@@ -1,1 +1,1 @@
-- Bộ nhớ chính của dự án là vault Obsidian `{{VAULT_PATH}}` — ĐẦU MỖI PHIÊN phải đọc các note liên quan trong đó trước khi làm gì; file này chỉ là cache, mâu thuẫn thì vault thắng.
+- The project's main memory is the Obsidian vault `{{VAULT_PATH}}` — AT THE START OF EVERY SESSION read the related notes in it before doing anything; this file is only a cache, on conflict the vault wins.

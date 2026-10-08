@@ -29,7 +29,7 @@ interface Running extends AgentRun {
 
 /**
  * Tìm file chạy thật của Claude Code. Gọi thẳng claude.exe thay vì claude.cmd để tham số
- * (luật phiên nhiều dòng, tiếng Việt) không phải đi qua cách tách tham số của cmd.exe.
+ * (luật phiên nhiều dòng, có thể chứa chữ ngoài ASCII) không phải đi qua cách tách tham số của cmd.exe.
  */
 async function resolveClaude(): Promise<string> {
   const dirs = (process.env.PATH ?? '').split(delimiter).filter(Boolean)
@@ -153,32 +153,33 @@ export class AgentService {
     const vars: Record<string, string> = {
       AGENT: agent.name,
       ROLE: agent.role,
-      ROLE_SUFFIX: agent.role ? ` (vai trò: ${agent.role})` : '',
-      ROLE_LINE: agent.role || '_(chưa ghi vai trò)_',
+      ROLE_SUFFIX: agent.role ? ` (role: ${agent.role})` : '',
+      ROLE_LINE: agent.role || '_(no role set)_',
       WORKSPACE: ws.name,
       PROJECT_PATH: ws.path,
       VAULT_PATH: ws.vaultPath,
       SESSION_ID: sessionId,
       SESSION_FILE: sessionFile,
       AGENT_NOTE: agentNote,
-      RECALL: structured ? `đọc ${join(ws.vaultPath, '_INDEX.md')}` : 'tìm và đọc các note liên quan trong vault',
+      RECALL: structured ? `read ${join(ws.vaultPath, '_INDEX.md')}` : 'find and read the related notes in the vault',
       OPENING: open
-        ? `Bạn còn việc dở: "${open.title}" (phạm vi: ${open.scope}). Chào ngắn, nhắc việc này và hỏi người dùng có làm tiếp không. Làm tiếp thì không cần task_start lại; không làm nữa thì gọi task_done với tóm tắt phần đã làm, rồi hỏi "Bạn muốn tôi giúp gì trong workspace này?"`
-        : 'Chào ngắn và hỏi người dùng: "Bạn muốn tôi giúp gì trong workspace này?" Không làm việc gì khác cho tới khi người dùng trả lời.',
+        ? `You have unfinished work: "${open.title}" (scope: ${open.scope}). Greet briefly, mention it and ask the user whether to continue. If continuing, no need to call task_start again; if not, call task_done with a summary of what was done, then ask what they want help with in this workspace.`
+        : 'Greet briefly and ask the user what they want you to help with in this workspace. Do nothing else until the user answers.',
+      USER_LANGUAGE: userLanguage(),
       DATE: today(),
       NOW: new Date().toISOString()
     }
 
     await this.writeSessionFile(sessionFile, vars, open)
     await writeIfMissing(agentNote, await readTemplate('agent/agent-note.md', vars))
-    await ensureIgnored(ws.path, ['.sessions/'], 'Phiên agent của stag.ai')
+    await ensureIgnored(ws.path, ['.sessions/'], 'stag.ai agent sessions')
 
     const args = resume ? ['--resume', sessionId] : ['--session-id', sessionId]
     args.push('--name', agent.name, '--append-system-prompt', await readTemplate('agent/rules.md', vars))
     args.push(...this.hub.claudeArgs())
     if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
     // `--` trước lời mở: `--mcp-config` nhận nhiều giá trị, không chặn lại thì nuốt luôn lời mở làm tên file.
-    if (!resume) args.push('--', 'Bắt đầu phiên mới.')
+    if (!resume) args.push('--', 'Start a new session.')
 
     const ptyId = this.ptys.spawn(
       owner,
@@ -233,9 +234,9 @@ export class AgentService {
   private async writeSessionFile(file: string, vars: Record<string, string>, task: Task | undefined): Promise<void> {
     const content = await readTemplate('agent/session.md', {
       ...vars,
-      STATUS: !task ? 'hỏi việc' : task.status === 'open' ? 'đang làm' : 'xong',
-      TASK: task?.title ?? '_(chưa rõ — agent đang hỏi người dùng)_',
-      SCOPE: task?.scope ?? '_(thư mục/file agent được sửa)_',
+      STATUS: !task ? 'asking' : task.status === 'open' ? 'working' : 'done',
+      TASK: task?.title ?? '_(not known yet — the agent is asking the user)_',
+      SCOPE: task?.scope ?? '_(folders/files the agent may edit)_',
       HANDOFF: task?.summary ?? ''
     })
     await fs.mkdir(dirname(file), { recursive: true })
@@ -409,6 +410,20 @@ export class AgentService {
     let k = 0
     this.data.agents = this.data.agents.map((a) => (a.workspaceId === workspaceId ? sorted[k++] : a))
     await this.save()
+  }
+}
+
+/**
+ * Ngôn ngữ hệ thống của người dùng, vd. "English (en-US)" — agent dùng cho câu hỏi mở phiên
+ * (lúc người dùng chưa viết gì); sau đó agent theo ngôn ngữ người dùng viết hoặc CLAUDE.md của dự án.
+ */
+function userLanguage(): string {
+  const tag = app.getPreferredSystemLanguages()[0] || app.getLocale() || 'en'
+  try {
+    const name = new Intl.DisplayNames(['en'], { type: 'language' }).of(tag)
+    return name && name !== tag ? `${name} (${tag})` : tag
+  } catch {
+    return tag
   }
 }
 

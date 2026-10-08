@@ -58,7 +58,7 @@
     } else if (tag === 'SELECT') {
       const sel = el
       kind = 'select'
-      extra = ` = "${clean(sel.selectedOptions[0]?.text)}" (${sel.options.length} lựa chọn)`
+      extra = ` = "${clean(sel.selectedOptions[0]?.text)}" (${sel.options.length} options)`
     } else if (el.isContentEditable) {
       kind = 'textbox(rich)'
     }
@@ -93,7 +93,7 @@
     const block = BLOCK.has(el.tagName)
     if (block) flush()
     if (el.tagName === 'TD' || el.tagName === 'TH') cur += ' | '
-    if (el.tagName === 'IMG' && el.getAttribute('alt')) cur += ` [ảnh: ${clean(el.getAttribute('alt'), 60)}]`
+    if (el.tagName === 'IMG' && el.getAttribute('alt')) cur += ` [image: ${clean(el.getAttribute('alt'), 60)}]`
     for (const child of el.childNodes) walk(child)
     if (block) flush()
   }
@@ -102,7 +102,7 @@
   flush()
 
   const deduped = lines.filter((l, i) => l !== lines[i - 1])
-  let out = `URL: ${location.href}\nTiêu đề: ${document.title}\n\n${deduped.join('\n')}`
-  if (out.length > maxChars) out = out.slice(0, maxChars) + `\n… (đã cắt, trang dài ${out.length} ký tự)`
+  let out = `URL: ${location.href}\nTitle: ${document.title}\n\n${deduped.join('\n')}`
+  if (out.length > maxChars) out = out.slice(0, maxChars) + `\n… (truncated, page is ${out.length} characters long)`
   return out
 })

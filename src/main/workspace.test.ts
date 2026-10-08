@@ -196,7 +196,7 @@ describe('WorkspaceStore.create', () => {
     expect(report).toContain('Dùng vault có sẵn "notes", giữ nguyên')
     expect((await fs.readdir(vault)).sort()).toEqual(['.obsidian', 'a.md'])
     const claude = await readFile(join(project, 'CLAUDE.md'))
-    expect(claude).toContain('không theo mẫu stag.ai')
+    expect(claude).toContain('not in the stag.ai layout')
     expect(claude).not.toContain('_INDEX.md')
     expect(await readFile(join(autoMemoryDir(project), 'MEMORY.md'))).not.toContain('_INDEX.md')
   })

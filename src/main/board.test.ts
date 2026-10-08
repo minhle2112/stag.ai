@@ -198,8 +198,8 @@ describe('Board: việc (task)', () => {
   it('task_start khi còn việc mở → lỗi; task_done/task_update khi chưa có việc → lỗi', async () => {
     const board = new Board(() => {})
     const a = agent('a')
-    await expect(board.finishTask(ws, 'a', 'x')).rejects.toThrow('chưa có việc nào đang mở')
-    await expect(board.updateTask(ws, 'a', { title: 'x' })).rejects.toThrow('chưa có việc nào đang mở')
+    await expect(board.finishTask(ws, 'a', 'x')).rejects.toThrow('You have no open task')
+    await expect(board.updateTask(ws, 'a', { title: 'x' })).rejects.toThrow('You have no open task')
     await board.startTask(ws, a, 's', 'Việc 1', '')
     await expect(board.startTask(ws, a, 's', 'Việc 2', '')).rejects.toThrow('Việc 1')
   })

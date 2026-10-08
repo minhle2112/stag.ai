@@ -5,15 +5,15 @@ session: {{SESSION_ID}}
 started: {{NOW}}
 status: {{STATUS}}
 ---
-# Phiên của {{AGENT}}
+# Session of {{AGENT}}
 
-File này do stag.ai tạo khi mở phiên, cập nhật khi agent gọi task_start / task_update / task_done, và xoá khi đóng phiên. Điều cần giữ lâu dài phải ghi vào vault.
+stag.ai creates this file when the session opens, updates it when the agent calls task_start / task_update / task_done, and deletes it when the session closes. Anything worth keeping must go into the vault.
 
-## Việc
+## Task
 {{TASK}}
 
-## Phạm vi
+## Scope
 {{SCOPE}}
 
-## Bàn giao
+## Handoff
 {{HANDOFF}}

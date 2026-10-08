@@ -111,7 +111,7 @@ export class BrowserService {
         const tab = this.findByContents(wc)
         if (tab && tab.owner.kind === 'agent') {
           event.preventDefault()
-          this.log(tab, 'warning', '[stag] Đã chặn tải file: agent không được tải file về máy.')
+          this.log(tab, 'warning', '[stag] Blocked a download: agents may not download files.')
         }
       })
       b = { tabs: [], active: null, allowed: new Set(), session: ses }
@@ -130,7 +130,7 @@ export class BrowserService {
 
   private tab(wsId: string, tabId: string): Tab {
     const t = this.byWs.get(wsId)?.tabs.find((x) => x.id === tabId)
-    if (!t) throw new Error('Tab không còn')
+    if (!t) throw new Error('Tab no longer exists')
     return t
   }
 
@@ -188,17 +188,17 @@ export class BrowserService {
       this.log(tab, e.level, e.message + (e.sourceId ? `  (${e.sourceId}:${e.lineNumber})` : ''))
     })
     wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
-      if (isMainFrame && code !== -3) this.log(tab, 'error', `[stag] Không tải được ${url}: ${desc} (${code})`)
+      if (isMainFrame && code !== -3) this.log(tab, 'error', `[stag] Failed to load ${url}: ${desc} (${code})`)
     })
-    wc.on('render-process-gone', (_e, d) => this.log(tab, 'error', `[stag] Trang bị sập: ${d.reason}`))
-    wc.on('did-navigate', (_e, url) => this.log(tab, 'info', `[stag] Đã mở ${url}`))
+    wc.on('render-process-gone', (_e, d) => this.log(tab, 'error', `[stag] Page crashed: ${d.reason}`))
+    wc.on('did-navigate', (_e, url) => this.log(tab, 'info', `[stag] Opened ${url}`))
 
     // Agent bấm link / bị chuyển hướng sang origin chưa được phép → chặn, bảo agent xin quyền.
     const guard = (e: Electron.Event, url: string, isMainFrame = true): void => {
       if (tab.owner.kind !== 'agent' || !isMainFrame) return
       if (!this.agentMayOpen(tab.wsId, url)) {
         e.preventDefault()
-        this.log(tab, 'warning', `[stag] Đã chặn điều hướng tới ${url}: chưa được phép. Gọi browser_navigate với URL này để xin quyền người dùng.`)
+        this.log(tab, 'warning', `[stag] Blocked navigation to ${url}: not allowed yet. Call browser_navigate with this URL to ask the user for permission.`)
       }
     }
     wc.on('will-navigate', (e) => guard(e, e.url))
@@ -208,7 +208,7 @@ export class BrowserService {
     wc.setWindowOpenHandler(({ url }) => {
       if (tab.owner.kind === 'agent') {
         if (this.agentMayOpen(tab.wsId, url)) wc.loadURL(url).catch(() => {})
-        else this.log(tab, 'warning', `[stag] Đã chặn mở cửa sổ ${url}: chưa được phép.`)
+        else this.log(tab, 'warning', `[stag] Blocked opening a window for ${url}: not allowed yet.`)
       } else {
         this.newTab(tab.wsId, { kind: 'user' }, url)
       }
@@ -364,7 +364,7 @@ export class BrowserService {
 
   private requireAgentTab(agent: Agent): Tab {
     const tab = this.agentTab(agent)
-    if (!tab) throw new Error('Bạn chưa có tab nào. Gọi browser_navigate trước.')
+    if (!tab) throw new Error('You have no tab yet. Call browser_navigate first.')
     return tab
   }
 
@@ -373,14 +373,14 @@ export class BrowserService {
     try {
       url = new URL(toUrl(raw))
     } catch {
-      throw new Error(`URL không hợp lệ: ${raw}`)
+      throw new Error(`Invalid URL: ${raw}`)
     }
     if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.href !== 'about:blank')
-      throw new Error('Chỉ mở được trang http/https.')
+      throw new Error('Only http/https pages can be opened.')
     const wsId = agent.workspaceId
     if (!this.agentMayOpen(wsId, url.href)) {
       const allow = await this.askUser(wsId, agent, url)
-      if (!allow) throw new Error(`Người dùng không cho phép mở ${url.origin}. Đừng thử lại trang này trừ khi người dùng bảo.`)
+      if (!allow) throw new Error(`The user did not allow opening ${url.origin}. Do not retry this page unless the user says so.`)
       this.ws(wsId).allowed.add(url.origin)
     }
 
@@ -395,10 +395,10 @@ export class BrowserService {
     } catch (e) {
       const msg = String((e as Error).message ?? e)
       // ERR_ABORTED: trang tự chuyển hướng/huỷ giữa chừng — vẫn đọc được trạng thái hiện tại.
-      if (!/ERR_ABORTED/.test(msg)) throw new Error(`Không mở được ${url.href}: ${msg}`)
+      if (!/ERR_ABORTED/.test(msg)) throw new Error(`Could not open ${url.href}: ${msg}`)
     }
     await settle(wc)
-    return `Đã mở: ${wc.getURL()}\nTiêu đề: ${wc.getTitle()}\nGọi browser_snapshot để đọc trang và lấy số [ref] của nút/ô nhập.`
+    return `Opened: ${wc.getURL()}\nTitle: ${wc.getTitle()}\nCall browser_snapshot to read the page and get the [ref] numbers of buttons/inputs.`
   }
 
   async agentSnapshot(agent: Agent): Promise<string> {
@@ -427,13 +427,13 @@ export class BrowserService {
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
     })()`
     const pos = (await tab.view.webContents.executeJavaScript(js)) as { x: number; y: number } | null
-    if (!pos) throw new Error(`Không thấy phần tử [${ref}] (trang đã đổi?). Gọi browser_snapshot để lấy ref mới.`)
+    if (!pos) throw new Error(`Element [${ref}] not found (did the page change?). Call browser_snapshot to get fresh refs.`)
     return pos
   }
 
   /** Thông báo chặn của app phát sinh trong lúc thao tác (để agent biết vì sao trang không đổi). */
   private blockedSince(tab: Tab, before: number): string {
-    const notes = tab.console.slice(before).filter((e) => e.text.startsWith('[stag] Đã chặn'))
+    const notes = tab.console.slice(before).filter((e) => e.text.startsWith('[stag] Blocked'))
     return notes.length ? '\n' + notes.map((e) => e.text).join('\n') : ''
   }
 
@@ -446,7 +446,7 @@ export class BrowserService {
     await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
     await settle(tab.view.webContents)
     const wc = tab.view.webContents
-    return `Đã bấm [${ref}]. Trang hiện tại: ${wc.getURL()} — ${wc.getTitle()}` + this.blockedSince(tab, before)
+    return `Clicked [${ref}]. Current page: ${wc.getURL()} — ${wc.getTitle()}` + this.blockedSince(tab, before)
   }
 
   async agentType(agent: Agent, ref: number, text: string, submit: boolean): Promise<string> {
@@ -462,7 +462,7 @@ export class BrowserService {
     await this.cdp(tab, 'Input.insertText', { text })
     if (submit) await this.key(tab, 'Enter')
     await settle(tab.view.webContents)
-    return (submit ? `Đã gõ vào [${ref}] và nhấn Enter.` : `Đã gõ vào [${ref}].`) + this.blockedSince(tab, before)
+    return (submit ? `Typed into [${ref}] and pressed Enter.` : `Typed into [${ref}].`) + this.blockedSince(tab, before)
   }
 
   async agentPress(agent: Agent, keyName: string): Promise<string> {
@@ -470,12 +470,12 @@ export class BrowserService {
     const before = tab.console.length
     await this.key(tab, keyName)
     await settle(tab.view.webContents)
-    return `Đã nhấn ${keyName}.` + this.blockedSince(tab, before)
+    return `Pressed ${keyName}.` + this.blockedSince(tab, before)
   }
 
   private async key(tab: Tab, keyName: string): Promise<void> {
     const k = KEYS[keyName]
-    if (!k) throw new Error(`Phím không hỗ trợ: ${keyName}`)
+    if (!k) throw new Error(`Unsupported key: ${keyName}`)
     const base = { key: keyName, code: k.code, windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode }
     await this.cdp(tab, 'Input.dispatchKeyEvent', { type: k.text ? 'keyDown' : 'rawKeyDown', ...base, ...(k.text ? { text: k.text } : {}) })
     await this.cdp(tab, 'Input.dispatchKeyEvent', { type: 'keyUp', ...base })
@@ -492,10 +492,10 @@ export class BrowserService {
   /** Trả các dòng console từ lần đọc trước, rồi xoá. */
   agentConsole(agent: Agent, onlyErrors: boolean): string {
     const tab = this.agentTab(agent)
-    if (!tab) return 'Bạn chưa có tab nào.'
+    if (!tab) return 'You have no tab yet.'
     const entries = tab.console.filter((e) => !onlyErrors || e.level === 'error' || e.level === 'warning')
     tab.console = []
-    if (!entries.length) return onlyErrors ? 'Không có lỗi/cảnh báo mới.' : 'Console không có gì mới.'
+    if (!entries.length) return onlyErrors ? 'No new errors/warnings.' : 'Nothing new in the console.'
     return entries.map((e) => `${e.at.slice(11, 19)} [${e.level}] ${e.text}`).join('\n')
   }
 

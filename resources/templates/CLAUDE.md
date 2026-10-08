@@ -1,13 +1,13 @@
 # {{PROJECT}}
 
-_(Mô tả dự án 2–3 dòng.)_
+_(Describe the project in 2–3 lines.)_
 
-**Ngôn ngữ trao đổi: tiếng Việt.**
+**Language:** reply in the language the user writes in. (To fix one language for this project, write it here, e.g. "Conversation language: Vietnamese".)
 
-## Memory (BẮT BUỘC)
+## Memory (REQUIRED)
 - Vault: `{{VAULT_PATH}}`
-- **Vault là bộ nhớ chính**; auto memory của Claude Code chỉ là cache trỏ về vault. Mâu thuẫn → vault thắng.
-- **Mọi phiên phải đọc `{{VAULT_DIR}}/_INDEX.md` (rồi các note liên quan) trước khi làm bất cứ việc gì.** Chạy trong worktree thì dùng đường dẫn tuyệt đối ở trên.
-- Học được điều mới (quy ước, lỗi, quyết định, việc xong) → ghi vào vault theo `{{VAULT_DIR}}/00 Meta/Memory Protocol.md`.
-- **Vault viết hoàn toàn bằng tiếng Anh** (tên file, thư mục, frontmatter, tiêu đề, nội dung); trao đổi với người dùng vẫn theo ngôn ngữ ở trên.
-- **Không lưu mật khẩu / API key / token** trong vault.
+- **The vault is the main memory**; Claude Code's auto memory is only a cache pointing to the vault. Conflict → the vault wins.
+- **Every session must read `{{VAULT_DIR}}/_INDEX.md` (then the related notes) before doing anything.** In a worktree, use the absolute path above.
+- Learned something new (convention, error, decision, finished work) → record it in the vault per `{{VAULT_DIR}}/00 Meta/Memory Protocol.md`.
+- **The vault is written entirely in English** (file and folder names, frontmatter, headings, body), whatever language the conversation uses.
+- **Never store passwords / API keys / tokens** in the vault.

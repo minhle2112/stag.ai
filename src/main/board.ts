@@ -166,7 +166,7 @@ export class Board {
     const next = prev.then(async () => {
       await fs.mkdir(dirname(file), { recursive: true })
       if (!this.ignored.has(ws.id)) {
-        await ensureIgnored(ws.path, ['.stag/'], 'Dữ liệu kanban của stag.ai')
+        await ensureIgnored(ws.path, ['.stag/'], 'stag.ai kanban data')
         this.ignored.add(ws.id)
       }
       const data: TasksFile = { version: 1, tasks: list }
@@ -196,7 +196,7 @@ export class Board {
     const open = await this.openTask(ws, agent.id)
     if (open)
       throw new Error(
-        `Bạn đang có việc chưa xong: "${open.title}". Gọi task_done cho việc đó trước, hoặc task_update nếu chỉ đổi tiêu đề/phạm vi.`
+        `You still have an unfinished task: "${open.title}". Call task_done for it first, or task_update if you only change the title/scope.`
       )
     const task: Task = {
       id: randomUUID(),
@@ -215,7 +215,7 @@ export class Board {
 
   async updateTask(ws: Workspace, agentId: string, change: { title?: string; scope?: string }): Promise<Task> {
     const task = await this.openTask(ws, agentId)
-    if (!task) throw new Error('Bạn chưa có việc nào đang mở. Gọi task_start trước.')
+    if (!task) throw new Error('You have no open task. Call task_start first.')
     if (change.title?.trim()) task.title = change.title.trim()
     if (change.scope?.trim()) task.scope = change.scope.trim()
     await this.save(ws)
@@ -225,7 +225,7 @@ export class Board {
   /** Agent báo xong việc đang mở của mình. */
   async finishTask(ws: Workspace, agentId: string, summary: string): Promise<Task> {
     const task = await this.openTask(ws, agentId)
-    if (!task) throw new Error('Bạn chưa có việc nào đang mở. Gọi task_start khi nhận việc mới.')
+    if (!task) throw new Error('You have no open task. Call task_start when you take a new task.')
     task.status = 'done'
     task.doneAt = new Date().toISOString()
     task.summary = summary.trim()

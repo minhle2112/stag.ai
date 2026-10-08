@@ -120,7 +120,7 @@ export class WorkspaceStore {
   private async ensureGitignore(projectDir: string, vaultPath: string): Promise<string> {
     const rel = relative(projectDir, vaultPath).replace(/\\/g, '/')
     if (!rel) return '.gitignore: vault chính là thư mục dự án, không thêm được vào .gitignore'
-    const added = await ensureIgnored(projectDir, [`${rel}/`, '.obsidian/', '.sessions/'], 'Vault Obsidian + phiên agent (dữ liệu cá nhân, không lên git)')
+    const added = await ensureIgnored(projectDir, [`${rel}/`, '.obsidian/', '.sessions/'], 'Obsidian vault + agent sessions (personal data, keep out of git)')
     return added.length ? `.gitignore: thêm ${added.join(', ')}` : '.gitignore: đã loại trừ vault và .sessions/, giữ nguyên'
   }
 
