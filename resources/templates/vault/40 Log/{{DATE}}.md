@@ -4,6 +4,6 @@ date: {{DATE}}
 ---
 # Log {{DATE}}
 
-Quay lại: [[_INDEX]]
+Back to: [[_INDEX]]
 
-- [x] Khởi tạo vault `{{VAULT_DIR}}` từ template của stag.ai — meta — xong — xem [[Memory Protocol]]
+- [x] Initialized vault `{{VAULT_DIR}}` from the stag.ai template — meta — done — see [[Memory Protocol]]

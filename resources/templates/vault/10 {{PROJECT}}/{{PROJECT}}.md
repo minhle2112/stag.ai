@@ -4,20 +4,20 @@ updated: {{DATE}}
 ---
 # {{PROJECT}}
 
-Quay lại: [[_INDEX]] · Quy tắc: [[Memory Protocol]]
+Back to: [[_INDEX]] · Rules: [[Memory Protocol]]
 
-## Một câu
-_(chưa có — dự án này là gì?)_
+## One sentence
+_(none yet — what is this project?)_
 
 ## Stack
-_(chưa có)_
+_(none yet)_
 
-## Lệnh
-_(chưa có)_
+## Commands
+_(none yet)_
 
-## Thư mục
-- `{{PROJECT_PATH}}` — thư mục dự án
-- `{{VAULT_DIR}}/` — vault Obsidian (bộ nhớ chính, không lên git)
+## Folders
+- `{{PROJECT_PATH}}` — project folder
+- `{{VAULT_DIR}}/` — Obsidian vault (primary memory, not in git)
 
-## Mốc thời gian
-- {{DATE}} — Tạo workspace trong stag.ai, khởi tạo vault. Xem [[{{DATE}}]].
+## Timeline
+- {{DATE}} — Workspace created in stag.ai, vault initialized. See [[{{DATE}}]].

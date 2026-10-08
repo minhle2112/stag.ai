@@ -4,13 +4,14 @@ updated: {{DATE}}
 ---
 # Learnings
 
-Quay lại: [[_INDEX]] · Quy tắc: [[Memory Protocol]]
+Back to: [[_INDEX]] · Rules: [[Memory Protocol]]
 
-## Quy ước
-- Vault là bộ nhớ chính; auto memory chỉ là cache trỏ về vault. Xem [[{{DATE}} Vault là bộ nhớ chính]].
+## Conventions
+- The vault is the primary memory; auto memory is only a cache pointing to the vault. See [[{{DATE}} Vault is the main memory]].
+- All vault content is written in English.
 
-## Thủ thuật
-- _(chưa có)_
+## Tips
+- _(none yet)_
 
-## Lỗi đã gặp
-- _(chưa có)_
+## Errors encountered
+- _(none yet)_

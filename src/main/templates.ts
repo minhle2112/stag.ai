@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { join, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { app } from 'electron'
 import { exists, writeIfMissing } from './fsutil'
 
@@ -13,22 +14,72 @@ function bundledTemplatesDir(): string {
 
 /**
  * Template người dùng tự chỉnh (userData/templates). File ở đây **đè** lên file cùng đường dẫn của
- * template gốc; file nào người dùng chưa chỉnh thì dùng bản gốc, nên bản cập nhật của app vẫn tới được.
+ * template gốc, nhưng chỉ khi người dùng đã sửa nó: bản chép ra mà chưa sửa thì vẫn dùng bản gốc,
+ * nên bản cập nhật của app vẫn tới được.
  */
 export function userTemplatesDir(): string {
   return join(app.getPath('userData'), 'templates')
 }
 
-/** Mở để chỉnh: lần đầu chép template gốc sang userData (không ghi đè file người dùng đã có). */
-export async function prepareUserTemplates(): Promise<string> {
-  await copyTree(bundledTemplatesDir(), userTemplatesDir(), null)
-  return userTemplatesDir()
+/** Ghi lại hash của từng file lúc chép từ bản gốc sang userData, để biết người dùng đã sửa file nào. */
+const MANIFEST = '.copied.json'
+type Manifest = Record<string, string>
+
+const key = (rel: string): string => rel.replace(/\\/g, '/')
+const hash = (text: string): string => createHash('sha256').update(text).digest('hex')
+
+async function readManifest(): Promise<Manifest> {
+  try {
+    return JSON.parse(await fs.readFile(join(userTemplatesDir(), MANIFEST), 'utf8')) as Manifest
+  } catch {
+    return {}
+  }
 }
 
-/** File template: bản của người dùng nếu có, không thì bản gốc. */
+/** File của người dùng vẫn y như lúc chép từ bản gốc (chưa sửa). File không có trong manifest coi như đã sửa. */
+async function untouched(rel: string, manifest: Manifest): Promise<boolean> {
+  const h = manifest[key(rel)]
+  if (!h) return false
+  try {
+    return hash(await fs.readFile(join(userTemplatesDir(), rel), 'utf8')) === h
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Mở để chỉnh: chép template gốc sang userData. File người dùng đã sửa thì giữ nguyên; file chưa sửa
+ * thì cập nhật theo bản gốc mới, hoặc xoá nếu bản gốc đã bỏ/đổi tên file đó.
+ */
+export async function prepareUserTemplates(): Promise<string> {
+  const bundled = bundledTemplatesDir()
+  const own = userTemplatesDir()
+  const manifest = await readManifest()
+  const bundledFiles = await listFiles(bundled)
+  const inBundle = new Set(bundledFiles.map(key))
+  for (const rel of await listFiles(own)) {
+    if (key(rel) === MANIFEST || inBundle.has(key(rel))) continue
+    if (await untouched(rel, manifest)) {
+      await fs.rm(join(own, rel), { force: true })
+      delete manifest[key(rel)]
+    }
+  }
+  for (const rel of bundledFiles) {
+    const dst = join(own, rel)
+    if ((await exists(dst)) && !(await untouched(rel, manifest))) continue
+    const text = await fs.readFile(join(bundled, rel), 'utf8')
+    await fs.mkdir(dirname(dst), { recursive: true })
+    await fs.writeFile(dst, text, 'utf8')
+    manifest[key(rel)] = hash(text)
+  }
+  await fs.writeFile(join(own, MANIFEST), JSON.stringify(manifest, null, 2), 'utf8')
+  return own
+}
+
+/** File template: bản người dùng đã sửa nếu có, không thì bản gốc. */
 async function templatePath(rel: string): Promise<string> {
   const own = join(userTemplatesDir(), rel)
-  return (await exists(own)) ? own : join(bundledTemplatesDir(), rel)
+  return (await exists(own)) && !(await untouched(rel, await readManifest())) ? own : join(bundledTemplatesDir(), rel)
 }
 
 export function fill(text: string, vars: Readonly<Record<string, string>>): string {
@@ -86,17 +137,15 @@ async function copyFiles(
   return created
 }
 
-async function copyTree(src: string, dest: string, vars: TemplateVars | null): Promise<string[]> {
-  const files = (await listFiles(src)).map((rel) => ({ rel, src: join(src, rel) }))
-  return copyFiles(files, dest, vars, false)
-}
-
-/** Tạo/bổ sung vault từ template (bản người dùng đè bản gốc theo từng file). */
+/** Tạo/bổ sung vault từ template (bản người dùng đã sửa đè bản gốc theo từng file). */
 export async function copyVaultTemplate(dest: string, vars: TemplateVars, skipDated = false): Promise<string[]> {
   const bundled = join(bundledTemplatesDir(), 'vault')
   const own = join(userTemplatesDir(), 'vault')
   const byRel = new Map<string, string>()
   for (const rel of await listFiles(bundled)) byRel.set(rel, join(bundled, rel))
-  for (const rel of await listFiles(own)) byRel.set(rel, join(own, rel))
+  const manifest = await readManifest()
+  for (const rel of await listFiles(own)) {
+    if (!(await untouched(join('vault', rel), manifest))) byRel.set(rel, join(own, rel))
+  }
   return copyFiles([...byRel].map(([rel, src]) => ({ rel, src })), dest, vars, skipDated)
 }

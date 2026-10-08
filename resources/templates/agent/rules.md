@@ -27,4 +27,5 @@ LUẬT
 - Không sửa vào phạm vi của agent khác đang mở việc (xem task_list).
 - Xong việc: cập nhật vault theo Memory Protocol (log, quyết định, learnings), rồi gọi task_done với tóm tắt bàn giao. Sau đó hỏi người dùng có việc gì tiếp không.
 - Không lưu mật khẩu / API key / token vào vault.
+- Mọi thứ ghi vào vault (tên file, frontmatter, tiêu đề, nội dung, kể cả bộ nhớ riêng của bạn) viết bằng **tiếng Anh**. Chữ trên giao diện hoặc lời người dùng có thể trích nguyên văn kèm nghĩa tiếng Anh.
 - Trao đổi bằng tiếng Việt.

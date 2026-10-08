@@ -4,47 +4,51 @@ updated: {{DATE}}
 ---
 # Memory Protocol
 
-Quay lại: [[_INDEX]]
+Back to: [[_INDEX]]
 
-**Đường dẫn tuyệt đối của vault:** `{{VAULT_PATH}}`
+**Absolute path of the vault:** `{{VAULT_PATH}}`
 
-## Vai trò
-| Nơi | Vai trò | Ghi chú |
+## Roles
+| Where | Role | Notes |
 |---|---|---|
-| Vault này (`{{VAULT_DIR}}/`) | **Bộ nhớ chính** (source of truth) | Mọi kiến thức lâu dài của dự án nằm ở đây |
-| Auto memory của Claude Code (`{{AUTO_MEMORY_PATH}}`) | **Cache ngắn** | Chỉ trỏ về vault, nhắc recall |
-| Mâu thuẫn giữa hai nơi | **Vault thắng** | Sửa cache cho khớp vault |
+| This vault (`{{VAULT_DIR}}/`) | **Primary memory** (source of truth) | All long-term project knowledge lives here |
+| Claude Code auto memory (`{{AUTO_MEMORY_PATH}}`) | **Short cache** | Only points to the vault, reminds to recall |
+| Conflict between the two | **The vault wins** | Fix the cache to match the vault |
 
-## Recall (bắt buộc)
-1. Đầu mỗi phiên: đọc [[_INDEX]] trước tiên.
-2. Đọc tiếp các note liên quan tới việc sắp làm (project, feature, decision, log gần nhất).
-3. **Chưa recall thì không hành động dựa trên "trí nhớ".**
+## Recall (required)
+1. At the start of every session: read [[_INDEX]] first.
+2. Then read the notes related to the upcoming work (project, feature, decision, latest log).
+3. **Do not act on "memory" before recalling.**
 
-## Ghi nhớ
-| Học được gì | Ghi vào đâu |
+## Record
+| What was learned | Where to write it |
 |---|---|
-| Quy trình / quy ước / thủ thuật / lỗi đã gặp | [[Learnings]] hoặc note trong `30 Features/` |
-| Xong việc có điều không hiển nhiên | `40 Log/<YYYY-MM-DD>.md` (theo [[40 Log/_Template|mẫu]]) |
-| Quyết định quan trọng + lý do | `50 Decisions/<YYYY-MM-DD> <tên>.md` (theo [[50 Decisions/_Template|mẫu]]) |
-| Điều riêng của một agent (vai trò, thói quen, việc dở) | `60 Agents/<tên agent>.md` |
-| Thay đổi trạng thái việc đang mở | Mục "Đang mở" trong [[_INDEX]] |
+| Process / convention / tip / error encountered | [[Learnings]] or a note in `30 Features/` |
+| Finished work with something non-obvious | `40 Log/<YYYY-MM-DD>.md` (per the [[40 Log/_Template|template]]) |
+| Important decision + rationale | `50 Decisions/<YYYY-MM-DD> <name>.md` (per the [[50 Decisions/_Template|template]]) |
+| Something specific to one agent (role, habits, unfinished work) | `60 Agents/<agent name>.md` |
+| Status change of an open item | "Open items" section in [[_INDEX]] |
 
-Sau khi ghi: cập nhật cache auto memory nếu cần (chỉ con trỏ, không chép nội dung).
+After recording: update the auto memory cache if needed (pointers only, do not copy content).
 
-## Cấm
-- **Không lưu mật khẩu / API key / token / bí mật** trong vault.
+## Language
+- **All vault content is written in English**: file and folder names, frontmatter, headings, body.
+- Chat with the user may be in another language. UI strings or the user's exact words may be quoted verbatim with an English gloss.
 
-## Quy ước note
-- Mọi note có frontmatter `type:` (index / protocol / project / workflow / feature / log / decision / agent) và `date:` hoặc `updated:`.
-- Nối các note bằng `[[link]]`.
+## Forbidden
+- **Never store passwords / API keys / tokens / secrets** in the vault.
 
-## Đổi tên / di chuyển vault
-Nếu đổi tên hoặc di chuyển thư mục vault:
-1. Mở lại vault trong Obsidian ("Open folder as vault").
-2. Sửa đường dẫn trong `CLAUDE.md` ở gốc dự án, trong note này, và trong cache auto memory (`MEMORY.md`).
+## Note conventions
+- Every note has frontmatter `type:` (index / protocol / project / workflow / feature / log / decision / agent) and `date:` or `updated:`.
+- Connect notes with `[[link]]`.
+
+## Renaming / moving the vault
+If the vault folder is renamed or moved:
+1. Reopen the vault in Obsidian ("Open folder as vault").
+2. Fix the path in `CLAUDE.md` at the project root, in this note, and in the auto memory cache (`MEMORY.md`).
 
 ## Worktree
-Vault chỉ nằm ở thư mục chính của dự án. Phiên chạy trong git worktree phải trỏ tới vault bằng đường dẫn tuyệt đối ở trên.
+The vault only lives in the main project folder. Sessions running in a git worktree must point to the vault by the absolute path above.
 
 ## Git
-Vault và `.obsidian/` là dữ liệu cá nhân → nằm trong `.gitignore`, không lên GitHub.
+The vault and `.obsidian/` are personal data → listed in `.gitignore`, never pushed to GitHub.

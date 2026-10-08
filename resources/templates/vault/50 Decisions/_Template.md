@@ -2,16 +2,16 @@
 type: decision
 date: YYYY-MM-DD
 ---
-# Quyết định: <tên>
+# Decision: <name>
 
-Quay lại: [[_INDEX]]
+Back to: [[_INDEX]]
 
-## Bối cảnh
+## Context
 
-## Quyết định
+## Decision
 
-## Lý do
+## Rationale
 
-## Phương án đã loại
+## Rejected alternatives
 
-## Ảnh hưởng
+## Consequences

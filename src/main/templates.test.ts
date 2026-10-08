@@ -154,4 +154,54 @@ describe('template người dùng', () => {
     )
     expect(await fs.readdir(join(own, 'vault', '30 Features'))).toEqual(['.keep'])
   })
+
+  it('bản chép ra mà chưa sửa không chặn bản cập nhật của app', async () => {
+    await prepareUserTemplates()
+    // App cập nhật template gốc sau khi người dùng đã bấm "Chỉnh template vault…".
+    await put(bundled, 'CLAUDE.md', 'gốc mới {{PROJECT}}\n')
+    await put(bundled, 'vault/_INDEX.md', '# INDEX mới\n')
+
+    expect(await readTemplate('CLAUDE.md', vars)).toBe('gốc mới Demo\n')
+    await copyVaultTemplate(dest, vars)
+    expect(await read('_INDEX.md')).toBe('# INDEX mới\n')
+
+    // Mở lại để chỉnh: bản chép chưa sửa được làm mới theo bản gốc.
+    await prepareUserTemplates()
+    expect(await fs.readFile(join(own, 'CLAUDE.md'), 'utf8')).toBe('gốc mới {{PROJECT}}\n')
+  })
+
+  it('người dùng sửa bản chép ra thì bản đó đè bản gốc, kể cả khi app cập nhật', async () => {
+    await prepareUserTemplates()
+    await put(own, 'CLAUDE.md', 'tôi sửa {{PROJECT}}\n')
+    await put(bundled, 'CLAUDE.md', 'gốc mới {{PROJECT}}\n')
+
+    expect(await readTemplate('CLAUDE.md', vars)).toBe('tôi sửa Demo\n')
+    await prepareUserTemplates()
+    expect(await fs.readFile(join(own, 'CLAUDE.md'), 'utf8')).toBe('tôi sửa {{PROJECT}}\n')
+  })
+
+  it('bản gốc đổi tên file: bản chép cũ chưa sửa bị bỏ, không sinh note trùng trong vault mới', async () => {
+    await put(bundled, 'vault/50 Decisions/{{DATE}} Cũ.md', 'cũ\n')
+    await prepareUserTemplates()
+    await fs.rm(join(bundled, 'vault', '50 Decisions', '{{DATE}} Cũ.md'))
+    await put(bundled, 'vault/50 Decisions/{{DATE}} New.md', 'new\n')
+
+    const created = slash(await copyVaultTemplate(dest, vars))
+    expect(created).toContain('50 Decisions/2026-01-02 New.md')
+    expect(created).not.toContain('50 Decisions/2026-01-02 Cũ.md')
+
+    await prepareUserTemplates()
+    expect((await fs.readdir(join(own, 'vault', '50 Decisions'))).sort()).toEqual(['{{DATE}} New.md'])
+  })
+
+  it('bản gốc bỏ file mà người dùng đã sửa bản chép: vẫn giữ và vẫn dùng', async () => {
+    await put(bundled, 'vault/50 Decisions/{{DATE}} Cũ.md', 'cũ\n')
+    await prepareUserTemplates()
+    await put(own, 'vault/50 Decisions/{{DATE}} Cũ.md', 'tôi sửa\n')
+    await fs.rm(join(bundled, 'vault', '50 Decisions', '{{DATE}} Cũ.md'))
+
+    await prepareUserTemplates()
+    expect(await fs.readFile(join(own, 'vault', '50 Decisions', '{{DATE}} Cũ.md'), 'utf8')).toBe('tôi sửa\n')
+    expect(slash(await copyVaultTemplate(dest, vars))).toContain('50 Decisions/2026-01-02 Cũ.md')
+  })
 })

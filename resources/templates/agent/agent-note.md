@@ -5,13 +5,13 @@ role: {{ROLE}}
 ---
 # {{AGENT}}
 
-Quay lại: [[_INDEX]]
+Back to: [[_INDEX]]
 
-## Vai trò
+## Role
 {{ROLE_LINE}}
 
-## Việc đã làm
-- {{DATE}} — Tạo agent trong stag.ai.
+## Work done
+- {{DATE}} — Agent created in stag.ai.
 
-## Ghi nhớ riêng
-- _(chưa có)_
+## Personal notes
+- _(none yet)_
