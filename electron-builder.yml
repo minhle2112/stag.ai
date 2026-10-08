@@ -1,0 +1,63 @@
+# Đóng gói stag.ai cho Windows: `npm run dist` (bộ cài NSIS) hoặc `npm run dist:dir` (chỉ thư mục chạy được).
+appId: ai.stag.app
+productName: stag.ai
+copyright: Copyright © 2026 stag.ai
+
+directories:
+  output: release
+  buildResources: build
+
+# Chỉ mã đã build (out/) + package.json. electron-builder tự thêm node_modules của `dependencies`.
+files:
+  - out/**
+  - package.json
+  # react, xterm, zustand đã được vite gộp vào out/renderer → không cần bản trong node_modules.
+  # main chỉ require node-pty, @modelcontextprotocol/sdk, zod (+ phụ thuộc của chúng).
+  - '!node_modules/{react,react-dom,scheduler,zustand,@xterm}/**'
+  # node-pty: chỉ giữ lib/ + prebuild win32-x64, bỏ mã C++, file debug (.pdb ~40 MB), test, nền tảng khác.
+  - '!node_modules/node-pty/{src,deps,third_party,scripts,build,typings,binding.gyp}'
+  - '!node_modules/node-pty/prebuilds/{darwin-*,linux-*,win32-arm64}/**'
+  - '!node_modules/node-pty/prebuilds/**/*.pdb'
+  # conpty.dll + OpenConsole.exe chỉ dùng khi bật `useConptyDll` (pty.ts không bật) → dùng ConPTY có sẵn của Windows.
+  - '!node_modules/node-pty/prebuilds/win32-x64/conpty/**'
+  - '!node_modules/node-pty/lib/**/*.{test.js,map}'
+
+# templates.ts đọc process.resourcesPath/templates khi app.isPackaged.
+extraResources:
+  - from: resources/templates
+    to: templates
+
+asar: true
+# Module native (.node, winpty-agent.exe) không nạp/chạy được từ trong asar.
+asarUnpack:
+  - node_modules/node-pty/**
+
+# Không build lại module native: node-pty 1.1 có sẵn prebuild N-API (prebuilds/win32-x64) chạy được
+# trong Electron mà không cần biên dịch, còn máy không có Visual Studio Build Tools để node-gyp chạy.
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+
+# Giao diện chỉ có tiếng Việt/Anh → bỏ các gói ngôn ngữ Chromium khác cho nhẹ.
+electronLanguages:
+  - en-US
+  - vi
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+nsis:
+  # Bộ cài có các bước (không phải một-click): người dùng thấy và chọn được thư mục cài.
+  oneClick: false
+  # Mặc định cài cho riêng người dùng hiện tại (%LOCALAPPDATA%\Programs), không cần quyền admin;
+  # trang chọn chế độ cài vẫn cho phép cài cho mọi người dùng nếu muốn.
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: stag.ai
+  # Gỡ app không xoá workspaces.json / agents.json / template người dùng trong %APPDATA%\stag.ai.
+  deleteAppDataOnUninstall: false
