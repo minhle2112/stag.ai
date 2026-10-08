@@ -23,6 +23,7 @@ import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
 import { createStagMcp } from './mcp'
 import { ScopeGuard } from './scopeGuard'
+import type { VaultActivityLog } from './vaultActivity'
 import type { PtyManager } from './pty'
 import { readTemplate } from './templates'
 import { TranscriptWatcher, transcriptPath } from './transcript'
@@ -130,7 +131,8 @@ export class AgentService {
     private workspaces: WorkspaceStore,
     private board: Board,
     private browser: BrowserService,
-    private settings: () => AppSettings
+    private settings: () => AppSettings,
+    private activity: VaultActivityLog
   ) {
     this.guard = new ScopeGuard(board)
   }
@@ -393,7 +395,10 @@ export class AgentService {
     }
     try {
       if (payload.hook_event_name === 'PreToolUse') return await this.guard.preToolUse(ctx.ws, ctx.agent, agentKind(ctx.agent), payload)
-      if (payload.hook_event_name === 'PostToolUse') await this.guard.postToolUse(ctx.ws, ctx.agent, payload)
+      if (payload.hook_event_name === 'PostToolUse') {
+        this.activity.onToolUse(ctx.ws, ctx.agent, payload)
+        await this.guard.postToolUse(ctx.ws, ctx.agent, payload)
+      }
     } catch (e) {
       // Lỗi đọc kanban… không được chặn agent: bỏ qua khoá lần này.
       console.error('[scope]', e)
@@ -579,6 +584,7 @@ export class AgentService {
     this.data.agents = this.data.agents.filter((a) => a.workspaceId !== workspaceId)
     delete this.data.layouts[workspaceId]
     this.board.forgetWorkspace(workspaceId)
+    this.activity.forgetWorkspace(workspaceId)
     this.browser.closeWorkspace(workspaceId)
     await this.save()
   }
@@ -640,6 +646,7 @@ export class AgentService {
     agent.name = name
     await this.save()
     if (ws) await this.board.renameAgent(ws, agent.id, name)
+    this.activity.renameAgent(agent.id, name)
     this.browser.renameAgent(agent.id, name)
     // File phiên (agent khác đọc trong .sessions/) ghi tên mới và đường dẫn note mới.
     const run = this.running.get(agent.id)

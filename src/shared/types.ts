@@ -98,6 +98,20 @@ export interface VaultSearchHit {
   matches: Array<{ line: number; text: string }>
 }
 
+/** Kết quả lưu note sửa trong app: 'conflict' = file trên đĩa đã đổi từ lúc bắt đầu sửa (`disk` null = đã bị xoá). */
+export type NoteWriteResult = { status: 'saved' } | { status: 'conflict'; disk: string | null }
+
+/** Một lần agent đọc / ghi note trong vault (suy ra từ hook, chỉ giữ trong bộ nhớ của app). */
+export interface VaultActivity {
+  agentId: string
+  agentName: string
+  /** Đường dẫn tương đối trong vault, '/', có đuôi `.md` (đúng hoa thường của file thật nếu biết). */
+  rel: string
+  kind: 'read' | 'write'
+  /** ISO. */
+  at: string
+}
+
 export type ObsidianOpenResult =
   | { status: 'opened' }
   | { status: 'needs-register'; vaultPath: string; obsidianInstalled: boolean }

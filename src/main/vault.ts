@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { basename, join, relative, resolve, sep } from 'node:path'
-import type { VaultCandidate, VaultNode } from '@shared/types'
+import type { NoteWriteResult, VaultCandidate, VaultNode } from '@shared/types'
 import { exists, isDir, readText, samePath } from './fsutil'
 
 /** Thư mục không bao giờ quét khi tìm vault. */
@@ -89,12 +89,58 @@ export async function vaultTree(vaultPath: string): Promise<VaultNode[]> {
   return walk(vaultPath, '')
 }
 
-/** Đọc một note; chặn đường dẫn thoát ra ngoài vault. */
-export async function readNote(vaultPath: string, rel: string): Promise<string> {
+/** Đường dẫn tuyệt đối của note `rel`; chặn đường dẫn thoát ra ngoài vault. */
+function notePath(vaultPath: string, rel: string): string {
   const root = resolve(vaultPath)
   const full = resolve(root, rel)
   if (!full.startsWith(root + sep)) throw new Error('Đường dẫn nằm ngoài vault')
-  return fs.readFile(full, 'utf8')
+  return full
+}
+
+/** Đọc một note; chặn đường dẫn thoát ra ngoài vault. */
+export async function readNote(vaultPath: string, rel: string): Promise<string> {
+  return fs.readFile(notePath(vaultPath, rel), 'utf8')
+}
+
+/**
+ * Ghi note người dùng sửa trong app. `base` = nội dung lúc bắt đầu sửa (lần đọc / lưu gần nhất): file trên
+ * đĩa đã khác `base` nghĩa là Obsidian hoặc agent vừa sửa → không ghi, trả về bản trên đĩa để người dùng chọn.
+ * Ghi thẳng vào file (không qua file tạm + đổi tên) để Obsidian thấy như một lần sửa bình thường.
+ */
+export async function writeNote(vaultPath: string, rel: string, text: string, base: string | null): Promise<NoteWriteResult> {
+  const full = notePath(vaultPath, rel)
+  if (!rel.toLowerCase().endsWith('.md')) throw new Error('Chỉ sửa được note .md')
+  if (base !== null) {
+    let disk: string | null
+    try {
+      disk = await fs.readFile(full, 'utf8')
+    } catch {
+      disk = null
+    }
+    if (disk !== base) return { status: 'conflict', disk }
+  }
+  await fs.writeFile(full, text, 'utf8')
+  return { status: 'saved' }
+}
+
+/**
+ * Tạo note mới `<folder>/<name>.md` với tiêu đề; trả về `rel`. Tên trùng thì báo lỗi (không ghi đè).
+ * Tên không được có ký tự Windows cấm hay ký tự Obsidian dùng trong link (`[ ] # ^ |`).
+ */
+export async function createNote(vaultPath: string, folder: string, name: string): Promise<string> {
+  const clean = name.trim().replace(/\.md$/i, '').trim()
+  if (!clean) throw new Error('Chưa nhập tên note')
+  if (/[\\/:*?"<>|[\]#^]/.test(clean) || /^\.|\.$/.test(clean)) throw new Error('Tên note không được có \\ / : * ? " < > | [ ] # ^ và không bắt đầu / kết thúc bằng dấu chấm')
+  const rel = folder ? `${folder.replace(/\/+$/, '')}/${clean}.md` : `${clean}.md`
+  const full = notePath(vaultPath, rel)
+  await fs.mkdir(resolve(full, '..'), { recursive: true })
+  try {
+    await fs.writeFile(full, `# ${clean}\n\n`, { encoding: 'utf8', flag: 'wx' })
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`Đã có note "${rel}"`)
+    throw e
+  }
+  return rel
 }
 
 export function vaultDirName(projectName: string): string {

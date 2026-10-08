@@ -8,6 +8,7 @@ import { StatusHub } from './hub'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty'
 import { SettingsStore } from './settings'
+import { VaultActivityLog } from './vaultActivity'
 import { WorkspaceStore } from './workspace'
 
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
@@ -26,7 +27,8 @@ const browser = new BrowserService({
   ask: (ask) => send(IPC.browserAsk, ask)
 })
 const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), (s) => send(IPC.settingsChanged, s))
-const agents = new AgentService(ptys, workspaces, board, browser, () => settings.get())
+const activity = new VaultActivityLog((workspaceId) => send(IPC.vaultActivityChanged, workspaceId))
+const agents = new AgentService(ptys, workspaces, board, browser, () => settings.get(), activity)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -80,7 +82,7 @@ app.whenReady().then(async () => {
   await agents.load()
   await hub.start()
   agents.attachHub(hub)
-  registerIpc(ptys, workspaces, agents, board, browser, settings)
+  registerIpc(ptys, workspaces, agents, board, browser, settings, activity)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

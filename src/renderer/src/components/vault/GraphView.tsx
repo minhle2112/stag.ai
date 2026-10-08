@@ -14,6 +14,7 @@ import {
   type GNode,
   type VaultGraph
 } from './graphData'
+import { agentColor, type NoteTouch } from './activity'
 
 export interface GraphViewProps {
   index: VaultIndex
@@ -21,6 +22,8 @@ export interface GraphViewProps {
   current: string | null
   /** Bấm một node note → mở note đó. */
   onOpen: (rel: string) => void
+  /** Agent vừa đọc / ghi note nào (khoá = rel chữ thường): vẽ quầng màu của agent quanh node. */
+  activity?: Map<string, NoteTouch[]>
 }
 
 /** Node trong mô phỏng: force-graph gắn thêm vị trí/vận tốc vào chính object này. */
@@ -130,7 +133,7 @@ function damped(inner: D3Force, heat: () => number): D3Force {
 const LABEL_ZOOM = 1.1
 
 /** Graph view của vault: node = note (+ node ma), cạnh = link; vẽ bằng force-graph (canvas 2D). */
-export function GraphView({ index, current, onOpen }: GraphViewProps): React.JSX.Element {
+export function GraphView({ index, current, onOpen, activity }: GraphViewProps): React.JSX.Element {
   const [store] = useState(() => savedFor(index.vaultPath))
   const [settings, setSettingsState] = useState<Settings>(store.settings)
   const setSettings = (patch: Partial<Settings>): void => {
@@ -143,6 +146,8 @@ export function GraphView({ index, current, onOpen }: GraphViewProps): React.JSX
   const fgRef = useRef<FG | null>(null)
   const currentRef = useRef(current)
   currentRef.current = current
+  const activityRef = useRef(activity)
+  activityRef.current = activity
   const onOpenRef = useRef(onOpen)
   onOpenRef.current = onOpen
   /** Trạng thái hover (đọc trong hàm vẽ, không qua React để khỏi render lại). */
@@ -187,6 +192,11 @@ export function GraphView({ index, current, onOpen }: GraphViewProps): React.JSX
   const stats = useMemo(() => typeStats(graph), [graph])
   const ghostCount = useMemo(() => graph.nodes.filter((n) => n.ghost).length, [graph])
 
+  // Hoạt động agent đổi → vẽ lại khung hình (không cần chạy lại mô phỏng).
+  useEffect(() => {
+    fgRef.current?.nodeRelSize(1)
+  }, [activity])
+
   // Tạo graph một lần khi mount, dọn khi unmount.
   useEffect(() => {
     const host = hostRef.current!
@@ -216,6 +226,22 @@ export function GraphView({ index, current, onOpen }: GraphViewProps): React.JSX
         const x = n.x ?? 0
         const y = n.y ?? 0
         ctx.globalAlpha = h.id && n.id !== h.id && !h.near?.has(n.id) ? 0.12 : 1
+        // Quầng hoạt động: mỗi agent vừa đụng tới note một vòng màu riêng (ghi = vòng liền, đọc = vòng đứt).
+        const touches = !n.ghost ? activityRef.current?.get(n.id.toLowerCase()) : undefined
+        touches?.slice(0, 3).forEach((tc, i) => {
+          const c = agentColor(tc.agentId)
+          ctx.beginPath()
+          ctx.arc(x, y, n.r + (3 + i * 3) / k, 0, 2 * Math.PI)
+          if (tc.kind === 'write' && i === 0) {
+            ctx.fillStyle = c.replace('hsl(', 'hsla(').replace(')', ', 0.22)')
+            ctx.fill()
+          }
+          ctx.setLineDash(tc.kind === 'read' ? [3 / k, 2 / k] : [])
+          ctx.lineWidth = 1.6 / k
+          ctx.strokeStyle = c
+          ctx.stroke()
+          ctx.setLineDash([])
+        })
         if (n.id === currentRef.current) {
           // Vòng sáng cho note đang mở.
           ctx.beginPath()

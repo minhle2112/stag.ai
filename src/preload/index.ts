@@ -7,6 +7,8 @@ import type {
   AppSettings,
   BoardSnapshot,
   BrowserPermissionAsk,
+  NoteWriteResult,
+  VaultActivity,
   BrowserState,
   CreateAgentRequest,
   CreateWorkspaceRequest,
@@ -139,6 +141,18 @@ const api = {
   vault: {
     tree: (vaultPath: string): Promise<VaultNode[]> => ipcRenderer.invoke(IPC.vaultTree, vaultPath),
     read: (vaultPath: string, rel: string): Promise<string> => ipcRenderer.invoke(IPC.vaultRead, vaultPath, rel),
+    /** Lưu note; `base` = nội dung lúc bắt đầu sửa (file trên đĩa khác `base` → 'conflict', không ghi). */
+    write: (vaultPath: string, rel: string, text: string, base: string | null): Promise<NoteWriteResult> =>
+      ipcRenderer.invoke(IPC.vaultWrite, vaultPath, rel, text, base),
+    /** Tạo note mới trong thư mục `folder` ('' = gốc vault); trả về `rel`. */
+    create: (vaultPath: string, folder: string, name: string): Promise<string> => ipcRenderer.invoke(IPC.vaultCreate, vaultPath, folder, name),
+    /** Agent đọc / ghi note nào trong workspace (từ lúc mở app). */
+    activity: (workspaceId: string): Promise<VaultActivity[]> => ipcRenderer.invoke(IPC.vaultActivity, workspaceId),
+    onActivity(cb: (workspaceId: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, workspaceId: string): void => cb(workspaceId)
+      ipcRenderer.on(IPC.vaultActivityChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.vaultActivityChanged, fn)
+    },
     openInObsidian: (vaultPath: string): Promise<ObsidianOpenResult> => ipcRenderer.invoke(IPC.vaultOpenObsidian, vaultPath),
     isRegistered: (vaultPath: string): Promise<boolean> => ipcRenderer.invoke(IPC.vaultIsRegistered, vaultPath),
     /** Chỉ mục toàn vault: note (kèm type/aliases/tags) + link đã phân giải. */

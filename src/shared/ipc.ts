@@ -60,7 +60,14 @@ export const IPC = {
   /** main → renderer: phiên cũ đã đóng sau khi bàn giao, mở phiên mới cho agent (kèm agentId). */
   agentRestart: 'agent:restart',
   /** Người dùng trả lời câu hỏi khoá phạm vi (agent Codex sửa file trong vùng của agent khác). */
-  scopeAnswer: 'scope:answer'
+  scopeAnswer: 'scope:answer',
+  /** Lưu note người dùng sửa trong app (kèm nội dung gốc để phát hiện sửa chồng). */
+  vaultWrite: 'vault:write',
+  vaultCreate: 'vault:create',
+  /** Agent đọc / ghi note nào (theo workspace). */
+  vaultActivity: 'vault:activity',
+  /** main → renderer: nhật ký đọc/ghi note của một workspace vừa đổi (kèm workspaceId). */
+  vaultActivityChanged: 'vault:activity-changed'
 } as const
 
 export interface AppInfo {

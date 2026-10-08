@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { VaultNode, VaultSearchHit, Workspace } from '@shared/types'
+import type { VaultActivity, VaultNode, VaultSearchHit, Workspace } from '@shared/types'
 import { resolveNote } from '@shared/wikilink'
+import { ago } from '../status'
+import { useVaultActivity } from '../store/vaultActivity'
 import { useVaultIndex } from '../vaultIndex'
 import { Button, Modal } from './Modal'
+import { agentColor, RECENT_MS, touchesByNote, type NoteTouch } from './vault/activity'
 import { Backlinks } from './vault/Backlinks'
 import { GraphView } from './vault/GraphView'
 import { renderNote } from './vault/markdown'
+import { NoteEditor } from './vault/NoteEditor'
 import { scrollToTarget, type ScrollTarget } from './vault/scroll'
 import { SearchResults } from './vault/SearchResults'
 
@@ -42,6 +46,26 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
 
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<VaultSearchHit[] | null>(null)
+
+  /** Chế độ sửa (giữ nguyên khi chuyển note, như Obsidian). */
+  const [editing, setEditing] = useState(false)
+  const [newNote, setNewNote] = useState(false)
+  /** Cột trái: cây note hay nhật ký agent đọc/ghi. */
+  const [side, setSide] = useState<'tree' | 'activity'>('tree')
+
+  // Agent đọc / ghi note nào (từ hook); "gần đây" mờ dần theo đồng hồ.
+  const events = useVaultActivity((s) => s.byWs[workspace.id])
+  const loadActivity = useVaultActivity((s) => s.load)
+  useEffect(() => {
+    loadActivity(workspace.id)
+  }, [workspace.id, loadActivity])
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+  const recent = useMemo(() => touchesByNote(events ?? [], Date.now() - RECENT_MS), [events, now])
+  const allTouches = useMemo(() => touchesByNote(events ?? []), [events])
 
   const loadTree = useCallback(() => {
     window.stag.vault.tree(vaultPath).then(setTree, () => setTree([]))
@@ -98,8 +122,19 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
   // Lùi/Tiến: Alt+←/→ và nút chuột 4/5.
   const goRef = useRef(go)
   goRef.current = go
+  const canEdit = view === 'note' && !!doc && doc.text !== null && doc.rel === current
+  const toggleEditRef = useRef(() => {})
+  toggleEditRef.current = () => {
+    if (canEdit || editing) setEditing(!editing)
+  }
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // Ctrl+E: đổi Xem ↔ Sửa (như Obsidian).
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault()
+        toggleEditRef.current()
+        return
+      }
       if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) return
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault()
@@ -228,6 +263,12 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
           ))}
         </div>
         <div className="flex shrink-0 gap-2">
+          {view === 'note' && (
+            <Button onClick={() => toggleEditRef.current()} disabled={!canEdit && !editing}>
+              <span title="Ctrl+E">{editing ? 'Xem' : 'Sửa'}</span>
+            </Button>
+          )}
+          <Button onClick={() => setNewNote(true)}>Note mới</Button>
           <Button
             onClick={() => {
               setReload((n) => n + 1)
@@ -257,13 +298,33 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
               className="w-full rounded-md border border-line bg-panel px-2 py-1 text-[12px] outline-none placeholder:text-muted focus:border-accent"
             />
           </div>
+          {!query.trim() && (
+            <div className="flex shrink-0 gap-1 px-2 pb-1.5 text-[12px]">
+              {(['tree', 'activity'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSide(s)}
+                  className={`rounded px-2 py-0.5 ${side === s ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
+                >
+                  {s === 'tree' ? 'Note' : `Agent đọc/ghi${recent.size ? ` (${recent.size})` : ''}`}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="min-h-0 flex-1 overflow-y-auto pb-2">
             {query.trim() ? (
               <SearchResults hits={hits} query={query.trim()} selected={current} onOpen={openAt} />
+            ) : side === 'activity' ? (
+              <ActivityList
+                events={events ?? []}
+                now={now}
+                selected={current}
+                onOpen={(rel) => open(index?.notes.find((n) => n.rel.toLowerCase() === rel.toLowerCase())?.rel ?? rel)}
+              />
             ) : (
               <>
                 {tree.length === 0 && <div className="px-3 text-muted">Vault trống hoặc không tồn tại.</div>}
-                <Tree nodes={tree} depth={0} selected={current} onSelect={open} />
+                <Tree nodes={tree} depth={0} selected={current} onSelect={open} recent={recent} now={now} />
               </>
             )}
             {error && <div className="mt-2 px-3 text-[11px] text-red-400">Không đọc được chỉ mục: {error}</div>}
@@ -271,7 +332,18 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
         </nav>
         {view === 'graph' ? (
           <div className="relative min-w-0 flex-1">
-            {index ? <GraphView index={index} current={current} onOpen={(rel) => open(rel)} /> : <div className="p-4 text-muted">Đang đọc vault…</div>}
+            {index ? (
+              <GraphView index={index} current={current} onOpen={(rel) => open(rel)} activity={recent} />
+            ) : (
+              <div className="p-4 text-muted">Đang đọc vault…</div>
+            )}
+          </div>
+        ) : editing && doc && doc.rel === current ? (
+          <div className="flex min-w-0 flex-1 flex-col">
+            <NoteTouches touches={allTouches.get(doc.rel.toLowerCase())} now={now} className="border-b border-line px-6 py-1.5" />
+            <div className="min-h-0 flex-1">
+              <NoteEditor key={doc.rel} vaultPath={vaultPath} rel={doc.rel} disk={doc.text} notes={index?.notes ?? null} />
+            </div>
           </div>
         ) : (
           <article ref={scrollerRef} className="min-w-0 flex-1 overflow-y-auto px-6 py-4 select-text">
@@ -279,7 +351,10 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
               <div className="text-muted">Chọn một note bên trái.</div>
             ) : doc ? (
               <div className="mx-auto max-w-3xl">
-                <div className="mb-3 text-[11px] text-muted">{doc.rel}</div>
+                <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+                  <span>{doc.rel}</span>
+                  <NoteTouches touches={allTouches.get(doc.rel.toLowerCase())} now={now} />
+                </div>
                 {doc.text === null ? (
                   <div className="rounded-md border border-line bg-panel px-3 py-2 text-muted">Note đã bị xoá hoặc đổi tên.</div>
                 ) : (
@@ -336,7 +411,182 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
           {registered === false && <p className="mt-3 text-[12px] text-muted">Chưa thấy vault trong danh sách của Obsidian.</p>}
         </Modal>
       )}
+
+      {newNote && (
+        <NewNoteDialog
+          vaultPath={vaultPath}
+          folders={folderList(tree)}
+          initialFolder={current?.includes('/') ? current.slice(0, current.lastIndexOf('/')) : ''}
+          onCancel={() => setNewNote(false)}
+          onCreated={(rel) => {
+            setNewNote(false)
+            setReload((n) => n + 1)
+            setEditing(true)
+            open(rel)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** Mọi thư mục trong cây ('' = gốc vault). */
+function folderList(nodes: VaultNode[]): string[] {
+  const out = ['']
+  const walk = (ns: VaultNode[]): void => {
+    for (const n of ns)
+      if (n.dir) {
+        out.push(n.rel)
+        walk(n.children ?? [])
+      }
+  }
+  walk(nodes)
+  return out
+}
+
+function NewNoteDialog({
+  vaultPath,
+  folders,
+  initialFolder,
+  onCancel,
+  onCreated
+}: {
+  vaultPath: string
+  folders: string[]
+  initialFolder: string
+  onCancel: () => void
+  onCreated: (rel: string) => void
+}): React.JSX.Element {
+  const [name, setName] = useState('')
+  const [folder, setFolder] = useState(folders.includes(initialFolder) ? initialFolder : '')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  async function submit(): Promise<void> {
+    if (!name.trim() || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      onCreated(await window.stag.vault.create(vaultPath, folder, name))
+    } catch (e) {
+      setError(String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      title="Note mới"
+      onClose={busy ? undefined : onCancel}
+      footer={
+        <>
+          <Button onClick={onCancel} disabled={busy}>
+            Huỷ
+          </Button>
+          <Button primary onClick={submit} disabled={busy || !name.trim()}>
+            Tạo và sửa
+          </Button>
+        </>
+      }
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+      >
+        <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">Tên note</div>
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="vd. Login flow"
+          className="mb-4 w-full rounded-md border border-line bg-bg px-2 py-1.5 outline-none focus:border-accent"
+        />
+        <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">Thư mục</div>
+        <select
+          value={folder}
+          onChange={(e) => setFolder(e.target.value)}
+          className="w-full rounded-md border border-line bg-bg px-2 py-1.5 outline-none focus:border-accent"
+        >
+          {folders.map((f) => (
+            <option key={f} value={f}>
+              {f || '(gốc vault)'}
+            </option>
+          ))}
+        </select>
+        <p className="mt-3 text-[12px] text-muted">Vault viết bằng tiếng Anh (quy ước của dự án): tên và nội dung note nên là tiếng Anh.</p>
+        {error && <div className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
+      </form>
+    </Modal>
+  )
+}
+
+const kindLabel = (k: 'read' | 'write'): string => (k === 'write' ? 'ghi' : 'đọc')
+
+/** Chấm màu của agent: ghi = chấm đặc, đọc = vòng rỗng. */
+function TouchDot({ touch }: { touch: NoteTouch }): React.JSX.Element {
+  const c = agentColor(touch.agentId)
+  return (
+    <span
+      className="inline-block h-2 w-2 shrink-0 rounded-full"
+      style={touch.kind === 'write' ? { backgroundColor: c } : { border: `1.5px solid ${c}` }}
+    />
+  )
+}
+
+/** "● Coder ghi · 2 phút" cho note đang xem (từ lúc mở app). */
+function NoteTouches({ touches, now, className = '' }: { touches?: NoteTouch[]; now: number; className?: string }): React.JSX.Element | null {
+  if (!touches?.length) return null
+  return (
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted ${className}`}>
+      {touches.map((t) => (
+        <span key={t.agentId} className="flex items-center gap-1" title={`${t.agentName} ${kindLabel(t.kind)} note này lúc ${new Date(t.at).toLocaleTimeString()}`}>
+          <TouchDot touch={t} />
+          <span className="text-fg/80">{t.agentName}</span> {kindLabel(t.kind)} · {ago(t.at, now)}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** Nhật ký agent đọc / ghi note, mới nhất trước. */
+function ActivityList({
+  events,
+  now,
+  selected,
+  onOpen
+}: {
+  events: VaultActivity[]
+  now: number
+  selected: string | null
+  onOpen: (rel: string) => void
+}): React.JSX.Element {
+  if (!events.length)
+    return <div className="px-3 text-[12px] text-muted">Chưa có agent nào đọc/ghi note từ lúc mở app. Hoạt động hiện ở đây khi agent làm việc.</div>
+  return (
+    <>
+      {[...events]
+        .reverse()
+        .slice(0, 150)
+        .map((e, i) => {
+          const name = e.rel.replace(/\.md$/i, '')
+          return (
+            <div
+              key={`${e.at}-${i}`}
+              onClick={() => onOpen(e.rel)}
+              title={e.rel}
+              className={`cursor-pointer px-3 py-1 ${selected?.toLowerCase() === e.rel.toLowerCase() ? 'bg-panel-2' : 'hover:bg-panel-2/60'}`}
+            >
+              <div className="flex items-center gap-1.5 text-[12px]">
+                <TouchDot touch={e} />
+                <span className="text-fg/90">{e.agentName}</span>
+                <span className="text-muted">{kindLabel(e.kind)}</span>
+                <span className="ml-auto shrink-0 text-[11px] text-muted">{ago(e.at, now)}</span>
+              </div>
+              <div className="truncate pl-3.5 text-[12px] text-muted">{name.slice(name.lastIndexOf('/') + 1)}</div>
+            </div>
+          )
+        })}
+    </>
   )
 }
 
@@ -353,30 +603,32 @@ function NavButton({ label, title, disabled, onClick }: { label: string; title: 
   )
 }
 
-function Tree({
-  nodes,
-  depth,
-  selected,
-  onSelect
-}: {
+interface TreeProps {
   nodes: VaultNode[]
   depth: number
   selected: string | null
   onSelect: (rel: string) => void
-}): React.JSX.Element {
+  /** Agent vừa đọc / ghi note nào (khoá = rel chữ thường). */
+  recent: Map<string, NoteTouch[]>
+  now: number
+}
+
+function Tree({ nodes, depth, selected, onSelect, recent, now }: TreeProps): React.JSX.Element {
   return (
     <>
       {nodes.map((n) =>
         n.dir ? (
-          <Folder key={n.rel} node={n} depth={depth} selected={selected} onSelect={onSelect} />
+          <Folder key={n.rel} node={n} depth={depth} selected={selected} onSelect={onSelect} recent={recent} now={now} />
         ) : (
           <div
             key={n.rel}
             onClick={() => onSelect(n.rel)}
             style={{ paddingLeft: 12 + depth * 14 }}
-            className={`cursor-pointer truncate py-1 pr-2 ${selected === n.rel ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
+            title={touchTitle(recent.get(n.rel.toLowerCase()), now)}
+            className={`flex cursor-pointer items-center gap-1.5 py-1 pr-2 ${selected === n.rel ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
           >
-            {n.name}
+            <span className="min-w-0 flex-1 truncate">{n.name}</span>
+            {recent.get(n.rel.toLowerCase())?.slice(0, 3).map((t) => <TouchDot key={t.agentId} touch={t} />)}
           </div>
         )
       )}
@@ -384,17 +636,7 @@ function Tree({
   )
 }
 
-function Folder({
-  node,
-  depth,
-  selected,
-  onSelect
-}: {
-  node: VaultNode
-  depth: number
-  selected: string | null
-  onSelect: (rel: string) => void
-}): React.JSX.Element {
+function Folder({ node, depth, selected, onSelect, recent, now }: Omit<TreeProps, 'nodes'> & { node: VaultNode }): React.JSX.Element {
   const [open, setOpen] = useState(true)
   return (
     <>
@@ -402,7 +644,11 @@ function Folder({
         <span className="inline-block w-3 text-muted">{open ? '▾' : '▸'}</span>
         {node.name}
       </div>
-      {open && node.children && <Tree nodes={node.children} depth={depth + 1} selected={selected} onSelect={onSelect} />}
+      {open && node.children && <Tree nodes={node.children} depth={depth + 1} selected={selected} onSelect={onSelect} recent={recent} now={now} />}
     </>
   )
+}
+
+function touchTitle(touches: NoteTouch[] | undefined, now: number): string | undefined {
+  return touches?.map((t) => `${t.agentName} ${kindLabel(t.kind)} · ${ago(t.at, now)}`).join('\n')
 }

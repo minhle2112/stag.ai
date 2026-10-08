@@ -8,14 +8,15 @@ import { openInObsidian } from './obsidian'
 import type { PtyManager } from './pty'
 import type { SettingsStore } from './settings'
 import { prepareUserTemplates } from './templates'
-import { findRegisteredId, readNote, vaultTree } from './vault'
+import { createNote, findRegisteredId, readNote, vaultTree, writeNote } from './vault'
+import type { VaultActivityLog } from './vaultActivity'
 import { VaultIndexer, VaultWatchers } from './vaultIndex'
 import type { WorkspaceStore } from './workspace'
 
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -38,6 +39,9 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
 
   ipcMain.handle(IPC.vaultTree, (_e, vaultPath: string) => vaultTree(vaultPath))
   ipcMain.handle(IPC.vaultRead, (_e, vaultPath: string, rel: string) => readNote(vaultPath, rel))
+  ipcMain.handle(IPC.vaultWrite, (_e, vaultPath: string, rel: string, text: string, base: string | null) => writeNote(vaultPath, rel, text, base))
+  ipcMain.handle(IPC.vaultCreate, (_e, vaultPath: string, folder: string, name: string) => createNote(vaultPath, folder, name))
+  ipcMain.handle(IPC.vaultActivity, (_e, workspaceId: string) => activity.list(workspaceId))
   ipcMain.handle(IPC.vaultOpenObsidian, (_e, vaultPath: string) => openInObsidian(vaultPath))
   ipcMain.handle(IPC.vaultIsRegistered, async (_e, vaultPath: string) => !!(await findRegisteredId(vaultPath)))
   ipcMain.handle(IPC.openFolder, (_e, path: string) => shell.openPath(path))
