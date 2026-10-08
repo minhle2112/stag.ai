@@ -24,7 +24,11 @@ export const IPC = {
   agentStart: 'agent:start',
   agentStop: 'agent:stop',
   agentRemove: 'agent:remove',
-  agentLayout: 'agent:layout'
+  agentLayout: 'agent:layout',
+  boardSnapshot: 'board:snapshot',
+  boardChanged: 'board:changed',
+  taskComplete: 'task:complete',
+  taskDrop: 'task:drop'
 } as const
 
 export interface AppInfo {

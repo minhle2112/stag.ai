@@ -3,16 +3,17 @@ type: session
 agent: {{AGENT}}
 session: {{SESSION_ID}}
 started: {{NOW}}
-status: hỏi việc
+status: {{STATUS}}
 ---
 # Phiên của {{AGENT}}
 
-File này do stag.ai tạo khi mở phiên và xoá khi đóng phiên. Điều cần giữ lâu dài phải ghi vào vault.
+File này do stag.ai tạo khi mở phiên, cập nhật khi agent gọi task_start / task_update / task_done, và xoá khi đóng phiên. Điều cần giữ lâu dài phải ghi vào vault.
 
 ## Việc
-_(chưa rõ — agent đang hỏi người dùng)_
+{{TASK}}
 
 ## Phạm vi
-_(thư mục/file agent được sửa)_
+{{SCOPE}}
 
 ## Bàn giao
+{{HANDOFF}}

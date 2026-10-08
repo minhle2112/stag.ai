@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { Agent, LayoutNode, SplitDir, Workspace } from '@shared/types'
 import { setRatio, type LayoutPath } from '../layout'
 import { useAgents, type WorkspaceAgents } from '../store/agents'
+import { useBoard } from '../store/board'
+import { statusView } from '../status'
 import { attachTerminal, fitTerminal, focusTerminal } from '../terminals'
 import { CreateAgentDialog } from './CreateAgentDialog'
 import { Button } from './Modal'
@@ -17,9 +19,12 @@ export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.El
   const { load, create, start } = useAgents()
   const [target, setTarget] = useState<NewAgentTarget | null>(null)
 
+  const loadBoard = useBoard((s) => s.load)
+
   useEffect(() => {
     load(wsId)
-  }, [wsId, load])
+    loadBoard(wsId)
+  }, [wsId, load, loadBoard])
 
   const runningCount = state ? Object.keys(state.running).length : 0
 
@@ -184,6 +189,8 @@ function AgentCell({
   const pendingAuto = !!state.autoStart[agent.id]
   const error = state.errors[agent.id]
   const focused = state.focused === agent.id
+  const status = useBoard((s) => s.byWs[ws.id]?.statuses.find((x) => x.agentId === agent.id))
+  const view = statusView(running, starting, status)
 
   useEffect(() => {
     const host = hostRef.current!
@@ -207,12 +214,10 @@ function AgentCell({
       onMouseDown={() => focus(ws.id, agent.id)}
     >
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-2">
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${running ? 'bg-emerald-400' : starting ? 'bg-amber-400' : 'bg-muted/50'}`}
-          title={running ? 'Đang chạy' : starting ? 'Đang mở' : 'Đã dừng'}
-        />
+        <span className={`h-2 w-2 shrink-0 rounded-full ${view.dot}`} title={view.label} />
         <span className="truncate font-medium">{agent.name}</span>
         {agent.role && <span className="truncate text-[12px] text-muted">{agent.role}</span>}
+        {view.waiting && <span className="truncate text-[12px] text-amber-300">{view.label}</span>}
         <div className="flex-1" />
         <IconBtn title="Thêm agent bên phải" onClick={() => onSplit({ agentId: agent.id, dir: 'row' })}>
           ◫

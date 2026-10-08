@@ -1,14 +1,15 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
-import type { CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, StartAgentRequest } from '@shared/types'
+import type { CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, StartAgentRequest, Workspace } from '@shared/types'
 import type { AgentService } from './agents'
+import type { Board } from './board'
 import { openInObsidian } from './obsidian'
 import type { PtyManager } from './pty'
 import { prepareUserTemplates } from './templates'
 import { findRegisteredId, readNote, vaultTree } from './vault'
 import type { WorkspaceStore } from './workspace'
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -42,4 +43,13 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.agentStop, (_e, agentId: string) => agents.stop(agentId))
   ipcMain.handle(IPC.agentRemove, (_e, agentId: string) => agents.remove(agentId))
   ipcMain.handle(IPC.agentLayout, (_e, workspaceId: string, layout: LayoutNode | null) => agents.saveLayout(workspaceId, layout))
+
+  const ws = (id: string): Workspace => {
+    const w = workspaces.get(id)
+    if (!w) throw new Error('Workspace không tồn tại')
+    return w
+  }
+  ipcMain.handle(IPC.boardSnapshot, (_e, workspaceId: string) => board.snapshot(ws(workspaceId)))
+  ipcMain.handle(IPC.taskComplete, (_e, workspaceId: string, taskId: string) => board.closeTask(ws(workspaceId), taskId, 'done'))
+  ipcMain.handle(IPC.taskDrop, (_e, workspaceId: string, taskId: string) => board.closeTask(ws(workspaceId), taskId, 'dropped'))
 }

@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs, rmSync } from 'node:fs'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { app, type WebContents } from 'electron'
-import type { Agent, AgentRun, AgentsSnapshot, CreateAgentRequest, LayoutNode, StartAgentRequest } from '@shared/types'
+import type { Agent, AgentRun, AgentsSnapshot, CreateAgentRequest, LayoutNode, StartAgentRequest, Task, Workspace } from '@shared/types'
+import type { Board, HookPayload } from './board'
 import { exists, readText, today, writeIfMissing } from './fsutil'
+import type { StatusHub } from './hub'
+import { createStagMcp } from './mcp'
 import type { PtyManager } from './pty'
 import { readTemplate } from './templates'
 import { ensureIgnored, safeName, type WorkspaceStore } from './workspace'
@@ -15,6 +18,8 @@ interface StoreFile {
 
 interface Running extends AgentRun {
   sessionFile: string
+  /** Biến template của phiên, để ghi lại file phiên khi việc đổi. */
+  vars: Record<string, string>
 }
 
 /**
@@ -62,10 +67,18 @@ export class AgentService {
   private data: StoreFile = { agents: [], layouts: {} }
   private running = new Map<string, Running>()
 
+  private hub: StatusHub | null = null
+
   constructor(
     private ptys: PtyManager,
-    private workspaces: WorkspaceStore
+    private workspaces: WorkspaceStore,
+    private board: Board
   ) {}
+
+  /** Gắn máy chủ trạng thái (hook + MCP) sau khi nó đã chạy. */
+  attachHub(hub: StatusHub): void {
+    this.hub = hub
+  }
 
   async load(): Promise<void> {
     const raw = await readText(this.file)
@@ -117,8 +130,10 @@ export class AgentService {
     const ws = this.workspaces.get(agent.workspaceId)
     if (!ws) throw new Error('Workspace của agent không còn trong app')
 
+    if (!this.hub) throw new Error('Máy chủ trạng thái của app chưa sẵn sàng')
     const exe = await resolveClaude()
     const resume = req.resume && !!agent.lastSessionId
+    const open = await this.board.openTask(ws, agent.id)
     const sessionId = resume ? agent.lastSessionId! : randomUUID()
     const sessionFile = join(ws.path, '.sessions', `${sessionId}.md`)
     const agentNote = join(ws.vaultPath, '60 Agents', `${agent.name}.md`)
@@ -135,16 +150,20 @@ export class AgentService {
       SESSION_FILE: sessionFile,
       AGENT_NOTE: agentNote,
       RECALL: structured ? `đọc ${join(ws.vaultPath, '_INDEX.md')}` : 'tìm và đọc các note liên quan trong vault',
+      OPENING: open
+        ? `Bạn còn việc dở: "${open.title}" (phạm vi: ${open.scope}). Chào ngắn, nhắc việc này và hỏi người dùng có làm tiếp không. Làm tiếp thì không cần task_start lại; không làm nữa thì gọi task_done với tóm tắt phần đã làm, rồi hỏi "Bạn muốn tôi giúp gì trong workspace này?"`
+        : 'Chào ngắn và hỏi người dùng: "Bạn muốn tôi giúp gì trong workspace này?" Không làm việc gì khác cho tới khi người dùng trả lời.',
       DATE: today(),
       NOW: new Date().toISOString()
     }
 
-    await writeIfMissing(sessionFile, await readTemplate('agent/session.md', vars))
+    await this.writeSessionFile(sessionFile, vars, open)
     await writeIfMissing(agentNote, await readTemplate('agent/agent-note.md', vars))
     await ensureIgnored(ws.path, ['.sessions/'], 'Phiên agent của stag.ai')
 
     const args = resume ? ['--resume', sessionId] : ['--session-id', sessionId]
     args.push('--name', agent.name, '--append-system-prompt', await readTemplate('agent/rules.md', vars))
+    args.push(...this.hub.claudeArgs())
     if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
     if (!resume) args.push('Bắt đầu phiên mới.')
 
@@ -152,13 +171,22 @@ export class AgentService {
       owner,
       { command: exe, args, cwd: ws.path, cols: req.cols, rows: req.rows },
       {
-        env: { STAG_AGENT_ID: agent.id, STAG_AGENT_NAME: agent.name, STAG_SESSION_ID: sessionId, STAG_WORKSPACE: ws.path },
+        env: {
+          ...this.hub.env(),
+          STAG_AGENT_ID: agent.id,
+          STAG_AGENT_NAME: agent.name,
+          STAG_SESSION_ID: sessionId,
+          STAG_WORKSPACE: ws.path
+        },
         filterEnv: independentSessionEnv,
         onExit: () => this.finish(agent.id, ptyId)
       }
     )
-    const run: Running = { agentId: agent.id, sessionId, ptyId, startedAt: new Date().toISOString(), sessionFile }
+    const run: Running = { agentId: agent.id, sessionId, ptyId, startedAt: new Date().toISOString(), sessionFile, vars }
     this.running.set(agent.id, run)
+    // Phiên mới: chờ hook đầu tiên (lời mở đầu). Tiếp tục phiên: Claude Code đứng chờ người dùng gõ.
+    if (resume) this.board.setActivity(agent, 'waiting', { reason: 'turn' })
+    else this.board.setActivity(agent, 'starting')
     agent.lastSessionId = sessionId
     await this.save()
     return run
@@ -170,6 +198,58 @@ export class AgentService {
     if (!run || run.ptyId !== ptyId) return
     this.running.delete(agentId)
     rmSync(run.sessionFile, { force: true })
+    const agent = this.data.agents.find((a) => a.id === agentId)
+    if (agent) this.board.setActivity(agent, 'stopped')
+  }
+
+  /** File phiên phản ánh việc đang mở (hoặc việc vừa xong) của agent. */
+  private async writeSessionFile(file: string, vars: Record<string, string>, task: Task | undefined): Promise<void> {
+    const content = await readTemplate('agent/session.md', {
+      ...vars,
+      STATUS: !task ? 'hỏi việc' : task.status === 'open' ? 'đang làm' : 'xong',
+      TASK: task?.title ?? '_(chưa rõ — agent đang hỏi người dùng)_',
+      SCOPE: task?.scope ?? '_(thư mục/file agent được sửa)_',
+      HANDOFF: task?.summary ?? ''
+    })
+    await fs.mkdir(dirname(file), { recursive: true })
+    await fs.writeFile(file, content, 'utf8')
+  }
+
+  private context(agentId: string): { agent: Agent; ws: Workspace; run?: Running } | null {
+    const agent = this.data.agents.find((a) => a.id === agentId)
+    const ws = agent && this.workspaces.get(agent.workspaceId)
+    return agent && ws ? { agent, ws, run: this.running.get(agentId) } : null
+  }
+
+  /** Hook từ phiên Claude Code của agent. Hook tới muộn sau khi phiên đã đóng thì bỏ qua. */
+  onHook(agentId: string, payload: HookPayload): void {
+    const ctx = this.context(agentId)
+    if (ctx?.run) this.board.hook(ctx.agent, payload)
+  }
+
+  /** Máy chủ MCP "stag" cho agent đang gọi. */
+  mcpFor(agentId: string): ReturnType<typeof createStagMcp> | null {
+    const ctx = this.context(agentId)
+    if (!ctx) return null
+    const { agent, ws, run } = ctx
+    return createStagMcp({
+      agent,
+      workspace: ws,
+      sessionId: run?.sessionId,
+      board: this.board,
+      teammates: () =>
+        this.data.agents.filter((a) => a.workspaceId === ws.id).map((a) => ({ agent: a, running: this.running.has(a.id) })),
+      syncSessionFile: async () => {
+        const cur = this.running.get(agent.id)
+        if (!cur) return
+        const tasks = (await this.board.snapshot(ws)).tasks.filter((t) => t.agentId === agent.id)
+        // Việc đang mở; không có thì việc vừa xong trong phiên này (để giữ phần Bàn giao).
+        const task =
+          tasks.find((t) => t.status === 'open') ??
+          tasks.filter((t) => t.sessionId === cur.sessionId && t.status === 'done').at(-1)
+        await this.writeSessionFile(cur.sessionFile, cur.vars, task)
+      }
+    })
   }
 
   stop(agentId: string): void {
@@ -180,6 +260,9 @@ export class AgentService {
   /** Bỏ agent khỏi workspace. Note bộ nhớ trong vault được giữ lại. */
   async remove(agentId: string): Promise<void> {
     this.stop(agentId)
+    const ctx = this.context(agentId)
+    if (ctx) await this.board.dropAgentTasks(ctx.ws, agentId)
+    this.board.forget(agentId)
     this.data.agents = this.data.agents.filter((a) => a.id !== agentId)
     await this.save()
   }
@@ -189,6 +272,7 @@ export class AgentService {
     for (const a of this.data.agents) if (a.workspaceId === workspaceId) this.stop(a.id)
     this.data.agents = this.data.agents.filter((a) => a.workspaceId !== workspaceId)
     delete this.data.layouts[workspaceId]
+    this.board.forgetWorkspace(workspaceId)
     await this.save()
   }
 

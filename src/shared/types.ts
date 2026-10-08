@@ -109,3 +109,45 @@ export interface StartAgentRequest {
   cols: number
   rows: number
 }
+
+/**
+ * Agent đang làm gì lúc này (suy ra từ hook của Claude Code).
+ * 'starting' = phiên vừa mở, chưa có hook nào (đang tải, hoặc đứng ở hộp thoại "trust this folder").
+ */
+export type AgentActivity = 'starting' | 'working' | 'waiting' | 'stopped'
+
+/** Vì sao agent đang chờ: hết lượt trả lời, xin quyền, hỏi lựa chọn, hay lâu không ai gõ. */
+export type WaitReason = 'turn' | 'permission' | 'question' | 'idle'
+
+export interface AgentStatus {
+  agentId: string
+  activity: AgentActivity
+  reason?: WaitReason
+  /** Tool đang chạy (khi activity = 'working'). */
+  tool?: string
+  since: string
+}
+
+export type TaskStatus = 'open' | 'done' | 'dropped'
+
+/** Một việc agent nhận (tool task_start), lưu ở <dự án>/.stag/tasks.json. */
+export interface Task {
+  id: string
+  agentId: string
+  /** Giữ tên lúc tạo để lịch sử vẫn đọc được khi agent đã bị xoá. */
+  agentName: string
+  sessionId: string
+  title: string
+  scope: string
+  status: TaskStatus
+  createdAt: string
+  doneAt?: string
+  summary?: string
+  /** Người dùng đánh dấu xong/bỏ bằng tay (không phải agent báo). */
+  manual?: boolean
+}
+
+export interface BoardSnapshot {
+  statuses: AgentStatus[]
+  tasks: Task[]
+}

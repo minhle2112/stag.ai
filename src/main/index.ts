@@ -1,13 +1,23 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
+import { IPC } from '@shared/ipc'
 import { AgentService } from './agents'
+import { Board } from './board'
+import { StatusHub } from './hub'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty'
 import { WorkspaceStore } from './workspace'
 
 const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
-const agents = new AgentService(ptys, workspaces)
+const board = new Board((workspaceId) => {
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IPC.boardChanged, workspaceId)
+})
+const agents = new AgentService(ptys, workspaces, board)
+const hub = new StatusHub({
+  hook: (agentId, payload) => agents.onHook(agentId, payload),
+  mcp: (agentId) => agents.mcpFor(agentId)
+})
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -44,17 +54,23 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   await workspaces.load()
   await agents.load()
-  registerIpc(ptys, workspaces, agents)
+  await hub.start()
+  agents.attachHub(hub)
+  registerIpc(ptys, workspaces, agents, board)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
-app.on('before-quit', () => agents.shutdown())
+app.on('before-quit', () => {
+  agents.shutdown()
+  hub.stop()
+})
 
 app.on('window-all-closed', () => {
   agents.shutdown()
+  hub.stop()
   ptys.killAll()
   if (process.platform !== 'darwin') app.quit()
 })

@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { AgentGrid } from './components/AgentGrid'
+import { Kanban } from './components/Kanban'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
+import { useAgents } from './store/agents'
+import { useBoard } from './store/board'
 import { useUi, type MainTab } from './store/ui'
 import { useActiveWorkspace, useWorkspaces } from './store/workspaces'
 
@@ -17,6 +20,7 @@ export function App(): React.JSX.Element {
   const active = useActiveWorkspace()
   // Lưới agent của workspace đã mở được giữ sống khi chuyển workspace/tab.
   const [visited, setVisited] = useState<string[]>([])
+  const waiting = useWaitingCount(active?.id)
 
   useEffect(() => {
     load()
@@ -39,6 +43,11 @@ export function App(): React.JSX.Element {
               className={`rounded-md px-3 py-1 ${tab === t.id ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
             >
               {t.label}
+              {t.id === 'kanban' && waiting > 0 && (
+                <span className="ml-1.5 rounded bg-amber-400/15 px-1.5 text-[12px] text-amber-300" title="Agent đang chờ bạn">
+                  {waiting}
+                </span>
+              )}
             </button>
           ))}
           <div className="flex-1" />
@@ -68,7 +77,7 @@ export function App(): React.JSX.Element {
                 <VaultView key={active.id} workspace={active} />
               </div>
             )}
-            {active && tab === 'kanban' && <Placeholder text="Kanban — làm ở mốc M3" />}
+            {active && tab === 'kanban' && <Kanban key={active.id} workspace={active} />}
           </section>
           {browserOpen && (
             <aside className="w-[40%] shrink-0 border-l border-line bg-panel">
@@ -79,6 +88,14 @@ export function App(): React.JSX.Element {
       </main>
     </div>
   )
+}
+
+/** Số agent đang chạy và đang chờ người dùng trong workspace. */
+function useWaitingCount(wsId: string | undefined): number {
+  const statuses = useBoard((s) => (wsId ? s.byWs[wsId]?.statuses : undefined))
+  const running = useAgents((s) => (wsId ? s.byWs[wsId]?.running : undefined))
+  if (!statuses || !running) return 0
+  return statuses.filter((st) => st.activity === 'waiting' && running[st.agentId]).length
 }
 
 function Placeholder({ text }: { text: string }): React.JSX.Element {

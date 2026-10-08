@@ -4,10 +4,12 @@ import type {
   Agent,
   AgentRun,
   AgentsSnapshot,
+  BoardSnapshot,
   CreateAgentRequest,
   CreateWorkspaceRequest,
   LayoutNode,
   StartAgentRequest,
+  Task,
   CreateWorkspaceResult,
   ObsidianOpenResult,
   VaultNode,
@@ -56,6 +58,18 @@ const api = {
     remove: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentRemove, agentId),
     saveLayout: (workspaceId: string, layout: LayoutNode | null): Promise<void> =>
       ipcRenderer.invoke(IPC.agentLayout, workspaceId, layout)
+  },
+  board: {
+    snapshot: (workspaceId: string): Promise<BoardSnapshot> => ipcRenderer.invoke(IPC.boardSnapshot, workspaceId),
+    completeTask: (workspaceId: string, taskId: string): Promise<Task | undefined> =>
+      ipcRenderer.invoke(IPC.taskComplete, workspaceId, taskId),
+    dropTask: (workspaceId: string, taskId: string): Promise<Task | undefined> => ipcRenderer.invoke(IPC.taskDrop, workspaceId, taskId),
+    /** Bảng của một workspace vừa đổi (việc hoặc trạng thái agent). */
+    onChanged(cb: (workspaceId: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, workspaceId: string): void => cb(workspaceId)
+      ipcRenderer.on(IPC.boardChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.boardChanged, fn)
+    }
   },
   workspace: {
     list: (): Promise<Workspace[]> => ipcRenderer.invoke(IPC.wsList),
