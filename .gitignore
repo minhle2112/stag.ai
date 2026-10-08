@@ -1,0 +1,17 @@
+# Vault Obsidian = dữ liệu cá nhân, không lên git
+stag.ai memory/
+.obsidian/
+
+# Phiên agent
+.sessions/
+.stag/
+
+# Node / build
+node_modules/
+out/
+dist/
+release/
+*.log
+.env
+.env.*
+*.tsbuildinfo

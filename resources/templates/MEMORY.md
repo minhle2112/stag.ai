@@ -1,0 +1,1 @@
+- Bộ nhớ chính của dự án là vault Obsidian `{{VAULT_PATH}}` — ĐẦU MỖI PHIÊN phải đọc `_INDEX.md` trong đó trước khi làm gì; file này chỉ là cache, mâu thuẫn thì vault thắng.
