@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AgentGrid } from './components/AgentGrid'
 import { BrowserAskDialog, BrowserPane } from './components/BrowserPane'
+import { CreateAgentDialog } from './components/CreateAgentDialog'
 import { Kanban } from './components/Kanban'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
@@ -88,7 +89,30 @@ export function App(): React.JSX.Element {
         </div>
       </main>
       <BrowserAskDialog />
+      <NewAgentDialog />
     </div>
+  )
+}
+
+/** Hộp thoại tạo agent, mở từ lưới (◫ ⬓ + Agent) hoặc từ thanh bên. */
+function NewAgentDialog(): React.JSX.Element | null {
+  const target = useUi((s) => s.newAgent)
+  const setNewAgent = useUi((s) => s.setNewAgent)
+  const agents = useAgents((s) => (target ? s.byWs[target.wsId]?.agents : undefined))
+  const create = useAgents((s) => s.create)
+  if (!target) return null
+  const taken = new Set((agents ?? []).map((a) => a.name.toLowerCase()))
+  let n = (agents?.length ?? 0) + 1
+  while (taken.has(`agent ${n}`)) n++
+  return (
+    <CreateAgentDialog
+      defaultName={`Agent ${n}`}
+      onCancel={() => setNewAgent(null)}
+      onSubmit={async (v) => {
+        await create({ workspaceId: target.wsId, ...v }, { agentId: target.agentId, dir: target.dir })
+        setNewAgent(null)
+      }}
+    />
   )
 }
 

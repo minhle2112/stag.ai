@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs, rmSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
-import { app, type WebContents } from 'electron'
+import { app, shell, type WebContents } from 'electron'
 import type { Agent, AgentRun, AgentsSnapshot, CreateAgentRequest, LayoutNode, StartAgentRequest, Task, Workspace } from '@shared/types'
 import type { Board, HookPayload } from './board'
 import type { BrowserService } from './browser'
@@ -167,7 +167,8 @@ export class AgentService {
     args.push('--name', agent.name, '--append-system-prompt', await readTemplate('agent/rules.md', vars))
     args.push(...this.hub.claudeArgs())
     if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
-    if (!resume) args.push('Bắt đầu phiên mới.')
+    // `--` trước lời mở: `--mcp-config` nhận nhiều giá trị, không chặn lại thì nuốt luôn lời mở làm tên file.
+    if (!resume) args.push('--', 'Bắt đầu phiên mới.')
 
     const ptyId = this.ptys.spawn(
       owner,
@@ -260,10 +261,24 @@ export class AgentService {
     if (run) this.ptys.kill(run.ptyId)
   }
 
-  /** Bỏ agent khỏi workspace. Note bộ nhớ trong vault được giữ lại. */
+  /**
+   * Xoá agent: dừng phiên, chuyển note bộ nhớ `60 Agents/<tên>.md` vào Thùng rác (khôi phục được),
+   * bỏ thẻ việc đang dở. Lịch sử việc đã xong trên kanban được giữ.
+   */
   async remove(agentId: string): Promise<void> {
-    this.stop(agentId)
     const ctx = this.context(agentId)
+    if (ctx) {
+      // Chuyển note trước: không chuyển được (bị khoá…) thì báo lỗi và chưa xoá gì cả.
+      const note = join(ctx.ws.vaultPath, '60 Agents', `${ctx.agent.name}.md`)
+      if (await exists(note)) {
+        try {
+          await shell.trashItem(note)
+        } catch (e) {
+          throw new Error(`Không chuyển được note ${note} vào Thùng rác: ${(e as Error).message}`)
+        }
+      }
+    }
+    this.stop(agentId)
     if (ctx) await this.board.dropAgentTasks(ctx.ws, agentId)
     this.board.forget(agentId)
     this.browser.closeAgentTabs(agentId)

@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { Agent, AgentStatus, Task, Workspace } from '@shared/types'
-import { useAgents } from '../store/agents'
+import { openAgent, useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
-import { useUi } from '../store/ui'
 import { ago, localDay, statusView } from '../status'
-import { focusTerminal } from '../terminals'
 
 type ColumnId = 'asking' | 'doing' | 'waiting' | 'done'
 
@@ -76,10 +74,7 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
   const doneShown = showOld ? done : doneToday
 
   function jump(agentId: string): void {
-    if (!agentsState.agents.some((a) => a.id === agentId)) return
-    useAgents.getState().focus(wsId, agentId)
-    useUi.getState().setTab('agents')
-    setTimeout(() => focusTerminal(agentId), 0)
+    if (agentsState.agents.some((a) => a.id === agentId)) openAgent(wsId, agentId)
   }
 
   return (

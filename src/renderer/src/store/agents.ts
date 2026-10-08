@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import type { Agent, AgentRun, CreateAgentRequest, LayoutNode, SplitDir } from '@shared/types'
-import { insertLeaf, reconcile, removeLeaf } from '../layout'
-import { bindPty, disposeTerminal, onAgentExit, startTerminalBus, terminalSize } from '../terminals'
+import { insertLeaf, leaves, reconcile, removeLeaf } from '../layout'
+import { bindPty, disposeTerminal, focusTerminal, onAgentExit, startTerminalBus, terminalSize } from '../terminals'
+import { useUi } from './ui'
+import { useWorkspaces } from './workspaces'
 
 export interface WorkspaceAgents {
   agents: Agent[]
@@ -24,6 +26,10 @@ interface AgentsState {
   start: (wsId: string, agentId: string, resume: boolean) => Promise<void>
   stop: (agentId: string) => Promise<void>
   remove: (wsId: string, agentId: string) => Promise<void>
+  /** Hiện ô của agent trong lưới (thêm cạnh ô đang chọn nếu đã đóng) và chọn nó. */
+  show: (wsId: string, agentId: string) => void
+  /** Đóng ô của agent. Phiên (nếu có) vẫn chạy; agent vẫn ở thanh bên. */
+  hide: (wsId: string, agentId: string) => void
   setLayout: (wsId: string, layout: LayoutNode | null, persist?: boolean) => void
   focus: (wsId: string, agentId: string) => void
 }
@@ -63,7 +69,7 @@ export const useAgents = create<AgentsState>((set, get) => {
         bindPty(r.agentId, r.ptyId)
       }
       const layout = reconcile(snap.layout, snap.agents.map((a) => a.id))
-      patch(wsId, () => ({ agents: snap.agents, layout, running, focused: snap.agents[0]?.id ?? null }))
+      patch(wsId, () => ({ agents: snap.agents, layout, running, focused: leaves(layout)[0] ?? null }))
       if (JSON.stringify(layout) !== JSON.stringify(snap.layout)) window.stag.agent.saveLayout(wsId, layout)
     },
 
@@ -117,11 +123,38 @@ export const useAgents = create<AgentsState>((set, get) => {
       await window.stag.agent.remove(agentId)
       disposeTerminal(agentId)
       const layout = removeLeaf(get().byWs[wsId]?.layout ?? null, agentId)
+      // Terminal đã gỡ nên sự kiện thoát của phiên sẽ không tới đây: tự bỏ agent khỏi các bảng trạng thái.
+      const without = <T>(rec: Record<string, T>): Record<string, T> => {
+        const next = { ...rec }
+        delete next[agentId]
+        return next
+      }
       patch(wsId, (cur) => ({
         agents: cur.agents.filter((a) => a.id !== agentId),
         layout,
-        focused: cur.focused === agentId ? null : cur.focused
+        running: without(cur.running),
+        starting: without(cur.starting),
+        autoStart: without(cur.autoStart),
+        errors: without(cur.errors),
+        focused: cur.focused === agentId ? (leaves(layout)[0] ?? null) : cur.focused
       }))
+      window.stag.agent.saveLayout(wsId, layout)
+    },
+
+    show(wsId, agentId) {
+      const w = get().byWs[wsId]
+      if (!w || !w.agents.some((a) => a.id === agentId)) return
+      if (leaves(w.layout).includes(agentId)) return get().focus(wsId, agentId)
+      const layout = insertLeaf(w.layout, w.focused, agentId, 'row')
+      patch(wsId, () => ({ layout, focused: agentId }))
+      window.stag.agent.saveLayout(wsId, layout)
+    },
+
+    hide(wsId, agentId) {
+      const w = get().byWs[wsId]
+      if (!w) return
+      const layout = removeLeaf(w.layout, agentId)
+      patch(wsId, (cur) => ({ layout, focused: cur.focused === agentId ? (leaves(layout)[0] ?? null) : cur.focused }))
       window.stag.agent.saveLayout(wsId, layout)
     },
 
@@ -135,3 +168,11 @@ export const useAgents = create<AgentsState>((set, get) => {
     }
   }
 })
+
+/** Mở agent cho người dùng xem: chuyển workspace + tab Agents, hiện ô (nếu đã đóng) và đặt con trỏ vào terminal. */
+export function openAgent(wsId: string, agentId: string): void {
+  useWorkspaces.getState().setActive(wsId)
+  useUi.getState().setTab('agents')
+  useAgents.getState().show(wsId, agentId)
+  setTimeout(() => focusTerminal(agentId), 0)
+}

@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { Agent, LayoutNode, SplitDir, Workspace } from '@shared/types'
 import { setRatio, type LayoutPath } from '../layout'
 import { useAgents, type WorkspaceAgents } from '../store/agents'
 import { useBoard } from '../store/board'
+import { useUi } from '../store/ui'
 import { statusView } from '../status'
 import { attachTerminal, fitTerminal, focusTerminal } from '../terminals'
-import { CreateAgentDialog } from './CreateAgentDialog'
 import { Button } from './Modal'
 
-interface NewAgentTarget {
+interface SplitTarget {
   agentId: string | null
   dir: SplitDir
 }
@@ -16,13 +16,15 @@ interface NewAgentTarget {
 export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const wsId = workspace.id
   const state = useAgents((s) => s.byWs[wsId])
-  const { load, create, start } = useAgents()
-  const [target, setTarget] = useState<NewAgentTarget | null>(null)
+  const { load, start } = useAgents()
+  const setNewAgent = useUi((s) => s.setNewAgent)
+  const setTarget = (t: SplitTarget): void => setNewAgent({ wsId, ...t })
 
   const loadBoard = useBoard((s) => s.load)
 
   useEffect(() => {
-    load(wsId)
+    // Thanh bên có thể đã nạp agent của workspace này; nạp lại sẽ đè lên lưới vừa đổi.
+    if (!useAgents.getState().byWs[wsId]) load(wsId)
     loadBoard(wsId)
   }, [wsId, load, loadBoard])
 
@@ -46,27 +48,23 @@ export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.El
         {state?.layout ? (
           <LayoutView node={state.layout} path={[]} ws={workspace} state={state} onSplit={setTarget} />
         ) : (
-          state && (
+          state &&
+          (state.agents.length ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-muted">
+              <div>Không có ô nào đang mở.</div>
+              <div className="text-[12px]">Bấm vào agent ở thanh bên trái để mở lại ô của nó. Phiên đang chạy vẫn chạy khi ô đóng.</div>
+            </div>
+          ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted">
               <div>Workspace này chưa có agent.</div>
               <Button primary onClick={() => setTarget({ agentId: null, dir: 'row' })}>
                 + Tạo agent đầu tiên
               </Button>
             </div>
-          )
+          ))
         )}
       </div>
 
-      {target && (
-        <CreateAgentDialog
-          defaultName={`Agent ${(state?.agents.length ?? 0) + 1}`}
-          onCancel={() => setTarget(null)}
-          onSubmit={async (v) => {
-            await create({ workspaceId: wsId, ...v }, target)
-            setTarget(null)
-          }}
-        />
-      )}
       {/* Agent vừa tạo tự mở phiên khi ô của nó đã có kích thước — xem AgentCell. */}
       <AutoStarter wsId={wsId} state={state} start={start} />
     </div>
@@ -103,7 +101,7 @@ function LayoutView({
   path: LayoutPath
   ws: Workspace
   state: WorkspaceAgents
-  onSplit: (t: NewAgentTarget) => void
+  onSplit: (t: SplitTarget) => void
 }): React.JSX.Element {
   const setLayout = useAgents((s) => s.setLayout)
   if (node.type === 'leaf') {
@@ -180,10 +178,10 @@ function AgentCell({
   ws: Workspace
   agent: Agent
   state: WorkspaceAgents
-  onSplit: (t: NewAgentTarget) => void
+  onSplit: (t: SplitTarget) => void
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
-  const { start, stop, remove, focus } = useAgents()
+  const { start, stop, hide, focus } = useAgents()
   const running = !!state.running[agent.id]
   const starting = !!state.starting[agent.id]
   const pendingAuto = !!state.autoStart[agent.id]
@@ -202,11 +200,6 @@ function AgentCell({
       detach()
     }
   }, [agent.id])
-
-  async function removeAgent(): Promise<void> {
-    const msg = `Xoá agent "${agent.name}" khỏi workspace?\n\nPhiên đang chạy sẽ bị dừng. Note bộ nhớ 60 Agents/${agent.name}.md trong vault vẫn được giữ.`
-    if (window.confirm(msg)) await remove(ws.id, agent.id)
-  }
 
   return (
     <div
@@ -234,8 +227,8 @@ function AgentCell({
             ▶
           </IconBtn>
         )}
-        <IconBtn title="Xoá agent" onClick={removeAgent}>
-          ✕
+        <IconBtn title={running ? 'Đóng ô (phiên vẫn chạy, mở lại ở thanh bên)' : 'Đóng ô (mở lại ở thanh bên)'} onClick={() => hide(ws.id, agent.id)}>
+          ×
         </IconBtn>
       </div>
 

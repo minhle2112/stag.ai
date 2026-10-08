@@ -39,10 +39,12 @@ export function setRatio(node: LayoutNode, path: LayoutPath, ratio: number): Lay
   return { ...node, [head]: setRatio(node[head], rest, ratio) }
 }
 
-/** Đồng bộ lưới với danh sách agent: bỏ ô của agent đã xoá, thêm ô cho agent chưa có chỗ. */
+/**
+ * Đồng bộ lưới với danh sách agent: bỏ ô của agent đã xoá. Agent không có ô là agent người dùng
+ * đã đóng ô — vẫn nằm ở thanh bên, không tự thêm lại.
+ */
 export function reconcile(node: LayoutNode | null, agentIds: string[]): LayoutNode | null {
   let result = node
   for (const id of leaves(node)) if (!agentIds.includes(id)) result = removeLeaf(result, id)
-  for (const id of agentIds) if (!leaves(result).includes(id)) result = insertLeaf(result, null, id, 'row')
   return result
 }

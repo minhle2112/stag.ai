@@ -9,6 +9,10 @@ import { registerIpc } from './ipc'
 import { PtyManager } from './pty'
 import { WorkspaceStore } from './workspace'
 
+// Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
+// Phải đặt trước khi tạo các service vì chúng đọc đường dẫn userData lúc khởi tạo.
+if (process.env.STAG_USER_DATA) app.setPath('userData', process.env.STAG_USER_DATA)
+
 const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
 const board = new Board((workspaceId) => send(IPC.boardChanged, workspaceId))
