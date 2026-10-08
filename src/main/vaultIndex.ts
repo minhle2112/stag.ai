@@ -166,10 +166,17 @@ export function isHiddenChange(filename: string | null): boolean {
 
 const CHANGE_DEBOUNCE_MS = 300
 
+interface Sub {
+  /** `vaultPath` đúng như cửa sổ gửi lên (để renderer so khớp). */
+  path: string
+  /** Số lần cửa sổ này đăng ký (vài chỗ cùng theo dõi một vault, hoặc StrictMode gọi effect hai lần). */
+  count: number
+  onDestroyed: () => void
+}
+
 interface WatchEntry {
   watcher: FSWatcher
-  /** Cửa sổ đang theo dõi → `vaultPath` đúng như cửa sổ đó gửi lên (để renderer so khớp). */
-  subs: Map<WebContents, string>
+  subs: Map<WebContents, Sub>
   timer: ReturnType<typeof setTimeout> | null
 }
 
@@ -197,12 +204,27 @@ export class VaultWatchers {
       this.entries.set(key, created)
       entry = created
     }
-    if (!entry.subs.has(wc)) wc.once('destroyed', () => this.unwatch(vaultPath, wc))
-    entry.subs.set(wc, vaultPath)
+    const sub = entry.subs.get(wc)
+    if (sub) {
+      sub.count++
+      return
+    }
+    const onDestroyed = (): void => this.drop(key, wc)
+    wc.once('destroyed', onDestroyed)
+    entry.subs.set(wc, { path: vaultPath, count: 1, onDestroyed })
   }
 
   unwatch(vaultPath: string, wc: WebContents): void {
     const key = vaultKey(vaultPath)
+    const sub = this.entries.get(key)?.subs.get(wc)
+    if (!sub) return
+    if (--sub.count > 0) return
+    wc.removeListener('destroyed', sub.onDestroyed)
+    this.drop(key, wc)
+  }
+
+  /** Bỏ hẳn cửa sổ khỏi danh sách theo dõi vault; không còn ai thì đóng watcher. */
+  private drop(key: string, wc: WebContents): void {
     const entry = this.entries.get(key)
     if (!entry) return
     entry.subs.delete(wc)
@@ -215,7 +237,7 @@ export class VaultWatchers {
     if (entry.timer) clearTimeout(entry.timer)
     entry.timer = setTimeout(() => {
       entry.timer = null
-      for (const [wc, path] of entry.subs) if (!wc.isDestroyed()) wc.send(IPC.vaultChanged, path)
+      for (const [wc, sub] of entry.subs) if (!wc.isDestroyed()) wc.send(IPC.vaultChanged, sub.path)
     }, CHANGE_DEBOUNCE_MS)
   }
 

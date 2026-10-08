@@ -109,21 +109,26 @@ describe('fold / isHiddenChange', () => {
 })
 
 describe('VaultWatchers', () => {
-  function fakeWc(): { wc: never; sent: string[]; destroy: () => void } {
+  function fakeWc(): { wc: never; sent: string[]; listeners: Array<() => void>; destroy: () => void } {
     const sent: string[] = []
     let destroyed = false
     const listeners: Array<() => void> = []
     const wc = {
       isDestroyed: () => destroyed,
       send: (_ch: string, path: string) => sent.push(path),
-      once: (_ev: string, fn: () => void) => listeners.push(fn)
+      once: (_ev: string, fn: () => void) => listeners.push(fn),
+      removeListener: (_ev: string, fn: () => void) => {
+        const i = listeners.indexOf(fn)
+        if (i !== -1) listeners.splice(i, 1)
+      }
     }
     return {
       wc: wc as never,
       sent,
+      listeners,
       destroy: () => {
         destroyed = true
-        listeners.forEach((fn) => fn())
+        listeners.splice(0).forEach((fn) => fn())
       }
     }
   }
@@ -148,6 +153,37 @@ describe('VaultWatchers', () => {
 
     a.destroy()
     await write('C.md', '3')
+    await wait(500)
+    expect(a.sent).toEqual([vault])
+    watchers.dispose()
+  })
+
+  it('watch/unwatch lặp lại không để sót listener `destroyed` (đổi workspace nhiều lần)', () => {
+    const watchers = new VaultWatchers()
+    const a = fakeWc()
+    for (let i = 0; i < 20; i++) {
+      watchers.watch(vault, a.wc)
+      watchers.unwatch(vault, a.wc)
+    }
+    expect(a.listeners).toHaveLength(0)
+    watchers.dispose()
+  })
+
+  it('cùng cửa sổ theo dõi hai lần: huỷ một lần vẫn còn nhận báo', async () => {
+    const watchers = new VaultWatchers()
+    const a = fakeWc()
+    watchers.watch(vault, a.wc)
+    watchers.watch(vault, a.wc)
+    expect(a.listeners).toHaveLength(1)
+    watchers.unwatch(vault, a.wc)
+    await wait(100)
+    await write('D.md', '4')
+    await wait(600)
+    expect(a.sent).toEqual([vault])
+
+    watchers.unwatch(vault, a.wc)
+    expect(a.listeners).toHaveLength(0)
+    await write('E.md', '5')
     await wait(500)
     expect(a.sent).toEqual([vault])
     watchers.dispose()
