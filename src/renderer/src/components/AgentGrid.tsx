@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { create } from 'zustand'
 import type { Agent, LayoutNode, SplitDir, Workspace } from '@shared/types'
 import { setRatio, type LayoutPath } from '../layout'
 import { useAgents, type WorkspaceAgents } from '../store/agents'
@@ -7,11 +8,34 @@ import { useUi } from '../store/ui'
 import { statusView } from '../status'
 import { attachTerminal, fitTerminal, focusTerminal } from '../terminals'
 import { Button } from './Modal'
+import { RenameAgentDialog } from './RenameAgentDialog'
 
 interface SplitTarget {
   agentId: string | null
   dir: SplitDir
 }
+
+const CELL_MIME = 'application/x-stag-cell'
+
+/** Ô đang được kéo (theo agent): các ô khác hiện lớp phủ vùng thả. */
+const useCellDrag = create<{ dragging: string | null; begin: (id: string) => void; end: () => void }>((set) => {
+  let current: string | null = null
+  return {
+    dragging: null,
+    begin(id) {
+      current = id
+      // Hiện vùng thả ở lượt sau: đổi DOM ngay trong dragstart có thể làm Chromium huỷ kéo.
+      setTimeout(() => current === id && set({ dragging: id }), 0)
+    },
+    end() {
+      current = null
+      set({ dragging: null })
+    }
+  }
+})
+
+// Ô nguồn có thể đã gắn lại chỗ khác lúc thả nên dragend không tới nó: dọn ở cấp cửa sổ cho chắc.
+window.addEventListener('dragend', () => useCellDrag.getState().end())
 
 export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const wsId = workspace.id
@@ -106,7 +130,8 @@ function LayoutView({
   const setLayout = useAgents((s) => s.setLayout)
   if (node.type === 'leaf') {
     const agent = state.agents.find((a) => a.id === node.agentId)
-    return agent ? <AgentCell ws={ws} agent={agent} state={state} onSplit={onSplit} /> : <div />
+    // key theo agent: đổi chỗ ô thì mỗi ô gắn lại đúng terminal của mình (terminals.ts chỉ chuyển phần tử DOM).
+    return agent ? <AgentCell key={agent.id} ws={ws} agent={agent} state={state} onSplit={onSplit} /> : <div />
   }
   return (
     <Split
@@ -181,7 +206,10 @@ function AgentCell({
   onSplit: (t: SplitTarget) => void
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
-  const { start, stop, hide, focus } = useAgents()
+  const { start, stop, hide, focus, swapCells } = useAgents()
+  const dragging = useCellDrag((s) => s.dragging)
+  const [dropOver, setDropOver] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const running = !!state.running[agent.id]
   const starting = !!state.starting[agent.id]
   const pendingAuto = !!state.autoStart[agent.id]
@@ -206,9 +234,21 @@ function AgentCell({
       className={`absolute inset-0 flex flex-col border ${focused ? 'border-accent/50' : 'border-transparent'}`}
       onMouseDown={() => focus(ws.id, agent.id)}
     >
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-2">
+      <div
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData(CELL_MIME, agent.id)
+          useCellDrag.getState().begin(agent.id)
+        }}
+        onDragEnd={() => useCellDrag.getState().end()}
+        title="Kéo thanh này thả lên ô khác để đổi chỗ"
+        className="flex h-8 shrink-0 cursor-grab items-center gap-2 border-b border-line bg-panel px-2 active:cursor-grabbing"
+      >
         <span className={`h-2 w-2 shrink-0 rounded-full ${view.dot}`} title={view.label} />
-        <span className="truncate font-medium">{agent.name}</span>
+        <span className="truncate font-medium" title="Double-click để đổi tên" onDoubleClick={() => setRenaming(true)}>
+          {agent.name}
+        </span>
         {agent.role && <span className="truncate text-[12px] text-muted">{agent.role}</span>}
         {view.waiting && <span className="truncate text-[12px] text-amber-300">{view.label}</span>}
         <div className="flex-1" />
@@ -250,6 +290,39 @@ function AgentCell({
           </div>
         )}
       </div>
+
+      {/* Phủ cả ô khi đang kéo một ô khác: không có lớp này thì xterm nuốt sự kiện thả. */}
+      {dragging && dragging !== agent.id && (
+        <div
+          data-cell-drop={agent.id}
+          className={`absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed ${
+            dropOver ? 'border-accent bg-accent/15' : 'border-line bg-bg/40'
+          }`}
+          onDragEnter={(e) => {
+            e.preventDefault()
+            setDropOver(true)
+          }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+          }}
+          onDragLeave={() => setDropOver(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDropOver(false)
+            const from = e.dataTransfer.getData(CELL_MIME) || dragging
+            useCellDrag.getState().end()
+            swapCells(ws.id, from, agent.id)
+          }}
+        >
+          <span className="pointer-events-none rounded-md bg-panel px-3 py-1.5 text-[12px] text-fg shadow">
+            Thả để đổi chỗ với <b>{agent.name}</b>
+          </span>
+        </div>
+      )}
+      {dragging === agent.id && <div className="pointer-events-none absolute inset-0 z-20 bg-bg/50" />}
+
+      {renaming && <RenameAgentDialog wsId={ws.id} agentId={agent.id} onClose={() => setRenaming(false)} />}
     </div>
   )
 }

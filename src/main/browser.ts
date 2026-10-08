@@ -481,6 +481,16 @@ export class BrowserService {
     for (const id of [...this.asks.keys()]) this.answer(id, false)
     for (const wsId of [...this.byWs.keys()]) this.closeWorkspace(wsId)
   }
+
+  /** Agent đổi tên: nhãn trên tab browser của nó đổi theo. */
+  renameAgent(agentId: string, agentName: string): void {
+    for (const [wsId, b] of this.byWs) {
+      const mine = b.tabs.filter((t) => t.owner.kind === 'agent' && t.owner.agentId === agentId)
+      if (!mine.length) continue
+      for (const t of mine) t.owner = { kind: 'agent', agentId, agentName }
+      this.emit(wsId)
+    }
+  }
 }
 
 function describeTab(t: Tab): BrowserTab {

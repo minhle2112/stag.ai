@@ -7,6 +7,7 @@ import { useUi } from '../store/ui'
 import { useWorkspaces } from '../store/workspaces'
 import { statusView } from '../status'
 import { CreateReport, CreateWorkspaceDialog } from './CreateWorkspaceDialog'
+import { RenameAgentDialog } from './RenameAgentDialog'
 
 export function Sidebar(): React.JSX.Element {
   const { items, setActive, add, remove } = useWorkspaces()
@@ -98,6 +99,12 @@ function WorkspaceGroup({
   const loadBoard = useBoard((s) => s.load)
   const setNewAgent = useUi((s) => s.setNewAgent)
   const setTab = useUi((s) => s.setTab)
+  const moveAgent = useAgents((s) => s.moveAgent)
+  /** Chỗ sẽ chèn agent đang kéo: trước dòng thứ `dropAt` (= số dòng: cuối danh sách). */
+  const [dropAt, setDropAt] = useState<number | null>(null)
+  const count = state?.agents.length ?? 0
+  const markFor = (i: number): 'before' | 'after' | null =>
+    dropAt === i ? 'before' : dropAt === count && i === count - 1 ? 'after' : null
 
   // Nạp agent + trạng thái để thanh bên có chấm trạng thái cho mọi workspace, kể cả chưa mở.
   useEffect(() => {
@@ -143,9 +150,33 @@ function WorkspaceGroup({
       </div>
 
       {open && state && (
-        <div className="mt-0.5 ml-3 border-l border-line pl-1.5">
-          {state.agents.map((a) => (
-            <AgentRow key={a.id} ws={ws} agent={a} />
+        <div
+          className="mt-0.5 ml-3 border-l border-line pl-1.5"
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null)
+          }}
+        >
+          {state.agents.map((a, i) => (
+            <AgentRow
+              key={a.id}
+              ws={ws}
+              agent={a}
+              mark={markFor(i)}
+              onDragOverRow={(after) => {
+                const from = state.agents.findIndex((x) => x.id === rowDrag?.agentId)
+                const at = i + (after ? 1 : 0)
+                // Thả ngay tại chỗ cũ thì không đổi gì: không hiện vạch.
+                setDropAt(at === from || at === from + 1 ? null : at)
+              }}
+              onDropRow={() => {
+                const drag = rowDrag
+                setDropAt(null)
+                if (!drag || drag.wsId !== ws.id || dropAt === null) return
+                const from = state.agents.findIndex((x) => x.id === drag.agentId)
+                moveAgent(ws.id, drag.agentId, from < dropAt ? dropAt - 1 : dropAt)
+              }}
+              onDragDone={() => setDropAt(null)}
+            />
           ))}
           {!state.agents.length && (
             <button onClick={newAgent} className="w-full rounded-md px-2 py-1 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg">
@@ -158,7 +189,26 @@ function WorkspaceGroup({
   )
 }
 
-function AgentRow({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Element {
+/** Agent đang được kéo ở thanh bên (dataTransfer không đọc được lúc dragover nên giữ ở đây). */
+let rowDrag: { wsId: string; agentId: string } | null = null
+const ROW_MIME = 'application/x-stag-agent-row'
+
+function AgentRow({
+  ws,
+  agent,
+  mark,
+  onDragOverRow,
+  onDropRow,
+  onDragDone
+}: {
+  ws: Workspace
+  agent: Agent
+  /** Vạch báo chỗ thả: trên hay dưới dòng này. */
+  mark: 'before' | 'after' | null
+  onDragOverRow: (after: boolean) => void
+  onDropRow: () => void
+  onDragDone: () => void
+}): React.JSX.Element {
   const state = useAgents((s) => s.byWs[ws.id])!
   const { start, stop, hide, remove } = useAgents()
   const status = useBoard((s) => s.byWs[ws.id]?.statuses.find((x) => x.agentId === agent.id))
@@ -166,6 +216,8 @@ function AgentRow({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Ele
   const onAgentsTab = useUi((s) => s.tab === 'agents')
   const selected = wsActive && onAgentsTab && state.focused === agent.id
   const [menu, setMenu] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [dragging, setDragging] = useState(false)
 
   const running = !!state.running[agent.id]
   const starting = !!state.starting[agent.id]
@@ -207,11 +259,40 @@ function AgentRow({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Ele
   )
 
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      onDragOver={(e) => {
+        if (rowDrag?.wsId !== ws.id) return // chỉ sắp xếp trong cùng workspace
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        const r = e.currentTarget.getBoundingClientRect()
+        onDragOverRow(e.clientY > r.top + r.height / 2)
+      }}
+      onDrop={(e) => {
+        if (rowDrag?.wsId !== ws.id) return
+        e.preventDefault()
+        onDropRow()
+      }}
+    >
+      {mark && <div className={`pointer-events-none absolute right-1 left-0 z-10 h-0.5 rounded bg-accent ${mark === 'before' ? '-top-px' : '-bottom-px'}`} />}
       <div
+        draggable
+        onDragStart={(e) => {
+          rowDrag = { wsId: ws.id, agentId: agent.id }
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData(ROW_MIME, agent.id)
+          setMenu(false)
+          setDragging(true)
+        }}
+        onDragEnd={() => {
+          rowDrag = null
+          setDragging(false)
+          onDragDone()
+        }}
         onClick={() => openAgent(ws.id, agent.id)}
-        title={`${agent.name}${agent.role ? ` · ${agent.role}` : ''} — ${view.label}${shown ? '' : ' (ô đang đóng)'}`}
-        className={`group flex cursor-pointer items-center gap-2 rounded-md py-1 pr-1 pl-2 ${
+        onDoubleClick={() => setRenaming(true)}
+        title={`${agent.name}${agent.role ? ` · ${agent.role}` : ''} — ${view.label}${shown ? '' : ' (ô đang đóng)'}\nKéo để sắp xếp · double-click để đổi tên`}
+        className={`group flex cursor-pointer items-center gap-2 rounded-md py-1 pr-1 pl-2 ${dragging ? 'opacity-40' : ''} ${
           selected ? 'bg-panel-2 text-fg' : shown || running ? 'text-fg/85 hover:bg-panel-2/60' : 'text-muted hover:bg-panel-2/60 hover:text-fg'
         }`}
       >
@@ -239,11 +320,13 @@ function AgentRow({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Ele
             {!running && !starting && agent.lastSessionId && item('Tiếp tục phiên trước', () => openAndStart(true))}
             {running && item('Dừng phiên', () => stop(agent.id))}
             {shown && item('Đóng ô', () => hide(ws.id, agent.id))}
+            {item('Đổi tên…', () => setRenaming(true))}
             <div className="my-0.5 border-t border-line" />
             {item('Xoá agent…', removeAgent, true)}
           </div>
         </>
       )}
+      {renaming && <RenameAgentDialog wsId={ws.id} agentId={agent.id} onClose={() => setRenaming(false)} />}
     </div>
   )
 }

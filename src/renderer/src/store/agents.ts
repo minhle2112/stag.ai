@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Agent, AgentRun, CreateAgentRequest, LayoutNode, SplitDir } from '@shared/types'
-import { insertLeaf, leaves, reconcile, removeLeaf } from '../layout'
+import { insertLeaf, leaves, reconcile, removeLeaf, swapLeaves } from '../layout'
 import { bindPty, disposeTerminal, focusTerminal, onAgentExit, startTerminalBus, terminalSize } from '../terminals'
 import { useUi } from './ui'
 import { useWorkspaces } from './workspaces'
@@ -32,6 +32,12 @@ interface AgentsState {
   hide: (wsId: string, agentId: string) => void
   setLayout: (wsId: string, layout: LayoutNode | null, persist?: boolean) => void
   focus: (wsId: string, agentId: string) => void
+  /** Đổi tên agent (main đổi tên luôn note bộ nhớ trong vault). Lỗi thì ném ra để hộp thoại hiện. */
+  rename: (wsId: string, agentId: string, name: string) => Promise<void>
+  /** Chuyển agent tới vị trí `index` trong danh sách của workspace (thanh bên). */
+  moveAgent: (wsId: string, agentId: string, index: number) => void
+  /** Đổi chỗ hai ô trong lưới. */
+  swapCells: (wsId: string, x: string, y: string) => void
 }
 
 function errMsg(e: unknown): string {
@@ -165,6 +171,34 @@ export const useAgents = create<AgentsState>((set, get) => {
 
     focus(wsId, agentId) {
       if (get().byWs[wsId]?.focused !== agentId) patch(wsId, () => ({ focused: agentId }))
+    },
+
+    async rename(wsId, agentId, name) {
+      let agent: Agent
+      try {
+        agent = await window.stag.agent.rename(agentId, name)
+      } catch (e) {
+        throw new Error(errMsg(e))
+      }
+      patch(wsId, (cur) => ({ agents: cur.agents.map((a) => (a.id === agentId ? { ...a, name: agent.name } : a)) }))
+    },
+
+    moveAgent(wsId, agentId, index) {
+      const w = get().byWs[wsId]
+      const from = w?.agents.findIndex((a) => a.id === agentId) ?? -1
+      if (!w || from === -1) return
+      const agents = [...w.agents]
+      const [moved] = agents.splice(from, 1)
+      agents.splice(Math.max(0, Math.min(index, agents.length)), 0, moved)
+      if (agents.every((a, i) => a.id === w.agents[i].id)) return
+      patch(wsId, () => ({ agents }))
+      window.stag.agent.reorder(wsId, agents.map((a) => a.id))
+    },
+
+    swapCells(wsId, x, y) {
+      const w = get().byWs[wsId]
+      if (!w || x === y || !leaves(w.layout).includes(x) || !leaves(w.layout).includes(y)) return
+      get().setLayout(wsId, swapLeaves(w.layout, x, y))
     }
   }
 })

@@ -218,4 +218,12 @@ export class Board {
     this.ignored.delete(workspaceId)
     for (const [id, s] of this.status) if (s.workspaceId === workspaceId) this.status.delete(id)
   }
+
+  /** Agent đổi tên: thẻ việc của nó (cả lịch sử đã xong) hiện tên mới. */
+  async renameAgent(ws: Workspace, agentId: string, name: string): Promise<void> {
+    const mine = (await this.tasks(ws)).filter((t) => t.agentId === agentId && t.agentName !== name)
+    if (!mine.length) return
+    for (const t of mine) t.agentName = name
+    await this.save(ws)
+  }
 }

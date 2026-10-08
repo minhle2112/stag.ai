@@ -60,7 +60,10 @@ const api = {
     stop: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentStop, agentId),
     remove: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentRemove, agentId),
     saveLayout: (workspaceId: string, layout: LayoutNode | null): Promise<void> =>
-      ipcRenderer.invoke(IPC.agentLayout, workspaceId, layout)
+      ipcRenderer.invoke(IPC.agentLayout, workspaceId, layout),
+    rename: (agentId: string, name: string): Promise<Agent> => ipcRenderer.invoke(IPC.agentRename, agentId, name),
+    /** Thứ tự agent của workspace ở thanh bên. */
+    reorder: (workspaceId: string, orderedIds: string[]): Promise<void> => ipcRenderer.invoke(IPC.agentReorder, workspaceId, orderedIds)
   },
   board: {
     snapshot: (workspaceId: string): Promise<BoardSnapshot> => ipcRenderer.invoke(IPC.boardSnapshot, workspaceId),

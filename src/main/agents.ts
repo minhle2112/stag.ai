@@ -11,6 +11,7 @@ import { createStagMcp } from './mcp'
 import type { PtyManager } from './pty'
 import { readTemplate } from './templates'
 import { ensureIgnored, safeName, type WorkspaceStore } from './workspace'
+import { agentNameProblem, sameAgentName } from '@shared/agentName'
 
 interface StoreFile {
   agents: Agent[]
@@ -309,4 +310,75 @@ export class AgentService {
     }
     this.running.clear()
   }
+
+  /**
+   * Đổi tên agent: đổi tên note `60 Agents/<tên cũ>.md` → `<tên mới>.md` trong vault (nếu có),
+   * rồi cập nhật agents.json, tên trên thẻ việc, nhãn tab browser và file phiên đang mở.
+   * Không sửa wikilink trỏ tới note cũ trong các note khác.
+   * Phiên đang chạy giữ tên cũ (`--name`, STAG_AGENT_NAME, luật phiên) tới phiên sau.
+   */
+  async rename(agentId: string, rawName: string): Promise<Agent> {
+    const agent = this.data.agents.find((a) => a.id === agentId)
+    if (!agent) throw new Error('Agent không tồn tại')
+    const name = rawName.trim()
+    const problem = agentNameProblem(name)
+    if (problem) throw new Error(problem)
+    if (name === agent.name) return agent
+    const taken = this.data.agents.some((a) => a.id !== agent.id && a.workspaceId === agent.workspaceId && sameAgentName(a.name, name))
+    if (taken) throw new Error(`Đã có agent tên "${name}" trong workspace này`)
+
+    const ws = this.workspaces.get(agent.workspaceId)
+    if (ws) {
+      const dir = join(ws.vaultPath, '60 Agents')
+      const from = join(dir, `${agent.name}.md`)
+      const to = join(dir, `${name}.md`)
+      // Chỉ đổi hoa/thường: trên Windows hai đường dẫn là một file, không coi là "đã tồn tại".
+      if (!sameAgentName(agent.name, name) && (await exists(to)))
+        throw new Error(`Trong vault đã có note ${to}. Đổi tên note đó trước, hoặc chọn tên khác. Chưa đổi gì cả.`)
+      if (await exists(from)) {
+        try {
+          await fs.rename(from, to)
+        } catch (e) {
+          throw new Error(`Không đổi tên được note ${from}: ${(e as Error).message}. Chưa đổi gì cả.`)
+        }
+        // Tiêu đề note theo template là "# <tên agent>": đổi theo nếu còn đúng như cũ.
+        const text = await readText(to)
+        const heading = `# ${agent.name}`
+        if (text && text.split(/\r?\n/).includes(heading))
+          await fs.writeFile(to, text.replace(new RegExp(`^${escapeRegExp(heading)}$`, 'm'), () => `# ${name}`), 'utf8')
+      }
+    }
+
+    agent.name = name
+    await this.save()
+    if (ws) await this.board.renameAgent(ws, agent.id, name)
+    this.browser.renameAgent(agent.id, name)
+    // File phiên (agent khác đọc trong .sessions/) ghi tên mới và đường dẫn note mới.
+    const run = this.running.get(agent.id)
+    if (run && ws) {
+      run.vars = { ...run.vars, AGENT: name, AGENT_NOTE: join(ws.vaultPath, '60 Agents', `${name}.md`) }
+      const tasks = (await this.board.snapshot(ws)).tasks.filter((t) => t.agentId === agent.id)
+      const task =
+        tasks.find((t) => t.status === 'open') ?? tasks.filter((t) => t.sessionId === run.sessionId && t.status === 'done').at(-1)
+      await this.writeSessionFile(run.sessionFile, run.vars, task)
+    }
+    return agent
+  }
+
+  /** Sắp xếp lại agent của một workspace theo `orderedIds` (thứ tự ở thanh bên). Agent workspace khác giữ nguyên chỗ. */
+  async reorder(workspaceId: string, orderedIds: string[]): Promise<void> {
+    const mine = this.data.agents.filter((a) => a.workspaceId === workspaceId)
+    const rank = (a: Agent): number => {
+      const i = orderedIds.indexOf(a.id)
+      return i === -1 ? orderedIds.length + mine.indexOf(a) : i
+    }
+    const sorted = [...mine].sort((x, y) => rank(x) - rank(y))
+    let k = 0
+    this.data.agents = this.data.agents.map((a) => (a.workspaceId === workspaceId ? sorted[k++] : a))
+    await this.save()
+  }
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
