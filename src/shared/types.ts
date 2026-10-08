@@ -109,7 +109,7 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'auto' | 'plan'
  * Loại ô trong lưới: agent chạy một CLI AI (có tên, vai trò, note bộ nhớ, luật phiên riêng), hoặc
  * terminal thường (PowerShell trong thư mục dự án, không có bộ nhớ, không lên kanban).
  */
-export type AgentKind = 'claude' | 'codex' | 'gemini' | 'terminal'
+export type AgentKind = 'claude' | 'codex' | 'terminal'
 
 /** Agent tạo trước khi có loại ô là agent Claude Code. */
 export function agentKind(a: { kind?: AgentKind }): AgentKind {

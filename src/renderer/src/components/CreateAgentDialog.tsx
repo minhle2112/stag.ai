@@ -22,12 +22,10 @@ function modes(kind: AgentKind): Array<{ id: PermissionMode; label: string; hint
   ]
 }
 
-/** Loại ô. `ready: false` = chưa tích hợp xong, hiện để biết là sắp có. */
-const KINDS: Array<{ id: AgentKind; label: string; hint: string; ready: boolean }> = [
-  { id: 'claude', label: 'Claude Code', hint: 'Agent có vai trò, bộ nhớ riêng, lên kanban.', ready: true },
-  { id: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI, cũng có vai trò, bộ nhớ, kanban.', ready: true },
-  { id: 'gemini', label: 'Gemini CLI', hint: 'Agent chạy Gemini CLI.', ready: false },
-  { id: 'terminal', label: 'Terminal', hint: 'PowerShell trong thư mục dự án, không có bộ nhớ.', ready: true }
+const KINDS: Array<{ id: AgentKind; label: string; hint: string }> = [
+  { id: 'claude', label: 'Claude Code', hint: 'Agent có vai trò, bộ nhớ riêng, lên kanban.' },
+  { id: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI, cũng có vai trò, bộ nhớ, kanban.' },
+  { id: 'terminal', label: 'Terminal', hint: 'PowerShell trong thư mục dự án, không có bộ nhớ.' }
 ]
 
 interface Props {
@@ -88,24 +86,23 @@ export function CreateAgentDialog({ suggestName, takenNames, onCancel, onSubmit 
         }}
       >
         <Label text="Loại">
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             {KINDS.map((k) => (
               <button
                 type="button"
                 key={k.id}
-                disabled={!k.ready}
-                title={k.ready ? k.hint : `${k.hint} Sắp có.`}
+                title={k.hint}
                 onClick={() => {
                   // Tên còn là tên gợi ý của loại cũ thì đổi theo loại mới.
                   if (name === suggestName(kind)) setName(suggestName(k.id))
                   setKind(k.id)
                 }}
-                className={`rounded-md border px-2 py-1.5 text-left disabled:opacity-40 ${
+                className={`rounded-md border px-2 py-1.5 text-left ${
                   kind === k.id ? 'border-accent bg-accent/10' : 'border-line bg-panel-2 hover:border-accent/50'
                 }`}
               >
                 <div>{k.label}</div>
-                <div className="text-[11px] text-muted">{k.ready ? k.hint : 'Sắp có'}</div>
+                <div className="text-[11px] text-muted">{k.hint}</div>
               </button>
             ))}
           </div>
