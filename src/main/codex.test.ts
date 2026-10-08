@@ -56,6 +56,14 @@ describe('codexArgs', () => {
     expect(hook).toBe(`hooks.Stop=[{hooks=[{type="command",command=${tomlString(cmd)},timeout=10}]}]`)
   })
 
+  it('PreToolUse: in câu trả lời của app ra stdout (khoá phạm vi), chờ lâu được', () => {
+    const cmd = codexHookCommand('http://127.0.0.1:9/hook', true)
+    expect(cmd).not.toContain('-o NUL')
+    expect(cmd).toContain('-m 300')
+    const hook = configs(codexArgs(base)).find((x) => x.startsWith('hooks.PreToolUse='))!
+    expect(hook).toBe(`hooks.PreToolUse=[{hooks=[{type="command",command=${tomlString(cmd)},timeout=310}]}]`)
+  })
+
   it('mức quyền', () => {
     expect(codexPermissionArgs('default')).toEqual([])
     expect(codexPermissionArgs('plan')).toEqual(['-s', 'read-only', '-a', 'on-request'])

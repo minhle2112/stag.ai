@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import * as z from 'zod'
 import type { Agent, Task, Workspace } from '@shared/types'
+import { overlapsOf, scopeLocks, sharedPrefixes } from '@shared/scope'
 import type { Board } from './board'
 import { BROWSER_KEYS, type BrowserService } from './browser'
 
@@ -31,6 +32,16 @@ function describe(t: Task): string {
   return `"${t.title}" — scope: ${t.scope || '(not set)'}`
 }
 
+/** Cảnh báo khi phạm vi vừa khai đè lên việc đang mở của agent khác (xem shared/scope.ts). */
+async function overlapWarning(board: Board, ws: Workspace, task: Task): Promise<string> {
+  const { tasks } = await board.snapshot(ws)
+  const shared = sharedPrefixes(ws.path, ws.vaultPath)
+  const overlaps = overlapsOf(task, scopeLocks(tasks, ws.path), ws.path, shared)
+  if (!overlaps.length) return ''
+  const lines = overlaps.map((o) => `- ${o.other.agentName}: "${o.other.title}" (scope: ${o.other.scope}) — overlaps on ${o.labels.join(', ')}`)
+  return `\n\nWARNING — your scope overlaps with other agents' open tasks:\n${lines.join('\n')}\nTell the user now and agree on who edits what (narrow your scope with task_update if possible). Before you edit a file in another agent's scope, stag.ai asks the user for permission.`
+}
+
 /** Máy chủ MCP "stag" cho một agent: các tool để agent tự đưa việc của mình lên kanban. */
 export function createStagMcp(ctx: McpContext): McpServer {
   const { agent, workspace: ws, board } = ctx
@@ -44,14 +55,14 @@ export function createStagMcp(ctx: McpContext): McpServer {
         'Call as soon as the task the user gave you is clear. Creates a card on the stag.ai kanban ("working" column) and writes Task/Scope into your session file. Only one open task at a time.',
       inputSchema: {
         title: z.string().min(1).max(120).describe('Short task title in the conversation language (shown to the user on the kanban), e.g. "Fix Google sign-in bug"'),
-        scope: z.string().min(1).max(500).describe('Folders/files you will edit, e.g. "src/auth/, tests/auth/"')
+        scope: z.string().min(1).max(500).describe('Folders/files you will edit, relative to the project folder, comma-separated, e.g. "src/auth/, tests/auth/*.test.ts". stag.ai locks them for you while the task is open.')
       }
     },
     async ({ title, scope }) => {
       try {
         const task = await board.startTask(ws, agent, ctx.sessionId ?? '', title, scope)
         await ctx.syncSessionFile()
-        return ok(`Task started: ${describe(task)}. When done, update the vault, then call task_done.`)
+        return ok(`Task started: ${describe(task)}. When done, update the vault, then call task_done.${await overlapWarning(board, ws, task)}`)
       } catch (e) {
         return fail(e)
       }
@@ -72,7 +83,7 @@ export function createStagMcp(ctx: McpContext): McpServer {
       try {
         const task = await board.updateTask(ws, agent.id, { title, scope })
         await ctx.syncSessionFile()
-        return ok(`Updated: ${describe(task)}`)
+        return ok(`Updated: ${describe(task)}${scope ? await overlapWarning(board, ws, task) : ''}`)
       } catch (e) {
         return fail(e)
       }

@@ -305,7 +305,7 @@ describe('Board: việc (task)', () => {
 
   it('chưa có tasks.json → danh sách rỗng, không tạo file khi chỉ đọc', async () => {
     const board = new Board(() => {})
-    expect(await board.snapshot(ws)).toEqual({ statuses: [], tasks: [] })
+    expect(await board.snapshot(ws)).toEqual({ statuses: [], tasks: [], scopeAsks: [] })
     await expect(fs.access(join(root, '.stag'))).rejects.toThrow()
   })
 })

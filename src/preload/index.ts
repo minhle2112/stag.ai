@@ -90,6 +90,7 @@ const api = {
     completeTask: (workspaceId: string, taskId: string): Promise<Task | undefined> =>
       ipcRenderer.invoke(IPC.taskComplete, workspaceId, taskId),
     dropTask: (workspaceId: string, taskId: string): Promise<Task | undefined> => ipcRenderer.invoke(IPC.taskDrop, workspaceId, taskId),
+    answerScope: (askId: string, allow: boolean): Promise<void> => ipcRenderer.invoke(IPC.scopeAnswer, askId, allow),
     /** Bảng của một workspace vừa đổi (việc hoặc trạng thái agent). */
     onChanged(cb: (workspaceId: string) => void): () => void {
       const fn = (_e: IpcRendererEvent, workspaceId: string): void => cb(workspaceId)

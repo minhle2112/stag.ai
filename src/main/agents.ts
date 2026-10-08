@@ -22,6 +22,7 @@ import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, p
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
 import { createStagMcp } from './mcp'
+import { ScopeGuard } from './scopeGuard'
 import type { PtyManager } from './pty'
 import { readTemplate } from './templates'
 import { TranscriptWatcher, transcriptPath } from './transcript'
@@ -122,6 +123,7 @@ export class AgentService {
 
   private hub: StatusHub | null = null
   private handoffTimer: NodeJS.Timeout | null = null
+  private guard: ScopeGuard
 
   constructor(
     private ptys: PtyManager,
@@ -129,7 +131,9 @@ export class AgentService {
     private board: Board,
     private browser: BrowserService,
     private settings: () => AppSettings
-  ) {}
+  ) {
+    this.guard = new ScopeGuard(board)
+  }
 
   /** Gắn máy chủ trạng thái (hook + MCP) sau khi nó đã chạy. */
   attachHub(hub: StatusHub): void {
@@ -333,6 +337,7 @@ export class AgentService {
     const run = this.running.get(agentId)
     if (!run || run.ptyId !== ptyId) return
     this.running.delete(agentId)
+    this.guard.endSession(agentId)
     run.transcript?.stop()
     if (run.sessionFile) rmSync(run.sessionFile, { force: true })
     const agent = this.data.agents.find((a) => a.id === agentId)
@@ -366,10 +371,15 @@ export class AgentService {
     return agent && ws ? { agent, ws, run: this.running.get(agentId) } : null
   }
 
-  /** Hook từ phiên Claude Code của agent. Hook tới muộn sau khi phiên đã đóng thì bỏ qua. */
-  onHook(agentId: string, payload: HookPayload): void {
+  /**
+   * Hook từ phiên Claude Code / Codex của agent. Hook tới muộn sau khi phiên đã đóng thì bỏ qua.
+   * Trả về câu trả lời cho hook (PreToolUse: khoá phạm vi, xem scopeGuard.ts) hoặc undefined = không can thiệp.
+   */
+  async onHook(agentId: string, payload: HookPayload): Promise<unknown> {
     const ctx = this.context(agentId)
-    if (!ctx?.run) return
+    if (!ctx?.run) return undefined
+    // Soi dữ liệu hook khi phát triển (CLI đổi dạng payload giữa các phiên bản).
+    if (process.env.STAG_DEBUG_HOOKS) void fs.appendFile(process.env.STAG_DEBUG_HOOKS, `${JSON.stringify({ agent: ctx.agent.name, ...payload })}\n`).catch(() => {})
     // Đường dẫn transcript thật (đoán sai lúc mở, hoặc /clear sang phiên mới) → theo file đó.
     if (payload.transcript_path) void ctx.run.transcript?.follow(payload.transcript_path)
     if (agentKind(ctx.agent) === 'codex') void this.codexHook(ctx.agent, ctx.run, payload)
@@ -381,6 +391,14 @@ export class AgentService {
       // Hết lượt sau lời nhờ mà chưa gọi session_handoff (gọi rồi thì trạng thái đã là 'restarting').
       else if (payload.hook_event_name === 'Stop' && ask.submitted) this.handoffFailed(ctx.agent, ctx.run)
     }
+    try {
+      if (payload.hook_event_name === 'PreToolUse') return await this.guard.preToolUse(ctx.ws, ctx.agent, agentKind(ctx.agent), payload)
+      if (payload.hook_event_name === 'PostToolUse') await this.guard.postToolUse(ctx.ws, ctx.agent, payload)
+    } catch (e) {
+      // Lỗi đọc kanban… không được chặn agent: bỏ qua khoá lần này.
+      console.error('[scope]', e)
+    }
+    return undefined
   }
 
   /**

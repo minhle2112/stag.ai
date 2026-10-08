@@ -9,7 +9,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { HookPayload } from './board'
 
 export interface HubHandlers {
-  hook(agentId: string, payload: HookPayload): void
+  /** Trả về JSON trả lời hook (vd. quyết định PreToolUse), undefined = chỉ ghi nhận. */
+  hook(agentId: string, payload: HookPayload): unknown
   /** Máy chủ MCP gắn với một agent (tool task_* biết ai đang gọi). null = agent không tồn tại. */
   mcp(agentId: string): McpServer | null
   /** JSON statusLine của phiên agent (độ dài context, xem context.ts). */
@@ -140,9 +141,9 @@ export class StatusHub {
     if (path === '/hook') {
       if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' })
       const body = (await readJson(req)) as HookPayload
-      if (agentId) this.handlers.hook(agentId, body)
-      // Trả {} = không can thiệp quyết định của Claude Code, chỉ ghi nhận.
-      return send(res, 200, {})
+      const out = agentId ? await this.handlers.hook(agentId, body) : undefined
+      // {} = không can thiệp quyết định của CLI, chỉ ghi nhận.
+      return send(res, 200, out ?? {})
     }
 
     if (path === '/status') {

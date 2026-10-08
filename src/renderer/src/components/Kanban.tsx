@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { overlapsOf, scopeLocks, sharedPrefixes, type ScopeOverlap } from '@shared/scope'
 import { agentKind, type Agent, type AgentStatus, type Task, type Workspace } from '@shared/types'
 import { openAgent, useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
@@ -20,6 +21,8 @@ interface AgentCardData {
   status?: AgentStatus
   running: boolean
   starting: boolean
+  /** Phạm vi việc này đè lên việc đang mở của agent khác (khoá phạm vi, xem shared/scope.ts). */
+  overlaps: ScopeOverlap[]
 }
 
 /** Thẻ của agent nằm ở cột nào; null = không chạy và không có việc dở → không lên bảng. */
@@ -52,14 +55,18 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
   if (!board || !agentsState) return <div className="absolute inset-0 flex items-center justify-center text-muted">…</div>
 
   const open = board.tasks.filter((t) => t.status === 'open')
+  const locks = scopeLocks(board.tasks, workspace.path)
+  const shared = sharedPrefixes(workspace.path, workspace.vaultPath)
   const cards: Record<ColumnId, AgentCardData[]> = { asking: [], doing: [], waiting: [], done: [] }
   const idle: Agent[] = []
   // Terminal thường không nhận việc, không có trạng thái: không lên kanban.
   const aiAgents = agentsState.agents.filter((a) => agentKind(a) !== 'terminal')
   for (const agent of aiAgents) {
+    const task = open.find((t) => t.agentId === agent.id)
     const c: AgentCardData = {
       agent,
-      task: open.find((t) => t.agentId === agent.id),
+      task,
+      overlaps: task ? overlapsOf(task, locks, workspace.path, shared) : [],
       status: board.statuses.find((s) => s.agentId === agent.id),
       running: !!agentsState.running[agent.id],
       starting: !!agentsState.starting[agent.id]
@@ -145,7 +152,7 @@ function Empty({ text }: { text: string }): React.JSX.Element | null {
 }
 
 function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCardData; now: number; onClick: () => void }): React.JSX.Element {
-  const { agent, task, status, running, starting } = data
+  const { agent, task, status, running, starting, overlaps } = data
   const view = statusView(running, starting, status)
   const stopped = !running && !starting
   const [menu, setMenu] = useState(false)
@@ -181,6 +188,20 @@ function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCard
         <>
           <div className="mt-1 text-fg">{task.title}</div>
           {task.scope && <div className="mt-0.5 truncate font-mono text-[11px] text-muted" title={task.scope}>{task.scope}</div>}
+          {!!task.files?.length && (
+            <div className="mt-0.5 text-[11px] text-muted" title={`File đã sửa (cũng bị khoá cho agent khác):\n${task.files.join('\n')}`}>
+              + {task.files.length} file đã sửa ngoài phạm vi
+            </div>
+          )}
+          {overlaps.map((o) => (
+            <div
+              key={o.other.id}
+              className="mt-1 rounded bg-amber-400/10 px-1.5 py-0.5 text-[11px] text-amber-300"
+              title={`Việc "${o.other.title}" của ${o.other.agentName} (phạm vi: ${o.other.scope}). Agent sửa file trong phạm vi của agent kia thì app hỏi bạn trước.`}
+            >
+              ⚠ Trùng phạm vi với {o.other.agentName}: <span className="font-mono">{o.labels.join(', ')}</span>
+            </div>
+          ))}
         </>
       ) : (
         <div className="mt-1 text-[12px] text-muted">Chưa nhận việc</div>

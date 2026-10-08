@@ -29,13 +29,20 @@ export const tomlString = (s: string): string => JSON.stringify(s)
  * môi trường đọc bằng `--variable %VAR` + `{{VAR}}` của curl (cần curl ≥ 8.3; Windows 11 có 8.x). Đã thử
  * trên PowerShell, cmd, Git Bash.
  */
-export function codexHookCommand(hookUrl: string): string {
+export function codexHookCommand(hookUrl: string, reply = false): string {
   return (
-    'curl.exe -s -m 5 -o NUL --variable %STAG_TOKEN --variable %STAG_AGENT_ID ' +
+    `curl.exe -s ${reply ? `-m ${CODEX_REPLY_SECONDS}` : '-m 5 -o NUL'} --variable %STAG_TOKEN --variable %STAG_AGENT_ID ` +
     '--expand-header "Authorization: Bearer {{STAG_TOKEN}}" --expand-header "X-Stag-Agent: {{STAG_AGENT_ID}}" ' +
     `-H "Content-Type: application/json" --data-binary "@-" ${hookUrl}`
   )
 }
+
+/**
+ * PreToolUse: câu trả lời của app (khoá phạm vi, xem scopeGuard.ts) in ra stdout cho Codex đọc. App có thể
+ * chờ người dùng trả lời tới SCOPE_ASK_MS (280 giây) nên curl và hook chờ lâu hơn chút.
+ */
+const CODEX_REPLY_EVENTS = new Set(['PreToolUse'])
+const CODEX_REPLY_SECONDS = 300
 
 /** Mức quyền của app → cờ của Codex. 'default' = theo ~/.codex/config.toml của người dùng. */
 export function codexPermissionArgs(mode: PermissionMode): string[] {
@@ -65,7 +72,6 @@ export interface CodexLaunch {
 
 /** Tham số cho codex.exe (truyền thẳng qua CreateProcess, không qua cmd.exe: luật phiên dài, nhiều dòng). */
 export function codexArgs(o: CodexLaunch): string[] {
-  const hook = codexHookCommand(o.hookUrl)
   const args = o.resumeId ? ['resume', o.resumeId] : []
   args.push(
     // Không gắn vào daemon app-server dùng chung: daemon không mang biến môi trường / cấu hình của phiên này.
@@ -85,8 +91,12 @@ export function codexArgs(o: CodexLaunch): string[] {
     '-c',
     'mcp_servers.stag.default_tools_approval_mode="approve"'
   )
-  for (const ev of CODEX_HOOK_EVENTS)
-    args.push('-c', `hooks.${ev}=[{hooks=[{type="command",command=${tomlString(hook)},timeout=10}]}]`)
+  // Codex hạ thời hạn hook Interrupt xuống 3 giây (và hiện cảnh báo nếu đặt cao hơn).
+  for (const ev of CODEX_HOOK_EVENTS) {
+    const reply = CODEX_REPLY_EVENTS.has(ev)
+    const hook = codexHookCommand(o.hookUrl, reply)
+    args.push('-c', `hooks.${ev}=[{hooks=[{type="command",command=${tomlString(hook)},timeout=${reply ? CODEX_REPLY_SECONDS + 10 : ev === 'Interrupt' ? 3 : 10}}]}]`)
+  }
   args.push(...codexPermissionArgs(o.permissionMode))
   if (!o.resumeId && o.prompt) args.push(o.prompt)
   return args

@@ -58,7 +58,9 @@ export const IPC = {
   /** Người dùng bấm "Bàn giao sang phiên mới". */
   agentHandoff: 'agent:handoff',
   /** main → renderer: phiên cũ đã đóng sau khi bàn giao, mở phiên mới cho agent (kèm agentId). */
-  agentRestart: 'agent:restart'
+  agentRestart: 'agent:restart',
+  /** Người dùng trả lời câu hỏi khoá phạm vi (agent Codex sửa file trong vùng của agent khác). */
+  scopeAnswer: 'scope:answer'
 } as const
 
 export interface AppInfo {

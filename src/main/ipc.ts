@@ -70,6 +70,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.browserReload, (_e, workspaceId: string, tabId: string) => browser.reload(workspaceId, tabId))
   ipcMain.on(IPC.browserBounds, (_e, workspaceId: string | null, rect: ViewRect | null) => browser.setBounds(workspaceId, rect))
   ipcMain.handle(IPC.browserAnswer, (_e, askId: string, allow: boolean) => browser.answer(askId, allow))
+  ipcMain.handle(IPC.scopeAnswer, (_e, askId: string, allow: boolean) => board.answerScope(askId, allow))
   ipcMain.handle(IPC.taskDrop, (_e, workspaceId: string, taskId: string) => board.closeTask(ws(workspaceId), taskId, 'dropped'))
   ipcMain.handle(IPC.agentRename, (_e, agentId: string, name: string) => agents.rename(agentId, name))
   ipcMain.handle(IPC.agentReorder, (_e, workspaceId: string, orderedIds: string[]) => agents.reorder(workspaceId, orderedIds))

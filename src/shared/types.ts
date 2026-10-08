@@ -236,11 +236,32 @@ export interface Task {
   summary?: string
   /** Người dùng đánh dấu xong/bỏ bằng tay (không phải agent báo). */
   manual?: boolean
+  /** File agent đã sửa trong lúc việc mở (tương đối so với dự án, '/'), cũng thuộc vùng khoá của việc (xem scope.ts). */
+  files?: string[]
+}
+
+/**
+ * Agent Codex sắp sửa file trong vùng khoá của việc agent khác: Codex không có hộp xin quyền cho hook
+ * nên app hỏi người dùng (Claude Code thì hỏi ngay trong terminal của nó).
+ */
+export interface ScopeAsk {
+  id: string
+  agentId: string
+  agentName: string
+  /** File / mục khoá sắp bị sửa (tương đối so với dự án). */
+  file: string
+  /** Lệnh shell sắp chạy (khi đoán từ lệnh, không phải tool sửa file). */
+  command?: string
+  /** Việc đang giữ file đó. */
+  holder: { agentName: string; title: string; entry: string }
+  /** Hạn trả lời (ISO); quá hạn thì app từ chối. */
+  until: string
 }
 
 export interface BoardSnapshot {
   statuses: AgentStatus[]
   tasks: Task[]
+  scopeAsks: ScopeAsk[]
 }
 
 /** Ai mở tab browser: người dùng, hoặc một agent. */

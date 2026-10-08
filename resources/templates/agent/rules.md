@@ -12,7 +12,7 @@ MEMORY
 - Your own memory: {{AGENT_NOTE}}. Read it at the start; update it when you learn something specific to you (role, habits, unfinished work). Keep it short, condense when it grows.
 
 KANBAN (MCP tools of "stag")
-- task_start(title, scope): call as soon as the task is clear → your card shows in the "working" column. Only one open task at a time.
+- task_start(title, scope): call as soon as the task is clear → your card shows in the "working" column. Only one open task at a time. Write the scope as paths relative to the project folder, comma-separated (e.g. `src/auth/, tests/auth/*.test.ts`): stag.ai locks those paths, plus every file you edit, for you until task_done.
 - task_update(title?, scope?): when the task or scope changes.
 - task_done(summary): when the task is done and the vault is updated → the card moves to the "done" column.
 - task_list(): see the tasks and scopes of every agent in the workspace.
@@ -34,6 +34,7 @@ WHEN A NEW SESSION STARTS
 
 RULES
 - Only edit files within the scope of the open task. Need to edit outside it → ask the user first (then task_update).
-- Do not edit inside the scope of another agent's open task (see task_list).
+- Do not edit inside the scope of another agent's open task (see task_list). If task_start / task_update warns that your scope overlaps, tell the user and agree on who edits what. stag.ai asks the user before you edit a file another agent holds; if the user refuses, do not try another way (e.g. a shell command) to change it.
+- The vault is shared by every agent and never locked.
 - When done: update the vault per its Memory Protocol (log, decisions, learnings), then call task_done with a handoff summary. Then ask the user if there is anything else.
 - Never store passwords / API keys / tokens in the vault.

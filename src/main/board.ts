@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, HandoffState, Task, WaitReason, Workspace } from '@shared/types'
+import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, HandoffState, ScopeAsk, Task, WaitReason, Workspace } from '@shared/types'
 import { readText } from './fsutil'
 import { ensureIgnored } from './workspace'
 
@@ -17,8 +17,15 @@ export interface HookPayload {
   /** Transcript JSONL của phiên (để phát hiện người dùng bấm Esc ngắt, xem transcript.ts). */
   transcript_path?: string
   tool_name?: string
+  /** Tham số của tool (PreToolUse / PostToolUse), để biết file nào sắp bị sửa (xem scopeGuard.ts). */
+  tool_input?: Record<string, unknown>
+  /** Thư mục làm việc của phiên (đường dẫn tương đối trong tool_input tính từ đây). */
+  cwd?: string
   notification_type?: string
 }
+
+/** Số file tối đa ghi vào một việc (vùng khoá); quá thì bỏ các file cũ nhất. */
+const MAX_TASK_FILES = 300
 
 /** Tool chờ người dùng trả lời ngay trong terminal. */
 const QUESTION_TOOLS = new Set(['AskUserQuestion'])
@@ -35,6 +42,8 @@ export class Board {
   private pending = new Map<string, NodeJS.Timeout>()
   /** Lần cuối người dùng gửi lời nhắn cho agent (ms, theo hook UserPromptSubmit). */
   private prompted = new Map<string, number>()
+  /** Câu hỏi khoá phạm vi đang chờ người dùng (agent Codex, xem scopeGuard.ts). */
+  private asks = new Map<string, { ask: ScopeAsk; workspaceId: string; done: (allow: boolean) => void }>()
 
   constructor(private notify: (workspaceId: string) => void) {}
 
@@ -211,7 +220,8 @@ export class Board {
     const statuses = [...this.status.values()]
       .filter((s) => s.workspaceId === ws.id)
       .map(({ workspaceId: _ws, ...s }) => s)
-    return { statuses, tasks: await this.tasks(ws) }
+    const scopeAsks = [...this.asks.values()].filter((a) => a.workspaceId === ws.id).map((a) => a.ask)
+    return { statuses, tasks: await this.tasks(ws), scopeAsks }
   }
 
   async openTask(ws: Workspace, agentId: string): Promise<Task | undefined> {
@@ -246,6 +256,60 @@ export class Board {
     if (change.scope?.trim()) task.scope = change.scope.trim()
     await this.save(ws)
     return task
+  }
+
+  /** Ghi các file agent vừa sửa vào việc đang mở của nó (thành một phần vùng khoá). */
+  async touch(ws: Workspace, agentId: string, files: string[]): Promise<void> {
+    const task = await this.openTask(ws, agentId)
+    if (!task) return
+    const list = task.files ?? []
+    const fresh = files.filter((f) => !list.some((x) => x.toLowerCase() === f.toLowerCase()))
+    if (!fresh.length) return
+    task.files = [...list, ...fresh].slice(-MAX_TASK_FILES)
+    await this.save(ws)
+  }
+
+  // ---- khoá phạm vi: hỏi người dùng thay cho agent Codex ----
+
+  /**
+   * Hỏi người dùng có cho agent sửa file trong vùng khoá của agent khác. Trong lúc chờ, thẻ agent hiện
+   * "cần duyệt quyền". Hết hạn (SCOPE_ASK_MS) hoặc phiên đóng → từ chối.
+   */
+  askScope(ws: Workspace, agent: Agent, q: Pick<ScopeAsk, 'file' | 'command' | 'holder'>, timeoutMs = 280_000): Promise<boolean> {
+    const ask: ScopeAsk = {
+      id: randomUUID(),
+      agentId: agent.id,
+      agentName: agent.name,
+      ...q,
+      until: new Date(Date.now() + timeoutMs).toISOString()
+    }
+    const before = this.status.get(agent.id)
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => this.answerScope(ask.id, false), timeoutMs)
+      this.asks.set(ask.id, {
+        ask,
+        workspaceId: ws.id,
+        done: (allow) => {
+          clearTimeout(timer)
+          this.asks.delete(ask.id)
+          // Trả lời xong: agent làm tiếp (nếu trạng thái vẫn là lúc hỏi).
+          const cur = this.status.get(agent.id)
+          if (cur?.activity === 'waiting' && cur.reason === 'permission') this.setActivity(agent, 'working', { tool: before?.tool })
+          this.notifySoon(ws.id)
+          resolve(allow)
+        }
+      })
+      this.setActivity(agent, 'waiting', { reason: 'permission' })
+      this.notifySoon(ws.id)
+    })
+  }
+
+  answerScope(askId: string, allow: boolean): void {
+    this.asks.get(askId)?.done(allow)
+  }
+
+  cancelScopeAsks(agentId: string): void {
+    for (const a of [...this.asks.values()]) if (a.ask.agentId === agentId) a.done(false)
   }
 
   /** Agent báo xong việc đang mở của mình. */

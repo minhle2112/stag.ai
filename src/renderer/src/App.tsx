@@ -4,6 +4,7 @@ import { BrowserAskDialog, BrowserDock } from './components/BrowserPane'
 import { agentKind, type AgentKind } from '@shared/types'
 import { CreateAgentDialog } from './components/CreateAgentDialog'
 import { Kanban } from './components/Kanban'
+import { ScopeAskDialog } from './components/ScopeAskDialog'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
 import { useAgents } from './store/agents'
@@ -86,6 +87,7 @@ export function App(): React.JSX.Element {
         </div>
       </main>
       <BrowserAskDialog />
+      <ScopeAskDialog />
       <NewAgentDialog />
     </div>
   )
