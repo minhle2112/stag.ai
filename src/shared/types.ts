@@ -105,15 +105,28 @@ export type ObsidianOpenResult =
 /** Mức tự quyền của Claude Code ('default' = theo cài đặt Claude Code của người dùng). */
 export type PermissionMode = 'default' | 'acceptEdits' | 'auto' | 'plan'
 
+/**
+ * Loại ô trong lưới: agent chạy một CLI AI (có tên, vai trò, note bộ nhớ, luật phiên riêng), hoặc
+ * terminal thường (PowerShell trong thư mục dự án, không có bộ nhớ, không lên kanban).
+ */
+export type AgentKind = 'claude' | 'codex' | 'gemini' | 'terminal'
+
+/** Agent tạo trước khi có loại ô là agent Claude Code. */
+export function agentKind(a: { kind?: AgentKind }): AgentKind {
+  return a.kind ?? 'claude'
+}
+
 /** Agent = danh tính lâu dài trong một workspace. Mỗi lần chạy là một phiên (session) mới. */
 export interface Agent {
   id: string
   workspaceId: string
+  /** Thiếu = 'claude' (xem agentKind). */
+  kind?: AgentKind
   name: string
   role: string
   permissionMode: PermissionMode
   createdAt: string
-  /** Phiên Claude Code gần nhất, để "tiếp tục phiên trước" (--resume). */
+  /** Phiên CLI gần nhất, để "tiếp tục phiên trước" (--resume). Terminal không có. */
   lastSessionId?: string
 }
 
@@ -139,6 +152,7 @@ export interface AgentsSnapshot {
 
 export interface CreateAgentRequest {
   workspaceId: string
+  kind: AgentKind
   name: string
   role: string
   permissionMode: PermissionMode

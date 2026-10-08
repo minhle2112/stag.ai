@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
-import type { Agent, LayoutNode, SplitDir, Workspace } from '@shared/types'
+import { agentKind, type Agent, type LayoutNode, type SplitDir, type Workspace } from '@shared/types'
 import { setRatio, type LayoutPath } from '../layout'
 import { useAgents, type WorkspaceAgents } from '../store/agents'
 import { useBoard } from '../store/board'
@@ -217,7 +217,8 @@ function AgentCell({
   const error = state.errors[agent.id]
   const focused = state.focused === agent.id
   const status = useBoard((s) => s.byWs[ws.id]?.statuses.find((x) => x.agentId === agent.id))
-  const view = statusView(running, starting, status)
+  const terminal = agentKind(agent) === 'terminal'
+  const view = statusView(running, starting, status, agentKind(agent))
 
   useEffect(() => {
     const host = hostRef.current!
@@ -250,7 +251,11 @@ function AgentCell({
         <span className="truncate font-medium" title="Double-click để đổi tên" onDoubleClick={() => setRenaming(true)}>
           {agent.name}
         </span>
-        {agent.role && <span className="truncate text-[12px] text-muted">{agent.role}</span>}
+        {terminal ? (
+          <span className="font-mono text-[11px] text-muted">&gt;_ terminal</span>
+        ) : (
+          agent.role && <span className="truncate text-[12px] text-muted">{agent.role}</span>
+        )}
         {view.waiting && <span className="truncate text-[12px] text-amber-300">{view.label}</span>}
         {status?.handoff && status.handoff !== 'failed' && <span className="truncate text-[12px] text-sky-300">{view.label}</span>}
         <div className="flex-1" />
@@ -282,11 +287,11 @@ function AgentCell({
             {error ? (
               <div className="max-w-md rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-center text-red-300">{error}</div>
             ) : (
-              <div className="text-muted">Agent chưa chạy.</div>
+              <div className="text-muted">{terminal ? 'Terminal chưa mở.' : 'Agent chưa chạy.'}</div>
             )}
             <div className="flex gap-2">
               <Button primary onClick={() => start(ws.id, agent.id, false)}>
-                Phiên mới
+                {terminal ? 'Mở terminal' : 'Phiên mới'}
               </Button>
               {agent.lastSessionId && <Button onClick={() => start(ws.id, agent.id, true)}>Tiếp tục phiên trước</Button>}
             </div>

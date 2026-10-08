@@ -3,16 +3,17 @@ import { promises as fs, rmSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
 import { app, shell, type WebContents } from 'electron'
 import { IPC } from '@shared/ipc'
-import type {
-  Agent,
-  AgentRun,
-  AgentsSnapshot,
-  AppSettings,
-  CreateAgentRequest,
-  LayoutNode,
-  StartAgentRequest,
-  Task,
-  Workspace
+import {
+  type Agent,
+  type AgentRun,
+  type AgentsSnapshot,
+  type AppSettings,
+  agentKind,
+  type CreateAgentRequest,
+  type LayoutNode,
+  type StartAgentRequest,
+  type Task,
+  type Workspace
 } from '@shared/types'
 import type { Board, HookPayload } from './board'
 import type { BrowserService } from './browser'
@@ -42,14 +43,15 @@ interface StoreFile {
 
 interface Running extends AgentRun {
   owner: WebContents
-  sessionFile: string
+  /** null = ô terminal thường (không có file phiên, không theo dõi transcript). */
+  sessionFile: string | null
   /** Biến template của phiên, để ghi lại file phiên khi việc đổi. */
   vars: Record<string, string>
   /**
    * Theo dõi transcript: người dùng bấm Esc ngắt (Claude Code không có hook cho việc này) và số token
    * context (có ngay khi tiếp tục phiên cũ, trước lần chạy statusLine đầu tiên; xem context.ts).
    */
-  transcript: TranscriptWatcher
+  transcript: TranscriptWatcher | null
   /** Đang nhờ agent bàn giao: lúc gõ lời nhờ, và Claude Code đã nhận lời nhờ đó chưa (UserPromptSubmit). */
   handoffAsk?: { at: number; submitted: boolean }
 }
@@ -159,12 +161,14 @@ export class AgentService {
     if (problem) throw new Error(problem)
     const taken = this.data.agents.some((a) => a.workspaceId === req.workspaceId && sameAgentName(a.name, name))
     if (taken) throw new Error(`Đã có agent tên "${name}" trong workspace này`)
+    const terminal = req.kind === 'terminal'
     const agent: Agent = {
       id: randomUUID(),
       workspaceId: req.workspaceId,
+      kind: req.kind,
       name,
-      role: req.role.trim(),
-      permissionMode: req.permissionMode,
+      role: terminal ? '' : req.role.trim(),
+      permissionMode: terminal ? 'default' : req.permissionMode,
       createdAt: new Date().toISOString()
     }
     this.data.agents.push(agent)
@@ -180,6 +184,7 @@ export class AgentService {
     if (existing) return publicRun(existing)
     const ws = this.workspaces.get(agent.workspaceId)
     if (!ws) throw new Error('Workspace của agent không còn trong app')
+    if (agentKind(agent) === 'terminal') return this.startTerminal(owner, agent, ws, req)
 
     if (!this.hub) throw new Error('Máy chủ trạng thái của app chưa sẵn sàng')
     const exe = await resolveClaude()
@@ -275,15 +280,39 @@ export class AgentService {
     return publicRun(run)
   }
 
+  /**
+   * Ô terminal thường: PowerShell trong thư mục dự án. Không luật phiên, không hook, không bộ nhớ,
+   * không lên kanban; bỏ biến "phiên con" như agent để chạy claude bên trong vẫn là phiên độc lập.
+   */
+  private startTerminal(owner: WebContents, agent: Agent, ws: Workspace, req: StartAgentRequest): AgentRun {
+    const ptyId = this.ptys.spawn(
+      owner,
+      { args: ['-NoLogo'], cwd: ws.path, cols: req.cols, rows: req.rows },
+      { filterEnv: independentSessionEnv, onExit: () => this.finish(agent.id, ptyId) }
+    )
+    const run: Running = {
+      agentId: agent.id,
+      sessionId: randomUUID(),
+      ptyId,
+      startedAt: new Date().toISOString(),
+      owner,
+      sessionFile: null,
+      vars: {},
+      transcript: null
+    }
+    this.running.set(agent.id, run)
+    return publicRun(run)
+  }
+
   /** Phiên kết thúc (agent tự thoát hoặc bị dừng): xoá file phiên. */
   private finish(agentId: string, ptyId: string): void {
     const run = this.running.get(agentId)
     if (!run || run.ptyId !== ptyId) return
     this.running.delete(agentId)
-    run.transcript.stop()
-    rmSync(run.sessionFile, { force: true })
+    run.transcript?.stop()
+    if (run.sessionFile) rmSync(run.sessionFile, { force: true })
     const agent = this.data.agents.find((a) => a.id === agentId)
-    if (!agent) return
+    if (!agent || agentKind(agent) === 'terminal') return
     this.board.setActivity(agent, 'stopped')
     // Đóng vì đã bàn giao: nhờ giao diện mở phiên mới trong cùng ô (sau khi nó nhận sự kiện thoát
     // của terminal cũ, PtyManager gửi sự kiện đó ngay sau khi gọi hàm này).
@@ -318,7 +347,7 @@ export class AgentService {
     const ctx = this.context(agentId)
     if (!ctx?.run) return
     // Đường dẫn transcript thật (đoán sai lúc mở, hoặc /clear sang phiên mới) → theo file đó.
-    if (payload.transcript_path) void ctx.run.transcript.follow(payload.transcript_path)
+    if (payload.transcript_path) void ctx.run.transcript?.follow(payload.transcript_path)
     this.board.hook(ctx.agent, payload)
     const ask = ctx.run.handoffAsk
     if (ask && this.board.statusOf(agentId)?.handoff === 'asking') {
@@ -431,11 +460,11 @@ export class AgentService {
       board: this.board,
       browser: this.browser,
       teammates: () =>
-        this.data.agents.filter((a) => a.workspaceId === ws.id).map((a) => ({ agent: a, running: this.running.has(a.id) })),
+        this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
       handoff: (summary) => this.completeHandoff(agent.id, summary),
       syncSessionFile: async () => {
         const cur = this.running.get(agent.id)
-        if (!cur) return
+        if (!cur?.sessionFile) return
         const tasks = (await this.board.snapshot(ws)).tasks.filter((t) => t.agentId === agent.id)
         // Việc đang mở; không có thì việc vừa xong trong phiên này (để giữ phần Bàn giao).
         const task =
@@ -499,9 +528,9 @@ export class AgentService {
   /** Thoát app: dừng mọi phiên và xoá file phiên ngay (không chờ sự kiện thoát). */
   shutdown(): void {
     for (const run of this.running.values()) {
-      run.transcript.stop()
+      run.transcript?.stop()
       this.ptys.kill(run.ptyId)
-      rmSync(run.sessionFile, { force: true })
+      if (run.sessionFile) rmSync(run.sessionFile, { force: true })
     }
     this.running.clear()
   }
@@ -523,7 +552,8 @@ export class AgentService {
     if (taken) throw new Error(`Đã có agent tên "${name}" trong workspace này`)
 
     const ws = this.workspaces.get(agent.workspaceId)
-    if (ws) {
+    // Terminal không có note bộ nhớ trong vault.
+    if (ws && agentKind(agent) !== 'terminal') {
       const dir = join(ws.vaultPath, '60 Agents')
       const from = join(dir, `${agent.name}.md`)
       const to = join(dir, `${name}.md`)
@@ -550,7 +580,7 @@ export class AgentService {
     this.browser.renameAgent(agent.id, name)
     // File phiên (agent khác đọc trong .sessions/) ghi tên mới và đường dẫn note mới.
     const run = this.running.get(agent.id)
-    if (run && ws) {
+    if (run?.sessionFile && ws) {
       run.vars = { ...run.vars, AGENT: name, AGENT_NOTE: join(ws.vaultPath, '60 Agents', `${name}.md`) }
       const tasks = (await this.board.snapshot(ws)).tasks.filter((t) => t.agentId === agent.id)
       const task =

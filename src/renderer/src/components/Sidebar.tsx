@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Agent, CreateWorkspaceResult, Workspace, WorkspaceInspection } from '@shared/types'
+import { agentKind, type Agent, type CreateWorkspaceResult, type Workspace, type WorkspaceInspection } from '@shared/types'
 import { leaves } from '../layout'
 import { openAgent, useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
@@ -232,7 +232,8 @@ function AgentRow({
   const running = !!state.running[agent.id]
   const starting = !!state.starting[agent.id]
   const shown = leaves(state.layout).includes(agent.id)
-  const view = statusView(running, starting, status)
+  const terminal = agentKind(agent) === 'terminal'
+  const view = statusView(running, starting, status, agentKind(agent))
 
   /** Mở ô rồi mới mở phiên, để terminal đã có kích thước thật. */
   function openAndStart(resume: boolean): void {
@@ -241,12 +242,13 @@ function AgentRow({
   }
 
   async function removeAgent(): Promise<void> {
-    const msg =
-      `Xoá agent "${agent.name}"?\n\n` +
-      `• Dừng phiên nếu đang chạy\n` +
-      `• Chuyển note 60 Agents/${agent.name}.md trong vault vào Thùng rác (khôi phục được)\n` +
-      `• Bỏ thẻ việc đang dở trên kanban\n\n` +
-      `Lịch sử việc đã xong trên kanban được giữ.`
+    const msg = terminal
+      ? `Xoá terminal "${agent.name}"? Terminal đang mở sẽ bị đóng.`
+      : `Xoá agent "${agent.name}"?\n\n` +
+        `• Dừng phiên nếu đang chạy\n` +
+        `• Chuyển note 60 Agents/${agent.name}.md trong vault vào Thùng rác (khôi phục được)\n` +
+        `• Bỏ thẻ việc đang dở trên kanban\n\n` +
+        `Lịch sử việc đã xong trên kanban được giữ.`
     if (!window.confirm(msg)) return
     try {
       await remove(ws.id, agent.id)
@@ -308,6 +310,7 @@ function AgentRow({
       >
         <span className={`h-2 w-2 shrink-0 rounded-full ${view.dot}`} />
         <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+        {terminal && <span className="shrink-0 font-mono text-[10px] text-muted">&gt;_</span>}
         {view.waiting && <span className="shrink-0 text-[11px] text-amber-300 group-hover:hidden">chờ bạn</span>}
         {running && !view.waiting && <ContextBadge status={status} className="group-hover:hidden" />}
         <button
@@ -327,14 +330,14 @@ function AgentRow({
           <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
           <div className="absolute top-full right-1 z-20 w-48 overflow-hidden rounded-md border border-line bg-panel py-0.5 shadow-lg">
             {!shown && item('Mở ô', () => openAgent(ws.id, agent.id))}
-            {!running && !starting && item('Phiên mới', () => openAndStart(false))}
-            {!running && !starting && agent.lastSessionId && item('Tiếp tục phiên trước', () => openAndStart(true))}
-            {running && item('Bàn giao sang phiên mới', () => void handoffNow(agent.id))}
-            {running && item('Dừng phiên', () => stop(agent.id))}
+            {!running && !starting && item(terminal ? 'Mở terminal' : 'Phiên mới', () => openAndStart(false))}
+            {!terminal && !running && !starting && agent.lastSessionId && item('Tiếp tục phiên trước', () => openAndStart(true))}
+            {!terminal && running && item('Bàn giao sang phiên mới', () => void handoffNow(agent.id))}
+            {running && item(terminal ? 'Đóng terminal' : 'Dừng phiên', () => stop(agent.id))}
             {shown && item('Đóng ô', () => hide(ws.id, agent.id))}
             {item('Đổi tên…', () => setRenaming(true))}
             <div className="my-0.5 border-t border-line" />
-            {item('Xoá agent…', removeAgent, true)}
+            {item(terminal ? 'Xoá terminal…' : 'Xoá agent…', removeAgent, true)}
           </div>
         </>
       )}

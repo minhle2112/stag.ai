@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AgentGrid } from './components/AgentGrid'
 import { BrowserAskDialog, BrowserDock } from './components/BrowserPane'
+import { agentKind, type AgentKind } from '@shared/types'
 import { CreateAgentDialog } from './components/CreateAgentDialog'
 import { Kanban } from './components/Kanban'
 import { Sidebar } from './components/Sidebar'
@@ -98,11 +99,15 @@ function NewAgentDialog(): React.JSX.Element | null {
   const create = useAgents((s) => s.create)
   if (!target) return null
   const taken = new Set((agents ?? []).map((a) => a.name.toLowerCase()))
-  let n = (agents?.length ?? 0) + 1
-  while (taken.has(`agent ${n}`)) n++
+  const suggestName = (kind: AgentKind): string => {
+    const base = kind === 'terminal' ? 'Terminal' : 'Agent'
+    let n = (agents ?? []).filter((a) => (agentKind(a) === 'terminal') === (kind === 'terminal')).length + 1
+    while (taken.has(`${base.toLowerCase()} ${n}`)) n++
+    return `${base} ${n}`
+  }
   return (
     <CreateAgentDialog
-      defaultName={`Agent ${n}`}
+      suggestName={suggestName}
       takenNames={(agents ?? []).map((a) => a.name)}
       onCancel={() => setNewAgent(null)}
       onSubmit={async (v) => {

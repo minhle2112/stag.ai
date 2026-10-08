@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Agent, AgentStatus, Task, Workspace } from '@shared/types'
+import { agentKind, type Agent, type AgentStatus, type Task, type Workspace } from '@shared/types'
 import { openAgent, useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
 import { ago, localDay, statusView } from '../status'
@@ -54,7 +54,9 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
   const open = board.tasks.filter((t) => t.status === 'open')
   const cards: Record<ColumnId, AgentCardData[]> = { asking: [], doing: [], waiting: [], done: [] }
   const idle: Agent[] = []
-  for (const agent of agentsState.agents) {
+  // Terminal thường không nhận việc, không có trạng thái: không lên kanban.
+  const aiAgents = agentsState.agents.filter((a) => agentKind(a) !== 'terminal')
+  for (const agent of aiAgents) {
     const c: AgentCardData = {
       agent,
       task: open.find((t) => t.agentId === agent.id),
@@ -110,7 +112,7 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
                     {cards[col.id].map((c) => (
                       <AgentCard key={c.agent.id} wsId={wsId} data={c} now={now} onClick={() => jump(c.agent.id)} />
                     ))}
-                    {!cards[col.id].length && <Empty text={emptyText(col.id, agentsState.agents.length)} />}
+                    {!cards[col.id].length && <Empty text={emptyText(col.id, aiAgents.length)} />}
                   </>
                 )}
               </div>

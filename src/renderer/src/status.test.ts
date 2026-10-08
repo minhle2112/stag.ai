@@ -38,6 +38,12 @@ describe('contextView / formatTokens', () => {
 })
 
 describe('statusView', () => {
+  it('terminal thường: chỉ đang mở / đã đóng, bỏ qua trạng thái hook', () => {
+    expect(statusView(true, false, st({ activity: 'waiting', reason: 'turn' }), 'terminal')).toMatchObject({ label: 'terminal', waiting: false })
+    expect(statusView(false, false, undefined, 'terminal').label).toBe('terminal đã đóng')
+    expect(statusView(false, true, undefined, 'terminal').label).toBe('đang mở terminal')
+  })
+
   it('đang bàn giao / đang chuyển sang phiên mới (kể cả lúc phiên cũ đã thoát)', () => {
     expect(statusView(true, false, st({ activity: 'working', handoff: 'asking' })).label).toBe('đang viết bàn giao')
     expect(statusView(false, false, st({ activity: 'stopped', handoff: 'restarting' })).label).toBe('đang chuyển sang phiên mới')

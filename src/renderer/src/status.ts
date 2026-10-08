@@ -1,4 +1,4 @@
-import type { AgentStatus, AppSettings } from '@shared/types'
+import type { AgentKind, AgentStatus, AppSettings } from '@shared/types'
 
 export interface StatusView {
   /** Lớp Tailwind cho chấm trạng thái. */
@@ -17,7 +17,13 @@ const WAIT_LABEL: Record<NonNullable<AgentStatus['reason']>, string> = {
 }
 
 /** Trạng thái hiển thị của một agent, dùng chung cho ô terminal và kanban. */
-export function statusView(running: boolean, starting: boolean, status: AgentStatus | undefined): StatusView {
+export function statusView(running: boolean, starting: boolean, status: AgentStatus | undefined, kind: AgentKind = 'claude'): StatusView {
+  // Terminal thường không có hook: chỉ biết đang mở hay đã đóng.
+  if (kind === 'terminal') {
+    if (starting) return { dot: 'bg-muted animate-pulse', label: 'đang mở terminal', waiting: false }
+    if (!running) return { dot: 'bg-muted/50', label: 'terminal đã đóng', waiting: false }
+    return { dot: 'bg-sky-400/70', label: 'terminal', waiting: false }
+  }
   if (starting) return { dot: 'bg-muted animate-pulse', label: 'đang mở phiên', waiting: false }
   // Bàn giao: phiên cũ đóng rồi mở phiên mới ngay, nên giữ nhãn này cả lúc tiến trình đã thoát.
   if (status?.handoff === 'restarting') return { dot: 'bg-sky-400 animate-pulse', label: 'đang chuyển sang phiên mới', waiting: false }
