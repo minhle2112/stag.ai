@@ -10,6 +10,7 @@ import type { StatusHub } from './hub'
 import { createStagMcp } from './mcp'
 import type { PtyManager } from './pty'
 import { readTemplate } from './templates'
+import { TranscriptWatcher, transcriptPath } from './transcript'
 import { ensureIgnored, safeName, type WorkspaceStore } from './workspace'
 
 interface StoreFile {
@@ -21,6 +22,8 @@ interface Running extends AgentRun {
   sessionFile: string
   /** Biến template của phiên, để ghi lại file phiên khi việc đổi. */
   vars: Record<string, string>
+  /** Theo dõi transcript để biết người dùng bấm Esc ngắt (Claude Code không có hook cho việc này). */
+  transcript: TranscriptWatcher
 }
 
 /**
@@ -39,6 +42,11 @@ async function resolveClaude(): Promise<string> {
     if (target && (await exists(join(dir, target[1])))) return join(dir, target[1])
   }
   throw new Error('Không tìm thấy Claude Code (claude) trong PATH. Cài bằng: npm install -g @anthropic-ai/claude-code')
+}
+
+/** Phần gửi được qua IPC (Running còn giữ watcher, biến template… chỉ dùng trong main). */
+function publicRun({ agentId, sessionId, ptyId, startedAt }: Running): AgentRun {
+  return { agentId, sessionId, ptyId, startedAt }
 }
 
 /** Biến cấu hình Claude Code của người dùng — luôn giữ. */
@@ -100,7 +108,7 @@ export class AgentService {
     const agents = this.data.agents.filter((a) => a.workspaceId === workspaceId)
     const running = [...this.running.values()]
       .filter((r) => agents.some((a) => a.id === r.agentId))
-      .map(({ agentId, sessionId, ptyId, startedAt }) => ({ agentId, sessionId, ptyId, startedAt }))
+      .map(publicRun)
     return { agents, layout: this.data.layouts[workspaceId] ?? null, running }
   }
 
@@ -128,7 +136,7 @@ export class AgentService {
     const agent = this.data.agents.find((a) => a.id === req.agentId)
     if (!agent) throw new Error('Agent không tồn tại')
     const existing = this.running.get(agent.id)
-    if (existing) return existing
+    if (existing) return publicRun(existing)
     const ws = this.workspaces.get(agent.workspaceId)
     if (!ws) throw new Error('Workspace của agent không còn trong app')
 
@@ -185,14 +193,27 @@ export class AgentService {
         onExit: () => this.finish(agent.id, ptyId)
       }
     )
-    const run: Running = { agentId: agent.id, sessionId, ptyId, startedAt: new Date().toISOString(), sessionFile, vars }
+    // Chỉ đọc phần ghi từ lúc này: `--resume` giữ nguyên transcript cũ, trong đó có thể đã có dòng ngắt
+    // của lần trước. (Mở chỉ tốn một lần stat, xong trước khi claude kịp khởi động.)
+    const transcript = TranscriptWatcher.open(transcriptPath(ws.path, sessionId), (i) =>
+      this.onInterrupt(agent.id, ptyId, i.at)
+    )
+    const run: Running = {
+      agentId: agent.id,
+      sessionId,
+      ptyId,
+      startedAt: new Date().toISOString(),
+      sessionFile,
+      vars,
+      transcript
+    }
     this.running.set(agent.id, run)
     // Phiên mới: chờ hook đầu tiên (lời mở đầu). Tiếp tục phiên: Claude Code đứng chờ người dùng gõ.
     if (resume) this.board.setActivity(agent, 'waiting', { reason: 'turn' })
     else this.board.setActivity(agent, 'starting')
     agent.lastSessionId = sessionId
     await this.save()
-    return run
+    return publicRun(run)
   }
 
   /** Phiên kết thúc (agent tự thoát hoặc bị dừng): xoá file phiên. */
@@ -200,6 +221,7 @@ export class AgentService {
     const run = this.running.get(agentId)
     if (!run || run.ptyId !== ptyId) return
     this.running.delete(agentId)
+    run.transcript.stop()
     rmSync(run.sessionFile, { force: true })
     const agent = this.data.agents.find((a) => a.id === agentId)
     if (agent) this.board.setActivity(agent, 'stopped')
@@ -227,7 +249,16 @@ export class AgentService {
   /** Hook từ phiên Claude Code của agent. Hook tới muộn sau khi phiên đã đóng thì bỏ qua. */
   onHook(agentId: string, payload: HookPayload): void {
     const ctx = this.context(agentId)
-    if (ctx?.run) this.board.hook(ctx.agent, payload)
+    if (!ctx?.run) return
+    // Đường dẫn transcript thật (đoán sai lúc mở, hoặc /clear sang phiên mới) → theo file đó.
+    if (payload.transcript_path) void ctx.run.transcript.follow(payload.transcript_path)
+    this.board.hook(ctx.agent, payload)
+  }
+
+  /** Transcript có dòng "người dùng ngắt" của đúng phiên đang chạy. */
+  private onInterrupt(agentId: string, ptyId: string, at: string): void {
+    const ctx = this.context(agentId)
+    if (ctx?.run?.ptyId === ptyId) this.board.interrupted(ctx.agent, at)
   }
 
   /** Máy chủ MCP "stag" cho agent đang gọi. */
@@ -304,6 +335,7 @@ export class AgentService {
   /** Thoát app: dừng mọi phiên và xoá file phiên ngay (không chờ sự kiện thoát). */
   shutdown(): void {
     for (const run of this.running.values()) {
+      run.transcript.stop()
       this.ptys.kill(run.ptyId)
       rmSync(run.sessionFile, { force: true })
     }

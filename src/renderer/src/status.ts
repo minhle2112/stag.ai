@@ -12,7 +12,8 @@ const WAIT_LABEL: Record<NonNullable<AgentStatus['reason']>, string> = {
   turn: 'chờ bạn trả lời',
   permission: 'cần bạn duyệt quyền',
   question: 'đang hỏi bạn',
-  idle: 'chờ bạn lâu rồi'
+  idle: 'chờ bạn lâu rồi',
+  interrupted: 'bạn đã ngắt'
 }
 
 /** Trạng thái hiển thị của một agent, dùng chung cho ô terminal và kanban. */
