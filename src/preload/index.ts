@@ -4,6 +4,7 @@ import type {
   Agent,
   AgentRun,
   AgentsSnapshot,
+  AppSettings,
   BoardSnapshot,
   BrowserPermissionAsk,
   BrowserState,
@@ -65,7 +66,24 @@ const api = {
       ipcRenderer.invoke(IPC.agentLayout, workspaceId, layout),
     rename: (agentId: string, name: string): Promise<Agent> => ipcRenderer.invoke(IPC.agentRename, agentId, name),
     /** Thứ tự agent của workspace ở thanh bên. */
-    reorder: (workspaceId: string, orderedIds: string[]): Promise<void> => ipcRenderer.invoke(IPC.agentReorder, workspaceId, orderedIds)
+    reorder: (workspaceId: string, orderedIds: string[]): Promise<void> => ipcRenderer.invoke(IPC.agentReorder, workspaceId, orderedIds),
+    /** Nhờ agent bàn giao rồi chuyển sang phiên mới (agent phải đang chờ bạn). */
+    handoff: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentHandoff, agentId),
+    /** Phiên cũ đã đóng sau khi bàn giao: mở phiên mới cho agent. */
+    onRestart(cb: (agentId: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, agentId: string): void => cb(agentId)
+      ipcRenderer.on(IPC.agentRestart, fn)
+      return () => ipcRenderer.removeListener(IPC.agentRestart, fn)
+    }
+  },
+  settings: {
+    get: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.settingsGet),
+    set: (patch: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke(IPC.settingsSet, patch),
+    onChanged(cb: (s: AppSettings) => void): () => void {
+      const fn = (_e: IpcRendererEvent, s: AppSettings): void => cb(s)
+      ipcRenderer.on(IPC.settingsChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.settingsChanged, fn)
+    }
   },
   board: {
     snapshot: (workspaceId: string): Promise<BoardSnapshot> => ipcRenderer.invoke(IPC.boardSnapshot, workspaceId),

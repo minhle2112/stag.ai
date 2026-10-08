@@ -7,13 +7,16 @@ import { useUi } from '../store/ui'
 import { useWorkspaces } from '../store/workspaces'
 import { statusView } from '../status'
 import { CreateReport, CreateWorkspaceDialog } from './CreateWorkspaceDialog'
+import { ContextBadge, handoffNow } from './ContextBadge'
 import { RenameAgentDialog } from './RenameAgentDialog'
+import { SettingsDialog } from './SettingsDialog'
 
 export function Sidebar(): React.JSX.Element {
   const { items, setActive, add, remove } = useWorkspaces()
   const [inspection, setInspection] = useState<WorkspaceInspection | null>(null)
   const [report, setReport] = useState<CreateWorkspaceResult | null>(null)
   const [collapsed, setCollapsed] = useState<string[]>([])
+  const [settings, setSettings] = useState(false)
 
   async function newWorkspace(): Promise<void> {
     const path = await window.stag.workspace.pick()
@@ -63,6 +66,13 @@ export function Sidebar(): React.JSX.Element {
       >
         Chỉnh template vault…
       </button>
+      <button
+        onClick={() => setSettings(true)}
+        className="mx-2 mb-2 -mt-1 rounded-md px-2 py-1.5 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg"
+      >
+        Cài đặt…
+      </button>
+      {settings && <SettingsDialog onClose={() => setSettings(false)} />}
 
       {inspection && (
         <CreateWorkspaceDialog
@@ -299,6 +309,7 @@ function AgentRow({
         <span className={`h-2 w-2 shrink-0 rounded-full ${view.dot}`} />
         <span className="min-w-0 flex-1 truncate">{agent.name}</span>
         {view.waiting && <span className="shrink-0 text-[11px] text-amber-300 group-hover:hidden">chờ bạn</span>}
+        {running && !view.waiting && <ContextBadge status={status} className="group-hover:hidden" />}
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -318,6 +329,7 @@ function AgentRow({
             {!shown && item('Mở ô', () => openAgent(ws.id, agent.id))}
             {!running && !starting && item('Phiên mới', () => openAndStart(false))}
             {!running && !starting && agent.lastSessionId && item('Tiếp tục phiên trước', () => openAndStart(true))}
+            {running && item('Bàn giao sang phiên mới', () => void handoffNow(agent.id))}
             {running && item('Dừng phiên', () => stop(agent.id))}
             {shown && item('Đóng ô', () => hide(ws.id, agent.id))}
             {item('Đổi tên…', () => setRenaming(true))}

@@ -1,4 +1,4 @@
-import type { AgentStatus } from '@shared/types'
+import type { AgentStatus, AppSettings } from '@shared/types'
 
 export interface StatusView {
   /** Lớp Tailwind cho chấm trạng thái. */
@@ -19,14 +19,60 @@ const WAIT_LABEL: Record<NonNullable<AgentStatus['reason']>, string> = {
 /** Trạng thái hiển thị của một agent, dùng chung cho ô terminal và kanban. */
 export function statusView(running: boolean, starting: boolean, status: AgentStatus | undefined): StatusView {
   if (starting) return { dot: 'bg-muted animate-pulse', label: 'đang mở phiên', waiting: false }
+  // Bàn giao: phiên cũ đóng rồi mở phiên mới ngay, nên giữ nhãn này cả lúc tiến trình đã thoát.
+  if (status?.handoff === 'restarting') return { dot: 'bg-sky-400 animate-pulse', label: 'đang chuyển sang phiên mới', waiting: false }
   if (!running) return { dot: 'bg-muted/50', label: 'phiên đã dừng', waiting: false }
   if (status?.activity === 'starting') return { dot: 'bg-muted animate-pulse', label: 'đang khởi động', waiting: false }
+  if (status?.handoff === 'asking') return { dot: 'bg-sky-400 animate-pulse', label: 'đang viết bàn giao', waiting: false }
   if (status?.activity === 'waiting')
     return { dot: 'bg-amber-400', label: WAIT_LABEL[status.reason ?? 'turn'], waiting: true }
   return {
     dot: 'bg-emerald-400 animate-pulse',
     label: status?.tool ? `đang chạy ${toolName(status.tool)}` : 'đang làm',
     waiting: false
+  }
+}
+
+export interface ContextView {
+  /** "42%" khi biết kích thước cửa sổ, không thì số token ("85k"). */
+  text: string
+  title: string
+  /** 'warn' = còn dưới 10 điểm % nữa là tới ngưỡng bàn giao, 'full' = đã tới ngưỡng. */
+  tone: 'normal' | 'warn' | 'full'
+  /** Lần tự bàn giao gần nhất trong phiên này không thành. */
+  failed: boolean
+}
+
+/** 85382 → "85k", 1000000 → "1M", 1250000 → "1.3M". */
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1000) return `${Math.round(n / 1000)}k`
+  return String(Math.round(n))
+}
+
+/** Độ dài context của phiên để hiện trên ô terminal / thẻ kanban. null = chưa có số. */
+export function contextView(status: AgentStatus | undefined, settings: AppSettings): ContextView | null {
+  const c = status?.context
+  if (!c) return null
+  const failed = status?.handoff === 'failed'
+  const auto = settings.autoHandoff ? `tự bàn giao ở ${settings.handoffPercent}%` : 'tự bàn giao đang tắt'
+  const fail = failed ? '\nLần tự bàn giao vừa rồi không thành (agent hết lượt mà chưa bàn giao). Bàn giao tay ở menu ⋯ của agent.' : ''
+  if (!c.size) {
+    return {
+      text: formatTokens(c.used),
+      title: `Context: ${c.used.toLocaleString('vi-VN')} token (chưa biết kích thước cửa sổ nên chưa tính được %, chưa tự bàn giao)${fail}`,
+      tone: 'normal',
+      failed
+    }
+  }
+  const pct = Math.min(100, (c.used / c.size) * 100)
+  const limit = settings.handoffPercent
+  const tone = settings.autoHandoff && pct >= limit ? 'full' : pct >= limit - 10 ? 'warn' : 'normal'
+  return {
+    text: `${Math.floor(pct)}%`,
+    title: `Context: ${c.used.toLocaleString('vi-VN')} / ${formatTokens(c.size)} token (${pct.toFixed(1)}%) · ${auto}${fail}`,
+    tone,
+    failed
   }
 }
 

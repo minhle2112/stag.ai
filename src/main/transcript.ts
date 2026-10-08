@@ -77,6 +77,57 @@ export function parseInterrupt(line: string, now = (): string => new Date().toIS
   return null
 }
 
+/** Độ dài context của phiên chính tại một thời điểm (đọc từ transcript). */
+export interface ContextSample {
+  /** Token đầu vào của lượt gần nhất (input + cache tạo + cache đọc) = độ dài context lúc đó. */
+  used: number
+  /** Model của lượt đó; null với mẫu sau compact. */
+  model: string | null
+  at: string
+  /** Mẫu lấy từ dòng compact_boundary (`postTokens`): context vừa được tóm tắt lại. */
+  compacted?: boolean
+}
+
+interface ContextLine {
+  type?: unknown
+  subtype?: unknown
+  isSidechain?: unknown
+  timestamp?: unknown
+  compactMetadata?: { postTokens?: unknown }
+  message?: { model?: unknown; usage?: Record<string, unknown> }
+}
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
+
+/**
+ * Một dòng transcript có cho biết độ dài context của phiên chính không: dòng assistant có `usage`
+ * (mỗi khối nội dung một dòng, cùng `usage`), hoặc dòng `compact_boundary` (độ dài sau compact).
+ * Bỏ qua subagent (context riêng) và tin nhắn `<synthetic>` (Claude Code tự sinh, usage bằng 0).
+ */
+export function parseContext(line: string, now = (): string => new Date().toISOString()): ContextSample | null {
+  const usage = line.includes('"usage"')
+  if (!usage && !line.includes('compact_boundary')) return null
+  let e: ContextLine
+  try {
+    e = JSON.parse(line) as ContextLine
+  } catch {
+    return null
+  }
+  if (!e || typeof e !== 'object' || e.isSidechain === true) return null
+  const at = typeof e.timestamp === 'string' ? e.timestamp : now()
+  if (e.type === 'system' && e.subtype === 'compact_boundary') {
+    const used = num(e.compactMetadata?.postTokens)
+    return used ? { used, model: null, at, compacted: true } : null
+  }
+  if (e.type !== 'assistant' || !usage) return null
+  const model = typeof e.message?.model === 'string' ? e.message.model : null
+  if (model === '<synthetic>') return null
+  const u = e.message?.usage
+  if (!u || typeof u !== 'object') return null
+  const used = num(u.input_tokens) + num(u.cache_creation_input_tokens) + num(u.cache_read_input_tokens)
+  return used ? { used, model, at } : null
+}
+
 /**
  * Cắt luồng byte nối thêm vào file JSONL thành từng dòng trọn vẹn. Dòng dở dang giữ lại chờ lần sau
  * (cắt theo byte '\n' nên không làm vỡ ký tự UTF-8). Dòng quá dài (kết quả tool lớn) thì bỏ hẳn
@@ -127,9 +178,40 @@ async function sizeOf(file: string): Promise<number> {
   }
 }
 
+export interface TranscriptHandlers {
+  onInterrupt?: (i: Interrupt) => void
+  onContext?: (c: ContextSample) => void
+}
+
+/** Lượng byte cuối file đọc để lấy độ dài context hiện có (tiếp tục phiên cũ, hoặc theo sang file khác). */
+const SEED_BYTES = 4 * 1024 * 1024
+
+/** Mẫu context mới nhất trong `[from, to)` byte của file (đọc ngược từng dòng). */
+async function lastContextIn(file: string, to: number): Promise<ContextSample | null> {
+  if (to <= 0) return null
+  const from = Math.max(0, to - SEED_BYTES)
+  const handle = await fs.open(file, 'r')
+  let buf: Buffer
+  try {
+    buf = Buffer.alloc(to - from)
+    const { bytesRead } = await handle.read(buf, 0, buf.length, from)
+    buf = buf.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
+  const lines = buf.toString('utf8').split('\n')
+  // Dòng đầu có thể bị cắt giữa chừng khi không đọc từ đầu file: JSON.parse sẽ bỏ qua nó.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const c = parseContext(lines[i])
+    if (c) return c
+  }
+  return null
+}
+
 /**
  * Đọc phần mới nối thêm vào transcript (poll nhẹ bằng stat; file có thể chưa tồn tại lúc phiên mới mở).
- * Chỉ xét phần ghi sau lúc bắt đầu theo dõi: transcript cũ khi `--resume` có thể đã chứa dòng ngắt.
+ * Dòng ngắt chỉ xét phần ghi sau lúc bắt đầu theo dõi: transcript cũ khi `--resume` có thể đã chứa dòng
+ * ngắt. Độ dài context thì lấy luôn mẫu mới nhất trong phần đã có (để hiện ngay khi tiếp tục phiên).
  */
 export class TranscriptWatcher {
   private offset = 0
@@ -141,15 +223,15 @@ export class TranscriptWatcher {
 
   private constructor(
     private file: string,
-    private onInterrupt: (i: Interrupt) => void
+    private handlers: TranscriptHandlers
   ) {}
 
   /**
    * Bắt đầu theo dõi từ cuối file hiện tại (chưa có file thì từ đầu). Đồng bộ (một lần stat) để gọi
    * ngay sau khi chạy tiến trình mà không chen `await` vào giữa lúc chạy và lúc ghi nhận phiên.
    */
-  static open(file: string, onInterrupt: (i: Interrupt) => void, intervalMs = 700): TranscriptWatcher {
-    const w = new TranscriptWatcher(file, onInterrupt)
+  static open(file: string, handlers: TranscriptHandlers, intervalMs = 700): TranscriptWatcher {
+    const w = new TranscriptWatcher(file, handlers)
     try {
       w.offset = statSync(file).size
     } catch {
@@ -157,11 +239,25 @@ export class TranscriptWatcher {
     }
     w.timer = setInterval(() => void w.poll(), intervalMs)
     w.timer.unref?.()
+    void w.seed(file, w.offset, w.generation)
     return w
   }
 
   get path(): string {
     return this.file
+  }
+
+  /** Báo độ dài context mới nhất có sẵn trong file (phần trước `upto`). */
+  private async seed(file: string, upto: number, gen: number): Promise<void> {
+    if (!this.handlers.onContext) return
+    let c: ContextSample | null = null
+    try {
+      c = await lastContextIn(file, upto)
+    } catch {
+      return
+    }
+    // Mẫu cũ hơn mẫu poll() đã báo thì bên nhận tự bỏ qua (so theo thời điểm).
+    if (c && gen === this.generation && this.timer) this.handlers.onContext(c)
   }
 
   /** Hook báo transcript ở chỗ khác (đoán sai đường dẫn, hoặc /clear sang phiên mới): theo file đó từ cuối. */
@@ -173,15 +269,17 @@ export class TranscriptWatcher {
     this.file = file
     this.offset = size
     this.tail.reset()
+    void this.seed(file, size, gen)
   }
 
-  /** Đọc phần mới; trả về các lần ngắt tìm thấy (đồng thời gọi onInterrupt). */
+  /** Đọc phần mới; trả về các lần ngắt tìm thấy (đồng thời gọi các handler). */
   async poll(): Promise<Interrupt[]> {
     if (this.busy || !this.timer) return []
     this.busy = true
     const gen = this.generation
     const file = this.file
     const found: Interrupt[] = []
+    let context: ContextSample | null = null
     try {
       const size = await sizeOf(file)
       if (size < this.offset) {
@@ -206,6 +304,7 @@ export class TranscriptWatcher {
       for (const line of this.tail.push(chunk)) {
         const i = parseInterrupt(line)
         if (i) found.push(i)
+        context = parseContext(line) ?? context
       }
     } catch {
       // File chưa có / đang bị khoá: lần sau đọc lại.
@@ -213,7 +312,8 @@ export class TranscriptWatcher {
     } finally {
       this.busy = false
     }
-    for (const i of found) this.onInterrupt(i)
+    for (const i of found) this.handlers.onInterrupt?.(i)
+    if (context) this.handlers.onContext?.(context)
     return found
   }
 

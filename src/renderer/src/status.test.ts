@@ -1,10 +1,49 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '@shared/types'
-import { ago, localDay, statusView } from './status'
+import { ago, contextView, formatTokens, localDay, statusView } from './status'
 
 const st = (s: Partial<AgentStatus>): AgentStatus => ({ agentId: 'a', activity: 'working', since: '2026-01-01T00:00:00.000Z', ...s })
 
+describe('contextView / formatTokens', () => {
+  const settings = { autoHandoff: true, handoffPercent: 80 }
+  const ctx = (used: number, size: number | null) => st({ context: { used, size, at: '' } })
+
+  it('định dạng số token', () => {
+    expect(formatTokens(950)).toBe('950')
+    expect(formatTokens(85382)).toBe('85k')
+    expect(formatTokens(1_000_000)).toBe('1M')
+    expect(formatTokens(1_250_000)).toBe('1.3M')
+  })
+
+  it('chưa có số → không hiện', () => {
+    expect(contextView(st({}), settings)).toBeNull()
+    expect(contextView(undefined, settings)).toBeNull()
+  })
+
+  it('% theo cửa sổ, màu theo khoảng cách tới ngưỡng', () => {
+    expect(contextView(ctx(100_000, 1_000_000), settings)).toMatchObject({ text: '10%', tone: 'normal' })
+    expect(contextView(ctx(140_000, 200_000), settings)).toMatchObject({ text: '70%', tone: 'warn' })
+    expect(contextView(ctx(161_000, 200_000), settings)).toMatchObject({ text: '80%', tone: 'full' })
+    // Tắt tự bàn giao: không đỏ (không có gì sắp xảy ra), vẫn vàng khi gần ngưỡng.
+    expect(contextView(ctx(190_000, 200_000), { ...settings, autoHandoff: false })).toMatchObject({ tone: 'warn' })
+  })
+
+  it('chưa biết kích thước cửa sổ → số token, không màu', () => {
+    expect(contextView(ctx(85382, null), settings)).toMatchObject({ text: '85k', tone: 'normal' })
+  })
+
+  it('bàn giao hỏng → đánh dấu', () => {
+    expect(contextView(st({ handoff: 'failed', context: { used: 1, size: 10, at: '' } }), settings)?.failed).toBe(true)
+  })
+})
+
 describe('statusView', () => {
+  it('đang bàn giao / đang chuyển sang phiên mới (kể cả lúc phiên cũ đã thoát)', () => {
+    expect(statusView(true, false, st({ activity: 'working', handoff: 'asking' })).label).toBe('đang viết bàn giao')
+    expect(statusView(false, false, st({ activity: 'stopped', handoff: 'restarting' })).label).toBe('đang chuyển sang phiên mới')
+    expect(statusView(true, false, st({ activity: 'waiting', reason: 'turn', handoff: 'failed' })).label).toBe('chờ bạn trả lời')
+  })
+
   it('đang mở phiên ưu tiên hơn mọi thứ', () => {
     expect(statusView(false, true, st({ activity: 'waiting' }))).toMatchObject({ label: 'đang mở phiên', waiting: false })
   })

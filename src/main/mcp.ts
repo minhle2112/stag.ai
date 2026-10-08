@@ -15,6 +15,8 @@ export interface McpContext {
   teammates(): Array<{ agent: Agent; running: boolean }>
   /** Ghi lại file .sessions/<id>.md sau khi việc đổi. */
   syncSessionFile(): Promise<void>
+  /** Lưu bản bàn giao rồi đóng phiên; app mở phiên mới đọc bản bàn giao đó. */
+  handoff(summary: string): Promise<void>
 }
 
 type ToolResult = {
@@ -117,6 +119,32 @@ export function createStagMcp(ctx: McpContext): McpServer {
           return `- ${who}: ${t ? describe(t) : 'no task yet'}`
         })
         return ok(lines.length ? lines.join('\n') : 'The workspace has no agents yet.')
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.registerTool(
+    'session_handoff',
+    {
+      title: 'Hand off to a new session',
+      description:
+        'Call only when stag.ai asks you to hand off (a message starting with "[stag.ai] Handoff") or the user asks you to continue in a fresh session. Update the vault first. stag.ai saves your handoff, closes this session and opens a new one that starts from it. Your open task stays open.',
+      inputSchema: {
+        summary: z
+          .string()
+          .min(1)
+          .max(8000)
+          .describe(
+            'Everything your next session needs, in the conversation language: the goal, what is done, what is left, key files and decisions, the exact next step, and anything the user asked for that is still pending'
+          )
+      }
+    },
+    async ({ summary }) => {
+      try {
+        await ctx.handoff(summary)
+        return ok('Handoff saved. stag.ai will close this session in a few seconds and open a new one. Do nothing more.')
       } catch (e) {
         return fail(e)
       }

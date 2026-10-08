@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, Task, WaitReason, Workspace } from '@shared/types'
+import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, HandoffState, Task, WaitReason, Workspace } from '@shared/types'
 import { readText } from './fsutil'
 import { ensureIgnored } from './workspace'
 
@@ -49,8 +49,31 @@ export class Board {
       activity,
       reason: activity === 'waiting' ? extra.reason : undefined,
       tool: activity === 'working' ? extra.tool : undefined,
-      since: cur?.activity === activity ? cur.since : new Date().toISOString()
+      since: cur?.activity === activity ? cur.since : new Date().toISOString(),
+      // Độ dài context thuộc về phiên: phiên đóng thì bỏ (phiên sau đo lại từ đầu).
+      context: activity === 'stopped' || activity === 'starting' ? undefined : cur?.context,
+      handoff: cur?.handoff
     })
+    this.notifySoon(agent.workspaceId)
+  }
+
+  /** Trạng thái hiện tại của agent (chỉ đọc). */
+  statusOf(agentId: string): AgentStatus | undefined {
+    return this.status.get(agentId)
+  }
+
+  /** Độ dài context mới của phiên đang chạy. Agent chưa có trạng thái (phiên chưa mở) thì bỏ qua. */
+  setContext(agent: Agent, context: ContextUsage | undefined): void {
+    const cur = this.status.get(agent.id)
+    if (!cur || cur.activity === 'stopped' || cur.context === context) return
+    this.status.set(agent.id, { ...cur, context })
+    this.notifySoon(agent.workspaceId)
+  }
+
+  setHandoff(agent: Agent, handoff: HandoffState | undefined): void {
+    const cur = this.status.get(agent.id)
+    if (!cur || cur.handoff === handoff) return
+    this.status.set(agent.id, { ...cur, handoff })
     this.notifySoon(agent.workspaceId)
   }
 

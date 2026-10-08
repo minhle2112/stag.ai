@@ -7,6 +7,7 @@ import { useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { statusView } from '../status'
 import { attachTerminal, fitTerminal, focusTerminal } from '../terminals'
+import { ContextBadge } from './ContextBadge'
 import { Button } from './Modal'
 import { RenameAgentDialog } from './RenameAgentDialog'
 
@@ -251,7 +252,9 @@ function AgentCell({
         </span>
         {agent.role && <span className="truncate text-[12px] text-muted">{agent.role}</span>}
         {view.waiting && <span className="truncate text-[12px] text-amber-300">{view.label}</span>}
+        {status?.handoff && status.handoff !== 'failed' && <span className="truncate text-[12px] text-sky-300">{view.label}</span>}
         <div className="flex-1" />
+        {running && <ContextBadge status={status} className="mr-1" />}
         <IconBtn title="Thêm agent bên phải" onClick={() => onSplit({ agentId: agent.id, dir: 'row' })}>
           ◫
         </IconBtn>

@@ -8,6 +8,8 @@ const defaultShell = process.platform === 'win32' ? 'powershell.exe' : process.e
 interface Session {
   proc: pty.IPty
   owner: WebContents
+  /** Lần cuối người dùng gõ vào terminal (ms); 0 = chưa gõ. */
+  lastInput: number
 }
 
 export interface SpawnExtras {
@@ -30,7 +32,7 @@ export class PtyManager {
       cwd: opts.cwd,
       env: { ...(extras.filterEnv ? extras.filterEnv(process.env) : process.env), FORCE_COLOR: '1', ...extras.env } as Record<string, string>
     })
-    this.sessions.set(id, { proc, owner })
+    this.sessions.set(id, { proc, owner, lastInput: 0 })
 
     proc.onData((data) => {
       if (!owner.isDestroyed()) owner.send(IPC.ptyData, id, data)
@@ -48,8 +50,16 @@ export class PtyManager {
     return this.sessions.has(id)
   }
 
-  write(id: string, data: string): void {
-    this.sessions.get(id)?.proc.write(data)
+  /** Ghi vào terminal. `fromUser` = người dùng gõ (app tự gõ thì không tính là người dùng đang gõ). */
+  write(id: string, data: string, fromUser = true): void {
+    const s = this.sessions.get(id)
+    if (!s) return
+    if (fromUser) s.lastInput = Date.now()
+    s.proc.write(data)
+  }
+
+  lastInputAt(id: string): number {
+    return this.sessions.get(id)?.lastInput ?? 0
   }
 
   resize(id: string, cols: number, rows: number): void {

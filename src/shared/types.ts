@@ -164,6 +164,23 @@ export type AgentActivity = 'starting' | 'working' | 'waiting' | 'stopped'
  */
 export type WaitReason = 'turn' | 'permission' | 'question' | 'idle' | 'interrupted'
 
+/** Độ dài context của phiên đang chạy. */
+export interface ContextUsage {
+  /** Token đầu vào của lượt gần nhất (input + cache), giống `used_percentage` của Claude Code. */
+  used: number
+  /** Kích thước cửa sổ context (200k / 1M…); null = chưa biết (người dùng có statusLine riêng, xem hub.ts). */
+  size: number | null
+  /** Lúc đo `used` (ISO). */
+  at: string
+}
+
+/**
+ * Bàn giao sang phiên mới khi context gần đầy: 'asking' = app đã nhờ agent viết bản bàn giao,
+ * 'restarting' = đã có bản bàn giao, đang đóng phiên cũ / mở phiên mới, 'failed' = agent hết lượt mà
+ * không bàn giao (không thử lại trong phiên này).
+ */
+export type HandoffState = 'asking' | 'restarting' | 'failed'
+
 export interface AgentStatus {
   agentId: string
   activity: AgentActivity
@@ -171,7 +188,22 @@ export interface AgentStatus {
   /** Tool đang chạy (khi activity = 'working'). */
   tool?: string
   since: string
+  context?: ContextUsage
+  handoff?: HandoffState
 }
+
+/** Cài đặt của app (userData/settings.json). */
+export interface AppSettings {
+  /** Tự bàn giao sang phiên mới khi context đạt `handoffPercent`. */
+  autoHandoff: boolean
+  /** Ngưỡng % cửa sổ context để bàn giao (HANDOFF_MIN…HANDOFF_MAX). */
+  handoffPercent: number
+}
+
+export const HANDOFF_MIN = 20
+/** Claude Code tự compact ở khoảng 96,7% cửa sổ 1M (và ở 100% cửa sổ 200k): bàn giao phải trước đó. */
+export const HANDOFF_MAX = 95
+export const DEFAULT_SETTINGS: AppSettings = { autoHandoff: true, handoffPercent: 80 }
 
 export type TaskStatus = 'open' | 'done' | 'dropped'
 

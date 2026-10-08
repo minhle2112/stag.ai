@@ -7,6 +7,7 @@ import { BrowserService } from './browser'
 import { StatusHub } from './hub'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty'
+import { SettingsStore } from './settings'
 import { WorkspaceStore } from './workspace'
 
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
@@ -24,10 +25,12 @@ const browser = new BrowserService({
   reveal: (workspaceId, tabId) => send(IPC.browserReveal, workspaceId, tabId),
   ask: (ask) => send(IPC.browserAsk, ask)
 })
-const agents = new AgentService(ptys, workspaces, board, browser)
+const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), (s) => send(IPC.settingsChanged, s))
+const agents = new AgentService(ptys, workspaces, board, browser, () => settings.get())
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
-  mcp: (agentId) => agents.mcpFor(agentId)
+  mcp: (agentId) => agents.mcpFor(agentId),
+  status: (agentId, body) => agents.onStatusLine(agentId, body)
 })
 
 function createWindow(): void {
@@ -73,10 +76,11 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   await workspaces.load()
+  await settings.load()
   await agents.load()
   await hub.start()
   agents.attachHub(hub)
-  registerIpc(ptys, workspaces, agents, board, browser)
+  registerIpc(ptys, workspaces, agents, board, browser, settings)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

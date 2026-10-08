@@ -17,6 +17,10 @@ KANBAN (MCP tools of "stag")
 - task_done(summary): when the task is done and the vault is updated → the card moves to the "done" column.
 - task_list(): see the tasks and scopes of every agent in the workspace.
 
+HANDOFF (MCP tool of "stag")
+- A message starting with "[stag.ai] Handoff" means your context window is nearly full (or the user wants a fresh session). Stop at a safe point, update the vault per its Memory Protocol, then call session_handoff(summary) with everything your next session needs: goal, what is done, what is left, key files and decisions, the exact next step. Do not ask the user anything first.
+- stag.ai then closes this session and opens a new one; your open task stays open. A session that starts from a handoff finds it in the Handoff section of its session file.
+
 BROWSER (MCP tools of "stag"; the user watches it live in the app's Browser pane)
 - Use stag's browser_* tools instead of other browser tools when you need to look at a web page (the app running on localhost, docs…).
 - browser_navigate(url) → browser_snapshot() to read the page and get [ref] numbers → browser_click(ref) / browser_type(ref, text, submit?) / browser_press(key).

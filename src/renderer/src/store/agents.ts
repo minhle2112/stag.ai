@@ -52,6 +52,20 @@ export const useAgents = create<AgentsState>((set, get) => {
     })
 
   startTerminalBus()
+  // Agent đã bàn giao, phiên cũ vừa đóng: mở phiên mới trong cùng ô (phiên mới tự đọc bản bàn giao).
+  window.stag.agent.onRestart((agentId) => {
+    for (const [wsId, w] of Object.entries(get().byWs)) {
+      if (!w.agents.some((a) => a.id === agentId)) continue
+      if (w.running[agentId]) {
+        patch(wsId, (cur) => {
+          const running = { ...cur.running }
+          delete running[agentId]
+          return { running }
+        })
+      }
+      void get().start(wsId, agentId, false)
+    }
+  })
   onAgentExit((agentId) => {
     for (const [wsId, w] of Object.entries(get().byWs)) {
       if (w.running[agentId]) {

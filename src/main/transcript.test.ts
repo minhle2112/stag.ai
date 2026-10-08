@@ -1,8 +1,17 @@
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { JsonlTail, parseInterrupt, projectDirName, TranscriptWatcher, transcriptPath, type Interrupt } from './transcript'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  JsonlTail,
+  parseContext,
+  parseInterrupt,
+  projectDirName,
+  TranscriptWatcher,
+  transcriptPath,
+  type ContextSample,
+  type Interrupt
+} from './transcript'
 
 // Cấu trúc dòng lấy theo transcript thật của Claude Code (đã bỏ nội dung).
 const userLine = (content: unknown, extra: Record<string, unknown> = {}): string =>
@@ -80,6 +89,55 @@ describe('parseInterrupt', () => {
   })
 })
 
+// Dòng assistant / compact_boundary theo transcript thật (Claude Code 2.1.293), đã bỏ nội dung.
+const assistantLine = (cacheRead: number, extra: Record<string, unknown> = {}, model = 'claude-opus-5-5'): string =>
+  JSON.stringify({
+    parentUuid: 'p',
+    isSidechain: false,
+    type: 'assistant',
+    message: {
+      model,
+      role: 'assistant',
+      content: [{ type: 'text', text: 'ok' }],
+      usage: { input_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: cacheRead - 2, output_tokens: 999 }
+    },
+    timestamp: '2026-10-08T11:00:00.000Z',
+    ...extra
+  })
+
+const compactLine = (postTokens: number): string =>
+  JSON.stringify({
+    type: 'system',
+    subtype: 'compact_boundary',
+    isSidechain: false,
+    compactMetadata: { trigger: 'auto', preTokens: 900000, postTokens },
+    timestamp: '2026-10-08T12:00:00.000Z'
+  })
+
+describe('parseContext', () => {
+  it('cộng input + cache tạo + cache đọc, không tính output', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      isSidechain: false,
+      timestamp: 'T',
+      message: { model: 'm', usage: { input_tokens: 2, cache_creation_input_tokens: 4560, cache_read_input_tokens: 80820, output_tokens: 1289 } }
+    })
+    expect(parseContext(line)).toEqual({ used: 85382, model: 'm', at: 'T' })
+  })
+
+  it('dòng compact_boundary cho độ dài sau compact', () => {
+    expect(parseContext(compactLine(18700))).toEqual({ used: 18700, model: null, at: '2026-10-08T12:00:00.000Z', compacted: true })
+  })
+
+  it('bỏ qua subagent, tin <synthetic>, dòng user, dòng không phải JSON', () => {
+    expect(parseContext(assistantLine(5000, { isSidechain: true }))).toBeNull()
+    expect(parseContext(assistantLine(5000, {}, '<synthetic>'))).toBeNull()
+    expect(parseContext(userLine('"usage" compact_boundary'))).toBeNull()
+    expect(parseContext('{"usage": ')).toBeNull()
+    expect(parseContext(JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 0 } } }))).toBeNull()
+  })
+})
+
 describe('JsonlTail', () => {
   it('giữ dòng dở dang tới lần sau', () => {
     const t = new JsonlTail()
@@ -119,7 +177,7 @@ describe('TranscriptWatcher', () => {
 
   const open = async (file: string, got: Interrupt[]): Promise<TranscriptWatcher> => {
     // Chu kỳ dài: test tự gọi poll() cho chắc chắn.
-    const w = TranscriptWatcher.open(file, (i) => got.push(i), 60_000)
+    const w = TranscriptWatcher.open(file, { onInterrupt: (i) => got.push(i) }, 60_000)
     watchers.push(w)
     return w
   }
@@ -162,6 +220,21 @@ describe('TranscriptWatcher', () => {
     await fs.appendFile(a, `${INTERRUPT}\n`) // file cũ không còn theo
     await fs.appendFile(b, `${INTERRUPT_TOOL}\n`)
     expect(await w.poll()).toEqual([{ at: '2026-10-08T10:00:00.000Z', forToolUse: true }])
+  })
+
+  it('độ dài context: lấy mẫu mới nhất có sẵn khi mở (tiếp tục phiên), rồi mẫu mới nhất của mỗi lần đọc', async () => {
+    const file = join(dir, 'ctx.jsonl')
+    await fs.writeFile(file, `${assistantLine(1000)}\n${assistantLine(5000)}\n${userLine('x')}\n`)
+    const got: ContextSample[] = []
+    const w = TranscriptWatcher.open(file, { onContext: (c) => got.push(c) }, 60_000)
+    watchers.push(w)
+    await vi.waitFor(() => expect(got.map((c) => c.used)).toEqual([5000]))
+    await fs.appendFile(file, `${assistantLine(6000)}\n${assistantLine(7000, { isSidechain: true })}\n${assistantLine(8000)}\n`)
+    await w.poll()
+    expect(got.map((c) => c.used)).toEqual([5000, 8000])
+    await fs.appendFile(file, `${compactLine(1200)}\n`)
+    await w.poll()
+    expect(got.at(-1)).toMatchObject({ used: 1200, compacted: true })
   })
 
   it('đã stop thì không báo nữa', async () => {

@@ -50,7 +50,15 @@ export const IPC = {
   vaultWatch: 'vault:watch',
   vaultUnwatch: 'vault:unwatch',
   /** main → renderer: file trong vault đổi (Obsidian, agent hoặc người dùng sửa). Kèm `vaultPath`. */
-  vaultChanged: 'vault:changed'
+  vaultChanged: 'vault:changed',
+  settingsGet: 'settings:get',
+  settingsSet: 'settings:set',
+  /** main → renderer: cài đặt vừa đổi. */
+  settingsChanged: 'settings:changed',
+  /** Người dùng bấm "Bàn giao sang phiên mới". */
+  agentHandoff: 'agent:handoff',
+  /** main → renderer: phiên cũ đã đóng sau khi bàn giao, mở phiên mới cho agent (kèm agentId). */
+  agentRestart: 'agent:restart'
 } as const
 
 export interface AppInfo {

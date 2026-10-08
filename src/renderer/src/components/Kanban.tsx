@@ -3,6 +3,7 @@ import type { Agent, AgentStatus, Task, Workspace } from '@shared/types'
 import { openAgent, useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
 import { ago, localDay, statusView } from '../status'
+import { ContextBadge } from './ContextBadge'
 
 type ColumnId = 'asking' | 'doing' | 'waiting' | 'done'
 
@@ -190,6 +191,7 @@ function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCard
           <span className="truncate">{view.label}</span>
         )}
         {status && !stopped && <span className="text-muted">· {ago(status.since, now)}</span>}
+        {!stopped && <ContextBadge status={status} className="ml-auto" />}
       </div>
 
       {menu && task && (
