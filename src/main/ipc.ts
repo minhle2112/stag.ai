@@ -2,6 +2,8 @@ import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
 import type { AppSettings, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AgentService } from './agents'
+import { artifactPath, type ArtifactLog } from './artifacts'
+import { artifactThumb } from './artifactThumb'
 import type { Board } from './board'
 import { toUrl, type BrowserService } from './browser'
 import { openInObsidian } from './obsidian'
@@ -16,7 +18,7 @@ import type { WorkspaceStore } from './workspace'
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -85,5 +87,16 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.settingsGet, () => settings.get())
   ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<AppSettings>) => settings.set(patch))
   ipcMain.handle(IPC.agentHandoff, (_e, agentId: string) => agents.handoffNow(agentId))
+  ipcMain.handle(IPC.artifactList, (_e, workspaceId: string) => artifacts.list(ws(workspaceId)))
+  ipcMain.handle(IPC.artifactStat, (_e, workspaceId: string, rels: string[]) => artifacts.stat(ws(workspaceId), rels))
+  ipcMain.handle(IPC.artifactText, (_e, workspaceId: string, rel: string, max?: number) => artifacts.text(ws(workspaceId), rel, max))
+  ipcMain.handle(IPC.artifactBytes, (_e, workspaceId: string, rel: string) => artifacts.bytes(ws(workspaceId), rel))
+  ipcMain.handle(IPC.artifactThumb, (_e, workspaceId: string, rel: string) => artifactThumb(artifactPath(ws(workspaceId), rel)))
+  ipcMain.handle(IPC.artifactForget, (_e, workspaceId: string, rel: string) => artifacts.forget(ws(workspaceId), rel))
+  ipcMain.handle(IPC.artifactOpen, async (_e, workspaceId: string, rel: string) => {
+    const err = await shell.openPath(artifactPath(ws(workspaceId), rel))
+    if (err) throw new Error(err)
+  })
+  ipcMain.handle(IPC.artifactReveal, (_e, workspaceId: string, rel: string) => shell.showItemInFolder(artifactPath(ws(workspaceId), rel)))
   ipcMain.handle(IPC.vaultUnwatch, (e, vaultPath: string) => vaultWatchers.unwatch(vaultPath, e.sender))
 }

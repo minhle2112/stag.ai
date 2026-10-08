@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AgentGrid } from './components/AgentGrid'
+import { ArtifactsView } from './components/ArtifactsView'
 import { BrowserAskDialog, BrowserDock } from './components/BrowserPane'
 import { agentKind, type AgentKind } from '@shared/types'
 import { CreateAgentDialog } from './components/CreateAgentDialog'
@@ -15,7 +16,7 @@ import { useActiveWorkspace, useWorkspaces } from './store/workspaces'
 const tabs: Array<{ id: MainTab; label: string }> = [
   { id: 'kanban', label: 'Kanban' },
   { id: 'agents', label: 'Agents' },
-  { id: 'vault', label: 'Vault' }
+  { id: 'artifacts', label: 'Artifacts' }
 ]
 
 export function App(): React.JSX.Element {
@@ -57,6 +58,13 @@ export function App(): React.JSX.Element {
           <div className="flex-1" />
           {active && <span className="mr-2 truncate text-[12px] text-muted">{active.path}</span>}
           <button
+            onClick={() => setTab(tab === 'vault' ? 'agents' : 'vault')}
+            title="Vault Obsidian của workspace (bộ nhớ của agent)"
+            className={`rounded-md px-3 py-1 ${tab === 'vault' ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
+          >
+            Vault
+          </button>
+          <button
             onClick={toggleBrowser}
             className={`rounded-md px-3 py-1 ${browserOpen ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
           >
@@ -79,6 +87,11 @@ export function App(): React.JSX.Element {
             {active && tab === 'vault' && (
               <div className="absolute inset-0">
                 <VaultView key={active.id} workspace={active} />
+              </div>
+            )}
+            {active && tab === 'artifacts' && (
+              <div className="absolute inset-0">
+                <ArtifactsView key={active.id} workspace={active} />
               </div>
             )}
             {active && tab === 'kanban' && <Kanban key={active.id} workspace={active} />}

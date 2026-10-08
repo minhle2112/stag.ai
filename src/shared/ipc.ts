@@ -67,7 +67,18 @@ export const IPC = {
   /** Agent đọc / ghi note nào (theo workspace). */
   vaultActivity: 'vault:activity',
   /** main → renderer: nhật ký đọc/ghi note của một workspace vừa đổi (kèm workspaceId). */
-  vaultActivityChanged: 'vault:activity-changed'
+  vaultActivityChanged: 'vault:activity-changed',
+  /** File agent tạo / sửa trong dự án (tab Artifacts). */
+  artifactList: 'artifact:list',
+  artifactStat: 'artifact:stat',
+  artifactText: 'artifact:text',
+  artifactForget: 'artifact:forget',
+  artifactBytes: 'artifact:bytes',
+  artifactThumb: 'artifact:thumb',
+  artifactOpen: 'artifact:open',
+  artifactReveal: 'artifact:reveal',
+  /** main → renderer: danh sách artifact của một workspace vừa đổi (kèm workspaceId). */
+  artifactsChanged: 'artifact:changed'
 } as const
 
 export interface AppInfo {

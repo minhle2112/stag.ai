@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { SplitDir } from '@shared/types'
 
-export type MainTab = 'kanban' | 'agents' | 'vault'
+/** 'vault' không còn là tab chính: mở bằng nút Vault ở góc phải thanh trên. */
+export type MainTab = 'kanban' | 'agents' | 'artifacts' | 'vault'
 
 /** Hộp thoại tạo agent: ô mới đặt cạnh ô `agentId` theo hướng `dir`. */
 export interface NewAgentTarget {

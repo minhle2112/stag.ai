@@ -1,0 +1,694 @@
+// Xem trước artifact ngay trong app theo loại file. Thư viện nặng (pdf.js, docx-preview, SheetJS, JSZip) chỉ tải
+// khi cần (import động → chunk riêng). Nội dung từ file của agent luôn được vẽ trong shadow DOM (không lẫn CSS với
+// app) hoặc iframe sandbox (HTML), và CSP của app chặn mọi script nội tuyến.
+import { useEffect, useRef, useState } from 'react'
+import type { Workspace } from '@shared/types'
+import { extOf, fileUrl, formatSize } from './stacks'
+
+// ---------- tiện ích chung ----------
+
+/** Gọi `fn` một lần khi phần tử lọt vào màn hình (để thẻ ngoài tầm nhìn chưa phải tải gì). */
+export function useVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
+  const ref = useRef<T>(null)
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || visible) return
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        setVisible(true)
+        io.disconnect()
+      }
+    }, { rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [visible])
+  return [ref, visible]
+}
+
+/** Tải cả file qua IPC; lỗi (file quá lớn…) trả về thông báo. */
+function useBytes(ws: Workspace, rel: string, version: string): { data: Uint8Array | null; error: string | null; loading: boolean } {
+  const [state, setState] = useState<{ data: Uint8Array | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: true })
+  useEffect(() => {
+    let alive = true
+    setState({ data: null, error: null, loading: true })
+    window.stag.artifacts
+      .bytes(ws.id, rel)
+      .then((data) => alive && setState({ data, error: data ? null : 'Không còn file này trên đĩa.', loading: false }))
+      .catch((e: Error) => alive && setState({ data: null, error: cleanError(e), loading: false }))
+    return () => {
+      alive = false
+    }
+  }, [ws.id, rel, version])
+  return state
+}
+
+export function cleanError(e: unknown): string {
+  return String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+}
+
+/** Phần tử có shadow root riêng để vẽ nội dung file vào (CSS của file không lọt ra app và ngược lại). */
+function useShadowHost(): [React.RefObject<HTMLDivElement | null>, () => ShadowRoot | null] {
+  const ref = useRef<HTMLDivElement>(null)
+  const get = (): ShadowRoot | null => {
+    const el = ref.current
+    if (!el) return null
+    return el.shadowRoot ?? el.attachShadow({ mode: 'open' })
+  }
+  return [ref, get]
+}
+
+/** Link trong nội dung file: http(s) mở bằng trình duyệt hệ thống, còn lại bỏ qua. */
+function guardLinks(root: ShadowRoot | HTMLElement): void {
+  root.addEventListener('click', (e) => {
+    const a = (e.target as Element | null)?.closest?.('a')
+    if (!a) return
+    const href = a.getAttribute('href') ?? ''
+    if (href.startsWith('#')) return
+    e.preventDefault()
+    if (/^https?:/i.test(href)) window.open(href)
+  })
+}
+
+export function Note({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return <div className="px-5 py-6 text-center text-[12px] text-muted">{children}</div>
+}
+
+function Loading(): React.JSX.Element {
+  return <Note>Đang mở…</Note>
+}
+
+// ---------- PDF (pdf.js) ----------
+
+type PdfJs = typeof import('pdfjs-dist')
+let pdfjsP: Promise<PdfJs> | null = null
+function pdfjs(): Promise<PdfJs> {
+  pdfjsP ??= (async () => {
+    const lib = await import('pdfjs-dist')
+    const worker = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
+    lib.GlobalWorkerOptions.workerSrc = worker
+    return lib
+  })()
+  return pdfjsP
+}
+
+async function openPdf(data: Uint8Array): Promise<import('pdfjs-dist').PDFDocumentProxy> {
+  const lib = await pdfjs()
+  // pdf.js chuyển buffer sang worker (làm rỗng mảng gốc) → đưa bản sao.
+  return lib.getDocument({ data: data.slice(), enableXfa: false }).promise
+}
+
+export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const { data, error, loading } = useBytes(ws, rel, version)
+  const host = useRef<HTMLDivElement>(null)
+  const [zoom, setZoom] = useState(1)
+  const [pages, setPages] = useState(0)
+  const [failed, setFailed] = useState<string | null>(null)
+
+  useEffect(() => {
+    const el = host.current
+    if (!data || !el) return
+    let doc: import('pdfjs-dist').PDFDocumentProxy | null = null
+    let cancelled = false
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) (e.target as HTMLElement & { draw?: () => void }).draw?.()
+      },
+      { root: el.parentElement, rootMargin: '600px' }
+    )
+    el.replaceChildren()
+    setFailed(null)
+    ;(async () => {
+      try {
+        doc = await openPdf(data)
+        if (cancelled) return
+        setPages(doc.numPages)
+        const width = Math.max(200, el.clientWidth - 32) * zoom
+        const ratio = window.devicePixelRatio || 1
+        for (let n = 1; n <= doc.numPages; n++) {
+          const page = await doc.getPage(n)
+          if (cancelled) return
+          const base = page.getViewport({ scale: 1 })
+          const scale = width / base.width
+          const vp = page.getViewport({ scale })
+          const box = document.createElement('div') as HTMLDivElement & { draw?: () => void }
+          Object.assign(box.style, { width: `${vp.width}px`, height: `${vp.height}px`, margin: '0 auto 16px', background: '#fff', boxShadow: '0 2px 10px rgba(0,0,0,.4)' })
+          box.draw = () => {
+            box.draw = undefined
+            const canvas = document.createElement('canvas')
+            canvas.width = Math.floor(vp.width * ratio)
+            canvas.height = Math.floor(vp.height * ratio)
+            Object.assign(canvas.style, { width: '100%', height: '100%', display: 'block' })
+            box.appendChild(canvas)
+            void page.render({ canvas, viewport: page.getViewport({ scale: scale * ratio }) }).promise.catch(() => {})
+          }
+          el.appendChild(box)
+          io.observe(box)
+        }
+      } catch (e) {
+        if (!cancelled) setFailed(cleanError(e))
+      }
+    })()
+    return () => {
+      cancelled = true
+      io.disconnect()
+      void doc?.loadingTask.destroy()
+    }
+  }, [data, zoom])
+
+  if (loading) return <Loading />
+  if (error || failed) return <Note>{error ?? `Không đọc được file PDF: ${failed}`}</Note>
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-line px-4 py-1.5 text-[12px] text-muted">
+        <span>{pages ? `${pages} trang` : ''}</span>
+        <div className="flex-1" />
+        <ZoomButtons zoom={zoom} setZoom={setZoom} />
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-[#2a2e37] py-4">
+        <div ref={host} />
+      </div>
+    </div>
+  )
+}
+
+function ZoomButtons({ zoom, setZoom }: { zoom: number; setZoom: (z: number) => void }): React.JSX.Element {
+  const btn = 'rounded bg-panel-2 px-2 py-0.5 text-fg hover:bg-line disabled:opacity-40'
+  return (
+    <>
+      <button className={btn} disabled={zoom <= 0.5} onClick={() => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}>
+        −
+      </button>
+      <button className={btn} onClick={() => setZoom(1)} title="Vừa khung">
+        {Math.round(zoom * 100)}%
+      </button>
+      <button className={btn} disabled={zoom >= 3} onClick={() => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))}>
+        +
+      </button>
+    </>
+  )
+}
+
+const pdfThumbs = new Map<string, Promise<string | null>>()
+/** Ảnh trang đầu của PDF (data URL) cho thẻ. */
+export function pdfThumb(ws: Workspace, rel: string, version: string): Promise<string | null> {
+  const key = `${ws.id}|${rel}|${version}`
+  let p = pdfThumbs.get(key)
+  if (!p) {
+    p = (async () => {
+      const data = await window.stag.artifacts.bytes(ws.id, rel).catch(() => null)
+      if (!data) return null
+      const doc = await openPdf(data)
+      try {
+        const page = await doc.getPage(1)
+        const base = page.getViewport({ scale: 1 })
+        const vp = page.getViewport({ scale: 480 / base.width })
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.floor(vp.width)
+        canvas.height = Math.floor(vp.height)
+        const ctx = canvas.getContext('2d')!
+        ctx.fillStyle = '#fff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        await page.render({ canvas, viewport: vp }).promise
+        return canvas.toDataURL('image/jpeg', 0.85)
+      } finally {
+        void doc.loadingTask.destroy()
+      }
+    })().catch(() => null)
+    pdfThumbs.set(key, p)
+  }
+  return p
+}
+
+// ---------- Word (docx-preview) ----------
+
+export function DocxView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const { data, error, loading } = useBytes(ws, rel, version)
+  const [ref, shadow] = useShadowHost()
+  const [failed, setFailed] = useState<string | null>(null)
+
+  useEffect(() => {
+    const root = shadow()
+    if (!data || !root) return
+    let cancelled = false
+    let ro: ResizeObserver | null = null
+    root.replaceChildren()
+    const style = document.createElement('div')
+    const body = document.createElement('div')
+    root.append(style, body)
+    guardLinks(root)
+    setFailed(null)
+    import('docx-preview')
+      .then(({ renderAsync }) =>
+        renderAsync(data, body, style, {
+          inWrapper: true,
+          breakPages: true,
+          ignoreLastRenderedPageBreak: true,
+          useBase64URL: true,
+          renderHeaders: true,
+          renderFooters: true,
+          renderFootnotes: true,
+          renderEndnotes: true,
+          experimental: true
+        })
+      )
+      .then(() => {
+        if (cancelled) return
+        // Nền khung giống màu app thay vì xám sáng mặc định; trang rộng hơn khung thì thu nhỏ cho vừa.
+        const w = body.querySelector<HTMLElement>('.docx-wrapper')
+        const host = ref.current
+        if (!w || !host) return
+        Object.assign(w.style, { background: '#2a2e37', padding: '16px' })
+        const pageWidth = Math.max(...Array.from(w.querySelectorAll<HTMLElement>(':scope > section')).map((s) => s.offsetWidth), 1)
+        const fit = (): void => {
+          w.style.zoom = String(Math.min(1, (host.clientWidth - 32) / pageWidth))
+        }
+        fit()
+        ro = new ResizeObserver(fit)
+        ro.observe(host)
+      })
+      .catch((e) => !cancelled && setFailed(cleanError(e)))
+    return () => {
+      cancelled = true
+      ro?.disconnect()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
+
+  if (loading) return <Loading />
+  if (error || failed) return <Note>{error ?? `Không đọc được file Word: ${failed}`}</Note>
+  return <div ref={ref} className="min-h-full bg-[#2a2e37] select-text" />
+}
+
+// ---------- Bảng tính (SheetJS) ----------
+
+/** Số dòng tối đa đọc mỗi sheet (file lớn vẫn mở nhanh). */
+const SHEET_ROWS = 2000
+
+const SHEET_CSS = `
+  :host { display: block; }
+  table { border-collapse: collapse; font: 12px 'Segoe UI', system-ui, sans-serif; color: #e6e8ee; }
+  td, th { border: 1px solid #2a2f3a; padding: 3px 8px; white-space: pre; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+  tr:first-child td { background: #1d212a; font-weight: 600; position: sticky; top: 0; }
+  tr:nth-child(even) td { background: rgba(255,255,255,.02); }
+  td.n { color: #8b93a7; text-align: right; background: #161920 !important; position: sticky; left: 0; font-weight: 400; }
+  a { color: #6ea8fe; }
+`
+
+export function SheetView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const { data, error, loading } = useBytes(ws, rel, version)
+  const [book, setBook] = useState<{ names: string[]; html: (i: number) => { html: string; rows: number; cut: boolean } } | null>(null)
+  const [sheet, setSheet] = useState(0)
+  const [failed, setFailed] = useState<string | null>(null)
+  const [ref, shadow] = useShadowHost()
+
+  useEffect(() => {
+    if (!data) return
+    let cancelled = false
+    setFailed(null)
+    import('xlsx')
+      .then((XLSX) => {
+        const ext = extOf(rel)
+        // CSV/TSV: giải mã UTF-8 trước (SheetJS đọc byte thô theo bảng mã cũ → hỏng chữ Việt).
+        const wb =
+          ext === 'csv' || ext === 'tsv'
+            ? XLSX.read(new TextDecoder('utf-8').decode(data), { type: 'string', sheetRows: SHEET_ROWS + 1, FS: ext === 'tsv' ? '\t' : undefined })
+            : XLSX.read(data, { type: 'array', sheetRows: SHEET_ROWS + 1, cellDates: true })
+        if (cancelled) return
+        setSheet(0)
+        const done = new Map<number, { html: string; rows: number; cut: boolean }>()
+        setBook({
+          names: wb.SheetNames,
+          html: (i) => {
+            const hit = done.get(i)
+            if (hit) return hit
+            const s = wb.Sheets[wb.SheetNames[i]]
+            const range = s?.['!ref'] ? XLSX.utils.decode_range(s['!ref']) : null
+            const rows = range ? range.e.r - range.s.r + 1 : 0
+            const cut = rows > SHEET_ROWS
+            if (s && cut && range) s['!ref'] = XLSX.utils.encode_range({ s: range.s, e: { r: range.s.r + SHEET_ROWS - 1, c: range.e.c } })
+            const out = { html: s ? XLSX.utils.sheet_to_html(s, { header: '', footer: '' }) : '', rows, cut }
+            done.set(i, out)
+            return out
+          }
+        })
+      })
+      .catch((e) => !cancelled && setFailed(cleanError(e)))
+    return () => {
+      cancelled = true
+    }
+  }, [data, rel])
+
+  const current = book && book.names.length ? book.html(Math.min(sheet, book.names.length - 1)) : null
+
+  useEffect(() => {
+    const root = shadow()
+    if (!root || !current) return
+    // sheet_to_html đã escape nội dung ô; CSP của app chặn mọi thuộc tính on* nếu có.
+    root.innerHTML = `<style>${SHEET_CSS}</style>${current.html}`
+    // Cột số dòng bên trái.
+    root.querySelectorAll('tr').forEach((tr, i) => {
+      const td = document.createElement('td')
+      td.className = 'n'
+      td.textContent = String(i + 1)
+      tr.prepend(td)
+    })
+    guardLinks(root)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.html])
+
+  if (loading) return <Loading />
+  if (error || failed) return <Note>{error ?? `Không đọc được bảng tính: ${failed}`}</Note>
+  if (!book) return <Loading />
+  return (
+    <div className="flex h-full flex-col">
+      {book.names.length > 1 && (
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-1.5">
+          {book.names.map((n, i) => (
+            <button
+              key={n}
+              onClick={() => setSheet(i)}
+              className={`shrink-0 rounded px-2.5 py-0.5 text-[12px] ${i === sheet ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto select-text">
+        <div ref={ref} />
+        {current?.cut && <Note>Chỉ hiện {SHEET_ROWS} dòng đầu. Bấm “Mở” để xem cả file.</Note>}
+        {current && !current.rows && <Note>Sheet trống.</Note>}
+      </div>
+    </div>
+  )
+}
+
+// ---------- PowerPoint (bộ vẽ riêng, xem pptx.ts) ----------
+
+export function PptxView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const { data, error, loading } = useBytes(ws, rel, version)
+  const [ref, shadow] = useShadowHost()
+  const [info, setInfo] = useState<{ count: number } | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
+
+  useEffect(() => {
+    const root = shadow()
+    const host = ref.current
+    if (!data || !root || !host) return
+    let cancelled = false
+    root.replaceChildren()
+    setFailed(null)
+    const list = document.createElement('div')
+    root.appendChild(list)
+    guardLinks(root)
+    let ro: ResizeObserver | null = null
+    ;(async () => {
+      try {
+        const { loadPptx } = await import('./pptx')
+        const deck = await loadPptx(data)
+        if (cancelled) return
+        setInfo({ count: deck.count })
+        const frames: Array<{ outer: HTMLElement; slide: HTMLElement }> = []
+        const fit = (): void => {
+          const s = Math.max(0.1, (host.clientWidth - 32) / deck.width)
+          for (const f of frames) {
+            Object.assign(f.outer.style, { width: `${deck.width * s}px`, height: `${deck.height * s}px` })
+            f.slide.style.transform = `scale(${s})`
+          }
+        }
+        for (let i = 0; i < deck.count; i++) {
+          const slide = await deck.render(i, document)
+          if (cancelled) return
+          slide.style.transformOrigin = '0 0'
+          const outer = document.createElement('div')
+          Object.assign(outer.style, { margin: '0 auto 6px', overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,.4)', position: 'relative' })
+          outer.appendChild(slide)
+          const label = document.createElement('div')
+          Object.assign(label.style, { textAlign: 'center', color: '#8b93a7', font: "11px 'Segoe UI', sans-serif", margin: '0 0 14px' })
+          label.textContent = `Slide ${i + 1} / ${deck.count}`
+          list.append(outer, label)
+          frames.push({ outer, slide })
+          fit()
+        }
+        ro = new ResizeObserver(fit)
+        ro.observe(host)
+      } catch (e) {
+        if (!cancelled) setFailed(cleanError(e))
+      }
+    })()
+    return () => {
+      cancelled = true
+      ro?.disconnect()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
+
+  if (loading) return <Loading />
+  if (error || failed) return <Note>{error ?? `Không đọc được file PowerPoint: ${failed}`}</Note>
+  return (
+    <div className="min-h-full bg-[#2a2e37] select-text">
+      {info && <div className="px-4 pt-3 text-[12px] text-muted">{info.count} slide · bản xem trước gần đúng (biểu đồ, SmartArt, hiệu ứng chưa vẽ)</div>}
+      <div ref={ref} className="px-4 py-3" />
+    </div>
+  )
+}
+
+/**
+ * Slide đầu của pptx thu nhỏ vào `host` (thẻ), căn giữa theo chiều dọc. Trả về hàm co lại theo cỡ mới của
+ * `host` (gọi khi thẻ đổi cỡ), hoặc null nếu không vẽ được.
+ */
+export async function pptxThumbInto(ws: Workspace, rel: string, host: HTMLElement): Promise<(() => void) | null> {
+  const data = await window.stag.artifacts.bytes(ws.id, rel).catch(() => null)
+  if (!data) return null
+  const { loadPptx } = await import('./pptx')
+  const deck = await loadPptx(data)
+  if (!deck.count) return null
+  const slide = await deck.render(0, document)
+  const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' })
+  Object.assign(slide.style, { transformOrigin: '0 0', pointerEvents: 'none' })
+  root.replaceChildren(slide)
+  const fit = (): void => {
+    const s = Math.min(host.clientWidth / deck.width, host.clientHeight / deck.height)
+    slide.style.transform = `translate(${(host.clientWidth - deck.width * s) / 2}px, ${(host.clientHeight - deck.height * s) / 2}px) scale(${s})`
+  }
+  fit()
+  return fit
+}
+
+/** Vài đoạn đầu của file Word (cho thẻ): đọc thẳng word/document.xml. */
+export async function docxSnippet(ws: Workspace, rel: string): Promise<string[] | null> {
+  const data = await window.stag.artifacts.bytes(ws.id, rel).catch(() => null)
+  if (!data) return null
+  const { default: JSZip } = await import('jszip')
+  const xml = await (await JSZip.loadAsync(data)).file('word/document.xml')?.async('text')
+  if (!xml) return null
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  const out: string[] = []
+  for (const p of Array.from(doc.getElementsByTagNameNS('*', 'p'))) {
+    const t = Array.from(p.getElementsByTagNameNS('*', 't'))
+      .map((e) => e.textContent ?? '')
+      .join('')
+    if (t.trim()) out.push(t)
+    if (out.length >= 14) break
+  }
+  return out
+}
+
+/** Vài dòng / cột đầu của sheet đầu tiên (cho thẻ). */
+export async function sheetSnippet(ws: Workspace, rel: string): Promise<string[][] | null> {
+  const data = await window.stag.artifacts.bytes(ws.id, rel).catch(() => null)
+  if (!data) return null
+  const XLSX = await import('xlsx')
+  const ext = extOf(rel)
+  const wb =
+    ext === 'csv' || ext === 'tsv'
+      ? XLSX.read(new TextDecoder('utf-8').decode(data.subarray(0, 64 * 1024)), { type: 'string', sheetRows: 12, FS: ext === 'tsv' ? '\t' : undefined })
+      : XLSX.read(data, { type: 'array', sheetRows: 12 })
+  const s = wb.Sheets[wb.SheetNames[0]]
+  if (!s) return null
+  return (XLSX.utils.sheet_to_json<unknown[]>(s, { header: 1, raw: false, defval: '' }) as unknown[][]).map((r) => r.slice(0, 6).map((c) => String(c ?? '')))
+}
+
+// ---------- HTML (tĩnh, iframe sandbox) ----------
+
+/**
+ * Dựng trang HTML để xem tĩnh: bỏ script, gộp CSS cạnh file vào trang, đặt `<base>` để ảnh/CSS tương đối tải qua
+ * `stag-file`. Iframe sandbox không cho script chạy; trang cần JavaScript thì bấm "Chạy trong Browser".
+ */
+export async function staticHtml(ws: Workspace, rel: string, source: string): Promise<string> {
+  const doc = new DOMParser().parseFromString(source, 'text/html')
+  doc.querySelectorAll('script, noscript, meta[http-equiv], base').forEach((e) => e.remove())
+  const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : ''
+  for (const link of Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'))) {
+    const href = link.getAttribute('href') ?? ''
+    if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(href)) continue
+    const target = normalizeRel(dir + href.split(/[?#]/)[0])
+    const css = target ? await window.stag.artifacts.text(ws.id, target).catch(() => null) : null
+    if (css?.status !== 'ok') continue
+    const style = doc.createElement('style')
+    style.textContent = css.text
+    link.replaceWith(style)
+  }
+  const base = doc.createElement('base')
+  base.href = fileUrl(ws.id, dir || '')
+  doc.head.prepend(base)
+  return `<!doctype html>${doc.documentElement.outerHTML}`
+}
+
+function normalizeRel(p: string): string | null {
+  const out: string[] = []
+  for (const seg of p.split('/')) {
+    if (seg === '..') {
+      if (!out.length) return null
+      out.pop()
+    } else if (seg && seg !== '.') out.push(seg)
+  }
+  return out.join('/')
+}
+
+export function HtmlView({ ws, rel, version, onRun }: { ws: Workspace; rel: string; version: string; onRun: () => void }): React.JSX.Element {
+  const [srcdoc, setSrcdoc] = useState<string | null>(null)
+  const [hasScript, setHasScript] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    setSrcdoc(null)
+    window.stag.artifacts
+      .text(ws.id, rel)
+      .then(async (t) => {
+        if (t.status !== 'ok') throw new Error(t.status === 'missing' ? 'Không còn file này trên đĩa.' : 'File không phải văn bản.')
+        setHasScript(/<script[\s>]/i.test(t.text))
+        const html = await staticHtml(ws, rel, t.text)
+        if (alive) setSrcdoc(html)
+      })
+      .catch((e) => alive && setFailed(cleanError(e)))
+    return () => {
+      alive = false
+    }
+  }, [ws, rel, version])
+  if (failed) return <Note>{failed}</Note>
+  if (srcdoc == null) return <Loading />
+  return (
+    <div className="flex h-full flex-col">
+      {hasScript && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-amber-400/10 px-4 py-1.5 text-[12px] text-amber-200">
+          Trang có JavaScript — bản xem trước ở đây không chạy script.
+          <button onClick={onRun} className="ml-auto rounded bg-panel-2 px-2 py-0.5 text-fg hover:bg-line">
+            Chạy trong Browser
+          </button>
+        </div>
+      )}
+      <iframe sandbox="" srcDoc={srcdoc} className="min-h-0 w-full flex-1 bg-white" title={rel} />
+    </div>
+  )
+}
+
+// ---------- zip ----------
+
+export function ZipView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const { data, error, loading } = useBytes(ws, rel, version)
+  const [entries, setEntries] = useState<Array<{ name: string; dir: boolean; size: number }> | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
+  useEffect(() => {
+    if (!data) return
+    let alive = true
+    import('jszip')
+      .then(({ default: JSZip }) => JSZip.loadAsync(data))
+      .then((zip) => {
+        const list: Array<{ name: string; dir: boolean; size: number }> = []
+        zip.forEach((name, f) => list.push({ name, dir: f.dir, size: (f as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0 }))
+        if (alive) setEntries(list.sort((a, b) => a.name.localeCompare(b.name)))
+      })
+      .catch((e) => alive && setFailed(cleanError(e)))
+    return () => {
+      alive = false
+    }
+  }, [data])
+  if (loading) return <Loading />
+  if (error || failed) return <Note>{error ?? `Không đọc được file nén: ${failed}`}</Note>
+  if (!entries) return <Loading />
+  const files = entries.filter((e) => !e.dir)
+  return (
+    <div className="select-text px-4 py-3 text-[12px]">
+      <div className="mb-2 text-muted">
+        {files.length} file · {formatSize(files.reduce((s, e) => s + e.size, 0))} khi giải nén
+      </div>
+      <ul className="font-mono">
+        {entries.slice(0, 3000).map((e) => (
+          <li key={e.name} className="flex gap-3 py-0.5">
+            <span className={`truncate ${e.dir ? 'text-muted' : ''}`}>{e.name}</span>
+            {!e.dir && <span className="ml-auto shrink-0 text-muted">{formatSize(e.size)}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// ---------- font ----------
+
+let fontSeq = 0
+export function FontView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const { data, error, loading } = useBytes(ws, rel, version)
+  const [family, setFamily] = useState<string | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
+  useEffect(() => {
+    if (!data) return
+    const name = `artifact-font-${++fontSeq}`
+    const face = new FontFace(name, data.slice().buffer)
+    let alive = true
+    face
+      .load()
+      .then((f) => {
+        document.fonts.add(f)
+        if (alive) setFamily(name)
+      })
+      .catch((e) => alive && setFailed(cleanError(e)))
+    return () => {
+      alive = false
+      document.fonts.delete(face)
+    }
+  }, [data])
+  if (loading) return <Loading />
+  if (error || failed) return <Note>{error ?? `Không đọc được font: ${failed}`}</Note>
+  if (!family) return <Loading />
+  return (
+    <div className="space-y-4 px-5 py-4 select-text" style={{ fontFamily: family }}>
+      {[48, 32, 22, 16].map((s) => (
+        <div key={s} style={{ fontSize: s }} className="leading-tight">
+          Chữ Việt có dấu: Ắ Ộ Ữ ỷ đ — The quick brown fox 0123456789
+        </div>
+      ))}
+      <div className="text-[18px] leading-relaxed">ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz ăâêôơưđ !@#$%&amp;*()</div>
+    </div>
+  )
+}
+
+// ---------- còn lại: ảnh thu nhỏ của Windows ----------
+
+export function OtherView({ ws, rel, version, reason }: { ws: Workspace; rel: string; version: string; reason?: string }): React.JSX.Element {
+  const [thumb, setThumb] = useState<string | null | undefined>(undefined)
+  useEffect(() => {
+    let alive = true
+    window.stag.artifacts
+      .thumb(ws.id, rel)
+      .then((t) => alive && setThumb(t))
+      .catch(() => alive && setThumb(null))
+    return () => {
+      alive = false
+    }
+  }, [ws.id, rel, version])
+  return (
+    <div className="flex flex-col items-center gap-4 px-5 py-8 text-center">
+      {thumb ? (
+        <img src={thumb} className="max-h-[420px] max-w-full rounded border border-line" draggable={false} />
+      ) : thumb === null ? (
+        <span className="rounded-md border border-line px-4 py-2 font-mono text-[18px] uppercase text-muted">{extOf(rel) || 'file'}</span>
+      ) : null}
+      <div className="max-w-[420px] text-[12px] text-muted">
+        {reason ?? 'App chưa có cách xem nội dung loại file này.'} Bấm “Mở” để mở bằng ứng dụng mặc định của Windows.
+      </div>
+    </div>
+  )
+}

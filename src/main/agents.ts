@@ -23,6 +23,7 @@ import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
 import { createStagMcp } from './mcp'
 import { ScopeGuard } from './scopeGuard'
+import type { ArtifactLog } from './artifacts'
 import type { VaultActivityLog } from './vaultActivity'
 import type { PtyManager } from './pty'
 import { readTemplate } from './templates'
@@ -132,7 +133,8 @@ export class AgentService {
     private board: Board,
     private browser: BrowserService,
     private settings: () => AppSettings,
-    private activity: VaultActivityLog
+    private activity: VaultActivityLog,
+    private artifacts: ArtifactLog
   ) {
     this.guard = new ScopeGuard(board)
   }
@@ -397,6 +399,7 @@ export class AgentService {
       if (payload.hook_event_name === 'PreToolUse') return await this.guard.preToolUse(ctx.ws, ctx.agent, agentKind(ctx.agent), payload)
       if (payload.hook_event_name === 'PostToolUse') {
         this.activity.onToolUse(ctx.ws, ctx.agent, payload)
+        void this.artifacts.onToolUse(ctx.ws, ctx.agent, payload).catch((e) => console.error('[artifacts]', e))
         await this.guard.postToolUse(ctx.ws, ctx.agent, payload)
       }
     } catch (e) {
@@ -585,6 +588,7 @@ export class AgentService {
     delete this.data.layouts[workspaceId]
     this.board.forgetWorkspace(workspaceId)
     this.activity.forgetWorkspace(workspaceId)
+    this.artifacts.forgetWorkspace(workspaceId)
     this.browser.closeWorkspace(workspaceId)
     await this.save()
   }
@@ -647,6 +651,7 @@ export class AgentService {
     await this.save()
     if (ws) await this.board.renameAgent(ws, agent.id, name)
     this.activity.renameAgent(agent.id, name)
+    void this.artifacts.renameAgent(agent.id, name)
     this.browser.renameAgent(agent.id, name)
     // File phiên (agent khác đọc trong .sessions/) ghi tên mới và đường dẫn note mới.
     const run = this.running.get(agent.id)

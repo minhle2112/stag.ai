@@ -1,7 +1,8 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, protocol, shell } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AgentService } from './agents'
+import { ArtifactLog, serveArtifact } from './artifacts'
 import { Board } from './board'
 import { BrowserService } from './browser'
 import { StatusHub } from './hub'
@@ -14,6 +15,9 @@ import { WorkspaceStore } from './workspace'
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
 // Phải đặt trước khi tạo các service vì chúng đọc đường dẫn userData lúc khởi tạo.
 if (process.env.STAG_USER_DATA) app.setPath('userData', process.env.STAG_USER_DATA)
+
+// Ảnh / video agent tạo ra (tab Artifacts): `stag-file://<workspaceId>/<đường dẫn trong dự án>`. Phải đăng ký trước khi app sẵn sàng.
+protocol.registerSchemesAsPrivileged([{ scheme: 'stag-file', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 
 const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
@@ -28,7 +32,8 @@ const browser = new BrowserService({
 })
 const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), (s) => send(IPC.settingsChanged, s))
 const activity = new VaultActivityLog((workspaceId) => send(IPC.vaultActivityChanged, workspaceId))
-const agents = new AgentService(ptys, workspaces, board, browser, () => settings.get(), activity)
+const artifacts = new ArtifactLog((workspaceId) => send(IPC.artifactsChanged, workspaceId))
+const agents = new AgentService(ptys, workspaces, board, browser, () => settings.get(), activity, artifacts)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -81,8 +86,14 @@ app.whenReady().then(async () => {
   await settings.load()
   await agents.load()
   await hub.start()
+  protocol.handle('stag-file', (req) => {
+    const url = new URL(req.url)
+    const ws = workspaces.get(url.hostname)
+    if (!ws) return new Response('Not found', { status: 404 })
+    return serveArtifact(ws, decodeURIComponent(url.pathname.replace(/^\/+/, '')), req.headers.get('range'))
+  })
   agents.attachHub(hub)
-  registerIpc(ptys, workspaces, agents, board, browser, settings, activity)
+  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -90,6 +101,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  void artifacts.flush()
   browser.shutdown()
   agents.shutdown()
   hub.stop()

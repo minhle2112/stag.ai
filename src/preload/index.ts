@@ -5,6 +5,9 @@ import type {
   AgentRun,
   AgentsSnapshot,
   AppSettings,
+  ArtifactEvent,
+  ArtifactStat,
+  ArtifactText,
   BoardSnapshot,
   BrowserPermissionAsk,
   NoteWriteResult,
@@ -170,6 +173,27 @@ const api = {
         ipcRenderer.removeListener(IPC.vaultChanged, fn)
         ipcRenderer.invoke(IPC.vaultUnwatch, vaultPath)
       }
+    }
+  },
+  artifacts: {
+    /** File agent tạo / sửa / xoá trong dự án (cũ trước, mới sau). */
+    list: (workspaceId: string): Promise<ArtifactEvent[]> => ipcRenderer.invoke(IPC.artifactList, workspaceId),
+    stat: (workspaceId: string, rels: string[]): Promise<Record<string, ArtifactStat | null>> => ipcRenderer.invoke(IPC.artifactStat, workspaceId, rels),
+    /** Nội dung chữ để xem trước; `max` = số byte tối đa (mặc định 512 KB). */
+    text: (workspaceId: string, rel: string, max?: number): Promise<ArtifactText> => ipcRenderer.invoke(IPC.artifactText, workspaceId, rel, max),
+    /** Cả nội dung file (tối đa 150 MB) để xem trước PDF / Office / zip / font; null = không còn file. */
+    bytes: (workspaceId: string, rel: string): Promise<Uint8Array | null> => ipcRenderer.invoke(IPC.artifactBytes, workspaceId, rel),
+    /** Ảnh thu nhỏ (data URL) từ file Office hoặc từ Windows; null = không có. */
+    thumb: (workspaceId: string, rel: string): Promise<string | null> => ipcRenderer.invoke(IPC.artifactThumb, workspaceId, rel),
+    /** Bỏ file khỏi danh sách (không xoá file). */
+    forget: (workspaceId: string, rel: string): Promise<void> => ipcRenderer.invoke(IPC.artifactForget, workspaceId, rel),
+    /** Mở bằng app mặc định của Windows. */
+    open: (workspaceId: string, rel: string): Promise<void> => ipcRenderer.invoke(IPC.artifactOpen, workspaceId, rel),
+    reveal: (workspaceId: string, rel: string): Promise<void> => ipcRenderer.invoke(IPC.artifactReveal, workspaceId, rel),
+    onChanged(cb: (workspaceId: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, workspaceId: string): void => cb(workspaceId)
+      ipcRenderer.on(IPC.artifactsChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.artifactsChanged, fn)
     }
   },
   openFolder: (path: string): Promise<string> => ipcRenderer.invoke(IPC.openFolder, path),

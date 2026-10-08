@@ -112,6 +112,33 @@ export interface VaultActivity {
   at: string
 }
 
+/**
+ * Một lần agent tạo / sửa / xoá file trong dự án (output của agent, suy ra từ hook PostToolUse).
+ * Lưu ở `<dự án>/.stag/artifacts.json`.
+ */
+export interface ArtifactEvent {
+  agentId: string
+  agentName: string
+  /** Đường dẫn tương đối so với thư mục dự án, '/' (đúng hoa thường của đường dẫn agent dùng). */
+  rel: string
+  /** 'write' = tạo hoặc ghi đè cả file; 'edit' = sửa một phần; 'delete' = xoá. */
+  kind: 'write' | 'edit' | 'delete'
+  /** Tool đã dùng (Write, Edit, apply_patch, Bash…). */
+  tool: string
+  /** ISO. */
+  at: string
+}
+
+/** Thông tin file của một artifact trên đĩa (null = không còn file). */
+export interface ArtifactStat {
+  size: number
+  /** ISO. */
+  mtime: string
+}
+
+/** Nội dung xem trước dạng chữ của một artifact. */
+export type ArtifactText = { status: 'ok'; text: string; truncated: boolean } | { status: 'binary' } | { status: 'missing' }
+
 export type ObsidianOpenResult =
   | { status: 'opened' }
   | { status: 'needs-register'; vaultPath: string; obsidianInstalled: boolean }
