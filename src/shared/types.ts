@@ -116,8 +116,11 @@ export interface StartAgentRequest {
  */
 export type AgentActivity = 'starting' | 'working' | 'waiting' | 'stopped'
 
-/** Vì sao agent đang chờ: hết lượt trả lời, xin quyền, hỏi lựa chọn, hay lâu không ai gõ. */
-export type WaitReason = 'turn' | 'permission' | 'question' | 'idle'
+/**
+ * Vì sao agent đang chờ: hết lượt trả lời, xin quyền, hỏi lựa chọn, lâu không ai gõ,
+ * hay người dùng bấm Esc ngắt giữa lượt ('interrupted', phát hiện qua transcript).
+ */
+export type WaitReason = 'turn' | 'permission' | 'question' | 'idle' | 'interrupted'
 
 export interface AgentStatus {
   agentId: string

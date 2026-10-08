@@ -14,6 +14,8 @@ interface TasksFile {
 export interface HookPayload {
   hook_event_name?: string
   session_id?: string
+  /** Transcript JSONL của phiên (để phát hiện người dùng bấm Esc ngắt, xem transcript.ts). */
+  transcript_path?: string
   tool_name?: string
   notification_type?: string
 }
@@ -31,6 +33,8 @@ export class Board {
   private writing = new Map<string, Promise<void>>()
   private ignored = new Set<string>()
   private pending = new Map<string, NodeJS.Timeout>()
+  /** Lần cuối người dùng gửi lời nhắn cho agent (ms, theo hook UserPromptSubmit). */
+  private prompted = new Map<string, number>()
 
   constructor(private notify: (workspaceId: string) => void) {}
 
@@ -54,6 +58,8 @@ export class Board {
   hook(agent: Agent, p: HookPayload): void {
     switch (p.hook_event_name) {
       case 'UserPromptSubmit':
+        this.prompted.set(agent.id, Date.now())
+        return this.setActivity(agent, 'working')
       case 'PostToolUse':
         return this.setActivity(agent, 'working')
       case 'PreToolUse':
@@ -66,15 +72,33 @@ export class Board {
         if (p.notification_type === 'elicitation_dialog' || p.notification_type === 'agent_needs_input')
           return this.setActivity(agent, 'waiting', { reason: 'question' })
         // idle_prompt: đã ở trạng thái chờ từ lúc Stop, chỉ đánh dấu là lâu rồi chưa ai trả lời.
-        if (p.notification_type === 'idle_prompt' && this.status.get(agent.id)?.activity === 'waiting')
-          return this.setActivity(agent, 'waiting', { reason: 'idle' })
+        // Giữ nhãn "bạn đã ngắt": cho biết vì sao agent dừng, có ích hơn "chờ lâu".
+        if (p.notification_type === 'idle_prompt') {
+          const cur = this.status.get(agent.id)
+          if (cur?.activity === 'waiting' && cur.reason !== 'interrupted')
+            return this.setActivity(agent, 'waiting', { reason: 'idle' })
+        }
         return
       case 'Stop':
         return this.setActivity(agent, 'waiting', { reason: 'turn' })
     }
   }
 
+  /**
+   * Người dùng bấm Esc ngắt agent (thấy trong transcript, Claude Code không bắn hook Stop lúc này).
+   * `at` = thời điểm ghi dòng ngắt. Transcript được đọc chậm hơn hook một chút: nếu người dùng đã gửi
+   * lời nhắn mới sau lúc ngắt thì agent đang làm tiếp, bỏ qua.
+   */
+  interrupted(agent: Agent, at: string): void {
+    const cur = this.status.get(agent.id)
+    if (!cur || cur.activity === 'stopped') return
+    const t = Date.parse(at)
+    if (Number.isFinite(t) && (this.prompted.get(agent.id) ?? 0) > t) return
+    this.setActivity(agent, 'waiting', { reason: 'interrupted' })
+  }
+
   forget(agentId: string): void {
+    this.prompted.delete(agentId)
     const cur = this.status.get(agentId)
     if (!cur) return
     this.status.delete(agentId)
