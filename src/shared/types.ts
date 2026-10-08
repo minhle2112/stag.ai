@@ -56,6 +56,48 @@ export interface VaultNode {
   children?: VaultNode[]
 }
 
+/** Một note trong chỉ mục vault (Vault Viewer). */
+export interface VaultNoteInfo {
+  /** Đường dẫn tương đối trong vault, phân cách '/', có đuôi `.md`. */
+  rel: string
+  /** Tên file bỏ `.md` (Obsidian hiển thị và link theo tên này). */
+  name: string
+  /** `type:` trong frontmatter (log / decision / feature / agent…), dùng tô màu graph. */
+  type: string | null
+  aliases: string[]
+  tags: string[]
+  /** Lần sửa cuối (ms). */
+  mtime: number
+}
+
+/** Một link từ note này sang note khác. */
+export interface VaultLink {
+  from: string
+  /** `rel` của note đích; null = note chưa có (node "ma" trong graph, tên lấy từ `target`). */
+  to: string | null
+  /** Chữ gốc trỏ tới note, đã bỏ `|bí danh` và `#heading`. */
+  target: string
+  embed: boolean
+  /** Dòng chứa link trong note nguồn (từ 1). */
+  line: number
+}
+
+/** Chỉ mục toàn vault: note + link. Backlinks = các link có `to` là note đang xem. Không gồm link tới file đính kèm. */
+export interface VaultIndex {
+  vaultPath: string
+  notes: VaultNoteInfo[]
+  links: VaultLink[]
+}
+
+/** Kết quả tìm kiếm toàn văn trong vault. */
+export interface VaultSearchHit {
+  rel: string
+  /** Từ khoá có trong tên note. */
+  titleMatch: boolean
+  /** Các dòng có từ khoá (tối đa vài dòng mỗi note), `text` là dòng gốc đã cắt ngắn. */
+  matches: Array<{ line: number; text: string }>
+}
+
 export type ObsidianOpenResult =
   | { status: 'opened' }
   | { status: 'needs-register'; vaultPath: string; obsidianInstalled: boolean }

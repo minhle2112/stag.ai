@@ -51,9 +51,17 @@ function createWindow(): void {
   browser.attachWindow(win)
 
   // Link ngoài mở bằng trình duyệt hệ thống, không mở cửa sổ Electron mới.
+  // Chỉ http(s)/mailto: link trong note của vault có thể là `file:` hay giao thức lạ.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (/^(https?|mailto):/i.test(url)) shell.openExternal(url)
     return { action: 'deny' }
+  })
+  // Không để cửa sổ app tự điều hướng sang trang khác (vd. bấm link trong note mà quên chặn).
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url !== win.webContents.getURL()) {
+      e.preventDefault()
+      if (/^(https?|mailto):/i.test(url)) shell.openExternal(url)
+    }
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

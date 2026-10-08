@@ -8,7 +8,11 @@ import { openInObsidian } from './obsidian'
 import type { PtyManager } from './pty'
 import { prepareUserTemplates } from './templates'
 import { findRegisteredId, readNote, vaultTree } from './vault'
+import { VaultIndexer, VaultWatchers } from './vaultIndex'
 import type { WorkspaceStore } from './workspace'
+
+const vaultIndexer = new VaultIndexer()
+const vaultWatchers = new VaultWatchers()
 
 export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
@@ -69,4 +73,8 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.agentRename, (_e, agentId: string, name: string) => agents.rename(agentId, name))
   ipcMain.handle(IPC.agentReorder, (_e, workspaceId: string, orderedIds: string[]) => agents.reorder(workspaceId, orderedIds))
   ipcMain.handle(IPC.browserDevTools, (_e, workspaceId: string, tabId: string) => browser.toggleDevTools(workspaceId, tabId))
+  ipcMain.handle(IPC.vaultIndex, (_e, vaultPath: string) => vaultIndexer.index(vaultPath))
+  ipcMain.handle(IPC.vaultSearch, (_e, vaultPath: string, query: string) => vaultIndexer.search(vaultPath, query))
+  ipcMain.handle(IPC.vaultWatch, (e, vaultPath: string) => vaultWatchers.watch(vaultPath, e.sender))
+  ipcMain.handle(IPC.vaultUnwatch, (e, vaultPath: string) => vaultWatchers.unwatch(vaultPath, e.sender))
 }

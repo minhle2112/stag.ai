@@ -15,7 +15,9 @@ import type {
   ViewRect,
   CreateWorkspaceResult,
   ObsidianOpenResult,
+  VaultIndex,
   VaultNode,
+  VaultSearchHit,
   Workspace,
   WorkspaceInspection
 } from '@shared/types'
@@ -119,7 +121,23 @@ const api = {
     tree: (vaultPath: string): Promise<VaultNode[]> => ipcRenderer.invoke(IPC.vaultTree, vaultPath),
     read: (vaultPath: string, rel: string): Promise<string> => ipcRenderer.invoke(IPC.vaultRead, vaultPath, rel),
     openInObsidian: (vaultPath: string): Promise<ObsidianOpenResult> => ipcRenderer.invoke(IPC.vaultOpenObsidian, vaultPath),
-    isRegistered: (vaultPath: string): Promise<boolean> => ipcRenderer.invoke(IPC.vaultIsRegistered, vaultPath)
+    isRegistered: (vaultPath: string): Promise<boolean> => ipcRenderer.invoke(IPC.vaultIsRegistered, vaultPath),
+    /** Chỉ mục toàn vault: note (kèm type/aliases/tags) + link đã phân giải. */
+    index: (vaultPath: string): Promise<VaultIndex> => ipcRenderer.invoke(IPC.vaultIndex, vaultPath),
+    /** Tìm toàn văn, không phân biệt hoa thường và dấu tiếng Việt. */
+    search: (vaultPath: string, query: string): Promise<VaultSearchHit[]> => ipcRenderer.invoke(IPC.vaultSearch, vaultPath, query),
+    /** Gọi `cb` khi file trong vault đổi (đã gộp 300ms, bỏ qua `.obsidian/`). Trả về hàm huỷ theo dõi. */
+    watch(vaultPath: string, cb: () => void): () => void {
+      const fn = (_e: IpcRendererEvent, path: string): void => {
+        if (path === vaultPath) cb()
+      }
+      ipcRenderer.on(IPC.vaultChanged, fn)
+      ipcRenderer.invoke(IPC.vaultWatch, vaultPath)
+      return () => {
+        ipcRenderer.removeListener(IPC.vaultChanged, fn)
+        ipcRenderer.invoke(IPC.vaultUnwatch, vaultPath)
+      }
+    }
   },
   openFolder: (path: string): Promise<string> => ipcRenderer.invoke(IPC.openFolder, path),
   openTemplates: (): Promise<string> => ipcRenderer.invoke(IPC.templatesOpen)

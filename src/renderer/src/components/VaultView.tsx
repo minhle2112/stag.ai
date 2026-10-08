@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { VaultNode, Workspace } from '@shared/types'
+import { useVaultIndex } from '../vaultIndex'
 import { Button, Modal } from './Modal'
+import { GraphView } from './vault/GraphView'
 
 export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const { vaultPath } = workspace
@@ -9,6 +11,8 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
   const [content, setContent] = useState<string>('')
   const [registered, setRegistered] = useState<boolean | null>(null)
   const [guide, setGuide] = useState(false)
+  const [view, setView] = useState<'note' | 'graph'>('note')
+  const { index } = useVaultIndex(vaultPath)
 
   const refresh = useCallback(async () => {
     setTree(await window.stag.vault.tree(vaultPath))
@@ -50,6 +54,17 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
           </span>
         )}
         <div className="flex-1" />
+        <div className="flex overflow-hidden rounded-md border border-line">
+          {(['note', 'graph'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-2.5 py-1 text-[12px] ${view === v ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
+            >
+              {v === 'note' ? 'Note' : 'Graph'}
+            </button>
+          ))}
+        </div>
         <Button onClick={refresh}>Làm mới</Button>
         <Button onClick={() => window.stag.openFolder(vaultPath)}>Mở thư mục</Button>
         <Button primary onClick={openObsidian}>
@@ -62,6 +77,22 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
           {tree.length === 0 && <div className="px-3 text-muted">Vault trống hoặc không tồn tại.</div>}
           <Tree nodes={tree} depth={0} selected={selected} onSelect={setSelected} />
         </nav>
+        {view === 'graph' ? (
+          <div className="relative min-w-0 flex-1">
+            {index ? (
+              <GraphView
+                index={index}
+                current={selected}
+                onOpen={(rel) => {
+                  setSelected(rel)
+                  setView('note')
+                }}
+              />
+            ) : (
+              <div className="p-4 text-muted">Đang đọc vault…</div>
+            )}
+          </div>
+        ) : (
         <article className="min-w-0 flex-1 overflow-y-auto px-6 py-4 select-text">
           {selected ? (
             <>
@@ -72,6 +103,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
             <div className="text-muted">Chọn một note bên trái.</div>
           )}
         </article>
+        )}
       </div>
 
       {guide && (

@@ -44,7 +44,13 @@ export const IPC = {
   browserAnswer: 'browser:answer',
   agentRename: 'agent:rename',
   agentReorder: 'agent:reorder',
-  browserDevTools: 'browser:devtools'
+  browserDevTools: 'browser:devtools',
+  vaultIndex: 'vault:index',
+  vaultSearch: 'vault:search',
+  vaultWatch: 'vault:watch',
+  vaultUnwatch: 'vault:unwatch',
+  /** main → renderer: file trong vault đổi (Obsidian, agent hoặc người dùng sửa). Kèm `vaultPath`. */
+  vaultChanged: 'vault:changed'
 } as const
 
 export interface AppInfo {
