@@ -32,6 +32,17 @@ export function removeLeaf(node: LayoutNode | null, agentId: string): LayoutNode
   return { ...node, a, b }
 }
 
+/** Đổi chỗ hai ô; khung chia và tỉ lệ giữ nguyên. */
+export function swapLeaves(node: LayoutNode | null, x: string, y: string): LayoutNode | null {
+  if (!node || x === y) return node
+  if (node.type === 'leaf') {
+    if (node.agentId === x) return { type: 'leaf', agentId: y }
+    if (node.agentId === y) return { type: 'leaf', agentId: x }
+    return node
+  }
+  return { ...node, a: swapLeaves(node.a, x, y)!, b: swapLeaves(node.b, x, y)! }
+}
+
 export function setRatio(node: LayoutNode, path: LayoutPath, ratio: number): LayoutNode {
   if (node.type === 'leaf') return node
   if (path.length === 0) return { ...node, ratio }
