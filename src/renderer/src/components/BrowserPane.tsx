@@ -13,6 +13,7 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
   const state = useBrowser((s) => s.byWs[wsId])
   const load = useBrowser((s) => s.load)
   const modals = useUi((s) => s.modals)
+  const resizing = useBrowser((s) => s.resizing)
   const viewport = useRef<HTMLDivElement>(null)
   const active = state?.tabs.find((t) => t.id === state.activeTabId)
   const b = window.stag.browser
@@ -21,12 +22,13 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
     load(wsId)
   }, [wsId, load])
 
-  // Báo main vị trí vùng hiển thị; ẩn view khi có hộp thoại (view gốc luôn nằm trên HTML).
+  // Báo main vị trí vùng hiển thị; ẩn view khi có hộp thoại hoặc đang kéo đổi độ rộng
+  // (view gốc luôn nằm trên HTML và nuốt sự kiện chuột).
   useEffect(() => {
     const el = viewport.current
     if (!el) return
     const report = (): void => {
-      if (modals > 0) return b.setBounds(null, null)
+      if (modals > 0 || resizing) return b.setBounds(null, null)
       const r = el.getBoundingClientRect()
       b.setBounds(wsId, { x: r.left, y: r.top, width: r.width, height: r.height })
     }
@@ -39,7 +41,7 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
       window.removeEventListener('resize', report)
       b.setBounds(null, null)
     }
-  }, [wsId, modals, b])
+  }, [wsId, modals, resizing, b])
 
   return (
     <div className="flex h-full flex-col">
@@ -64,8 +66,99 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
             <Button onClick={() => b.newTab(wsId)}>Tab mới</Button>
           </div>
         )}
+        {active && resizing && (
+          <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-muted">
+            Thả chuột để giữ độ rộng này
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+/** Độ rộng tối thiểu (px) của pane browser và của phần agent/kanban bên trái. */
+const PANE_MIN = 320
+const MAIN_MIN = 360
+
+/** Tỉ lệ độ rộng pane khi mép trái của nó ở `x`, đã giới hạn theo px. */
+function ratioAt(row: DOMRect, x: number): number {
+  const max = Math.max(PANE_MIN, row.width - MAIN_MIN)
+  const px = Math.min(max, Math.max(PANE_MIN, row.right - x))
+  return px / row.width
+}
+
+/**
+ * Cột bên phải chứa pane browser, kéo mép trái để đổi độ rộng (nhấp đúp = về mặc định).
+ * Độ rộng lưu dạng tỉ lệ; CSS `clamp` giữ cả hai bên không nhỏ hơn mức tối thiểu khi cửa sổ co lại.
+ * Lúc kéo: ẩn view trang (nó nuốt sự kiện chuột) và phủ một lớp trong suốt toàn cửa sổ.
+ * Terminal bên trái tự fit lại nhờ ResizeObserver của từng ô.
+ */
+export function BrowserDock({ workspace }: { workspace: Workspace }): React.JSX.Element {
+  const width = useBrowser((s) => s.width)
+  const setWidth = useBrowser((s) => s.setWidth)
+  const resetWidth = useBrowser((s) => s.resetWidth)
+  const setResizing = useBrowser((s) => s.setResizing)
+  const [dragging, setDragging] = useState(false)
+  const aside = useRef<HTMLElement>(null)
+
+  function startDrag(e: React.PointerEvent<HTMLDivElement>): void {
+    const row = aside.current?.parentElement
+    if (e.button !== 0 || !row) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const rect = row.getBoundingClientRect()
+    let x = e.clientX
+    let moved = false
+    let frame = 0
+    const apply = (): void => {
+      frame = 0
+      setWidth(ratioAt(rect, x))
+    }
+    const move = (ev: PointerEvent): void => {
+      if (ev.clientX === x) return
+      x = ev.clientX
+      moved = true
+      if (!frame) frame = requestAnimationFrame(apply)
+    }
+    const end = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      window.removeEventListener('blur', end)
+      cancelAnimationFrame(frame)
+      // Chỉ lưu khi thật sự kéo: nhấp đúp (hai lần nhấn không di chuột) không được làm lệch độ rộng.
+      if (moved) setWidth(ratioAt(rect, x), true)
+      setDragging(false)
+      setResizing(false)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    window.addEventListener('blur', end)
+    setDragging(true)
+    setResizing(true)
+  }
+
+  return (
+    <aside
+      ref={aside}
+      className="relative shrink-0 border-l border-line bg-panel"
+      style={{ width: `clamp(${PANE_MIN}px, ${(width * 100).toFixed(3)}%, calc(100% - ${MAIN_MIN}px))` }}
+    >
+      {/* Phần lớn thanh kéo nằm bên trái mép pane: phần nằm trên vùng trang sẽ bị view che. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        title="Kéo để đổi độ rộng · nhấp đúp để về mặc định"
+        onPointerDown={startDrag}
+        onDoubleClick={resetWidth}
+        className="group absolute inset-y-0 -left-[5px] z-20 w-[8px] cursor-col-resize"
+      >
+        <div className={`mx-auto h-full w-[2px] transition-colors ${dragging ? 'bg-accent' : 'bg-transparent group-hover:bg-accent/60'}`} />
+      </div>
+      <BrowserPane key={workspace.id} workspace={workspace} />
+      {dragging && <div className="fixed inset-0 z-[60] cursor-col-resize" />}
+    </aside>
   )
 }
 
@@ -160,6 +253,15 @@ function AddressBar({ wsId, tab }: { wsId: string; tab: BrowserTab | undefined }
         spellCheck={false}
         className="h-7 min-w-0 flex-1 rounded-md border border-line bg-bg px-2 font-mono text-[12px] text-fg outline-none select-text focus:border-accent/60"
       />
+      <button
+        className={`${nav} font-mono text-[12px] ${tab?.devtools ? 'bg-panel-2 text-accent' : ''}`}
+        disabled={!tab}
+        onClick={() => tab && b.toggleDevTools(wsId, tab.id)}
+        title={tab?.devtools ? 'Đóng DevTools của tab này' : 'Mở DevTools của tab này (cửa sổ riêng)'}
+        aria-pressed={!!tab?.devtools}
+      >
+        {'</>'}
+      </button>
     </div>
   )
 }

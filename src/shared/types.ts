@@ -163,6 +163,8 @@ export interface BrowserTab {
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  /** DevTools của tab đang mở (cửa sổ riêng). */
+  devtools: boolean
 }
 
 /** Browser của một workspace. */

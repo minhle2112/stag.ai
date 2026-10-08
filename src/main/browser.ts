@@ -179,6 +179,8 @@ export class BrowserService {
     wc.on('page-title-updated', changed)
     wc.on('did-navigate', changed)
     wc.on('did-navigate-in-page', changed)
+    wc.on('devtools-opened', changed)
+    wc.on('devtools-closed', changed)
 
     wc.on('console-message', (e) => {
       // Cảnh báo bảo mật của chính Electron về trang (thiếu CSP…), không phải lỗi của trang.
@@ -235,7 +237,23 @@ export class BrowserService {
 
   private destroy(tab: Tab): void {
     this.win?.contentView.removeChildView(tab.view)
-    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
+    const wc = tab.view.webContents
+    if (wc.isDestroyed()) return
+    // Cửa sổ DevTools đi theo tab: đóng trước để không còn cửa sổ mồ côi.
+    if (wc.isDevToolsOpened()) wc.closeDevTools()
+    wc.close()
+  }
+
+  /**
+   * Mở / đóng DevTools của tab. Luôn là cửa sổ riêng (`detach`): view nằm đè lên giao diện app
+   * nên DevTools gắn vào cửa sổ app sẽ bị che. Dùng chung được với `webContents.debugger` của tool agent.
+   */
+  toggleDevTools(wsId: string, tabId: string): void {
+    const tab = this.tab(wsId, tabId)
+    const wc = tab.view.webContents
+    if (wc.isDevToolsOpened()) return wc.closeDevTools()
+    const who = tab.owner.kind === 'agent' ? `agent ${tab.owner.agentName}` : 'tab'
+    wc.openDevTools({ mode: 'detach', activate: true, title: `DevTools · ${who} · ${wc.getURL() || 'about:blank'}` })
   }
 
   activate(wsId: string, tabId: string): void {
@@ -278,7 +296,11 @@ export class BrowserService {
           const r = this.shown!.rect
           tab.view.setBounds({ x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) })
         }
+        const wasVisible = tab.view.getVisible()
         tab.view.setVisible(visible)
+        // Hiện lại sau khi ẩn (hộp thoại, kéo đổi độ rộng): ép vẽ lại, nếu không lúc cửa sổ đang bị che
+        // view có thể giữ khung trống tới lần trang tự vẽ tiếp.
+        if (visible && !wasVisible && !tab.view.webContents.isDestroyed()) tab.view.webContents.invalidate()
       }
     }
   }
@@ -493,7 +515,8 @@ function describeTab(t: Tab): BrowserTab {
     title: dead ? '' : wc.getTitle(),
     loading: !dead && wc.isLoading(),
     canGoBack: !dead && wc.navigationHistory.canGoBack(),
-    canGoForward: !dead && wc.navigationHistory.canGoForward()
+    canGoForward: !dead && wc.navigationHistory.canGoForward(),
+    devtools: !dead && wc.isDevToolsOpened()
   }
 }
 

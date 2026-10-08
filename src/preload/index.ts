@@ -101,7 +101,9 @@ const api = {
       const fn = (_e: IpcRendererEvent, ask: BrowserPermissionAsk): void => cb(ask)
       ipcRenderer.on(IPC.browserAsk, fn)
       return () => ipcRenderer.removeListener(IPC.browserAsk, fn)
-    }
+    },
+    /** Mở / đóng DevTools của tab (cửa sổ riêng). */
+    toggleDevTools: (workspaceId: string, tabId: string): Promise<void> => ipcRenderer.invoke(IPC.browserDevTools, workspaceId, tabId)
   },
   workspace: {
     list: (): Promise<Workspace[]> => ipcRenderer.invoke(IPC.wsList),

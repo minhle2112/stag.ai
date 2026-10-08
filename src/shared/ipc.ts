@@ -41,7 +41,8 @@ export const IPC = {
   browserReload: 'browser:reload',
   browserBounds: 'browser:bounds',
   browserAsk: 'browser:ask',
-  browserAnswer: 'browser:answer'
+  browserAnswer: 'browser:answer',
+  browserDevTools: 'browser:devtools'
 } as const
 
 export interface AppInfo {
