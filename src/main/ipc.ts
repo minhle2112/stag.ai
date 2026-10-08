@@ -1,15 +1,16 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
-import type { CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, StartAgentRequest, Workspace } from '@shared/types'
+import type { CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AgentService } from './agents'
 import type { Board } from './board'
+import { toUrl, type BrowserService } from './browser'
 import { openInObsidian } from './obsidian'
 import type { PtyManager } from './pty'
 import { prepareUserTemplates } from './templates'
 import { findRegisteredId, readNote, vaultTree } from './vault'
 import type { WorkspaceStore } from './workspace'
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -51,5 +52,18 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   }
   ipcMain.handle(IPC.boardSnapshot, (_e, workspaceId: string) => board.snapshot(ws(workspaceId)))
   ipcMain.handle(IPC.taskComplete, (_e, workspaceId: string, taskId: string) => board.closeTask(ws(workspaceId), taskId, 'done'))
+  ipcMain.handle(IPC.browserState, (_e, workspaceId: string) => browser.state(workspaceId))
+  ipcMain.handle(IPC.browserNewTab, (_e, workspaceId: string, url?: string) => {
+    ws(workspaceId)
+    browser.newTab(workspaceId, { kind: 'user' }, url ? toUrl(url) : undefined)
+  })
+  ipcMain.handle(IPC.browserCloseTab, (_e, workspaceId: string, tabId: string) => browser.closeTab(workspaceId, tabId))
+  ipcMain.handle(IPC.browserActivate, (_e, workspaceId: string, tabId: string) => browser.activate(workspaceId, tabId))
+  ipcMain.handle(IPC.browserNavigate, (_e, workspaceId: string, tabId: string, input: string) => browser.navigate(workspaceId, tabId, input))
+  ipcMain.handle(IPC.browserBack, (_e, workspaceId: string, tabId: string) => browser.back(workspaceId, tabId))
+  ipcMain.handle(IPC.browserForward, (_e, workspaceId: string, tabId: string) => browser.forward(workspaceId, tabId))
+  ipcMain.handle(IPC.browserReload, (_e, workspaceId: string, tabId: string) => browser.reload(workspaceId, tabId))
+  ipcMain.on(IPC.browserBounds, (_e, workspaceId: string | null, rect: ViewRect | null) => browser.setBounds(workspaceId, rect))
+  ipcMain.handle(IPC.browserAnswer, (_e, askId: string, allow: boolean) => browser.answer(askId, allow))
   ipcMain.handle(IPC.taskDrop, (_e, workspaceId: string, taskId: string) => board.closeTask(ws(workspaceId), taskId, 'dropped'))
 }

@@ -11,6 +11,12 @@ KANBAN (tool MCP "stag")
 - task_done(summary): khi xong việc và đã cập nhật vault → thẻ sang cột "Xong".
 - task_list(): xem việc và phạm vi của mọi agent trong workspace.
 
+BROWSER (tool MCP "stag", người dùng thấy trực tiếp trong pane Browser của app)
+- Dùng các tool browser_* của stag thay cho công cụ browser khác khi cần xem trang web (app đang chạy ở localhost, tài liệu…).
+- browser_navigate(url) → browser_snapshot() để đọc trang và lấy số [ref] → browser_click(ref) / browser_type(ref, text, submit?) / browser_press(key).
+- browser_console(only_errors?) đọc lỗi JS và lỗi tải trang; browser_screenshot() khi cần nhìn giao diện.
+- localhost mở ngay; trang ngoài Internet thì người dùng phải cho phép. Bị từ chối thì không thử lại.
+
 KHI BẮT ĐẦU PHIÊN MỚI
 1. Recall: {{RECALL}} và đọc bộ nhớ riêng của bạn. Chưa đọc gì thêm.
 2. {{OPENING}}

@@ -1,7 +1,8 @@
 // Dùng: node cdp.mjs <port> <js-expression> [text-to-type]
 const [port, expr, typeText] = process.argv.slice(2)
 const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json()
-const page = targets.find(t => t.type === 'page' && !t.url.startsWith('devtools'))
+const page = // Cửa sổ app (title stag.ai); các tab browser trong app cũng là target 'page'.
+  (targets.find(t => t.type === 'page' && t.title === 'stag.ai') ?? targets.find(t => t.type === 'page' && !t.url.startsWith('devtools')))
 const ws = new WebSocket(page.webSocketDebuggerUrl)
 let n = 0; const pending = new Map()
 const call = (method, params = {}) => new Promise(r => { const id = ++n; pending.set(id, r); ws.send(JSON.stringify({ id, method, params })) })

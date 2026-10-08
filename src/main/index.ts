@@ -3,6 +3,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AgentService } from './agents'
 import { Board } from './board'
+import { BrowserService } from './browser'
 import { StatusHub } from './hub'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty'
@@ -10,10 +11,16 @@ import { WorkspaceStore } from './workspace'
 
 const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
-const board = new Board((workspaceId) => {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IPC.boardChanged, workspaceId)
+const board = new Board((workspaceId) => send(IPC.boardChanged, workspaceId))
+const send = (channel: string, ...args: unknown[]): void => {
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...args)
+}
+const browser = new BrowserService({
+  changed: (workspaceId, state) => send(IPC.browserChanged, workspaceId, state),
+  reveal: (workspaceId, tabId) => send(IPC.browserReveal, workspaceId, tabId),
+  ask: (ask) => send(IPC.browserAsk, ask)
 })
-const agents = new AgentService(ptys, workspaces, board)
+const agents = new AgentService(ptys, workspaces, board, browser)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId)
@@ -37,6 +44,7 @@ function createWindow(): void {
   })
 
   win.once('ready-to-show', () => win.show())
+  browser.attachWindow(win)
 
   // Link ngoài mở bằng trình duyệt hệ thống, không mở cửa sổ Electron mới.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -56,7 +64,7 @@ app.whenReady().then(async () => {
   await agents.load()
   await hub.start()
   agents.attachHub(hub)
-  registerIpc(ptys, workspaces, agents, board)
+  registerIpc(ptys, workspaces, agents, board, browser)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -64,6 +72,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  browser.shutdown()
   agents.shutdown()
   hub.stop()
 })

@@ -5,11 +5,14 @@ import type {
   AgentRun,
   AgentsSnapshot,
   BoardSnapshot,
+  BrowserPermissionAsk,
+  BrowserState,
   CreateAgentRequest,
   CreateWorkspaceRequest,
   LayoutNode,
   StartAgentRequest,
   Task,
+  ViewRect,
   CreateWorkspaceResult,
   ObsidianOpenResult,
   VaultNode,
@@ -69,6 +72,35 @@ const api = {
       const fn = (_e: IpcRendererEvent, workspaceId: string): void => cb(workspaceId)
       ipcRenderer.on(IPC.boardChanged, fn)
       return () => ipcRenderer.removeListener(IPC.boardChanged, fn)
+    }
+  },
+  browser: {
+    state: (workspaceId: string): Promise<BrowserState> => ipcRenderer.invoke(IPC.browserState, workspaceId),
+    newTab: (workspaceId: string, url?: string): Promise<void> => ipcRenderer.invoke(IPC.browserNewTab, workspaceId, url),
+    closeTab: (workspaceId: string, tabId: string): Promise<void> => ipcRenderer.invoke(IPC.browserCloseTab, workspaceId, tabId),
+    activate: (workspaceId: string, tabId: string): Promise<void> => ipcRenderer.invoke(IPC.browserActivate, workspaceId, tabId),
+    navigate: (workspaceId: string, tabId: string, input: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.browserNavigate, workspaceId, tabId, input),
+    back: (workspaceId: string, tabId: string): Promise<void> => ipcRenderer.invoke(IPC.browserBack, workspaceId, tabId),
+    forward: (workspaceId: string, tabId: string): Promise<void> => ipcRenderer.invoke(IPC.browserForward, workspaceId, tabId),
+    reload: (workspaceId: string, tabId: string): Promise<void> => ipcRenderer.invoke(IPC.browserReload, workspaceId, tabId),
+    /** Vị trí vùng hiển thị trang (null = ẩn). */
+    setBounds: (workspaceId: string | null, rect: ViewRect | null): void => ipcRenderer.send(IPC.browserBounds, workspaceId, rect),
+    answer: (askId: string, allow: boolean): Promise<void> => ipcRenderer.invoke(IPC.browserAnswer, askId, allow),
+    onChanged(cb: (workspaceId: string, state: BrowserState) => void): () => void {
+      const fn = (_e: IpcRendererEvent, workspaceId: string, state: BrowserState): void => cb(workspaceId, state)
+      ipcRenderer.on(IPC.browserChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.browserChanged, fn)
+    },
+    onReveal(cb: (workspaceId: string, tabId: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, workspaceId: string, tabId: string): void => cb(workspaceId, tabId)
+      ipcRenderer.on(IPC.browserReveal, fn)
+      return () => ipcRenderer.removeListener(IPC.browserReveal, fn)
+    },
+    onAsk(cb: (ask: BrowserPermissionAsk) => void): () => void {
+      const fn = (_e: IpcRendererEvent, ask: BrowserPermissionAsk): void => cb(ask)
+      ipcRenderer.on(IPC.browserAsk, fn)
+      return () => ipcRenderer.removeListener(IPC.browserAsk, fn)
     }
   },
   workspace: {

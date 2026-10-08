@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AgentGrid } from './components/AgentGrid'
+import { BrowserAskDialog, BrowserPane } from './components/BrowserPane'
 import { Kanban } from './components/Kanban'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
@@ -79,13 +80,14 @@ export function App(): React.JSX.Element {
             )}
             {active && tab === 'kanban' && <Kanban key={active.id} workspace={active} />}
           </section>
-          {browserOpen && (
-            <aside className="w-[40%] shrink-0 border-l border-line bg-panel">
-              <Placeholder text="Browser — làm ở mốc M4" />
+          {browserOpen && active && (
+            <aside className="w-[42%] min-w-[360px] shrink-0 border-l border-line bg-panel">
+              <BrowserPane key={active.id} workspace={active} />
             </aside>
           )}
         </div>
       </main>
+      <BrowserAskDialog />
     </div>
   )
 }

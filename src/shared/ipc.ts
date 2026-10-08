@@ -28,7 +28,20 @@ export const IPC = {
   boardSnapshot: 'board:snapshot',
   boardChanged: 'board:changed',
   taskComplete: 'task:complete',
-  taskDrop: 'task:drop'
+  taskDrop: 'task:drop',
+  browserState: 'browser:state',
+  browserChanged: 'browser:changed',
+  browserReveal: 'browser:reveal',
+  browserNewTab: 'browser:new-tab',
+  browserCloseTab: 'browser:close-tab',
+  browserActivate: 'browser:activate',
+  browserNavigate: 'browser:navigate',
+  browserBack: 'browser:back',
+  browserForward: 'browser:forward',
+  browserReload: 'browser:reload',
+  browserBounds: 'browser:bounds',
+  browserAsk: 'browser:ask',
+  browserAnswer: 'browser:answer'
 } as const
 
 export interface AppInfo {

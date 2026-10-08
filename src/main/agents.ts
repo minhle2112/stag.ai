@@ -4,6 +4,7 @@ import { delimiter, dirname, join } from 'node:path'
 import { app, type WebContents } from 'electron'
 import type { Agent, AgentRun, AgentsSnapshot, CreateAgentRequest, LayoutNode, StartAgentRequest, Task, Workspace } from '@shared/types'
 import type { Board, HookPayload } from './board'
+import type { BrowserService } from './browser'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
 import { createStagMcp } from './mcp'
@@ -72,7 +73,8 @@ export class AgentService {
   constructor(
     private ptys: PtyManager,
     private workspaces: WorkspaceStore,
-    private board: Board
+    private board: Board,
+    private browser: BrowserService
   ) {}
 
   /** Gắn máy chủ trạng thái (hook + MCP) sau khi nó đã chạy. */
@@ -237,6 +239,7 @@ export class AgentService {
       workspace: ws,
       sessionId: run?.sessionId,
       board: this.board,
+      browser: this.browser,
       teammates: () =>
         this.data.agents.filter((a) => a.workspaceId === ws.id).map((a) => ({ agent: a, running: this.running.has(a.id) })),
       syncSessionFile: async () => {
@@ -263,6 +266,7 @@ export class AgentService {
     const ctx = this.context(agentId)
     if (ctx) await this.board.dropAgentTasks(ctx.ws, agentId)
     this.board.forget(agentId)
+    this.browser.closeAgentTabs(agentId)
     this.data.agents = this.data.agents.filter((a) => a.id !== agentId)
     await this.save()
   }
@@ -273,6 +277,7 @@ export class AgentService {
     this.data.agents = this.data.agents.filter((a) => a.workspaceId !== workspaceId)
     delete this.data.layouts[workspaceId]
     this.board.forgetWorkspace(workspaceId)
+    this.browser.closeWorkspace(workspaceId)
     await this.save()
   }
 

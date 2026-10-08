@@ -151,3 +151,38 @@ export interface BoardSnapshot {
   statuses: AgentStatus[]
   tasks: Task[]
 }
+
+/** Ai mở tab browser: người dùng, hoặc một agent. */
+export type BrowserTabOwner = { kind: 'user' } | { kind: 'agent'; agentId: string; agentName: string }
+
+export interface BrowserTab {
+  id: string
+  owner: BrowserTabOwner
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+}
+
+/** Browser của một workspace. */
+export interface BrowserState {
+  tabs: BrowserTab[]
+  activeTabId: string | null
+}
+
+/** Agent xin mở trang ngoài localhost: người dùng trả lời trong app. */
+export interface BrowserPermissionAsk {
+  id: string
+  workspaceId: string
+  agentName: string
+  origin: string
+  url: string
+}
+
+export interface ViewRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}

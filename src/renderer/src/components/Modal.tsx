@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { useUi } from '../store/ui'
 
 interface Props {
   title: string
@@ -9,6 +10,12 @@ interface Props {
 }
 
 export function Modal({ title, children, footer, onClose, width = 'w-[560px]' }: Props): React.JSX.Element {
+  useEffect(() => {
+    const ui = useUi.getState()
+    ui.modalOpened()
+    return () => ui.modalClosed()
+  }, [])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onMouseDown={onClose}>
       <div
