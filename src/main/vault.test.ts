@@ -1,0 +1,190 @@
+import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultProjectName, detectVaults, findRegisteredId, readNote, readObsidianRegistry, vaultDirName, vaultTree } from './vault'
+
+let root: string
+let project: string
+let appData: string
+
+const STAG_INDEX = '---\ntype: index\nupdated: 2026-01-01\n---\n# INDEX\n'
+
+async function put(rel: string, content = ''): Promise<void> {
+  const file = join(project, rel)
+  await fs.mkdir(dirname(file), { recursive: true })
+  await fs.writeFile(file, content, 'utf8')
+}
+
+async function mkdir(rel: string): Promise<void> {
+  await fs.mkdir(join(project, rel), { recursive: true })
+}
+
+/** Viết obsidian.json giả trong %APPDATA% tạm (không bao giờ đọc file thật của người dùng). */
+async function registry(paths: Record<string, string>): Promise<void> {
+  const vaults = Object.fromEntries(Object.entries(paths).map(([id, path]) => [id, { path, ts: 1, open: true }]))
+  await fs.mkdir(join(appData, 'obsidian'), { recursive: true })
+  await fs.writeFile(join(appData, 'obsidian', 'obsidian.json'), JSON.stringify({ vaults }), 'utf8')
+}
+
+beforeEach(async () => {
+  root = await fs.mkdtemp(join(tmpdir(), 'stag-vault-'))
+  project = join(root, 'proj')
+  appData = join(root, 'AppData')
+  await fs.mkdir(project, { recursive: true })
+  vi.stubEnv('APPDATA', appData)
+})
+
+afterEach(async () => {
+  vi.unstubAllEnvs()
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+describe('readObsidianRegistry', () => {
+  it('không có obsidian.json → rỗng', async () => {
+    expect(await readObsidianRegistry()).toEqual([])
+  })
+
+  it('không có APPDATA → rỗng', async () => {
+    vi.stubEnv('APPDATA', undefined)
+    expect(await readObsidianRegistry()).toEqual([])
+  })
+
+  it('file hỏng → rỗng, không ném lỗi', async () => {
+    await fs.mkdir(join(appData, 'obsidian'), { recursive: true })
+    await fs.writeFile(join(appData, 'obsidian', 'obsidian.json'), '{hỏng', 'utf8')
+    expect(await readObsidianRegistry()).toEqual([])
+  })
+
+  it('đọc danh sách, bỏ mục không có path', async () => {
+    await fs.mkdir(join(appData, 'obsidian'), { recursive: true })
+    await fs.writeFile(
+      join(appData, 'obsidian', 'obsidian.json'),
+      JSON.stringify({ vaults: { a: { path: 'C:\\v1' }, b: { ts: 1 } } }),
+      'utf8'
+    )
+    expect(await readObsidianRegistry()).toEqual([{ id: 'a', path: 'C:\\v1' }])
+  })
+
+  it('findRegisteredId so đường dẫn không phân biệt / \\ và hoa thường', async () => {
+    await registry({ abc: 'C:/Users/X/Proj/Proj memory' })
+    expect(await findRegisteredId('c:\\users\\x\\proj\\proj memory\\')).toBe('abc')
+    expect(await findRegisteredId('C:\\khác')).toBeUndefined()
+  })
+})
+
+describe('detectVaults', () => {
+  it('thư mục trống → không có vault', async () => {
+    expect(await detectVaults(project)).toEqual([])
+  })
+
+  it('thư mục con có _INDEX.md type: index → vault đúng mẫu stag', async () => {
+    await put('proj memory/_INDEX.md', STAG_INDEX)
+    expect(await detectVaults(project)).toEqual([
+      { path: join(project, 'proj memory'), relPath: 'proj memory', kind: 'stag', registered: false }
+    ])
+  })
+
+  it('_INDEX.md xuống dòng CRLF vẫn nhận', async () => {
+    await put('m/_INDEX.md', STAG_INDEX.replace(/\n/g, '\r\n'))
+    expect((await detectVaults(project)).map((v) => v.kind)).toEqual(['stag'])
+  })
+
+  it('_INDEX.md không có type: index → không phải vault', async () => {
+    await put('a/_INDEX.md', '# Không frontmatter\ntype: index\n')
+    await put('b/_INDEX.md', '---\ntype: note\n---\n')
+    expect(await detectVaults(project)).toEqual([])
+  })
+
+  it('có .obsidian/ → vault Obsidian khác mẫu', async () => {
+    await mkdir('notes/.obsidian')
+    await put('notes/a.md', 'x')
+    expect(await detectVaults(project)).toEqual([
+      { path: join(project, 'notes'), relPath: 'notes', kind: 'obsidian', registered: false }
+    ])
+  })
+
+  it('chính thư mục dự án là vault → relPath rỗng, không quét vault lồng bên trong', async () => {
+    await mkdir('.obsidian')
+    await put('inner/_INDEX.md', STAG_INDEX)
+    expect(await detectVaults(project)).toEqual([{ path: project, relPath: '', kind: 'obsidian', registered: false }])
+  })
+
+  it('vault đúng mẫu lên trước, rồi theo relPath', async () => {
+    await mkdir('z-obs/.obsidian')
+    await mkdir('a-obs/.obsidian')
+    await put('m memory/_INDEX.md', STAG_INDEX)
+    await mkdir('m memory/.obsidian')
+    expect((await detectVaults(project)).map((v) => [v.relPath, v.kind])).toEqual([
+      ['m memory', 'stag'],
+      ['a-obs', 'obsidian'],
+      ['z-obs', 'obsidian']
+    ])
+  })
+
+  it('quét tối đa 2 cấp và bỏ qua node_modules, .git…', async () => {
+    await mkdir(join('a', 'b', '.obsidian')) // cấp 2 → thấy
+    await mkdir(join('a', 'b2', 'c', '.obsidian')) // cấp 3 → không thấy
+    await mkdir(join('node_modules', 'pkg', '.obsidian'))
+    await mkdir(join('.git', '.obsidian'))
+    expect((await detectVaults(project)).map((v) => v.relPath)).toEqual([join('a', 'b')])
+  })
+
+  it('gắn nhãn registered theo obsidian.json (giả, trong APPDATA tạm)', async () => {
+    await put('proj memory/_INDEX.md', STAG_INDEX)
+    await mkdir('other/.obsidian')
+    await registry({ id1: join(project, 'proj memory').replace(/\\/g, '/').toUpperCase() })
+    const found = await detectVaults(project)
+    expect(found.map((v) => [v.relPath, v.registered])).toEqual([
+      ['proj memory', true],
+      ['other', false]
+    ])
+  })
+})
+
+describe('vaultTree / readNote', () => {
+  it('chỉ lấy thư mục + .md, bỏ mục ẩn, thư mục lên trước', async () => {
+    await put('v/_INDEX.md')
+    await put('v/10 A/note 2.md')
+    await put('v/10 A/note 10.md')
+    await put('v/10 A/ảnh.png')
+    await put('v/.obsidian/app.json')
+    await put('v/.hidden.md')
+    const tree = await vaultTree(join(project, 'v'))
+    expect(tree).toEqual([
+      {
+        name: '10 A',
+        rel: '10 A',
+        dir: true,
+        children: [
+          { name: 'note 2', rel: '10 A/note 2.md', dir: false },
+          { name: 'note 10', rel: '10 A/note 10.md', dir: false }
+        ]
+      },
+      { name: '_INDEX', rel: '_INDEX.md', dir: false }
+    ])
+  })
+
+  it('vault không tồn tại → cây rỗng', async () => {
+    expect(await vaultTree(join(project, 'không có'))).toEqual([])
+  })
+
+  it('readNote đọc note trong vault, chặn đường dẫn thoát ra ngoài', async () => {
+    await put('v/a.md', 'nội dung')
+    await put('bí mật.md', 'không được đọc')
+    const vault = join(project, 'v')
+    expect(await readNote(vault, 'a.md')).toBe('nội dung')
+    await expect(readNote(vault, '../bí mật.md')).rejects.toThrow('ngoài vault')
+    await expect(readNote(vault, join(project, 'bí mật.md'))).rejects.toThrow('ngoài vault')
+    // Thư mục anh em có tên bắt đầu bằng tên vault cũng là "ngoài".
+    await put('v2/x.md', 'x')
+    await expect(readNote(vault, '../v2/x.md')).rejects.toThrow('ngoài vault')
+  })
+})
+
+describe('tên', () => {
+  it('vaultDirName / defaultProjectName', () => {
+    expect(vaultDirName('stag.ai')).toBe('stag.ai memory')
+    expect(defaultProjectName(join(root, 'Dự án X'))).toBe('Dự án X')
+  })
+})
