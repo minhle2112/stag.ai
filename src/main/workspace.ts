@@ -18,7 +18,7 @@ export function autoMemoryDir(projectDir: string): string {
 }
 
 /** Ký tự không hợp lệ trong tên file Windows. */
-function safeName(name: string): string {
+export function safeName(name: string): string {
   return name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').trim()
 }
 
@@ -33,6 +33,10 @@ export class WorkspaceStore {
 
   list(): Workspace[] {
     return this.items
+  }
+
+  get(id: string): Workspace | undefined {
+    return this.items.find((w) => w.id === id)
   }
 
   private async save(): Promise<void> {
@@ -116,14 +120,8 @@ export class WorkspaceStore {
   private async ensureGitignore(projectDir: string, vaultPath: string): Promise<string> {
     const rel = relative(projectDir, vaultPath).replace(/\\/g, '/')
     if (!rel) return '.gitignore: vault chính là thư mục dự án, không thêm được vào .gitignore'
-    const file = join(projectDir, '.gitignore')
-    const current = (await readText(file)) ?? ''
-    const have = new Set(current.split(/\r?\n/).map((l) => l.trim().replace(/^\//, '')))
-    const wanted = [`${rel}/`, '.obsidian/'].filter((l) => !have.has(l))
-    if (!wanted.length) return '.gitignore: đã loại trừ vault, giữ nguyên'
-    const block = `${current && !current.endsWith('\n') ? '\n' : ''}${current ? '\n' : ''}# Vault Obsidian (dữ liệu cá nhân, không lên git)\n${wanted.join('\n')}\n`
-    await fs.appendFile(file, block, 'utf8')
-    return `.gitignore: thêm ${wanted.join(', ')}`
+    const added = await ensureIgnored(projectDir, [`${rel}/`, '.obsidian/', '.sessions/'], 'Vault Obsidian + phiên agent (dữ liệu cá nhân, không lên git)')
+    return added.length ? `.gitignore: thêm ${added.join(', ')}` : '.gitignore: đã loại trừ vault và .sessions/, giữ nguyên'
   }
 
   private async ensureClaudeMd(projectDir: string, vars: TemplateVars, structured: boolean): Promise<string> {
@@ -148,3 +146,17 @@ export class WorkspaceStore {
     return 'Cache auto memory có sẵn: thêm dòng trỏ về vault'
   }
 }
+
+/** Thêm các dòng còn thiếu vào .gitignore (chỉ khi thư mục là repo git). Trả về các dòng đã thêm. */
+export async function ensureIgnored(projectDir: string, entries: string[], header: string): Promise<string[]> {
+  if (!(await exists(join(projectDir, '.git')))) return []
+  const file = join(projectDir, '.gitignore')
+  const current = (await readText(file)) ?? ''
+  const have = new Set(current.split(/\r?\n/).map((l) => l.trim().replace(/^\//, '')))
+  const wanted = entries.filter((l) => !have.has(l))
+  if (!wanted.length) return []
+  const block = `${current && !current.endsWith('\n') ? '\n' : ''}${current ? '\n' : ''}# ${header}\n${wanted.join('\n')}\n`
+  await fs.appendFile(file, block, 'utf8')
+  return wanted
+}
+

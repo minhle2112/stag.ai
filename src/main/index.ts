@@ -1,12 +1,13 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
+import { AgentService } from './agents'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty'
-import { ensureUserTemplates } from './templates'
 import { WorkspaceStore } from './workspace'
 
 const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
+const agents = new AgentService(ptys, workspaces)
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -41,16 +42,19 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-  await ensureUserTemplates()
   await workspaces.load()
-  registerIpc(ptys, workspaces)
+  await agents.load()
+  registerIpc(ptys, workspaces, agents)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
+app.on('before-quit', () => agents.shutdown())
+
 app.on('window-all-closed', () => {
+  agents.shutdown()
   ptys.killAll()
   if (process.platform !== 'darwin') app.quit()
 })

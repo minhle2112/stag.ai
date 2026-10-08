@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import * as pty from 'node-pty'
-import { IPC, type PtySpawnOptions } from '@shared/ipc'
+import { IPC, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 
 const defaultShell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || 'bash'
 
@@ -10,18 +10,25 @@ interface Session {
   owner: WebContents
 }
 
+export interface SpawnExtras {
+  env?: Record<string, string>
+  /** Lọc biến môi trường kế thừa trước khi thêm `env`. */
+  filterEnv?: (env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv
+  onExit?: (exit: PtyExit) => void
+}
+
 /** Quản lý các terminal thật (ConPTY trên Windows) và đẩy dữ liệu về renderer sở hữu. */
 export class PtyManager {
   private sessions = new Map<string, Session>()
 
-  spawn(owner: WebContents, opts: PtySpawnOptions): string {
+  spawn(owner: WebContents, opts: PtySpawnOptions, extras: SpawnExtras = {}): string {
     const id = randomUUID()
     const proc = pty.spawn(opts.command || defaultShell, opts.args ?? [], {
       name: 'xterm-256color',
       cols: opts.cols,
       rows: opts.rows,
       cwd: opts.cwd,
-      env: { ...process.env, FORCE_COLOR: '1' } as Record<string, string>
+      env: { ...(extras.filterEnv ? extras.filterEnv(process.env) : process.env), FORCE_COLOR: '1', ...extras.env } as Record<string, string>
     })
     this.sessions.set(id, { proc, owner })
 
@@ -30,10 +37,15 @@ export class PtyManager {
     })
     proc.onExit(({ exitCode, signal }) => {
       this.sessions.delete(id)
+      extras.onExit?.({ exitCode, signal })
       if (!owner.isDestroyed()) owner.send(IPC.ptyExit, id, { exitCode, signal })
     })
     owner.once('destroyed', () => this.kill(id))
     return id
+  }
+
+  isAlive(id: string): boolean {
+    return this.sessions.has(id)
   }
 
   write(id: string, data: string): void {
@@ -47,7 +59,6 @@ export class PtyManager {
   kill(id: string): void {
     const s = this.sessions.get(id)
     if (!s) return
-    this.sessions.delete(id)
     s.proc.kill()
   }
 

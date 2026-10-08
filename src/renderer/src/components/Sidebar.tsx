@@ -20,7 +20,11 @@ export function Sidebar(): React.JSX.Element {
   }
 
   async function removeWorkspace(id: string, name: string): Promise<void> {
-    if (window.confirm(`Bỏ workspace "${name}" khỏi app?\n\nKhông xoá file nào trên đĩa (code, vault vẫn giữ nguyên).`)) {
+    if (
+      window.confirm(
+        `Bỏ workspace "${name}" khỏi app?\n\nCác agent của workspace này sẽ bị dừng và bỏ khỏi app. Không xoá file nào trên đĩa (code, vault, note agent vẫn giữ nguyên).`
+      )
+    ) {
       await remove(id)
     }
   }

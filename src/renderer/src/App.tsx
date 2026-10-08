@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
+import { AgentGrid } from './components/AgentGrid'
 import { Sidebar } from './components/Sidebar'
-import { TerminalPane } from './components/TerminalPane'
 import { VaultView } from './components/VaultView'
 import { useUi, type MainTab } from './store/ui'
 import { useActiveWorkspace, useWorkspaces } from './store/workspaces'
@@ -15,7 +15,7 @@ export function App(): React.JSX.Element {
   const { tab, setTab, browserOpen, toggleBrowser } = useUi()
   const { items, loaded, load } = useWorkspaces()
   const active = useActiveWorkspace()
-  // Terminal của workspace đã mở được giữ sống khi chuyển workspace.
+  // Lưới agent của workspace đã mở được giữ sống khi chuyển workspace/tab.
   const [visited, setVisited] = useState<string[]>([])
 
   useEffect(() => {
@@ -59,7 +59,7 @@ export function App(): React.JSX.Element {
               .filter((w) => visited.includes(w.id))
               .map((w) => (
                 <div key={w.id} className={`absolute inset-0 ${tab === 'agents' && w.id === active?.id ? '' : 'invisible'}`}>
-                  <TerminalPane cwd={w.path} />
+                  <AgentGrid workspace={w} />
                 </div>
               ))}
 

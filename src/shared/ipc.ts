@@ -18,7 +18,13 @@ export const IPC = {
   vaultOpenObsidian: 'vault:open-obsidian',
   vaultIsRegistered: 'vault:is-registered',
   openFolder: 'shell:open-folder',
-  templatesOpen: 'templates:open'
+  templatesOpen: 'templates:open',
+  agentSnapshot: 'agent:snapshot',
+  agentCreate: 'agent:create',
+  agentStart: 'agent:start',
+  agentStop: 'agent:stop',
+  agentRemove: 'agent:remove',
+  agentLayout: 'agent:layout'
 } as const
 
 export interface AppInfo {

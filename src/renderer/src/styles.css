@@ -28,8 +28,17 @@ body {
   user-select: none;
 }
 
+:root {
+  color-scheme: dark;
+}
+
 .xterm,
 .xterm .xterm-viewport {
   height: 100%;
   background-color: var(--color-bg) !important;
+}
+
+/* xterm 6 tự vẽ thanh cuộn; ẩn thanh cuộn gốc của Chromium trên viewport. */
+.xterm .xterm-viewport {
+  scrollbar-width: none;
 }

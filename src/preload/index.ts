@@ -1,7 +1,13 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type {
+  Agent,
+  AgentRun,
+  AgentsSnapshot,
+  CreateAgentRequest,
   CreateWorkspaceRequest,
+  LayoutNode,
+  StartAgentRequest,
   CreateWorkspaceResult,
   ObsidianOpenResult,
   VaultNode,
@@ -29,7 +35,27 @@ const api = {
       }
       ipcRenderer.on(IPC.ptyExit, fn)
       return () => ipcRenderer.removeListener(IPC.ptyExit, fn)
+    },
+    /** Nhận dữ liệu của mọi terminal (để không mất phần in ra trước khi ô kịp gắn vào). */
+    onAnyData(cb: (id: string, data: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, id: string, data: string): void => cb(id, data)
+      ipcRenderer.on(IPC.ptyData, fn)
+      return () => ipcRenderer.removeListener(IPC.ptyData, fn)
+    },
+    onAnyExit(cb: (id: string, exit: PtyExit) => void): () => void {
+      const fn = (_e: IpcRendererEvent, id: string, exit: PtyExit): void => cb(id, exit)
+      ipcRenderer.on(IPC.ptyExit, fn)
+      return () => ipcRenderer.removeListener(IPC.ptyExit, fn)
     }
+  },
+  agent: {
+    snapshot: (workspaceId: string): Promise<AgentsSnapshot> => ipcRenderer.invoke(IPC.agentSnapshot, workspaceId),
+    create: (req: CreateAgentRequest): Promise<Agent> => ipcRenderer.invoke(IPC.agentCreate, req),
+    start: (req: StartAgentRequest): Promise<AgentRun> => ipcRenderer.invoke(IPC.agentStart, req),
+    stop: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentStop, agentId),
+    remove: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentRemove, agentId),
+    saveLayout: (workspaceId: string, layout: LayoutNode | null): Promise<void> =>
+      ipcRenderer.invoke(IPC.agentLayout, workspaceId, layout)
   },
   workspace: {
     list: (): Promise<Workspace[]> => ipcRenderer.invoke(IPC.wsList),
