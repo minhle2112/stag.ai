@@ -61,6 +61,13 @@ export class StatusHub {
     return ['--settings', this.settingsFile, '--mcp-config', this.mcpFile]
   }
 
+  /** Địa chỉ hook / MCP cho CLI không dùng file cấu hình của app (Codex nhận qua `-c`). */
+  endpoints(): { hookUrl: string; mcpUrl: string } {
+    if (!this.server) throw new Error('StatusHub chưa chạy')
+    const base = `http://127.0.0.1:${this.port}`
+    return { hookUrl: `${base}/hook`, mcpUrl: `${base}/mcp` }
+  }
+
   /** Biến môi trường thêm cho tiến trình agent. */
   env(): Record<string, string> {
     return { STAG_TOKEN: this.token }

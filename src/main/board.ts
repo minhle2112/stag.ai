@@ -104,6 +104,9 @@ export class Board {
         return
       case 'Stop':
         return this.setActivity(agent, 'waiting', { reason: 'turn' })
+      // Codex: người dùng bấm Esc giữa lượt (Claude Code không có sự kiện này, xem transcript.ts).
+      case 'Interrupt':
+        return this.interrupted(agent, new Date().toISOString())
     }
   }
 

@@ -17,6 +17,7 @@ import {
 } from '@shared/types'
 import type { Board, HookPayload } from './board'
 import type { BrowserService } from './browser'
+import { codexArgs, findCodexRollout, isCodexSessionVar, parseCodexContext, resolveCodex } from './codex'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
@@ -52,6 +53,8 @@ interface Running extends AgentRun {
    * context (có ngay khi tiếp tục phiên cũ, trước lần chạy statusLine đầu tiên; xem context.ts).
    */
   transcript: TranscriptWatcher | null
+  /** Codex: đã theo đúng file rollout chưa (đường dẫn chỉ biết sau hook SessionStart / lần ghi đầu). */
+  rolloutKnown?: boolean
   /** Đang nhờ agent bàn giao: lúc gõ lời nhờ, và Claude Code đã nhận lời nhờ đó chưa (UserPromptSubmit). */
   handoffAsk?: { at: number; submitted: boolean }
 }
@@ -95,13 +98,18 @@ const USER_CLAUDE_CONFIG =
  * Agent của stag.ai là phiên độc lập, nên bỏ các biến đó, giữ biến cấu hình của người dùng.
  */
 export function independentSessionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (!env.CLAUDECODE && !env.CLAUDE_CODE_CHILD_SESSION) return env
+  const claude = !!(env.CLAUDECODE || env.CLAUDE_CODE_CHILD_SESSION)
+  // Mở từ trong một phiên Codex: biến thread / sandbox của phiên đó (xem codex.ts).
+  const codex = Object.keys(env).some(isCodexSessionVar)
+  if (!claude && !codex) return env
   const out: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(env)) {
     const hostMarker =
-      /^(CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT)$/.test(key) ||
-      /^(CLAUDE_AGENT_SDK_|CLAUDE_PREVIEW_)/.test(key) ||
-      (key.startsWith('CLAUDE_CODE_') && !USER_CLAUDE_CONFIG.test(key))
+      (claude &&
+        (/^(CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT)$/.test(key) ||
+          /^(CLAUDE_AGENT_SDK_|CLAUDE_PREVIEW_)/.test(key) ||
+          (key.startsWith('CLAUDE_CODE_') && !USER_CLAUDE_CONFIG.test(key)))) ||
+      isCodexSessionVar(key)
     if (!hostMarker) out[key] = value
   }
   return out
@@ -176,7 +184,7 @@ export class AgentService {
     return agent
   }
 
-  /** Mở một phiên Claude Code cho agent trong terminal thật. */
+  /** Mở một phiên CLI (Claude Code / Codex) cho agent trong terminal thật. */
   async start(owner: WebContents, req: StartAgentRequest): Promise<AgentRun> {
     const agent = this.data.agents.find((a) => a.id === req.agentId)
     if (!agent) throw new Error('Agent không tồn tại')
@@ -187,12 +195,17 @@ export class AgentService {
     if (agentKind(agent) === 'terminal') return this.startTerminal(owner, agent, ws, req)
 
     if (!this.hub) throw new Error('Máy chủ trạng thái của app chưa sẵn sàng')
-    const exe = await resolveClaude()
+    const kind = agentKind(agent)
+    if (kind !== 'claude' && kind !== 'codex') throw new Error('Loại agent này chưa được hỗ trợ')
+    const exe = kind === 'codex' ? await resolveCodex() : await resolveClaude()
     const resume = req.resume && !!agent.lastSessionId
     const open = await this.board.openTask(ws, agent.id)
     // Phiên trước đã bàn giao: phiên mới (không phải tiếp tục phiên cũ) làm tiếp từ bản bàn giao.
     const handoff = resume ? undefined : this.data.handoffs?.[agent.id]
-    const sessionId = resume ? agent.lastSessionId! : randomUUID()
+    // Claude Code: id phiên của app = id phiên Claude (đặt trước được). Codex tự sinh thread id (biết qua
+    // hook SessionStart, lưu vào lastSessionId để resume), nên phiên của app luôn có id riêng.
+    const sessionId = resume && kind === 'claude' ? agent.lastSessionId! : randomUUID()
+    const codexResume = resume && kind === 'codex' ? agent.lastSessionId : undefined
     const sessionFile = join(ws.path, '.sessions', `${sessionId}.md`)
     const agentNote = join(ws.vaultPath, '60 Agents', `${agent.name}.md`)
     const structured = await exists(join(ws.vaultPath, '_INDEX.md'))
@@ -223,19 +236,28 @@ export class AgentService {
     await writeIfMissing(agentNote, await readTemplate('agent/agent-note.md', vars))
     await ensureIgnored(ws.path, ['.sessions/'], 'stag.ai agent sessions')
 
-    const args = resume ? ['--resume', sessionId] : ['--session-id', sessionId]
-    args.push('--name', agent.name, '--append-system-prompt', await readTemplate('agent/rules.md', vars))
-    args.push(...this.hub.claudeArgs())
-    if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
-    // `--` trước lời mở: `--mcp-config` nhận nhiều giá trị, không chặn lại thì nuốt luôn lời mở làm tên file.
-    if (!resume) args.push('--', handoff ? 'Continue from the handoff of the previous session.' : 'Start a new session.')
-
-    // statusLine của app (cho biết kích thước cửa sổ context) thay statusLine của người dùng trong phiên
-    // agent; script của app chạy tiếp lệnh của họ để nó vẫn hiện như cũ (xem statusScript trong hub.ts).
-    const ownStatusLine = await userStatusLine(ws.path)
-    const statusEnv: Record<string, string> = ownStatusLine
-      ? { STAG_USER_STATUSLINE: ownStatusLine, STAG_USER_STATUSLINE_BASH: (await findGitBash()) ?? '' }
-      : {}
+    const rules = await readTemplate('agent/rules.md', vars)
+    const opening = handoff ? 'Continue from the handoff of the previous session.' : 'Start a new session.'
+    let args: string[]
+    let statusEnv: Record<string, string> = {}
+    // Transcript đoán trước. Codex: rollout của phiên cũ khi resume; phiên mới thì chưa có (theo sau, xem codexHook).
+    let transcriptFile: string
+    if (kind === 'codex') {
+      args = codexArgs({ rules, ...this.hub.endpoints(), permissionMode: agent.permissionMode, resumeId: codexResume, prompt: opening })
+      transcriptFile = (codexResume && (await findCodexRollout(codexResume))) || join(ws.path, '.sessions', `${sessionId}.rollout-pending`)
+    } else {
+      args = resume ? ['--resume', sessionId] : ['--session-id', sessionId]
+      args.push('--name', agent.name, '--append-system-prompt', rules)
+      args.push(...this.hub.claudeArgs())
+      if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
+      // `--` trước lời mở: `--mcp-config` nhận nhiều giá trị, không chặn lại thì nuốt luôn lời mở làm tên file.
+      if (!resume) args.push('--', opening)
+      // statusLine của app (cho biết kích thước cửa sổ context) thay statusLine của người dùng trong phiên
+      // agent; script của app chạy tiếp lệnh của họ để nó vẫn hiện như cũ (xem statusScript trong hub.ts).
+      const ownStatusLine = await userStatusLine(ws.path)
+      if (ownStatusLine) statusEnv = { STAG_USER_STATUSLINE: ownStatusLine, STAG_USER_STATUSLINE_BASH: (await findGitBash()) ?? '' }
+      transcriptFile = transcriptPath(ws.path, sessionId)
+    }
     const ptyId = this.ptys.spawn(
       owner,
       { command: exe, args, cwd: ws.path, cols: req.cols, rows: req.rows },
@@ -254,9 +276,10 @@ export class AgentService {
     )
     // Chỉ đọc phần ghi từ lúc này: `--resume` giữ nguyên transcript cũ, trong đó có thể đã có dòng ngắt
     // của lần trước. (Mở chỉ tốn một lần stat, xong trước khi claude kịp khởi động.)
-    const transcript = TranscriptWatcher.open(transcriptPath(ws.path, sessionId), {
+    const transcript = TranscriptWatcher.open(transcriptFile, {
       onInterrupt: (i) => this.onInterrupt(agent.id, ptyId, i.at),
-      onContext: (c) => this.onContext(agent.id, ptyId, { used: c.used, at: c.at })
+      onContext: (c) => this.onContext(agent.id, ptyId, { used: c.used, size: c.size, at: c.at }),
+      contextParser: kind === 'codex' ? parseCodexContext : undefined
     })
     const run: Running = {
       agentId: agent.id,
@@ -266,14 +289,15 @@ export class AgentService {
       owner,
       sessionFile,
       vars,
-      transcript
+      transcript,
+      rolloutKnown: kind === 'codex' ? !transcriptFile.endsWith('.rollout-pending') : undefined
     }
     this.running.set(agent.id, run)
     // Phiên mới: chờ hook đầu tiên (lời mở đầu). Tiếp tục phiên: Claude Code đứng chờ người dùng gõ.
     if (resume) this.board.setActivity(agent, 'waiting', { reason: 'turn' })
     else this.board.setActivity(agent, 'starting')
     this.board.setHandoff(agent, undefined)
-    agent.lastSessionId = sessionId
+    if (kind === 'claude') agent.lastSessionId = sessionId
     // Bản bàn giao đã chép vào file phiên mới: dùng một lần.
     if (handoff) delete this.data.handoffs![agent.id]
     await this.save()
@@ -348,12 +372,33 @@ export class AgentService {
     if (!ctx?.run) return
     // Đường dẫn transcript thật (đoán sai lúc mở, hoặc /clear sang phiên mới) → theo file đó.
     if (payload.transcript_path) void ctx.run.transcript?.follow(payload.transcript_path)
+    if (agentKind(ctx.agent) === 'codex') void this.codexHook(ctx.agent, ctx.run, payload)
     this.board.hook(ctx.agent, payload)
     const ask = ctx.run.handoffAsk
     if (ask && this.board.statusOf(agentId)?.handoff === 'asking') {
       if (payload.hook_event_name === 'UserPromptSubmit') ask.submitted = true
+      else if (payload.hook_event_name === 'Interrupt') this.handoffFailed(ctx.agent, ctx.run)
       // Hết lượt sau lời nhờ mà chưa gọi session_handoff (gọi rồi thì trạng thái đã là 'restarting').
       else if (payload.hook_event_name === 'Stop' && ask.submitted) this.handoffFailed(ctx.agent, ctx.run)
+    }
+  }
+
+  /**
+   * Codex: SessionStart cho biết thread id (để lần sau `codex resume`). Rollout chỉ được tạo khi Codex ghi
+   * lần đầu và hook có thể không có transcript_path → tìm theo thread id ở các hook sau cho tới khi thấy.
+   */
+  private async codexHook(agent: Agent, run: Running, payload: HookPayload): Promise<void> {
+    const threadId = payload.session_id
+    if (payload.hook_event_name === 'SessionStart' && threadId && agent.lastSessionId !== threadId) {
+      agent.lastSessionId = threadId
+      await this.save()
+    }
+    if (payload.transcript_path) run.rolloutKnown = true
+    if (run.rolloutKnown || !threadId) return
+    const file = await findCodexRollout(threadId)
+    if (file && this.running.get(agent.id) === run && !run.rolloutKnown) {
+      run.rolloutKnown = true
+      await run.transcript?.follow(file)
     }
   }
 

@@ -86,6 +86,8 @@ export interface ContextSample {
   at: string
   /** Mẫu lấy từ dòng compact_boundary (`postTokens`): context vừa được tóm tắt lại. */
   compacted?: boolean
+  /** Kích thước cửa sổ context nếu transcript có ghi (rollout của Codex có, transcript Claude Code thì không). */
+  size?: number
 }
 
 interface ContextLine {
@@ -181,13 +183,15 @@ async function sizeOf(file: string): Promise<number> {
 export interface TranscriptHandlers {
   onInterrupt?: (i: Interrupt) => void
   onContext?: (c: ContextSample) => void
+  /** Đọc độ dài context từ một dòng; mặc định theo transcript Claude Code (Codex có định dạng riêng). */
+  contextParser?: (line: string) => ContextSample | null
 }
 
 /** Lượng byte cuối file đọc để lấy độ dài context hiện có (tiếp tục phiên cũ, hoặc theo sang file khác). */
 const SEED_BYTES = 4 * 1024 * 1024
 
 /** Mẫu context mới nhất trong `[from, to)` byte của file (đọc ngược từng dòng). */
-async function lastContextIn(file: string, to: number): Promise<ContextSample | null> {
+async function lastContextIn(file: string, to: number, parse: (line: string) => ContextSample | null): Promise<ContextSample | null> {
   if (to <= 0) return null
   const from = Math.max(0, to - SEED_BYTES)
   const handle = await fs.open(file, 'r')
@@ -202,7 +206,7 @@ async function lastContextIn(file: string, to: number): Promise<ContextSample | 
   const lines = buf.toString('utf8').split('\n')
   // Dòng đầu có thể bị cắt giữa chừng khi không đọc từ đầu file: JSON.parse sẽ bỏ qua nó.
   for (let i = lines.length - 1; i >= 0; i--) {
-    const c = parseContext(lines[i])
+    const c = parse(lines[i])
     if (c) return c
   }
   return null
@@ -252,7 +256,7 @@ export class TranscriptWatcher {
     if (!this.handlers.onContext) return
     let c: ContextSample | null = null
     try {
-      c = await lastContextIn(file, upto)
+      c = await lastContextIn(file, upto, this.handlers.contextParser ?? parseContext)
     } catch {
       return
     }
@@ -304,7 +308,7 @@ export class TranscriptWatcher {
       for (const line of this.tail.push(chunk)) {
         const i = parseInterrupt(line)
         if (i) found.push(i)
-        context = parseContext(line) ?? context
+        context = (this.handlers.contextParser ?? parseContext)(line) ?? context
       }
     } catch {
       // File chưa có / đang bị khoá: lần sau đọc lại.

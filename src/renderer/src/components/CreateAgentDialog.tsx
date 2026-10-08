@@ -5,17 +5,27 @@ import { Button, Modal } from './Modal'
 
 const ROLES = ['Lead', 'Dev', 'QA', 'Docs']
 
-const MODES: Array<{ id: PermissionMode; label: string; hint: string }> = [
-  { id: 'default', label: 'Theo cài đặt Claude Code', hint: 'Hỏi bạn như khi bạn tự chạy claude.' },
-  { id: 'acceptEdits', label: 'Tự sửa file', hint: 'Sửa file không cần hỏi; chạy lệnh vẫn hỏi.' },
-  { id: 'auto', label: 'Tự động', hint: 'Claude tự quyết, vẫn chặn việc rủi ro.' },
-  { id: 'plan', label: 'Chỉ lập kế hoạch', hint: 'Đọc và đề xuất, không sửa gì.' }
-]
+/** Mức quyền theo CLI của agent (main đổi sang cờ của từng CLI, xem agents.ts / codex.ts). */
+function modes(kind: AgentKind): Array<{ id: PermissionMode; label: string; hint: string }> {
+  if (kind === 'codex')
+    return [
+      { id: 'default', label: 'Theo cài đặt Codex', hint: 'Như khi bạn tự chạy codex (~/.codex/config.toml).' },
+      { id: 'acceptEdits', label: 'Tự sửa file', hint: 'Sửa trong thư mục dự án không cần hỏi; ra ngoài sandbox thì hỏi.' },
+      { id: 'auto', label: 'Tự động', hint: 'Codex tự duyệt (approve-for-me), vẫn trong sandbox.' },
+      { id: 'plan', label: 'Chỉ đọc', hint: 'Sandbox chỉ đọc: đọc và đề xuất, không sửa gì.' }
+    ]
+  return [
+    { id: 'default', label: 'Theo cài đặt Claude Code', hint: 'Hỏi bạn như khi bạn tự chạy claude.' },
+    { id: 'acceptEdits', label: 'Tự sửa file', hint: 'Sửa file không cần hỏi; chạy lệnh vẫn hỏi.' },
+    { id: 'auto', label: 'Tự động', hint: 'Claude tự quyết, vẫn chặn việc rủi ro.' },
+    { id: 'plan', label: 'Chỉ lập kế hoạch', hint: 'Đọc và đề xuất, không sửa gì.' }
+  ]
+}
 
 /** Loại ô. `ready: false` = chưa tích hợp xong, hiện để biết là sắp có. */
 const KINDS: Array<{ id: AgentKind; label: string; hint: string; ready: boolean }> = [
   { id: 'claude', label: 'Claude Code', hint: 'Agent có vai trò, bộ nhớ riêng, lên kanban.', ready: true },
-  { id: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI.', ready: false },
+  { id: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI, cũng có vai trò, bộ nhớ, kanban.', ready: true },
   { id: 'gemini', label: 'Gemini CLI', hint: 'Agent chạy Gemini CLI.', ready: false },
   { id: 'terminal', label: 'Terminal', hint: 'PowerShell trong thư mục dự án, không có bộ nhớ.', ready: true }
 ]
@@ -133,7 +143,7 @@ export function CreateAgentDialog({ suggestName, takenNames, onCancel, onSubmit 
             </Label>
             <Label text="Quyền">
               <div className="space-y-1">
-                {MODES.map((m) => (
+                {modes(kind).map((m) => (
                   <label key={m.id} className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-panel-2">
                     <input type="radio" checked={mode === m.id} onChange={() => setMode(m.id)} className="mt-0.5" />
                     <span>
