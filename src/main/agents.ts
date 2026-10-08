@@ -11,7 +11,7 @@ import { createStagMcp } from './mcp'
 import type { PtyManager } from './pty'
 import { readTemplate } from './templates'
 import { TranscriptWatcher, transcriptPath } from './transcript'
-import { ensureIgnored, safeName, type WorkspaceStore } from './workspace'
+import { ensureIgnored, type WorkspaceStore } from './workspace'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 
 interface StoreFile {
@@ -115,9 +115,10 @@ export class AgentService {
 
   async create(req: CreateAgentRequest): Promise<Agent> {
     if (!this.workspaces.get(req.workspaceId)) throw new Error('Workspace không tồn tại')
-    const name = safeName(req.name)
-    if (!name) throw new Error('Agent cần có tên')
-    const taken = this.data.agents.some((a) => a.workspaceId === req.workspaceId && a.name.toLowerCase() === name.toLowerCase())
+    const name = req.name.trim()
+    const problem = agentNameProblem(name)
+    if (problem) throw new Error(problem)
+    const taken = this.data.agents.some((a) => a.workspaceId === req.workspaceId && sameAgentName(a.name, name))
     if (taken) throw new Error(`Đã có agent tên "${name}" trong workspace này`)
     const agent: Agent = {
       id: randomUUID(),

@@ -39,9 +39,24 @@ describe('mentionsPath', () => {
     expect(mentionsPath('', 'C:\\a')).toBe(false)
   })
 
-  // Hạn chế đã biết: so khớp là "chứa chuỗi", nên đường dẫn dài hơn cùng tiền tố cũng tính là có nhắc.
-  // Ví dụ MEMORY.md nhắc `...\proj memory old` thì app coi như đã nhắc `...\proj memory` và không thêm dòng.
-  it.todo('không coi `C:\\a\\bc` là đã nhắc tới `C:\\a\\b` (cần so khớp theo ranh giới tên thư mục)')
+  it('không coi `C:\\a\\bc` là đã nhắc tới `C:\\a\\b`', () => {
+    expect(mentionsPath('C:\\a\\bc', 'C:\\a\\b')).toBe(false)
+    expect(mentionsPath('vault: `C:\\a\\b-old`', 'C:\\a\\b')).toBe(false)
+    expect(mentionsPath('C:\\a\\b.bak', 'C:\\a\\b')).toBe(false)
+    expect(mentionsPath('C:\\proj\\Dựán', 'C:\\proj\\Dự')).toBe(false)
+  })
+
+  it('tính khi đường dẫn kết thúc đúng ranh giới tên thư mục', () => {
+    expect(mentionsPath('C:\\a\\b', 'C:\\a\\b')).toBe(true)
+    expect(mentionsPath('- Vault: `C:\\a\\b` — đọc trước.', 'C:\\a\\b')).toBe(true)
+    expect(mentionsPath('đọc C:/a/b/_INDEX.md trước', 'C:\\a\\b')).toBe(true)
+    expect(mentionsPath('Vault ở C:\\a\\b.', 'C:\\a\\b')).toBe(true)
+    expect(mentionsPath('(C:\\a\\b)', 'C:\\a\\b')).toBe(true)
+  })
+
+  it('lần nhắc đầu là tiền tố của tên khác thì vẫn tìm tiếp các lần sau', () => {
+    expect(mentionsPath('cũ: C:\\a\\bc — mới: C:\\a\\b', 'C:\\a\\b')).toBe(true)
+  })
 })
 
 describe('ghi / đọc file', () => {

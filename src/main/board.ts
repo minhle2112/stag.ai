@@ -128,6 +128,11 @@ export class Board {
     if (!list) {
       list = this.read(ws)
       this.lists.set(ws.id, list)
+      // Đọc lỗi thì bỏ khỏi cache để lần sau đọc lại, không giữ mãi promise lỗi.
+      const failed = list
+      failed.catch(() => {
+        if (this.lists.get(ws.id) === failed) this.lists.delete(ws.id)
+      })
     }
     return list
   }
@@ -136,14 +141,22 @@ export class Board {
     const file = this.file(ws)
     const raw = await readText(file)
     if (!raw) return []
+    let data: Partial<TasksFile> | null = null
     try {
-      const data = JSON.parse(raw) as TasksFile
-      return Array.isArray(data.tasks) ? data.tasks : []
+      data = JSON.parse(raw) as Partial<TasksFile> | null
     } catch {
-      // File hỏng: cất sang bên cạnh để không ghi đè mất lịch sử, bắt đầu danh sách mới.
-      await fs.rename(file, `${file}.broken-${Date.now()}`)
-      return []
+      data = null
     }
+    if (data && typeof data === 'object' && Array.isArray(data.tasks)) return data.tasks
+    // File hỏng (không phải JSON, hoặc JSON nhưng thiếu mảng `tasks`): cất sang bên cạnh để lần ghi sau
+    // không đè mất lịch sử, rồi bắt đầu danh sách mới. Không cất được thì báo lỗi, không ghi đè.
+    const aside = `${file}.broken-${Date.now()}`
+    try {
+      await fs.rename(file, aside)
+    } catch (e) {
+      throw new Error(`File kanban ${file} bị hỏng và không cất sang ${aside} được: ${(e as Error).message}`)
+    }
+    return []
   }
 
   private async save(ws: Workspace): Promise<void> {

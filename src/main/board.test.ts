@@ -267,6 +267,42 @@ describe('Board: việc (task)', () => {
     expect((await fs.readdir(join(root, '.stag'))).sort()).toEqual([broken[0], 'tasks.json'].sort())
   })
 
+  it.each([
+    ['{}', '{}'],
+    ['null', 'null'],
+    ['mảng', '[]'],
+    ['tasks không phải mảng', '{ "version": 1, "tasks": {} }']
+  ])('tasks.json là JSON nhưng thiếu mảng tasks (%s) → cũng cất sang bên cạnh, không bị ghi đè', async (_label, raw) => {
+    await fs.mkdir(join(root, '.stag'))
+    await fs.writeFile(tasksFile(), raw, 'utf8')
+
+    const board = new Board(() => {})
+    expect((await board.snapshot(ws)).tasks).toEqual([])
+    await board.startTask(ws, agent('a'), 's', 'Mới', '')
+
+    const files = await fs.readdir(join(root, '.stag'))
+    const broken = files.filter((f) => /^tasks\.json\.broken-\d+$/.test(f))
+    expect(broken).toHaveLength(1)
+    expect(await fs.readFile(join(root, '.stag', broken[0]), 'utf8')).toBe(raw)
+  })
+
+  it('tasks.json hỏng mà không cất được → báo lỗi, không ghi đè, lần sau đọc lại', async () => {
+    await fs.mkdir(join(root, '.stag'))
+    await fs.writeFile(tasksFile(), '{}', 'utf8')
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValue(new Error('EBUSY'))
+
+    const board = new Board(() => {})
+    await expect(board.snapshot(ws)).rejects.toThrow(/không cất sang .* được: EBUSY/)
+    await expect(board.startTask(ws, agent('a'), 's', 'Mới', '')).rejects.toThrow(/EBUSY/)
+    expect(await fs.readFile(tasksFile(), 'utf8')).toBe('{}')
+    rename.mockRestore()
+
+    // Promise lỗi không nằm lại trong cache: lần sau đọc lại, cất được thì chạy bình thường.
+    expect((await board.snapshot(ws)).tasks).toEqual([])
+    const files = await fs.readdir(join(root, '.stag'))
+    expect(files.filter((f) => /^tasks\.json\.broken-\d+$/.test(f))).toHaveLength(1)
+  })
+
   it('chưa có tasks.json → danh sách rỗng, không tạo file khi chỉ đọc', async () => {
     const board = new Board(() => {})
     expect(await board.snapshot(ws)).toEqual({ statuses: [], tasks: [] })

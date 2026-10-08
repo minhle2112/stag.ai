@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import type { PermissionMode } from '@shared/types'
 import { Button, Modal } from './Modal'
 
@@ -13,22 +14,30 @@ const MODES: Array<{ id: PermissionMode; label: string; hint: string }> = [
 
 interface Props {
   defaultName: string
+  /** Tên các agent đã có trong workspace, để báo trùng ngay khi gõ. */
+  takenNames: string[]
   onCancel: () => void
   onSubmit: (v: { name: string; role: string; permissionMode: PermissionMode }) => Promise<void>
 }
 
-export function CreateAgentDialog({ defaultName, onCancel, onSubmit }: Props): React.JSX.Element {
+export function CreateAgentDialog({ defaultName, takenNames, onCancel, onSubmit }: Props): React.JSX.Element {
   const [name, setName] = useState(defaultName)
   const [role, setRole] = useState('')
   const [mode, setMode] = useState<PermissionMode>('default')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const trimmed = name.trim()
+  const problem =
+    agentNameProblem(trimmed) ??
+    (takenNames.some((n) => sameAgentName(n, trimmed)) ? `Đã có agent tên "${trimmed}" trong workspace này` : null)
+
   async function submit(): Promise<void> {
+    if (problem) return
     setBusy(true)
     setError(null)
     try {
-      await onSubmit({ name: name.trim(), role: role.trim(), permissionMode: mode })
+      await onSubmit({ name: trimmed, role: role.trim(), permissionMode: mode })
     } catch (e) {
       setError(String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
       setBusy(false)
@@ -45,7 +54,7 @@ export function CreateAgentDialog({ defaultName, onCancel, onSubmit }: Props): R
           <Button onClick={onCancel} disabled={busy}>
             Huỷ
           </Button>
-          <Button primary onClick={submit} disabled={busy || !name.trim()}>
+          <Button primary onClick={submit} disabled={busy || !!problem}>
             {busy ? 'Đang tạo…' : 'Tạo và mở phiên'}
           </Button>
         </>
@@ -64,6 +73,7 @@ export function CreateAgentDialog({ defaultName, onCancel, onSubmit }: Props): R
             onChange={(e) => setName(e.target.value)}
             className="w-full rounded-md border border-line bg-bg px-2 py-1.5 outline-none focus:border-accent"
           />
+          {problem && trimmed !== '' && <div className="mt-1.5 text-[12px] text-red-300">{problem}</div>}
         </Label>
         <Label text="Vai trò (tuỳ chọn)">
           <input
@@ -99,7 +109,7 @@ export function CreateAgentDialog({ defaultName, onCancel, onSubmit }: Props): R
         </Label>
         <p className="text-[12px] text-muted">
           Khi mở, agent sẽ đọc vault rồi hỏi bạn muốn nó giúp gì trong workspace này. Bộ nhớ riêng của agent nằm ở{' '}
-          <code>60 Agents/{name.trim() || '…'}.md</code> trong vault.
+          <code>60 Agents/{trimmed || '…'}.md</code> trong vault.
         </p>
         {error && <div className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
       </form>

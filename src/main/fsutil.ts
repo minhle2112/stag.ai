@@ -54,7 +54,27 @@ export function samePath(a: string, b: string): boolean {
   return normPath(a) === normPath(b)
 }
 
-/** Văn bản có nhắc tới đường dẫn này không (không phân biệt hoa thường / kiểu dấu gạch). */
+const NAME_CHAR = /[\p{L}\p{M}\p{N}_-]/u
+
+/** Vị trí `i` là chỗ kết thúc tên thư mục: hết văn bản, `\`, khoảng trắng, dấu câu; dấu chấm chỉ tính khi sau nó không còn chữ. */
+function endsName(s: string, i: number): boolean {
+  const c = s[i]
+  if (c === undefined) return true
+  if (c === '.') return !NAME_CHAR.test(s[i + 1] ?? '')
+  return !NAME_CHAR.test(c)
+}
+
+/**
+ * Văn bản có nhắc tới đường dẫn này không (không phân biệt hoa thường / kiểu dấu gạch).
+ * Chỉ tính khi đường dẫn kết thúc đúng ranh giới tên thư mục: `C:\a\bc` không phải là nhắc `C:\a\b`,
+ * còn `C:\a\b\_INDEX.md` thì có. Hạn chế: tên có khoảng trắng thì `C:\a\b old` vẫn tính là nhắc `C:\a\b`.
+ */
 export function mentionsPath(text: string, p: string): boolean {
-  return text.replace(/[\\/]+/g, '\\').toLowerCase().includes(normPath(p))
+  const hay = text.replace(/[\\/]+/g, '\\').toLowerCase()
+  const needle = normPath(p)
+  if (!needle) return false
+  for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + 1)) {
+    if (endsName(hay, i + needle.length)) return true
+  }
+  return false
 }

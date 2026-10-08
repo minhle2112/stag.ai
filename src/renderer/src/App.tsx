@@ -103,6 +103,7 @@ function NewAgentDialog(): React.JSX.Element | null {
   return (
     <CreateAgentDialog
       defaultName={`Agent ${n}`}
+      takenNames={(agents ?? []).map((a) => a.name)}
       onCancel={() => setNewAgent(null)}
       onSubmit={async (v) => {
         await create({ workspaceId: target.wsId, ...v }, { agentId: target.agentId, dir: target.dir })

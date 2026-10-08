@@ -12,7 +12,13 @@ interface Entry {
   opened: boolean
   ptyId: string | null
   input: { dispose: () => void } | null
+  /** Kích thước đã báo cho tiến trình gần nhất, và hẹn giờ báo kích thước mới. */
+  sent: { cols: number; rows: number } | null
+  resizeTimer: ReturnType<typeof setTimeout> | null
 }
+
+/** Chờ người dùng ngừng kéo (pane browser, thanh chia ô) rồi mới báo kích thước cho tiến trình. */
+const RESIZE_DEBOUNCE_MS = 80
 
 const entries = new Map<string, Entry>()
 const agentByPty = new Map<string, string>()
@@ -76,7 +82,7 @@ function entry(agentId: string): Entry {
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    e = { term, fit, el, opened: false, ptyId: null, input: null }
+    e = { term, fit, el, opened: false, ptyId: null, input: null, sent: null, resizeTimer: null }
     entries.set(agentId, e)
   }
   return e
@@ -96,12 +102,28 @@ export function attachTerminal(agentId: string, host: HTMLElement): () => void {
   }
 }
 
-/** Canh lại kích thước theo ô và báo cho tiến trình. */
+/**
+ * Canh lại kích thước theo ô ngay (để hình không giật), còn việc báo cho tiến trình thì gom lại:
+ * kéo pane gọi hàm này mỗi khung hình, mỗi lần báo là Claude TUI vẽ lại cả màn hình.
+ */
 export function fitTerminal(agentId: string): void {
   const e = entries.get(agentId)
   if (!e || !e.opened || !e.el.isConnected || e.el.clientWidth === 0 || e.el.clientHeight === 0) return
   e.fit.fit()
-  if (e.ptyId) window.stag.pty.resize(e.ptyId, e.term.cols, e.term.rows)
+  if (e.resizeTimer) clearTimeout(e.resizeTimer)
+  e.resizeTimer = setTimeout(() => {
+    e.resizeTimer = null
+    sendSize(e)
+  }, RESIZE_DEBOUNCE_MS)
+}
+
+/** Báo kích thước cho tiến trình, bỏ qua nếu không đổi so với lần báo trước. */
+function sendSize(e: Entry, force = false): void {
+  if (!e.ptyId) return
+  const { cols, rows } = e.term
+  if (!force && e.sent && e.sent.cols === cols && e.sent.rows === rows) return
+  e.sent = { cols, rows }
+  window.stag.pty.resize(e.ptyId, cols, rows)
 }
 
 export function terminalSize(agentId: string): { cols: number; rows: number } {
@@ -119,7 +141,8 @@ export function bindPty(agentId: string, ptyId: string): void {
   for (const chunk of pending.get(ptyId) ?? []) e.term.write(chunk)
   pending.delete(ptyId)
   e.input = e.term.onData((data) => window.stag.pty.write(ptyId, data))
-  if (e.opened) window.stag.pty.resize(ptyId, e.term.cols, e.term.rows)
+  e.sent = null
+  if (e.opened) sendSize(e, true)
 }
 
 export function focusTerminal(agentId: string): void {
@@ -129,6 +152,7 @@ export function focusTerminal(agentId: string): void {
 export function disposeTerminal(agentId: string): void {
   const e = entries.get(agentId)
   if (!e) return
+  if (e.resizeTimer) clearTimeout(e.resizeTimer)
   e.input?.dispose()
   if (e.ptyId) agentByPty.delete(e.ptyId)
   e.term.dispose()
