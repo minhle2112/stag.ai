@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AgentGrid } from './components/AgentGrid'
-import { BrowserAskDialog, BrowserPane } from './components/BrowserPane'
+import { BrowserAskDialog, BrowserDock } from './components/BrowserPane'
 import { CreateAgentDialog } from './components/CreateAgentDialog'
 import { Kanban } from './components/Kanban'
 import { Sidebar } from './components/Sidebar'
@@ -81,11 +81,7 @@ export function App(): React.JSX.Element {
             )}
             {active && tab === 'kanban' && <Kanban key={active.id} workspace={active} />}
           </section>
-          {browserOpen && active && (
-            <aside className="w-[42%] min-w-[360px] shrink-0 border-l border-line bg-panel">
-              <BrowserPane key={active.id} workspace={active} />
-            </aside>
-          )}
+          {browserOpen && active && <BrowserDock workspace={active} />}
         </div>
       </main>
       <BrowserAskDialog />

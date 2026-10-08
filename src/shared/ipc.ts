@@ -43,7 +43,8 @@ export const IPC = {
   browserAsk: 'browser:ask',
   browserAnswer: 'browser:answer',
   agentRename: 'agent:rename',
-  agentReorder: 'agent:reorder'
+  agentReorder: 'agent:reorder',
+  browserDevTools: 'browser:devtools'
 } as const
 
 export interface AppInfo {
