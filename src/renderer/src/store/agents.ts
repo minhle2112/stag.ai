@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Agent, AgentRun, CreateAgentRequest, LayoutNode, SplitDir } from '@shared/types'
-import { insertLeaf, leaves, reconcile, removeLeaf, swapLeaves } from '../layout'
+import { cells, insertCell, insertLeaf, leaves, reconcile, removeLeaf, swapLeaves, widgetKey, widgets } from '../layout'
 import { bindPty, disposeTerminal, focusTerminal, onAgentExit, startTerminalBus, terminalSize } from '../terminals'
 import { useUi } from './ui'
 import { useWorkspaces } from './workspaces'
@@ -14,8 +14,12 @@ export interface WorkspaceAgents {
   /** Agent vừa tạo: ô sẽ tự mở phiên mới khi đã gắn terminal và biết kích thước. */
   autoStart: Record<string, boolean>
   errors: Record<string, string>
+  /** Mã ô đang chọn: id agent, hoặc widgetKey(...) với ô widget (xem layout.ts). */
   focused: string | null
 }
+
+/** Ô chọn sẵn khi ô đang chọn bị đóng: ưu tiên ô agent. */
+const firstCell = (layout: LayoutNode | null): string | null => leaves(layout)[0] ?? cells(layout)[0] ?? null
 
 const empty = (): WorkspaceAgents => ({ agents: [], layout: null, running: {}, starting: {}, autoStart: {}, errors: {}, focused: null })
 
@@ -31,12 +35,17 @@ interface AgentsState {
   /** Đóng ô của agent. Phiên (nếu có) vẫn chạy; agent vẫn ở thanh bên. */
   hide: (wsId: string, agentId: string) => void
   setLayout: (wsId: string, layout: LayoutNode | null, persist?: boolean) => void
-  focus: (wsId: string, agentId: string) => void
+  /** Chọn ô (mã ô: id agent hoặc widgetKey). */
+  focus: (wsId: string, key: string) => void
+  /** Mở widget plugin ("<id plugin>/<id slot>") cạnh ô đang chọn; đã mở thì chọn ô đó. */
+  openWidget: (wsId: string, widget: string) => void
+  /** Đóng ô widget (chỉ bỏ ô khỏi lưới). */
+  closeWidget: (wsId: string, widget: string) => void
   /** Đổi tên agent (main đổi tên luôn note bộ nhớ trong vault). Lỗi thì ném ra để hộp thoại hiện. */
   rename: (wsId: string, agentId: string, name: string) => Promise<void>
   /** Chuyển agent tới vị trí `index` trong danh sách của workspace (thanh bên). */
   moveAgent: (wsId: string, agentId: string, index: number) => void
-  /** Đổi chỗ hai ô trong lưới. */
+  /** Đổi chỗ hai ô trong lưới (theo mã ô). */
   swapCells: (wsId: string, x: string, y: string) => void
 }
 
@@ -89,7 +98,7 @@ export const useAgents = create<AgentsState>((set, get) => {
         bindPty(r.agentId, r.ptyId)
       }
       const layout = reconcile(snap.layout, snap.agents.map((a) => a.id))
-      patch(wsId, () => ({ agents: snap.agents, layout, running, focused: leaves(layout)[0] ?? null }))
+      patch(wsId, () => ({ agents: snap.agents, layout, running, focused: firstCell(layout) }))
       if (JSON.stringify(layout) !== JSON.stringify(snap.layout)) window.stag.agent.saveLayout(wsId, layout)
     },
 
@@ -156,7 +165,7 @@ export const useAgents = create<AgentsState>((set, get) => {
         starting: without(cur.starting),
         autoStart: without(cur.autoStart),
         errors: without(cur.errors),
-        focused: cur.focused === agentId ? (leaves(layout)[0] ?? null) : cur.focused
+        focused: cur.focused === agentId ? firstCell(layout) : cur.focused
       }))
       window.stag.agent.saveLayout(wsId, layout)
     },
@@ -174,7 +183,7 @@ export const useAgents = create<AgentsState>((set, get) => {
       const w = get().byWs[wsId]
       if (!w) return
       const layout = removeLeaf(w.layout, agentId)
-      patch(wsId, (cur) => ({ layout, focused: cur.focused === agentId ? (leaves(layout)[0] ?? null) : cur.focused }))
+      patch(wsId, (cur) => ({ layout, focused: cur.focused === agentId ? firstCell(layout) : cur.focused }))
       window.stag.agent.saveLayout(wsId, layout)
     },
 
@@ -183,8 +192,28 @@ export const useAgents = create<AgentsState>((set, get) => {
       if (persist) window.stag.agent.saveLayout(wsId, layout)
     },
 
-    focus(wsId, agentId) {
-      if (get().byWs[wsId]?.focused !== agentId) patch(wsId, () => ({ focused: agentId }))
+    focus(wsId, key) {
+      if (get().byWs[wsId]?.focused !== key) patch(wsId, () => ({ focused: key }))
+    },
+
+    openWidget(wsId, widget) {
+      const w = get().byWs[wsId]
+      if (!w) return
+      const key = widgetKey(widget)
+      // Mỗi widget chỉ một ô trong một workspace.
+      if (widgets(w.layout).includes(widget)) return get().focus(wsId, key)
+      const layout = insertCell(w.layout, w.focused, { type: 'widget', widget }, 'row')
+      patch(wsId, () => ({ layout, focused: key }))
+      window.stag.agent.saveLayout(wsId, layout)
+    },
+
+    closeWidget(wsId, widget) {
+      const w = get().byWs[wsId]
+      if (!w) return
+      const key = widgetKey(widget)
+      const layout = removeLeaf(w.layout, key)
+      patch(wsId, (cur) => ({ layout, focused: cur.focused === key ? firstCell(layout) : cur.focused }))
+      window.stag.agent.saveLayout(wsId, layout)
     },
 
     async rename(wsId, agentId, name) {
@@ -211,7 +240,7 @@ export const useAgents = create<AgentsState>((set, get) => {
 
     swapCells(wsId, x, y) {
       const w = get().byWs[wsId]
-      if (!w || x === y || !leaves(w.layout).includes(x) || !leaves(w.layout).includes(y)) return
+      if (!w || x === y || !cells(w.layout).includes(x) || !cells(w.layout).includes(y)) return
       get().setLayout(wsId, swapLeaves(w.layout, x, y))
     }
   }

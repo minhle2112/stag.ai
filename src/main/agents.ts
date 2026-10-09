@@ -38,6 +38,7 @@ import { resolveShell } from './shells'
 import { readTemplate } from './templates'
 import { TranscriptWatcher, transcriptPath } from './transcript'
 import { ensureIgnored, type WorkspaceStore } from './workspace'
+import { normalizeLayout } from './agentLayout'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { effectiveConnectors, toolPolicy } from '@shared/connectors'
 import { effectiveSkills } from '@shared/skills'
@@ -144,6 +145,10 @@ export class AgentService {
   async load(): Promise<void> {
     const raw = await readText(this.file)
     if (raw) this.data = JSON.parse(raw) as StoreFile
+    // Lưới ô (agent + widget plugin): bỏ nút hỏng do sửa tay / bản cũ.
+    const layouts: StoreFile['layouts'] = {}
+    for (const [wsId, l] of Object.entries(this.data.layouts ?? {})) layouts[wsId] = normalizeLayout(l)
+    this.data.layouts = layouts
     // Lúc khởi động chưa phiên nào chạy: file phiên còn lại là do app bị tắt đột ngột (crash, kill).
     for (const agent of this.data.agents) {
       const ws = this.workspaces.get(agent.workspaceId)
@@ -693,7 +698,7 @@ export class AgentService {
   }
 
   async saveLayout(workspaceId: string, layout: LayoutNode | null): Promise<void> {
-    this.data.layouts[workspaceId] = layout
+    this.data.layouts[workspaceId] = normalizeLayout(layout)
     await this.save()
   }
 
