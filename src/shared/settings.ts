@@ -1,3 +1,4 @@
+import { normalizeSkills, normalizeSkillToggles } from './skills'
 import {
   DEFAULT_ADAPTERS,
   DEFAULT_GENERAL,
@@ -126,6 +127,8 @@ export function normalizeOverrides(raw: unknown): SettingsOverrides | null {
   if (models) out.models = models
   const connectors = normalizeToggles(obj(raw).connectors)
   if (Object.keys(connectors).length) out.connectors = connectors
+  const skills = normalizeSkillToggles(obj(raw).skills)
+  if (Object.keys(skills).length) out.skills = skills
   return Object.keys(out).length ? out : null
 }
 
@@ -157,7 +160,7 @@ export function normalizeSettings(raw: unknown): Settings {
   if (r.version !== 2) {
     return {
       version: 2,
-      app: { general: normalizeGeneral({}), handoff: normalizeHandoff(r), adapters: normalizeAdapters({}), connectors: normalizeConnectors({}) },
+      app: { general: normalizeGeneral({}), handoff: normalizeHandoff(r), adapters: normalizeAdapters({}), connectors: normalizeConnectors({}), skills: normalizeSkills({}) },
       workspaces: {},
       agents: {}
     }
@@ -169,7 +172,8 @@ export function normalizeSettings(raw: unknown): Settings {
       general: normalizeGeneral(app.general),
       handoff: normalizeHandoff(app.handoff),
       adapters: normalizeAdapters(app.adapters, obj(app.general).terminalShell),
-      connectors: normalizeConnectors(app.connectors)
+      connectors: normalizeConnectors(app.connectors),
+      skills: normalizeSkills(app.skills)
     },
     workspaces: normalizeMap(r.workspaces),
     agents: normalizeMap(r.agents)
@@ -188,7 +192,8 @@ export function patchApp(app: AppSettings, patch: AppSettingsPatch): AppSettings
     },
     connectors: patch.connectors?.inherited
       ? { items: app.connectors.items, inherited: normalizeToggles(patch.connectors.inherited, true) }
-      : app.connectors
+      : app.connectors,
+    skills: patch.skills ? { toggles: normalizeSkillToggles(patch.skills.toggles) } : app.skills
   }
 }
 

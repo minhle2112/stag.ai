@@ -120,6 +120,22 @@ export const IPC = {
   approvalsList: 'approvals:list',
   approvalsAnswer: 'approvals:answer',
   approvalsChanged: 'approvals:changed',
+  /**
+   * Skill: thư viện của stag.ai (danh sách, đọc, tạo, lưu, gỡ, nhập thư mục / zip, cài từ danh mục, chép skill có sẵn,
+   * mở thư mục), đọc skill có sẵn / trong danh mục để xem, quét skill Claude Code / Codex tự nạp.
+   */
+  skillsList: 'skills:list',
+  skillsRead: 'skills:read',
+  skillsReadPath: 'skills:read-path',
+  skillsCatalogDoc: 'skills:catalog-doc',
+  skillsCreate: 'skills:create',
+  skillsSave: 'skills:save',
+  skillsRemove: 'skills:remove',
+  skillsImport: 'skills:import',
+  skillsInstall: 'skills:install',
+  skillsCopy: 'skills:copy',
+  skillsScan: 'skills:scan',
+  skillsReveal: 'skills:reveal',
   /** main → renderer: người dùng bấm thông báo của agent → mở agent đó (kèm workspaceId, agentId). */
   revealAgent: 'agent:reveal'
 } as const

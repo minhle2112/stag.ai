@@ -75,13 +75,20 @@ export class StatusHub {
   }
 
   /**
-   * File cấu hình riêng của một phiên có connector: `mcpServers` = stag + connector; settings = bản chung
-   * + quyền tool connector + máy chủ có sẵn bị tắt (`--settings` chỉ nhận một file, nên phải ghép).
+   * File cấu hình riêng của một phiên có connector / skill: `mcpServers` = stag + connector; settings = bản chung
+   * + quyền tool connector + máy chủ có sẵn bị tắt + skill / plugin có sẵn bị tắt (`--settings` chỉ nhận một file, nên phải ghép).
    */
   async writeSessionConfigs(
     base: string,
     servers: Record<string, unknown>,
-    extra: { allow: string[]; ask: string[]; deny: string[]; deniedMcpServers: Array<{ serverName: string }> }
+    extra: {
+      allow: string[]
+      ask: string[]
+      deny: string[]
+      deniedMcpServers: Array<{ serverName: string }>
+      skillOverrides?: Record<string, 'off'>
+      enabledPlugins?: Record<string, false>
+    }
   ): Promise<{ settingsFile?: string; mcpFile?: string; files: string[] }> {
     const out: { settingsFile?: string; mcpFile?: string; files: string[] } = { files: [] }
     if (Object.keys(servers).length) {
@@ -89,7 +96,7 @@ export class StatusHub {
       await fs.writeFile(out.mcpFile, JSON.stringify({ mcpServers: { stag: this.stagServer(), ...servers } }, null, 2), 'utf8')
       out.files.push(out.mcpFile)
     }
-    if (extra.allow.length || extra.ask.length || extra.deny.length || extra.deniedMcpServers.length) {
+    if (extra.allow.length || extra.ask.length || extra.deny.length || extra.deniedMcpServers.length || extra.skillOverrides || extra.enabledPlugins) {
       const perms = (this.settingsObj.permissions ?? {}) as { allow?: string[] }
       const settings = {
         ...this.settingsObj,
@@ -99,7 +106,9 @@ export class StatusHub {
           ...(extra.ask.length ? { ask: extra.ask } : {}),
           ...(extra.deny.length ? { deny: extra.deny } : {})
         },
-        ...(extra.deniedMcpServers.length ? { deniedMcpServers: extra.deniedMcpServers } : {})
+        ...(extra.deniedMcpServers.length ? { deniedMcpServers: extra.deniedMcpServers } : {}),
+        ...(extra.skillOverrides ? { skillOverrides: extra.skillOverrides } : {}),
+        ...(extra.enabledPlugins ? { enabledPlugins: extra.enabledPlugins } : {})
       }
       out.settingsFile = `${base}.settings.json`
       await fs.writeFile(out.settingsFile, JSON.stringify(settings, null, 2), 'utf8')

@@ -14,6 +14,7 @@ import { PtyManager } from './pty'
 import { SecretStore } from './secrets'
 import { OAuthService } from './oauth'
 import { ApprovalQueue } from './approvals'
+import { SkillLibrary } from './skills'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
 import { WorkspaceStore } from './workspace'
@@ -71,7 +72,13 @@ const secrets = new SecretStore(
 )
 const oauth = new OAuthService(secrets, (url) => shell.openExternal(url))
 const approvals = new ApprovalQueue((list) => send(IPC.approvalsChanged, list))
-const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals)
+// Danh mục skill kèm app: resources/skill-catalog (đóng gói qua extraResources).
+const skills = new SkillLibrary(
+  join(app.getPath('userData'), 'skills'),
+  app.isPackaged ? join(process.resourcesPath, 'skill-catalog') : join(app.getAppPath(), 'resources', 'skill-catalog'),
+  join(app.getPath('userData'), 'skill-sessions')
+)
+const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals, skills)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -218,6 +225,7 @@ app.whenReady().then(async () => {
   await settings.load()
   await external.load()
   await secrets.load()
+  await skills.cleanAllSessions()
   await agents.load()
   await hub.start()
   protocol.handle('stag-file', (req) => {
@@ -227,7 +235,7 @@ app.whenReady().then(async () => {
     return serveArtifact(ws, decodeURIComponent(url.pathname.replace(/^\/+/, '')), req.headers.get('range'))
   })
   agents.attachHub(hub)
-  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals)
+  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills)
   createWindow()
   applyGeneral(settings.general())
   app.on('activate', () => {

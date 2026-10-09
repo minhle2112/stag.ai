@@ -23,6 +23,7 @@ import { claudeServers, claudeSettingsExtra, codexConfiguredServers, codexConnec
 import type { SecretStore } from './secrets'
 import type { OAuthService } from './oauth'
 import type { ApprovalQueue } from './approvals'
+import { claudeSkillSettings, codexSkillArgs, scanClaudeSkills, skillInstructions, type SkillLibrary } from './skills'
 import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
@@ -39,6 +40,7 @@ import { TranscriptWatcher, transcriptPath } from './transcript'
 import { ensureIgnored, type WorkspaceStore } from './workspace'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { effectiveConnectors, toolPolicy } from '@shared/connectors'
+import { effectiveSkills } from '@shared/skills'
 
 /** Bản bàn giao agent viết (tool session_handoff), chờ phiên sau đọc. */
 interface Handoff {
@@ -102,7 +104,8 @@ export class AgentService {
     private external: ExternalAdapterStore,
     private secrets: SecretStore,
     private oauth: OAuthService,
-    private approvals: ApprovalQueue
+    private approvals: ApprovalQueue,
+    private skills: SkillLibrary
   ) {
     this.guard = new ScopeGuard(board)
   }
@@ -193,6 +196,12 @@ export class AgentService {
     // hook SessionStart, lưu vào lastSessionId để resume), nên phiên của app luôn có id riêng.
     const sessionId = resume && kind === 'claude' ? agent.lastSessionId! : randomUUID()
     const codexResume = resume && kind === 'codex' ? agent.lastSessionId : undefined
+    // Skill bật cho agent: bản chép riêng của phiên (Claude nạp qua --add-dir, CLI khác đọc theo luật phiên).
+    const sk = effectiveSkills(this.settings.get(), await this.skills.usable(), agent.workspaceId, agent.id)
+    // Claude tắt skill theo tên (skillOverrides) nên không tách được hai skill cùng tên: trùng với skill Claude Code
+    // tự nạp (user / claude.ai / project) thì phiên Claude dùng bản của Claude Code, không chép bản thư viện.
+    const claudeOwn = kind === 'claude' ? new Set((await scanClaudeSkills(ws.path)).filter((s) => s.scope !== 'plugin').map((s) => s.name)) : null
+    const sessionSkills = await this.skills.prepareSession(sessionId, claudeOwn ? sk.library.filter((n) => !claudeOwn.has(n)) : sk.library)
     const sessionFile = join(ws.path, '.sessions', `${sessionId}.md`)
     const agentNote = join(ws.vaultPath, '60 Agents', `${agent.name}.md`)
     const structured = await exists(join(ws.vaultPath, '_INDEX.md'))
@@ -224,6 +233,7 @@ export class AgentService {
     await ensureIgnored(ws.path, ['.sessions/'], 'stag.ai agent sessions')
 
     const rules = await readTemplate('agent/rules.md', vars)
+    const skillText = skillInstructions(sessionSkills.skills)
     const opening = handoff ? 'Continue from the handoff of the previous session.' : 'Start a new session.'
     let command = exe
     let args: string[] | string
@@ -236,7 +246,7 @@ export class AgentService {
       // Luật phiên vào một file cạnh file phiên; CLI nhận qua cờ hoặc biến môi trường (stagAdapter.rules).
       const rulesFile = sessionFile.replace(/\.md$/, '.rules.md')
       const note = ext.manifest.mcpConfigFlag ? '' : '\n\nNOTE: this CLI has no access to the stag MCP tools mentioned above (kanban, browser, handoff). Skip those steps.\n'
-      await fs.writeFile(rulesFile, rules + note, 'utf8')
+      await fs.writeFile(rulesFile, rules + skillText + note, 'utf8')
       const own = ext.manifest.mcpConfigFlag
         ? await this.hub.writeSessionConfigs(sessionFile.replace(/\.md$/, ''), claudeServers(conn.servers, connCmds), { allow: [], ask: [], deny: [], deniedMcpServers: [] })
         : { mcpFile: undefined }
@@ -248,20 +258,28 @@ export class AgentService {
       transcriptFile = null
     } else if (kind === 'codex') {
       args = codexArgs({
-        rules,
+        rules: rules + skillText,
         ...this.hub.endpoints(),
         permissionMode: agent.permissionMode,
         resumeId: codexResume,
         prompt: opening,
-        userArgs: [...codexConnectorArgs(conn, connCmds, await codexConfiguredServers(ws.path), connEnv), ...this.adapters.launchArgs('codex', agent)]
+        userArgs: [
+          ...codexConnectorArgs(conn, connCmds, await codexConfiguredServers(ws.path), connEnv),
+          ...(await codexSkillArgs(sk.denied.codex, ws.path)),
+          ...this.adapters.launchArgs('codex', agent)
+        ]
       })
       transcriptFile = (codexResume && (await findCodexRollout(codexResume))) || join(ws.path, '.sessions', `${sessionId}.rollout-pending`)
     } else {
       args = resume ? ['--resume', sessionId] : ['--session-id', sessionId]
       args.push('--name', agent.name, '--append-system-prompt', rules)
-      // Có connector / tắt máy chủ có sẵn → file --settings / --mcp-config riêng của phiên.
-      const own = await this.hub.writeSessionConfigs(sessionFile.replace(/\.md$/, ''), claudeServers(conn.servers, connCmds), claudeSettingsExtra(conn))
+      // Có connector / tắt máy chủ, skill có sẵn → file --settings / --mcp-config riêng của phiên.
+      const own = await this.hub.writeSessionConfigs(sessionFile.replace(/\.md$/, ''), claudeServers(conn.servers, connCmds), {
+        ...claudeSettingsExtra(conn),
+        ...claudeSkillSettings(sk)
+      })
       args.push(...this.hub.claudeArgs(own))
+      if (sessionSkills.dir) args.push('--add-dir', sessionSkills.dir)
       if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
       // Model, mức suy nghĩ, tham số thêm (Cài đặt → Adapter).
       args.push(...this.adapters.launchArgs('claude', agent))
@@ -359,7 +377,10 @@ export class AgentService {
     this.guard.endSession(agentId)
     this.approvals.cancelAgent(agentId)
     run.transcript?.stop()
-    if (run.sessionFile) removeSessionFiles(run.sessionFile)
+    if (run.sessionFile) {
+      removeSessionFiles(run.sessionFile)
+      void this.skills.cleanSession(run.sessionId)
+    }
     const agent = this.data.agents.find((a) => a.id === agentId)
     if (!agent || agentKind(agent) === 'terminal') return
     this.board.setActivity(agent, 'stopped')

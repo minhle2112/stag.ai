@@ -1,14 +1,16 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
 import { homedir } from 'node:os'
+import { basename, dirname } from 'node:path'
 import { connectorSecrets, OAUTH_SECRET_PREFIX, parseMcpJson } from '@shared/connectors'
-import type { ApprovalDecision, CliAdapterId, ConnectRequest, ConnectResult, Connector, ConnectorImport, ConnectorTestResult } from '@shared/types'
+import type { ApprovalDecision, CliAdapterId, ConnectRequest, ConnectResult, Connector, ConnectorImport, ConnectorTestResult, SkillImportResult, SkillsList } from '@shared/types'
 import { independentSessionEnv } from './adapters'
 import { importInherited, inheritedConfig, scanInherited, testConnector } from './connectors'
 import type { SecretStore } from './secrets'
 import type { OAuthService } from './oauth'
 import type { ApprovalQueue } from './approvals'
 import { connectFromCatalog } from './connect'
+import { readSkillDir, scanSkills, type SkillLibrary } from './skills'
 import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
@@ -31,7 +33,7 @@ import type { WorkspaceStore } from './workspace'
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -243,6 +245,56 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     const users = settings.get().app.connectors.items.filter((c) => connectorSecrets(c).includes(name)).map((c) => c.id)
     if (users.length) throw new Error(`Bí mật ${name} đang được dùng bởi: ${users.join(', ')}. Bỏ khỏi connector đó trước.`)
     return secrets.remove(String(name))
+  })
+  // ---- Skill ----
+  const skillsList = async (): Promise<SkillsList> => ({ library: await skills.list(), catalog: await skills.catalog() })
+  const imported = async (r: { added: string[]; skipped: Array<{ name: string; reason: string }> }): Promise<SkillImportResult> => ({ ...r, list: await skillsList() })
+  /** Chỉ đọc file tên SKILL.md (skill có sẵn của CLI, đường dẫn lấy từ lần quét). */
+  const skillMdPath = (p: unknown): string => {
+    if (typeof p !== 'string' || !/^skill\.md$/i.test(basename(p))) throw new Error('Đường dẫn skill không hợp lệ')
+    return p
+  }
+  ipcMain.handle(IPC.skillsList, () => skillsList())
+  ipcMain.handle(IPC.skillsRead, (_e, name: string) => skills.read(String(name)))
+  ipcMain.handle(IPC.skillsReadPath, (_e, path: string) => readSkillDir(dirname(skillMdPath(path)), false))
+  ipcMain.handle(IPC.skillsCatalogDoc, (_e, slug: string) => skills.catalogDoc(String(slug)))
+  ipcMain.handle(IPC.skillsCreate, async (_e, name: string, description: string) => {
+    await skills.create(String(name ?? '').trim(), String(description ?? ''))
+    return skillsList()
+  })
+  ipcMain.handle(IPC.skillsSave, async (_e, name: string, md: string) => {
+    const r = await skills.save(String(name), String(md ?? ''))
+    if (r.name !== name) await settings.renameSkill(name, r.name)
+    return { ...r, list: await skillsList() }
+  })
+  ipcMain.handle(IPC.skillsRemove, async (_e, name: string) => {
+    await skills.remove(String(name))
+    await settings.renameSkill(name, null)
+    return skillsList()
+  })
+  ipcMain.handle(IPC.skillsImport, async (e, kind: 'folder' | 'zip') => {
+    const win = BrowserWindow.fromWebContents(e.sender)!
+    const r = await dialog.showOpenDialog(win, {
+      title: kind === 'zip' ? 'Chọn file .zip chứa skill' : 'Chọn thư mục skill (có SKILL.md) hoặc thư mục chứa nhiều skill',
+      properties: kind === 'zip' ? ['openFile'] : ['openDirectory'],
+      filters: kind === 'zip' ? [{ name: 'Zip', extensions: ['zip', 'skill'] }] : undefined
+    })
+    if (r.canceled || !r.filePaths[0]) return null
+    return imported(kind === 'zip' ? await skills.importZip(r.filePaths[0]) : await skills.importDir(r.filePaths[0], { kind: 'folder', from: r.filePaths[0] }))
+  })
+  ipcMain.handle(IPC.skillsInstall, async (_e, slug: string) => imported(await skills.installCatalog(String(slug))))
+  ipcMain.handle(IPC.skillsCopy, async (_e, runtime: CliAdapterId, path: string) => {
+    if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
+    return imported(await skills.importDir(dirname(skillMdPath(path)), { kind: runtime, from: path }))
+  })
+  ipcMain.handle(IPC.skillsScan, (_e, runtime: CliAdapterId, workspaceId?: string) => {
+    if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
+    return scanSkills(runtime, cwdOf(workspaceId), async () => (await adapters.exe('codex')).path, cliEnv('codex'))
+  })
+  ipcMain.handle(IPC.skillsReveal, async (_e, target: string) => {
+    const dir = typeof target === 'string' && /^skill\.md$/i.test(basename(target)) ? dirname(target) : (await skills.read(String(target))).dir
+    const err = await shell.openPath(dir)
+    if (err) throw new Error(err)
   })
   ipcMain.handle(IPC.pickFile, async (e, title: string, defaultPath?: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)!

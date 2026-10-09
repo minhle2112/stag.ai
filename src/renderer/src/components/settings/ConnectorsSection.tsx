@@ -1,8 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { connectorOn, connectorSecrets, CONNECTOR_ID_RE, emptyConnector, ENV_KEY_RE, SECRET_NAME_RE, slugify, toolPolicy } from '@shared/connectors'
+import { connectorSecrets, CONNECTOR_ID_RE, emptyConnector, ENV_KEY_RE, SECRET_NAME_RE, slugify, toolPolicy } from '@shared/connectors'
 import { splitArgs } from '@shared/settings'
 import {
-  agentKind,
   type CliAdapterId,
   type Connector,
   type ConnectorImport,
@@ -23,6 +22,7 @@ import { useApprovals } from '../../store/approvals'
 import { BrowseView, catalogOf, ConnectorLogo, ReviewView } from './ConnectorCatalog'
 import { methodLabel } from '@shared/catalog'
 import { ErrorBar, Group, Row, Select, SmallButton, Switch, useSaveError } from './controls'
+import { LevelPicker, LevelToggle, setAtLevel, useLevel, type Level, type LevelKey } from './levels'
 
 /**
  * Settings → Connector: máy chủ MCP cho phiên agent. Hai loại:
@@ -33,8 +33,6 @@ import { ErrorBar, Group, Row, Select, SmallButton, Switch, useSaveError } from 
  */
 
 type View = { type: 'list' } | { type: 'detail'; id: string }
-/** 'app' | `ws:<id>` | `agent:<wsId>:<agentId>` */
-type LevelKey = string
 
 const TONE: Record<Tone, string> = { ok: 'bg-emerald-400', warn: 'bg-amber-400', bad: 'bg-red-400', muted: 'bg-muted/60' }
 const RUNTIME: Record<CliAdapterId, string> = { claude: 'Claude Code', codex: 'Codex' }
@@ -147,115 +145,32 @@ export function ConnectorsSection(): React.JSX.Element {
   )
 }
 
-// ---- cấp áp dụng ----
+// ---- cấp áp dụng (levels.tsx) ----
 
-interface Level {
-  lvl: 'app' | 'ws' | 'agent'
-  wsId?: string
-  agentId?: string
-  name: string
-}
-
-function useLevel(level: LevelKey): Level {
-  const workspaces = useWorkspaces((s) => s.items)
-  const byWs = useAgents((s) => s.byWs)
-  const [kind, wsId, agentId] = level.split(':') as ['app' | 'ws' | 'agent', string?, string?]
-  const ws = workspaces.find((w) => w.id === wsId)
-  const agent = agentId ? byWs[wsId!]?.agents.find((a) => a.id === agentId) : undefined
-  if (kind === 'agent' && ws && agent) return { lvl: 'agent', wsId: ws.id, agentId: agent.id, name: `agent ${agent.name}` }
-  if (kind === 'ws' && ws) return { lvl: 'ws', wsId: ws.id, name: `workspace ${ws.name}` }
-  return { lvl: 'app', name: 'mọi agent' }
-}
-
-function LevelPicker({ level, setLevel }: { level: LevelKey; setLevel: (l: LevelKey) => void }): React.JSX.Element {
-  const settings = useSettings((s) => s.value)
-  const workspaces = useWorkspaces((s) => s.items)
-  const byWs = useAgents((s) => s.byWs)
-  const cur = useLevel(level)
-  const has = (o?: { connectors?: Record<string, boolean> }): string => (o?.connectors ? ' •' : '')
-  const options = [
-    { value: 'app', label: 'Mặc định cho mọi agent' },
-    ...workspaces.flatMap((w) => [
-      { value: `ws:${w.id}`, label: `Workspace: ${w.name}${has(settings.workspaces[w.id])}` },
-      ...(byWs[w.id]?.agents ?? [])
-        .filter((a) => agentKind(a) !== 'terminal')
-        .map((a) => ({ value: `agent:${w.id}:${a.id}`, label: `↳ Agent: ${a.name}${has(settings.agents[a.id])}` }))
-    ])
-  ]
-  return (
-    <Group title="Áp dụng cho">
-      <Row
-        label="Cấp"
-        desc="Workspace ghi đè mặc định của app; agent ghi đè workspace của nó. Dấu • = có bật / tắt riêng. Phiên đang chạy giữ nguyên, phiên mở sau mới nhận thay đổi."
-      >
-        <Select label="Cấp áp dụng connector" value={cur.lvl === 'app' ? 'app' : level} onChange={setLevel} options={options} />
-      </Row>
-    </Group>
-  )
-}
-
-/** Công tắc bật / tắt một connector / máy chủ có sẵn ở cấp đang chọn. Cấp dưới: theo cấp trên / bật / tắt. */
-function LevelToggle({ k, level, label }: { k: string; level: Level; label: string }): React.JSX.Element {
-  const settings = useSettings((s) => s.value)
-  const [, run] = useSaveError()
-  if (level.lvl === 'app') {
-    const on = connectorOn(settings, k)
-    const set = (v: boolean): void => {
-      if (k.includes(':')) {
-        const inherited = { ...settings.app.connectors.inherited }
-        if (v) delete inherited[k]
-        else inherited[k] = false
-        run(useSettings.getState().save({ connectors: { inherited } }))
-      } else {
-        const c = settings.app.connectors.items.find((x) => x.id === k)
-        if (c) run(window.stag.connectors.save({ ...c, enabled: v }))
-      }
+/** Bật / tắt ở cấp app: máy chủ có sẵn → map `inherited`; connector của stag.ai → trường `enabled` của nó. */
+function connectorSetApp(k: string): (on: boolean) => Promise<unknown> {
+  return (v) => {
+    const settings = useSettings.getState().value
+    if (k.includes(':')) {
+      const inherited = { ...settings.app.connectors.inherited }
+      if (v) delete inherited[k]
+      else inherited[k] = false
+      return useSettings.getState().save({ connectors: { inherited } })
     }
-    return (
-      <span onClick={(e) => e.stopPropagation()}>
-        <Switch label={`${on ? 'Tắt' : 'Bật'} ${label} cho mọi agent`} checked={on} onChange={set} />
-      </span>
-    )
+    const c = settings.app.connectors.items.find((x) => x.id === k)
+    return c ? window.stag.connectors.save({ ...c, enabled: v }) : Promise.resolve()
   }
-  const own = (level.lvl === 'ws' ? settings.workspaces[level.wsId!] : settings.agents[level.agentId!])?.connectors ?? {}
-  const parent = level.lvl === 'agent' ? connectorOn(settings, k, level.wsId) : connectorOn(settings, k)
-  const value = k in own ? (own[k] ? 'on' : 'off') : 'inherit'
-  const set = (v: 'inherit' | 'on' | 'off'): void => {
-    const next = { ...own }
-    if (v === 'inherit') delete next[k]
-    else next[k] = v === 'on'
-    const empty = Object.keys(next).length === 0
-    run(
-      useSettings
-        .getState()
-        .saveOverrides(level.lvl === 'ws' ? 'workspace' : 'agent', level.lvl === 'ws' ? level.wsId! : level.agentId!, { connectors: empty ? null : next })
-    )
-  }
-  return (
-    <span onClick={(e) => e.stopPropagation()}>
-      <Select
-        label={`${label} cho ${level.name}`}
-        value={value}
-        onChange={set}
-        options={[
-          { value: 'inherit', label: `Theo cấp trên (${parent ? 'bật' : 'tắt'})` },
-          { value: 'on', label: 'Bật' },
-          { value: 'off', label: 'Tắt' }
-        ]}
-      />
-    </span>
-  )
+}
+
+function ConnToggle({ k, level, label }: { k: string; level: Level; label: string }): React.JSX.Element {
+  return <LevelToggle k={k} level={level} label={label} field="connectors" setApp={connectorSetApp(k)} />
 }
 
 /** Connector vừa tạo: ở cấp app thì bật cho mọi agent; ở cấp workspace / agent thì tắt ở app, bật riêng ở cấp đó. */
 async function enableOnlyAt(level: Level, c: Connector): Promise<void> {
   if (level.lvl === 'app') return
   if (c.enabled) await window.stag.connectors.save({ ...c, enabled: false })
-  const st = useSettings.getState().value
-  const own = (level.lvl === 'ws' ? st.workspaces[level.wsId!] : st.agents[level.agentId!])?.connectors ?? {}
-  await useSettings
-    .getState()
-    .saveOverrides(level.lvl === 'ws' ? 'workspace' : 'agent', level.lvl === 'ws' ? level.wsId! : level.agentId!, { connectors: { ...own, [c.id]: true } })
+  await setAtLevel(level, 'connectors', c.id, true)
 }
 
 // ---- danh sách ----
@@ -294,7 +209,7 @@ function ConnectorList({
         ngoài đọc được file MCP. Token / API key cất ở <b className="font-medium text-fg">Secrets</b>, truyền qua biến môi trường, không nằm trên dòng lệnh.
       </p>
 
-      <LevelPicker level={level} setLevel={setLevel} />
+      <LevelPicker level={level} setLevel={setLevel} field="connectors" />
 
       <SectionHead icon={<PlugIcon className="h-4 w-4 text-muted" />}>Connector của stag.ai</SectionHead>
       {items.length === 0 ? (
@@ -325,7 +240,7 @@ function ConnectorList({
                 line={line}
                 lineBad={miss.length > 0}
                 onOpen={() => open(c.id)}
-                control={<LevelToggle k={c.id} level={lv} label={c.label || c.id} />}
+                control={<ConnToggle k={c.id} level={lv} label={c.label || c.id} />}
               />
             )
           })}
@@ -443,7 +358,7 @@ function InheritedGroup({ runtime, level }: { runtime: CliAdapterId; level: Leve
                         Chép
                       </button>
                     )}
-                    <LevelToggle k={s.key} level={level} label={s.name} />
+                    <ConnToggle k={s.key} level={level} label={s.name} />
                   </>
                 }
               />
@@ -554,7 +469,7 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
       logo={<ConnectorLogo slug={c.catalog?.slug} name={c.label || c.id} size={32} />}
       title={c.label || c.id}
       badge={<Badge>{c.transport === 'http' ? 'HTTP' : 'stdio'}</Badge>}
-      control={<LevelToggle k={c.id} level={lv} label={c.label || c.id} />}
+      control={<ConnToggle k={c.id} level={lv} label={c.label || c.id} />}
       sub={`Công tắc bên phải áp dụng cho ${lv.name} (đổi cấp ở trang danh sách). Sửa cấu hình áp dụng cho mọi nơi; phiên đang chạy giữ nguyên.`}
     >
       <ErrorBar error={error} />

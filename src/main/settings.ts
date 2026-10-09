@@ -90,8 +90,8 @@ export class SettingsStore {
     return this.commit({
       ...this.value,
       app: { ...this.value.app, connectors: { ...this.value.app.connectors, items: next } },
-      workspaces: renamed ? renameToggle(this.value.workspaces, renamed) : this.value.workspaces,
-      agents: renamed ? renameToggle(this.value.agents, renamed) : this.value.agents
+      workspaces: renamed ? renameToggle(this.value.workspaces, 'connectors', renamed) : this.value.workspaces,
+      agents: renamed ? renameToggle(this.value.agents, 'connectors', renamed) : this.value.agents
     })
   }
 
@@ -113,8 +113,25 @@ export class SettingsStore {
     return this.commit({
       ...this.value,
       app: { ...this.value.app, connectors: { ...this.value.app.connectors, items: this.value.app.connectors.items.filter((c) => c.id !== id) } },
-      workspaces: renameToggle(this.value.workspaces, rm),
-      agents: renameToggle(this.value.agents, rm)
+      workspaces: renameToggle(this.value.workspaces, 'connectors', rm),
+      agents: renameToggle(this.value.agents, 'connectors', rm)
+    })
+  }
+
+  /** Skill trong thư viện đổi tên (`to`) hoặc bị gỡ (`to: null`): bật / tắt ở mọi cấp đi theo. */
+  async renameSkill(from: string, to: string | null): Promise<Settings> {
+    const r = { from, to }
+    const toggles = { ...this.value.app.skills.toggles }
+    if (from in toggles) {
+      const v = toggles[from]
+      delete toggles[from]
+      if (to) toggles[to] = v
+    }
+    return this.commit({
+      ...this.value,
+      app: { ...this.value.app, skills: { toggles } },
+      workspaces: renameToggle(this.value.workspaces, 'skills', r),
+      agents: renameToggle(this.value.agents, 'skills', r)
     })
   }
 
@@ -143,20 +160,25 @@ export class SettingsStore {
   }
 }
 
-/** Đổi khoá bật / tắt connector trong các ghi đè (`to: null` = bỏ). Ghi đè rỗng thì bỏ hẳn. */
-function renameToggle(map: Record<string, SettingsOverrides>, r: { from: string; to: string | null }): Record<string, SettingsOverrides> {
+/** Đổi khoá bật / tắt connector / skill trong các ghi đè (`to: null` = bỏ). Ghi đè rỗng thì bỏ hẳn. */
+function renameToggle(
+  map: Record<string, SettingsOverrides>,
+  field: 'connectors' | 'skills',
+  r: { from: string; to: string | null }
+): Record<string, SettingsOverrides> {
   const out: Record<string, SettingsOverrides> = {}
   for (const [id, o] of Object.entries(map)) {
-    if (!o.connectors || !(r.from in o.connectors)) {
+    const cur = o[field]
+    if (!cur || !(r.from in cur)) {
       out[id] = o
       continue
     }
-    const connectors = { ...o.connectors }
-    const v = connectors[r.from]
-    delete connectors[r.from]
-    if (r.to) connectors[r.to] = v
-    const next: SettingsOverrides = { ...o, connectors }
-    if (!Object.keys(connectors).length) delete next.connectors
+    const toggles = { ...cur }
+    const v = toggles[r.from]
+    delete toggles[r.from]
+    if (r.to) toggles[r.to] = v
+    const next: SettingsOverrides = { ...o, [field]: toggles }
+    if (!Object.keys(toggles).length) delete next[field]
     if (Object.keys(next).length) out[id] = next
   }
   return out

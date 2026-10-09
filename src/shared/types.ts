@@ -384,6 +384,15 @@ export interface AppSettings {
   handoff: HandoffSettings
   adapters: AdaptersSettings
   connectors: ConnectorsSettings
+  skills: SkillsSettings
+}
+
+export interface SkillsSettings {
+  /**
+   * Bật / tắt ở cấp app. Khoá: tên skill trong thư viện của stag.ai (vắng = bật), `claude:<tên>` / `codex:<tên>`
+   * (skill có sẵn của CLI, vắng = bật), `claude-plugin:<plugin@marketplace>` (cả plugin Claude Code, vắng = bật).
+   */
+  toggles: Record<string, boolean>
 }
 
 /** Phần ghi đè ở cấp workspace / agent; thiếu khoá = theo cấp trên. */
@@ -393,6 +402,8 @@ export interface SettingsOverrides {
   models?: Partial<Record<CliAdapterId, Partial<ModelSettings>>>
   /** Bật / tắt connector (id) hoặc máy chủ MCP có sẵn (`claude:<tên>` / `codex:<tên>`). */
   connectors?: Record<string, boolean>
+  /** Bật / tắt skill (khoá như SkillsSettings.toggles). */
+  skills?: Record<string, boolean>
 }
 
 /** Sửa ghi đè: khoá có mặt thay cả mục đó, `null` = bỏ mục đó (theo cấp trên). Khoá vắng mặt giữ nguyên. */
@@ -417,6 +428,8 @@ export interface AppSettingsPatch {
   }
   /** Chỉ phần bật / tắt máy chủ có sẵn; danh sách connector sửa qua IPC riêng (connectors:save / remove). */
   connectors?: { inherited?: Record<string, boolean> }
+  /** Thay cả map bật / tắt skill ở cấp app. */
+  skills?: { toggles: Record<string, boolean> }
 }
 
 export type OverrideLevel = 'workspace' | 'agent'
@@ -442,7 +455,7 @@ export const DEFAULT_ADAPTERS: AdaptersSettings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 2,
-  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} } },
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} } },
   workspaces: {},
   agents: {}
 }
@@ -755,3 +768,89 @@ export interface ToolApproval {
 }
 
 export type ApprovalDecision = 'allow' | 'always' | 'deny'
+
+// ---- Skill (Cài đặt → Skill) ----
+
+/** Skill trong thư viện của stag.ai đến từ đâu. */
+export interface SkillSource {
+  kind: 'created' | 'folder' | 'zip' | 'catalog' | 'claude' | 'codex'
+  /** Đường dẫn / slug gốc. */
+  from?: string
+  at: string
+}
+
+/** Skill trong thư viện của stag.ai (userData/skills/<tên>/SKILL.md). */
+export interface LibrarySkill {
+  name: string
+  description: string
+  files: number
+  bytes: number
+  source: SkillSource
+  updatedAt: string
+  /** SKILL.md hỏng (thiếu frontmatter, tên không khớp thư mục…): vẫn hiện để sửa, không đưa vào phiên. */
+  problem?: string
+}
+
+export interface SkillFile {
+  /** Đường dẫn trong thư mục skill, dấu `/`. */
+  path: string
+  bytes: number
+}
+
+/** Nội dung một skill để xem / sửa. */
+export interface SkillDoc {
+  name: string
+  dir: string
+  md: string
+  files: SkillFile[]
+  /** false = skill có sẵn của CLI / plugin: chỉ xem. */
+  editable: boolean
+}
+
+/** Skill Claude Code / Codex tự nạp (app chỉ bật / tắt cho phiên agent, không sửa). */
+export interface InheritedSkill {
+  runtime: CliAdapterId
+  name: string
+  description: string
+  /** user / project / claude.ai / plugin (Claude); user / repo / system / admin (Codex). */
+  scope: 'user' | 'project' | 'claude.ai' | 'plugin' | 'repo' | 'system' | 'admin'
+  /** Đường dẫn SKILL.md. */
+  path: string
+  /** Khoá bật / tắt: `claude:<tên>` / `codex:<tên>`; skill của plugin Claude Code: `claude-plugin:<plugin>` (cả plugin). */
+  toggleKey: string
+  /** Plugin Claude Code chứa skill này. */
+  plugin?: string
+  /** Codex: người dùng đã tắt trong config.toml của họ. */
+  disabledInCli?: boolean
+}
+
+export interface SkillScan {
+  runtime: CliAdapterId
+  cwd: string
+  skills: InheritedSkill[]
+  error: string | null
+  scannedAt: string
+}
+
+/** Skill trong danh mục kèm app (resources/skill-catalog, từ @paperclipai/skills-catalog, MIT). */
+export interface SkillCatalogEntry {
+  slug: string
+  name: string
+  description: string
+  category: string
+  tags: string[]
+  files: number
+  bytes: number
+}
+
+export interface SkillsList {
+  library: LibrarySkill[]
+  catalog: SkillCatalogEntry[]
+}
+
+/** Kết quả nhập / cài / chép skill vào thư viện. */
+export interface SkillImportResult {
+  added: string[]
+  skipped: Array<{ name: string; reason: string }>
+  list: SkillsList
+}

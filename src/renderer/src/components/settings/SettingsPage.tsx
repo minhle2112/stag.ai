@@ -6,6 +6,7 @@ import { Group, Row, SectionTitle, SmallButton } from './controls'
 import { AdaptersSection } from './AdaptersSection'
 import { ConnectorsSection } from './ConnectorsSection'
 import { SecretsSection } from './SecretsSection'
+import { SkillsSection } from './SkillsSection'
 import { GeneralSection } from './GeneralSection'
 import { HandoffSection } from './HandoffSection'
 
@@ -22,7 +23,7 @@ const NAV: NavItem[][] = [
   [
     { id: 'adapters', label: 'Adapter' },
     { id: 'connectors', label: 'Connector' },
-    { id: 'skills', label: 'Skill', soon: 'S3' },
+    { id: 'skills', label: 'Skill' },
     { id: 'plugins', label: 'Plugin', soon: 'S4' },
     { id: 'secrets', label: 'Secrets' }
   ],
@@ -40,14 +41,6 @@ const NAV: NavItem[][] = [
 
 /** Mô tả các mục chưa làm (theo kế hoạch Settings đã chốt 2026-10-09). */
 const SOON: Partial<Record<SettingsSection, { title: string; points: string[] }>> = {
-  skills: {
-    title: 'Skill',
-    points: [
-      'Các thư mục SKILL.md: có sẵn trong stag.ai, của bạn (~/.claude/skills), của dự án, đi kèm plugin.',
-      'Tạo mới từ mẫu, nhập từ thư mục / zip / git, xem và sửa ngay trong app.',
-      'Bật / tắt theo cấp app → workspace → agent; ghi rõ adapter nào dùng được.'
-    ]
-  },
   plugins: {
     title: 'Plugin',
     points: [
@@ -122,7 +115,7 @@ export function SettingsPage(): React.JSX.Element {
       </nav>
 
       <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className={`mx-auto ${section === 'connectors' ? 'max-w-5xl' : 'max-w-3xl'} select-text px-8 py-8`}>
+        <div className={`mx-auto ${section === 'connectors' || section === 'skills' ? 'max-w-5xl' : 'max-w-3xl'} select-text px-8 py-8`}>
           <Section id={section} />
         </div>
       </main>
@@ -138,6 +131,8 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
       return <AdaptersSection />
     case 'connectors':
       return <ConnectorsSection />
+    case 'skills':
+      return <SkillsSection />
     case 'secrets':
       return <SecretsSection />
     case 'handoff':

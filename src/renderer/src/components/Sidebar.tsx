@@ -334,6 +334,7 @@ function AgentRow({
               ? item('Cài đặt adapter…', () => openSettings('adapters', { external: agent.adapterId }))
               : !terminal && item('Model & effort…', () => openSettings('adapters', { adapter: agentKind(agent) as 'claude' | 'codex', agentId: agent.id }))}
             {!terminal && item('Connector (MCP)…', () => openSettings('connectors', { agentId: agent.id }))}
+            {!terminal && item('Skill…', () => openSettings('skills', { agentId: agent.id }))}
             <div className="my-0.5 border-t border-line" />
             {item(terminal ? 'Xoá terminal…' : 'Xoá agent…', removeAgent, true)}
           </div>

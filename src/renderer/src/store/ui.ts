@@ -36,6 +36,8 @@ export interface SettingsFocus {
   connector?: string
   /** Mở thẳng mục Duyệt của Connector. */
   review?: boolean
+  /** Tên skill trong thư viện (mở trang chi tiết của nó). */
+  skill?: string
 }
 
 interface UiState {

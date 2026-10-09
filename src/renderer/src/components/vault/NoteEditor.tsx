@@ -25,7 +25,7 @@ interface Props {
 }
 
 /** Màu cú pháp markdown theo bảng màu của app. */
-const highlight = HighlightStyle.define([
+export const noteHighlight = HighlightStyle.define([
   { tag: tags.heading1, fontSize: '1.45em', fontWeight: '600' },
   { tag: tags.heading2, fontSize: '1.25em', fontWeight: '600' },
   { tag: tags.heading3, fontSize: '1.1em', fontWeight: '600' },
@@ -42,7 +42,7 @@ const highlight = HighlightStyle.define([
   { tag: [tags.string, tags.content], color: 'var(--color-fg)' }
 ])
 
-const theme = EditorView.theme(
+export const noteTheme = EditorView.theme(
   {
     '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--color-fg)', fontSize: '14px' },
     '&.cm-focused': { outline: 'none' },
@@ -164,10 +164,10 @@ export function NoteEditor({ vaultPath, rel, disk, notes }: Props): React.JSX.El
           autocompletion({ override: [complete], icons: false }),
           // Frontmatter `---…---` đầu note là YAML, không phải tiêu đề setext của markdown.
           yamlFrontmatter({ content: markdown() }),
-          syntaxHighlighting(highlight),
+          syntaxHighlighting(noteHighlight),
           EditorView.lineWrapping,
           placeholder('Note trống…'),
-          theme,
+          noteTheme,
           keymap.of([
             { key: 'Mod-s', preventDefault: true, run: () => (void saveRef.current(), true) },
             indentWithTab,

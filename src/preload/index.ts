@@ -19,6 +19,10 @@ import type {
   Connector,
   ConnectorImport,
   ConnectorTestResult,
+  SkillDoc,
+  SkillImportResult,
+  SkillScan,
+  SkillsList,
   InheritedScan,
   SecretsList,
   ArtifactEvent,
@@ -252,6 +256,23 @@ const api = {
     connect: (req: ConnectRequest, workspaceId?: string): Promise<ConnectResult> => ipcRenderer.invoke(IPC.connectorConnect, req, workspaceId),
     cancelConnect: (): Promise<void> => ipcRenderer.invoke(IPC.connectorConnectCancel),
     reauth: (id: string, workspaceId?: string): Promise<ConnectorTestResult> => ipcRenderer.invoke(IPC.connectorReauth, id, workspaceId)
+  },
+  /** Skill: thư viện của stag.ai, danh mục kèm app, skill có sẵn của Claude Code / Codex. */
+  skills: {
+    list: (): Promise<SkillsList> => ipcRenderer.invoke(IPC.skillsList),
+    read: (name: string): Promise<SkillDoc> => ipcRenderer.invoke(IPC.skillsRead, name),
+    readPath: (path: string): Promise<SkillDoc> => ipcRenderer.invoke(IPC.skillsReadPath, path),
+    catalogDoc: (slug: string): Promise<SkillDoc> => ipcRenderer.invoke(IPC.skillsCatalogDoc, slug),
+    create: (name: string, description: string): Promise<SkillsList> => ipcRenderer.invoke(IPC.skillsCreate, name, description),
+    save: (name: string, md: string): Promise<{ name: string; problem: string | null; list: SkillsList }> => ipcRenderer.invoke(IPC.skillsSave, name, md),
+    remove: (name: string): Promise<SkillsList> => ipcRenderer.invoke(IPC.skillsRemove, name),
+    /** Mở hộp chọn thư mục / file zip; null = người dùng huỷ. */
+    import: (kind: 'folder' | 'zip'): Promise<SkillImportResult | null> => ipcRenderer.invoke(IPC.skillsImport, kind),
+    install: (slug: string): Promise<SkillImportResult> => ipcRenderer.invoke(IPC.skillsInstall, slug),
+    copy: (runtime: CliAdapterId, path: string): Promise<SkillImportResult> => ipcRenderer.invoke(IPC.skillsCopy, runtime, path),
+    scan: (runtime: CliAdapterId, workspaceId?: string): Promise<SkillScan> => ipcRenderer.invoke(IPC.skillsScan, runtime, workspaceId),
+    /** Tên skill trong thư viện, hoặc đường dẫn SKILL.md của skill có sẵn. */
+    reveal: (target: string): Promise<void> => ipcRenderer.invoke(IPC.skillsReveal, target)
   },
   /** Lần gọi tool connector đang chờ duyệt. */
   approvals: {

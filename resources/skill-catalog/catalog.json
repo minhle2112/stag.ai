@@ -1,0 +1,103 @@
+{
+ "source": "@paperclipai/skills-catalog 0.3.1 (MIT)",
+ "entries": [
+  {
+   "slug": "agent-browser",
+   "name": "agent-browser",
+   "description": "Drive a real browser to inspect or interact with a web page or app — navigate, take screenshots, read console and network, fill simple forms — for verification tasks, not unattended automation.",
+   "category": "browser",
+   "tags": [
+    "browser",
+    "puppeteer",
+    "playwright",
+    "verification"
+   ],
+   "files": 1,
+   "bytes": 5133
+  },
+  {
+   "slug": "design-critique",
+   "name": "design-critique",
+   "description": "Give a structured product design critique — user job clarity, hierarchy, affordance, error states, accessibility, and consistency — focused on what to change, in what order, and why.",
+   "category": "product",
+   "tags": [
+    "design",
+    "product",
+    "ux",
+    "review"
+   ],
+   "files": 1,
+   "bytes": 4851
+  },
+  {
+   "slug": "doc-maintenance",
+   "name": "doc-maintenance",
+   "description": "Keep project docs aligned with recent code and feature changes — detect drift, update affected pages, and add release-relevant notes without rewriting unchanged sections.",
+   "category": "docs",
+   "tags": [
+    "docs",
+    "documentation",
+    "release-notes"
+   ],
+   "files": 1,
+   "bytes": 4478
+  },
+  {
+   "slug": "github-pr-workflow",
+   "name": "github-pr-workflow",
+   "description": "Prepare a GitHub pull request from a feature branch — branch hygiene, commit shape, title/body, verification notes, screenshots for UI work, and replies to review comments.",
+   "category": "software-development",
+   "tags": [
+    "github",
+    "pull-requests",
+    "code-review",
+    "release"
+   ],
+   "files": 1,
+   "bytes": 3970
+  },
+  {
+   "slug": "qa-acceptance",
+   "name": "qa-acceptance",
+   "description": "Produce QA acceptance criteria and a manual validation plan for a feature change — golden path, edge cases, error states, performance limits, and explicit pass/fail evidence.",
+   "category": "quality",
+   "tags": [
+    "qa",
+    "acceptance",
+    "validation",
+    "testing"
+   ],
+   "files": 1,
+   "bytes": 3861
+  },
+  {
+   "slug": "simplified-english",
+   "name": "simplified-english",
+   "description": "Write user-facing comments, plans, and documents in ASD-STE100 Simplified Technical English — short, unambiguous sentences with approved words and one meaning each — so readers understand them the first time.",
+   "category": "content",
+   "tags": [
+    "writing",
+    "communication",
+    "clarity",
+    "style"
+   ],
+   "files": 1,
+   "bytes": 1578
+  },
+  {
+   "slug": "wireframe",
+   "name": "wireframe",
+   "description": "Produce low-fidelity black-and-white UI wireframes as SVGs or viewer pages. Use when asked to wireframe, sketch a screen, draft a layout, make a low-fi mockup, or publish wireframes.",
+   "category": "product",
+   "tags": [
+    "design",
+    "wireframe",
+    "ux",
+    "prototyping",
+    "svg"
+   ],
+   "files": 7,
+   "bytes": 63982
+  }
+ ]
+}
