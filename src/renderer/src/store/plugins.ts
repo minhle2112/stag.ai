@@ -64,3 +64,17 @@ export async function runSlot(p: InstalledPlugin, slot: PluginSlot, workspaceId?
 
 /** Mã tab chính của trang plugin (slot page). */
 export const pageTab = (pluginId: string, slotId: string): `plugin:${string}` => `plugin:${pluginId}/${slotId}`
+
+/** Mã widget trong lưới agent (LayoutNode type 'widget'): "<id plugin>/<id slot dashboardWidget>". */
+export const widgetId = (pluginId: string, slotId: string): string => `${pluginId}/${slotId}`
+
+/** Tách mã widget; id plugin và id slot không chứa "/". */
+export function parseWidgetId(widget: string): { pluginId: string; slotId: string } {
+  const i = widget.indexOf('/')
+  return i === -1 ? { pluginId: widget, slotId: '' } : { pluginId: widget.slice(0, i), slotId: widget.slice(i + 1) }
+}
+
+/** Widget (slot dashboardWidget) thêm được vào lưới agent của workspace: plugin đang chạy và bật cho workspace đó. */
+export function widgetsOf(items: InstalledPlugin[], settings: Settings, workspaceId: string): Array<{ id: string; plugin: InstalledPlugin; slot: PluginSlot }> {
+  return slotsOf(items, settings, 'dashboardWidget', workspaceId).map((x) => ({ id: widgetId(x.plugin.manifest.id, x.slot.id), ...x }))
+}

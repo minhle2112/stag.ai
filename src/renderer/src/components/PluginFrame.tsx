@@ -13,7 +13,7 @@ export interface PluginFrameContext {
 }
 
 /**
- * Trang của plugin (slot page / settingsPage) trong iframe cách ly: `sandbox` không có allow-same-origin nên trang
+ * Trang của plugin (slot page / settingsPage / dashboardWidget) trong iframe cách ly: `sandbox` không có allow-same-origin nên trang
  * chạy với origin "null", không thấy window.stag hay DOM của app. Trang nói chuyện qua postMessage
  * ({ __stag: 1, id, method, params }); app điền ngữ cảnh và chuyển lời gọi cho main (kiểm quyền ở PluginHost.bridge).
  */
@@ -27,7 +27,7 @@ export function PluginFrame({
   plugin: InstalledPlugin
   slot: PluginSlot
   workspace?: { id: string; name: string; path: string }
-  /** Cao theo nội dung (trang cài đặt); không thì lấp đầy chỗ chứa. */
+  /** Cao theo nội dung (trang cài đặt); không thì lấp đầy chỗ chứa. Widget (ô trong lưới agent) luôn lấp đầy ô. */
   autoHeight?: boolean
   className?: string
 }): React.JSX.Element {
@@ -48,6 +48,7 @@ export function PluginFrame({
   const ctxRef = useRef(context)
   ctxRef.current = context
   const name = plugin.manifest.displayName
+  const fit = autoHeight && slot.type !== 'dashboardWidget'
 
   const post = (m: Record<string, unknown>): void => ref.current?.contentWindow?.postMessage({ __stag: 1, ...m }, '*')
 
@@ -113,8 +114,8 @@ export function PluginFrame({
       src={`stag-plugin://${id}/${slot.path ?? 'index.html'}`}
       sandbox="allow-scripts allow-forms allow-downloads"
       referrerPolicy="no-referrer"
-      className={`block w-full border-0 bg-bg ${autoHeight ? '' : 'h-full'} ${className ?? ''}`}
-      style={autoHeight ? { height } : undefined}
+      className={`block w-full border-0 bg-bg ${fit ? '' : 'h-full'} ${className ?? ''}`}
+      style={fit ? { height } : undefined}
     />
   )
 }

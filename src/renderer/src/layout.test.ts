@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { LayoutNode } from '@shared/types'
-import { insertLeaf, leaves, reconcile, removeLeaf, setRatio } from './layout'
+import { cellKey, cells, insertCell, insertLeaf, leaves, reconcile, removeLeaf, setRatio, swapLeaves, widgetKey, widgets } from './layout'
 
 const leaf = (agentId: string): LayoutNode => ({ type: 'leaf', agentId })
+const wid = (widget: string): LayoutNode => ({ type: 'widget', widget })
 const split = (dir: 'row' | 'col', a: LayoutNode, b: LayoutNode, ratio = 0.5): LayoutNode => ({ type: 'split', dir, ratio, a, b })
 
 describe('leaves', () => {
@@ -72,5 +73,51 @@ describe('reconcile', () => {
     expect(reconcile(tree, ['a', 'c', 'd'])).toEqual(split('row', leaf('a'), leaf('c')))
     expect(reconcile(tree, [])).toBeNull()
     expect(reconcile(null, ['a'])).toBeNull()
+  })
+})
+
+describe('ô widget', () => {
+  const W = 'stag.hello/board'
+  const WK = widgetKey(W)
+  const tree = split('row', leaf('a'), split('col', wid(W), leaf('b'), 0.6), 0.3)
+
+  it('leaves chỉ có agent; cells / widgets có cả widget', () => {
+    expect(leaves(tree)).toEqual(['a', 'b'])
+    expect(cells(tree)).toEqual(['a', WK, 'b'])
+    expect(widgets(tree)).toEqual([W])
+    expect(cellKey({ type: 'widget', widget: W })).toBe('widget:stag.hello/board')
+    expect(cellKey({ type: 'leaf', agentId: 'a' })).toBe('a')
+  })
+
+  it('lưới trống → widget thành gốc; chia đúng ô đích (agent hoặc widget)', () => {
+    expect(insertCell(null, null, { type: 'widget', widget: W }, 'row')).toEqual(wid(W))
+    expect(insertCell(leaf('a'), 'a', { type: 'widget', widget: W }, 'col')).toEqual(split('col', leaf('a'), wid(W)))
+    // Agent mới cạnh ô widget đang chọn.
+    expect(insertLeaf(tree, WK, 'c', 'row')).toEqual(split('row', leaf('a'), split('col', split('row', wid(W), leaf('c')), leaf('b'), 0.6), 0.3))
+    // Mã widget không có tiền tố "widget:" không phải mã ô nào → chia cả lưới.
+    expect(insertLeaf(tree, W, 'c', 'row')).toEqual(split('row', tree, leaf('c')))
+  })
+
+  it('removeLeaf theo mã ô: bỏ widget không đụng agent, bỏ agent không đụng widget', () => {
+    expect(removeLeaf(tree, WK)).toEqual(split('row', leaf('a'), leaf('b'), 0.3))
+    expect(removeLeaf(tree, 'b')).toEqual(split('row', leaf('a'), wid(W), 0.3))
+    expect(removeLeaf(wid(W), WK)).toBeNull()
+    expect(removeLeaf(tree, W)).toEqual(tree)
+  })
+
+  it('swapLeaves đổi chỗ agent với widget, giữ khung và tỉ lệ', () => {
+    expect(swapLeaves(tree, 'a', WK)).toEqual(split('row', wid(W), split('col', leaf('a'), leaf('b'), 0.6), 0.3))
+    expect(swapLeaves(tree, WK, 'b')).toEqual(split('row', leaf('a'), split('col', leaf('b'), wid(W), 0.6), 0.3))
+    expect(swapLeaves(tree, WK, 'không-có')).toEqual(tree)
+  })
+
+  it('setRatio tới ô widget → không đổi gì', () => {
+    expect(setRatio(tree, ['b', 'a'], 0.9)).toEqual(tree)
+    expect(setRatio(tree, ['b'], 0.2)).toEqual(split('row', leaf('a'), split('col', wid(W), leaf('b'), 0.2), 0.3))
+  })
+
+  it('reconcile giữ ô widget (cả khi không còn agent nào)', () => {
+    expect(reconcile(tree, ['a'])).toEqual(split('row', leaf('a'), wid(W), 0.3))
+    expect(reconcile(tree, [])).toEqual(wid(W))
   })
 })

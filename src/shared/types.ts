@@ -176,10 +176,18 @@ export interface Agent {
 
 export type SplitDir = 'row' | 'col'
 
-/** Lưới ô của tab Agents: cây chia đôi. 'row' = trái|phải, 'col' = trên/dưới. */
+/**
+ * Lưới ô của tab Agents: cây chia đôi. 'row' = trái|phải, 'col' = trên/dưới.
+ * Lá: ô agent (`leaf`) hoặc ô widget của plugin (`widget` = "<id plugin>/<id slot dashboardWidget>", mỗi widget
+ * tối đa một ô trong một workspace).
+ */
 export type LayoutNode =
   | { type: 'leaf'; agentId: string }
+  | { type: 'widget'; widget: string }
   | { type: 'split'; dir: SplitDir; ratio: number; a: LayoutNode; b: LayoutNode }
+
+/** Ô lá của lưới (agent hoặc widget). */
+export type LayoutCell = Exclude<LayoutNode, { type: 'split' }>
 
 export interface AgentRun {
   agentId: string
