@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<title>Ghi âm đo thử giọng nói</title>
+<style>
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #16181d; color: #e6e6e6; display: flex; height: 100vh; }
+  aside { width: 230px; border-right: 1px solid #2c2f36; overflow: auto; }
+  aside button { display: flex; gap: 8px; width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 6px 12px; cursor: pointer; font: inherit; }
+  aside button.on { background: #262a33; }
+  aside .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; background: #555; flex: none; }
+  aside .dot.ok { background: #3fb950; }
+  aside .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  main { flex: 1; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+  textarea { font: 22px/1.4 system-ui, sans-serif; background: #1d2027; color: #fff; border: 1px solid #2c2f36; border-radius: 6px; padding: 12px; resize: none; height: 110px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button.b { background: #2b3040; color: #fff; border: 1px solid #3a4052; border-radius: 6px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  button.rec { background: #8b1e1e; border-color: #b33; }
+  button.rec.live { background: #e5484d; }
+  .meter { flex: 1; height: 8px; background: #2c2f36; border-radius: 4px; overflow: hidden; min-width: 120px; }
+  .meter i { display: block; height: 100%; width: 0; background: #3fb950; }
+  .hint { color: #9aa0aa; font-size: 13px; }
+  select { background: #1d2027; color: #fff; border: 1px solid #2c2f36; border-radius: 6px; padding: 6px; max-width: 360px; }
+  .err { color: #ff7b72; }
+</style>
+</head>
+<body>
+<aside id="list"></aside>
+<main>
+  <div class="hint">Đọc tự nhiên như khi ra lệnh cho agent. Lỡ đọc khác câu mẫu thì sửa lại chữ trong khung cho đúng điều bạn đã nói (để chấm điểm đúng).</div>
+  <textarea id="text"></textarea>
+  <div class="row">
+    <button class="b rec" id="rec">Giữ để ghi (hoặc giữ phím Space)</button>
+    <button class="b" id="play">▶ Nghe lại</button>
+    <button class="b" id="prev">← Câu trước</button>
+    <button class="b" id="next">Câu sau →</button>
+    <div class="meter"><i id="lvl"></i></div>
+  </div>
+  <div class="row"><span class="hint">Micro:</span><select id="mic"></select></div>
+  <div id="status" class="hint"></div>
+</main>
+<script>
+const RATE = 16000
+const $ = (id) => document.getElementById(id)
+let items = [], cur = 0, ctx = null, stream = null, node = null, chunks = null, startedAt = 0, closing = false
+// Người nói hay bắt đầu ngay lúc nhấn và thả phím trước khi dứt chữ cuối → giữ 0,3 s trước khi nhấn, ghi thêm 0,5 s sau khi thả.
+const PRE_MS = 300, POST_MS = 500
+let pre = [], preLen = 0
+
+const worklet = `
+class Tap extends AudioWorkletProcessor {
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0]
+    if (ch) this.port.postMessage(ch.slice(0))
+    return true
+  }
+}
+registerProcessor('tap', Tap)`
+
+async function openMic() {
+  if (stream) stream.getTracks().forEach((t) => t.stop())
+  if (ctx) await ctx.close()
+  const deviceId = $('mic').value
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { deviceId: deviceId ? { exact: deviceId } : undefined, channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true }
+  })
+  ctx = new AudioContext({ sampleRate: RATE })
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: 'text/javascript' })))
+  node = new AudioWorkletNode(ctx, 'tap')
+  node.port.onmessage = (e) => {
+    const s = e.data
+    let peak = 0
+    for (let i = 0; i < s.length; i++) peak = Math.max(peak, Math.abs(s[i]))
+    $('lvl').style.width = Math.min(100, peak * 140) + '%'
+    if (chunks) chunks.push(s)
+    else {
+      pre.push(s); preLen += s.length
+      while (preLen - pre[0].length >= (RATE * PRE_MS) / 1000) preLen -= pre.shift().length
+    }
+  }
+  ctx.createMediaStreamSource(stream).connect(node)
+}
+
+async function listMics() {
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput')
+  const sel = $('mic'), keep = sel.value
+  sel.innerHTML = devs.map((d) => `<option value="${d.deviceId}">${d.label || 'Micro'}</option>`).join('')
+  if (keep) sel.value = keep
+}
+
+function renderList() {
+  $('list').innerHTML = items.map((s, i) =>
+    `<button class="${i === cur ? 'on' : ''}" data-i="${i}"><span class="dot ${s.recorded ? 'ok' : ''}"></span><span class="t">${s.id} · ${s.text}</span></button>`).join('')
+  $('list').querySelectorAll('button').forEach((b) => (b.onclick = () => go(+b.dataset.i)))
+  const done = items.filter((s) => s.recorded).length
+  $('status').textContent = `Đã ghi ${done}/${items.length} câu.` + (done === items.length ? ' Xong rồi, có thể đóng cửa sổ.' : '')
+}
+
+function go(i) {
+  cur = Math.max(0, Math.min(items.length - 1, i))
+  $('text').value = items[cur].text
+  renderList()
+}
+
+function startRec() {
+  if (chunks || closing || !ctx) return
+  if (ctx.state === 'suspended') ctx.resume()
+  chunks = pre.slice()
+  pre = []; preLen = 0
+  startedAt = performance.now()
+  $('rec').classList.add('live')
+}
+
+async function stopRec() {
+  if (!chunks || closing) return
+  closing = true
+  $('status').textContent = 'Đang chốt…'
+  await new Promise((r) => setTimeout(r, POST_MS))
+  const got = chunks
+  chunks = null
+  closing = false
+  $('rec').classList.remove('live')
+  if (performance.now() - startedAt < 600) { $('status').innerHTML = '<span class="err">Ngắn quá, giữ phím lâu hơn.</span>'; return }
+  const len = got.reduce((n, c) => n + c.length, 0)
+  const all = new Float32Array(len)
+  let o = 0
+  for (const c of got) { all.set(c, o); o += c.length }
+  const it = items[cur]
+  it.text = $('text').value.trim()
+  await window.bench.save(it.id, it.text, Array.from(all), RATE)
+  it.recorded = true
+  if (cur < items.length - 1) go(cur + 1); else renderList()
+}
+
+async function play() {
+  const buf = await window.bench.load(items[cur].id)
+  if (!buf) return
+  const a = new Audio(URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })))
+  a.play()
+}
+
+$('rec').onmousedown = startRec
+$('rec').onmouseup = stopRec
+$('rec').onmouseleave = stopRec
+$('play').onclick = play
+$('prev').onclick = () => go(cur - 1)
+$('next').onclick = () => go(cur + 1)
+$('mic').onchange = () => openMic().catch(showErr)
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && document.activeElement !== $('text')) { e.preventDefault(); if (!e.repeat) startRec() }
+})
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space' && document.activeElement !== $('text')) { e.preventDefault(); stopRec() }
+})
+const showErr = (e) => ($('status').innerHTML = `<span class="err">Không mở được micro: ${e.message}. Kiểm tra Windows Settings → Privacy → Microphone → cho ứng dụng desktop dùng micro.</span>`)
+
+;(async () => {
+  items = await window.bench.list()
+  go(Math.max(0, items.findIndex((s) => !s.recorded)))
+  try { await openMic(); await listMics() } catch (e) { showErr(e) }
+})()
+</script>
+</body>
+</html>

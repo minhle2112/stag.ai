@@ -1,0 +1,18 @@
+[
+  { "id": "s01", "text": "Sửa hàm handleClick trong file App.tsx cho nó không bị gọi hai lần.", "terms": ["handleClick", "App.tsx"] },
+  { "id": "s02", "text": "Chạy npm run test rồi báo cho tôi biết test nào bị fail.", "terms": ["npm", "test", "fail"] },
+  { "id": "s03", "text": "Thêm một nút Settings ở góc trên bên phải của Sidebar.", "terms": ["Settings", "Sidebar"] },
+  { "id": "s04", "text": "Đọc file README rồi tóm tắt cho tôi trong ba câu.", "terms": ["file", "README"] },
+  { "id": "s05", "text": "Tạo một component React mới tên là VoiceButton dùng useState.", "terms": ["component", "React", "VoiceButton", "useState"] },
+  { "id": "s06", "text": "Commit các thay đổi với message là sửa lỗi scope lock rồi push lên GitHub.", "terms": ["commit", "message", "scope lock", "push", "GitHub"] },
+  { "id": "s07", "text": "Kiểm tra xem API trả về lỗi 404 hay 500 khi token hết hạn.", "terms": ["API", "404", "500", "token"] },
+  { "id": "s08", "text": "Đổi biến userId thành accountId trong toàn bộ thư mục src/main.", "terms": ["userId", "accountId", "src", "main"] },
+  { "id": "s09", "text": "Viết unit test cho hàm normalizeOrigin, nhớ có trường hợp localhost.", "terms": ["unit test", "normalizeOrigin", "localhost"] },
+  { "id": "s10", "text": "Mở terminal chạy git status rồi cho tôi xem diff.", "terms": ["terminal", "git status", "diff"] },
+  { "id": "s11", "text": "Agent Codex đang bị treo, hãy restart session và đọc lại vault.", "terms": ["agent", "Codex", "restart", "session", "vault"] },
+  { "id": "s12", "text": "Refactor đoạn code này dùng async await thay vì callback.", "terms": ["refactor", "code", "async", "await", "callback"] },
+  { "id": "s13", "text": "Hôm nay mình làm tiếp phần gõ tiếng Việt bằng giọng nói nhé, nhớ ghi lại vào nhật ký.", "terms": [] },
+  { "id": "s14", "text": "Cài thêm package zustand bằng npm install rồi cập nhật file package.json.", "terms": ["package", "zustand", "npm install", "package.json"] },
+  { "id": "s15", "text": "Debug giúp tôi tại sao Electron không mở được cửa sổ trên Windows.", "terms": ["debug", "Electron", "Windows"] },
+  { "id": "s16", "text": "Đặt timeout là ba mươi giây và retry tối đa năm lần.", "terms": ["timeout", "retry"] }
+]

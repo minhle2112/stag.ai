@@ -15,3 +15,6 @@ release/
 .env
 .env.*
 *.tsbuildinfo
+
+# Đo thử nhận dạng giọng nói (model, bản ghi âm cá nhân)
+.voice-bench/
