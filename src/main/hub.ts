@@ -36,6 +36,8 @@ export class StatusHub {
   private settingsFile = ''
   private mcpFile = ''
   private statusScript = ''
+  /** Nội dung file `--settings` chung (hook, statusLine, quyền tool stag): phiên có connector ghép thêm vào bản riêng. */
+  private settingsObj: Record<string, unknown> = {}
 
   constructor(private handlers: HubHandlers) {}
 
@@ -56,10 +58,54 @@ export class StatusHub {
     await this.writeConfigs()
   }
 
-  /** Tham số thêm cho `claude`: hook + máy chủ MCP của app. */
-  claudeArgs(): string[] {
+  /** Tham số thêm cho `claude`: hook + máy chủ MCP của app (hoặc file riêng của phiên, xem writeSessionConfigs). */
+  claudeArgs(own: { settingsFile?: string; mcpFile?: string } = {}): string[] {
     if (!this.server) throw new Error('StatusHub chưa chạy')
-    return ['--settings', this.settingsFile, '--mcp-config', this.mcpFile]
+    return ['--settings', own.settingsFile ?? this.settingsFile, '--mcp-config', own.mcpFile ?? this.mcpFile]
+  }
+
+  /** Mục `stag` trong `mcpServers` kiểu Claude (token / id agent lấy từ biến môi trường). */
+  stagServer(): Record<string, unknown> {
+    if (!this.server) throw new Error('StatusHub chưa chạy')
+    return {
+      type: 'http',
+      url: `http://127.0.0.1:${this.port}/mcp`,
+      headers: { Authorization: 'Bearer ${STAG_TOKEN}', 'X-Stag-Agent': '${STAG_AGENT_ID}' }
+    }
+  }
+
+  /**
+   * File cấu hình riêng của một phiên có connector: `mcpServers` = stag + connector; settings = bản chung
+   * + quyền tool connector + máy chủ có sẵn bị tắt (`--settings` chỉ nhận một file, nên phải ghép).
+   */
+  async writeSessionConfigs(
+    base: string,
+    servers: Record<string, unknown>,
+    extra: { allow: string[]; ask: string[]; deny: string[]; deniedMcpServers: Array<{ serverName: string }> }
+  ): Promise<{ settingsFile?: string; mcpFile?: string; files: string[] }> {
+    const out: { settingsFile?: string; mcpFile?: string; files: string[] } = { files: [] }
+    if (Object.keys(servers).length) {
+      out.mcpFile = `${base}.mcp.json`
+      await fs.writeFile(out.mcpFile, JSON.stringify({ mcpServers: { stag: this.stagServer(), ...servers } }, null, 2), 'utf8')
+      out.files.push(out.mcpFile)
+    }
+    if (extra.allow.length || extra.ask.length || extra.deny.length || extra.deniedMcpServers.length) {
+      const perms = (this.settingsObj.permissions ?? {}) as { allow?: string[] }
+      const settings = {
+        ...this.settingsObj,
+        permissions: {
+          ...perms,
+          allow: [...(perms.allow ?? []), ...extra.allow],
+          ...(extra.ask.length ? { ask: extra.ask } : {}),
+          ...(extra.deny.length ? { deny: extra.deny } : {})
+        },
+        ...(extra.deniedMcpServers.length ? { deniedMcpServers: extra.deniedMcpServers } : {})
+      }
+      out.settingsFile = `${base}.settings.json`
+      await fs.writeFile(out.settingsFile, JSON.stringify(settings, null, 2), 'utf8')
+      out.files.push(out.settingsFile)
+    }
+    return out
   }
 
   /** File cấu hình MCP kiểu Claude (`{ mcpServers: { stag } }`, token qua biến môi trường) cho adapter ngoài. */
@@ -103,9 +149,11 @@ export class StatusHub {
       allowedEnvVars: ['STAG_TOKEN', 'STAG_AGENT_ID'],
       timeout: 5
     }
+    // PreToolUse có thể phải chờ người dùng duyệt tool connector trong app (approvals.ts, tối đa 540 s).
+    const hookFor = (e: string): typeof hook => (e === 'PreToolUse' ? { ...hook, timeout: 600 } : hook)
     const common = {
       permissions: { allow: ['mcp__stag'] },
-      hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, [{ hooks: [hook] }]]))
+      hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, [{ hooks: [hookFor(e)] }]]))
     }
     // statusLine chỉ chạy lệnh (không có kiểu http như hook): một script PowerShell chuyển stdin về /status.
     // Claude Code chạy lệnh qua Git Bash (nếu có) hoặc PowerShell: đường dẫn dùng '/' cho cả hai.
@@ -124,15 +172,8 @@ export class StatusHub {
           }
         }
       : common
-    const mcp = {
-      mcpServers: {
-        stag: {
-          type: 'http',
-          url: `${base}/mcp`,
-          headers: { Authorization: 'Bearer ${STAG_TOKEN}', 'X-Stag-Agent': '${STAG_AGENT_ID}' }
-        }
-      }
-    }
+    this.settingsObj = settings
+    const mcp = { mcpServers: { stag: this.stagServer() } }
     this.settingsFile = join(dir, `settings-${this.port}.json`)
     this.mcpFile = join(dir, `mcp-${this.port}.json`)
     await fs.writeFile(this.settingsFile, JSON.stringify(settings, null, 2), 'utf8')

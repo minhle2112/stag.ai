@@ -16,7 +16,7 @@ import { ErrorBar, Group, Row, SmallButton, Switch, useSaveError } from './contr
 
 type View = { type: 'list' } | { type: 'builtin'; id: AdapterId } | { type: 'external'; id: string }
 
-const errText = (e: unknown): string => String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+export const errText = (e: unknown): string => String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 
 export function AdaptersSection(): React.JSX.Element {
   const focus = useUi((s) => s.settingsFocus)
@@ -190,10 +190,10 @@ function AdapterList({ status, open, onInstall }: { status: StatusMap; open: (v:
   )
 }
 
-type Tone = 'ok' | 'warn' | 'bad' | 'muted'
+export type Tone = 'ok' | 'warn' | 'bad' | 'muted'
 const TONE: Record<Tone, string> = { ok: 'bg-emerald-400', warn: 'bg-amber-400', bad: 'bg-red-400', muted: 'bg-muted/60' }
 
-function ListRow({
+export function ListRow({
   title,
   badge,
   line,
@@ -233,7 +233,7 @@ function ListRow({
   )
 }
 
-function PowerButton({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: (v: boolean) => void }): React.JSX.Element {
+export function PowerButton({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: (v: boolean) => void }): React.JSX.Element {
   return (
     <button
       type="button"
@@ -610,7 +610,7 @@ function SectionHead({ children }: { children: ReactNode }): React.JSX.Element {
   )
 }
 
-function Badge({ children }: { children: ReactNode }): React.JSX.Element {
+export function Badge({ children }: { children: ReactNode }): React.JSX.Element {
   return <span className="rounded-full border border-line px-2 py-px text-[10.5px] text-muted">{children}</span>
 }
 
@@ -625,7 +625,7 @@ function ChipIcon({ className }: { className?: string }): React.JSX.Element {
   )
 }
 
-function PowerIcon({ className }: { className?: string }): React.JSX.Element {
+export function PowerIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
       <path d="M12 2v10" />

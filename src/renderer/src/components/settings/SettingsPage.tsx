@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import type { AppMeta } from '@shared/types'
 import { useUi, type SettingsSection } from '../../store/ui'
+import { useApprovals } from '../../store/approvals'
 import { Group, Row, SectionTitle, SmallButton } from './controls'
 import { AdaptersSection } from './AdaptersSection'
+import { ConnectorsSection } from './ConnectorsSection'
+import { SecretsSection } from './SecretsSection'
 import { GeneralSection } from './GeneralSection'
 import { HandoffSection } from './HandoffSection'
 
@@ -18,10 +21,10 @@ const NAV: NavItem[][] = [
   [{ id: 'general', label: 'Chung' }],
   [
     { id: 'adapters', label: 'Adapter' },
-    { id: 'connectors', label: 'Connector', soon: 'S2' },
+    { id: 'connectors', label: 'Connector' },
     { id: 'skills', label: 'Skill', soon: 'S3' },
     { id: 'plugins', label: 'Plugin', soon: 'S4' },
-    { id: 'secrets', label: 'Secrets', soon: 'S2' }
+    { id: 'secrets', label: 'Secrets' }
   ],
   [
     { id: 'handoff', label: 'Agent & bàn giao' },
@@ -37,15 +40,6 @@ const NAV: NavItem[][] = [
 
 /** Mô tả các mục chưa làm (theo kế hoạch Settings đã chốt 2026-10-09). */
 const SOON: Partial<Record<SettingsSection, { title: string; points: string[] }>> = {
-  connectors: {
-    title: 'Connector',
-    points: [
-      'Kết nối dịch vụ ngoài qua MCP: GitHub, Linear, Notion, Slack, Sentry…',
-      'Thêm bằng form, dán JSON, hoặc nhập từ cấu hình Claude Code / Codex có sẵn trên máy.',
-      'Nút "Thử kết nối" để xem danh sách tool; mỗi tool chọn tự cho phép / hỏi trước / chặn.',
-      'Bật / tắt theo cấp app → workspace → agent.'
-    ]
-  },
   skills: {
     title: 'Skill',
     points: [
@@ -63,13 +57,6 @@ const SOON: Partial<Record<SettingsSection, { title: string; points: string[] }>
       'Trang mỗi plugin: Cấu hình, Trạng thái, Giới thiệu.'
     ]
   },
-  secrets: {
-    title: 'Secrets',
-    points: [
-      'Nơi cất token / API key cho connector và plugin, mã hoá bằng Windows.',
-      'Truyền cho agent qua biến môi trường, không đưa lên dòng lệnh, không bao giờ ghi vào vault.'
-    ]
-  },
   scope: {
     title: 'Khoá phạm vi',
     points: ['Khi agent sửa vào vùng của agent khác: hỏi bạn / chặn / chỉ cảnh báo.', 'Hiện tại app luôn hỏi bạn.']
@@ -84,6 +71,7 @@ export function SettingsPage(): React.JSX.Element {
   const section = useUi((s) => s.settings) ?? 'general'
   const open = useUi((s) => s.openSettings)
   const close = useUi((s) => s.closeSettings)
+  const pending = useApprovals((s) => s.items.length)
 
   // Trình duyệt trong app là view gốc nằm trên HTML: phải ẩn khi trang Settings phủ lên (giống hộp thoại).
   useEffect(() => {
@@ -121,6 +109,11 @@ export function SettingsPage(): React.JSX.Element {
                 >
                   <span className="flex-1">{item.label}</span>
                   {item.soon && <span className="rounded bg-line/60 px-1.5 text-[10.5px] text-muted">sắp có</span>}
+                  {item.id === 'connectors' && pending > 0 && (
+                    <span className="rounded-full bg-amber-400 px-1.5 text-[10.5px] font-semibold text-black" title="Đang chờ bạn duyệt">
+                      {pending}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -129,7 +122,7 @@ export function SettingsPage(): React.JSX.Element {
       </nav>
 
       <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl select-text px-8 py-8">
+        <div className={`mx-auto ${section === 'connectors' ? 'max-w-5xl' : 'max-w-3xl'} select-text px-8 py-8`}>
           <Section id={section} />
         </div>
       </main>
@@ -143,6 +136,10 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
       return <GeneralSection />
     case 'adapters':
       return <AdaptersSection />
+    case 'connectors':
+      return <ConnectorsSection />
+    case 'secrets':
+      return <SecretsSection />
     case 'handoff':
       return <HandoffSection />
     case 'vault':

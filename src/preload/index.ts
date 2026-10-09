@@ -12,6 +12,15 @@ import type {
   AppMeta,
   AppSettingsPatch,
   CliAdapterId,
+  ApprovalDecision,
+  ConnectRequest,
+  ConnectResult,
+  ToolApproval,
+  Connector,
+  ConnectorImport,
+  ConnectorTestResult,
+  InheritedScan,
+  SecretsList,
   ArtifactEvent,
   ArtifactStat,
   ArtifactText,
@@ -229,6 +238,40 @@ const api = {
       const fn = (_e: IpcRendererEvent, list: InstalledAdapter[]): void => cb(list)
       ipcRenderer.on(IPC.adapterExtChanged, fn)
       return () => ipcRenderer.removeListener(IPC.adapterExtChanged, fn)
+    }
+  },
+  /** Connector (máy chủ MCP). `workspaceId` = thư mục chạy thử / quét. */
+  connectors: {
+    save: (c: Connector, prevId?: string): Promise<Settings> => ipcRenderer.invoke(IPC.connectorSave, c, prevId),
+    remove: (id: string): Promise<Settings> => ipcRenderer.invoke(IPC.connectorRemove, id),
+    importJson: (text: string): Promise<ConnectorImport> => ipcRenderer.invoke(IPC.connectorImport, text),
+    copy: (runtime: CliAdapterId, name: string, workspaceId?: string): Promise<ConnectorImport> => ipcRenderer.invoke(IPC.connectorCopy, runtime, name, workspaceId),
+    test: (id: string, workspaceId?: string): Promise<ConnectorTestResult> => ipcRenderer.invoke(IPC.connectorTest, id, workspaceId),
+    scan: (runtime: CliAdapterId, workspaceId?: string): Promise<InheritedScan> => ipcRenderer.invoke(IPC.connectorScan, runtime, workspaceId),
+    /** Connect từ danh mục: có thể mở trình duyệt đăng nhập; xong thì thử kết nối luôn. */
+    connect: (req: ConnectRequest, workspaceId?: string): Promise<ConnectResult> => ipcRenderer.invoke(IPC.connectorConnect, req, workspaceId),
+    cancelConnect: (): Promise<void> => ipcRenderer.invoke(IPC.connectorConnectCancel),
+    reauth: (id: string, workspaceId?: string): Promise<ConnectorTestResult> => ipcRenderer.invoke(IPC.connectorReauth, id, workspaceId)
+  },
+  /** Lần gọi tool connector đang chờ duyệt. */
+  approvals: {
+    list: (): Promise<ToolApproval[]> => ipcRenderer.invoke(IPC.approvalsList),
+    answer: (id: string, decision: ApprovalDecision): Promise<void> => ipcRenderer.invoke(IPC.approvalsAnswer, id, decision),
+    onChanged(cb: (list: ToolApproval[]) => void): () => void {
+      const fn = (_e: IpcRendererEvent, list: ToolApproval[]): void => cb(list)
+      ipcRenderer.on(IPC.approvalsChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.approvalsChanged, fn)
+    }
+  },
+  /** Bí mật: giao diện chỉ thấy tên, chỉ gửi giá trị đi (không đọc lại được). */
+  secrets: {
+    list: (): Promise<SecretsList> => ipcRenderer.invoke(IPC.secretsList),
+    set: (name: string, value: string): Promise<SecretsList> => ipcRenderer.invoke(IPC.secretsSet, name, value),
+    remove: (name: string): Promise<SecretsList> => ipcRenderer.invoke(IPC.secretsRemove, name),
+    onChanged(cb: (list: SecretsList) => void): () => void {
+      const fn = (_e: IpcRendererEvent, list: SecretsList): void => cb(list)
+      ipcRenderer.on(IPC.secretsChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.secretsChanged, fn)
     }
   },
   /** Chọn một file .exe; null = huỷ. */

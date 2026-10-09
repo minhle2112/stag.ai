@@ -6,6 +6,7 @@ import { agentKind, type AgentKind } from '@shared/types'
 import { CreateAgentDialog } from './components/CreateAgentDialog'
 import { Kanban } from './components/Kanban'
 import { ScopeAskDialog } from './components/ScopeAskDialog'
+import { ApprovalToast } from './components/ApprovalToast'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
@@ -133,6 +134,7 @@ export function App(): React.JSX.Element {
       </main>
       <BrowserAskDialog />
       <ScopeAskDialog />
+      <ApprovalToast />
       <NewAgentDialog />
       {settingsOpen && <SettingsPage />}
     </div>

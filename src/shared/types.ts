@@ -331,11 +331,59 @@ export interface AdaptersSettings {
   terminal: TerminalAdapterSettings
 }
 
+/** Giá trị trong cấu hình connector: chữ thường, hoặc tên một bí mật (Settings → Secrets). */
+export type ConnectorValue = { value: string } | { secret: string; prefix?: string }
+
+/** Tool của connector: tự cho phép / hỏi trước / chặn. */
+export type ToolPolicy = 'allow' | 'ask' | 'block'
+
+/** Connector = máy chủ MCP app đưa vào phiên agent (Settings → Connector). Không chứa giá trị bí mật. */
+export interface Connector {
+  /** Tên máy chủ MCP trong phiên: a-z, 0-9, '_', '-'; không trùng "stag". */
+  id: string
+  label: string
+  transport: 'stdio' | 'http'
+  /** stdio: chương trình + tham số + biến môi trường. */
+  command: string
+  args: string[]
+  env: Record<string, ConnectorValue>
+  /** http (Streamable HTTP): địa chỉ, bí mật làm `Authorization: Bearer …` ('' = không), header thêm. */
+  url: string
+  /** URL có token bên trong (vd. Zapier) cất thành bí mật này; `url` chỉ còn bản rút gọn để hiện. '' = không. */
+  urlSecret: string
+  bearerSecret: string
+  headers: Record<string, ConnectorValue>
+  /** Đăng nhập OAuth trong app: bearerSecret = bí mật `OAUTH_<ID>` chứa token (app tự làm mới trước mỗi phiên). */
+  oauth: boolean
+  /** Tạo từ danh mục (logo, tên dịch vụ, cách kết nối). */
+  catalog?: { slug: string; method: string }
+  /** Bật ở cấp app (workspace / agent ghi đè được). */
+  enabled: boolean
+  /** Mức cho tool chưa đặt riêng trong toolPolicy. */
+  approval: 'allow' | 'ask'
+  toolPolicy: Record<string, ToolPolicy>
+  /** Tool thấy ở lần "Thử kết nối" gần nhất. */
+  tools: ConnectorTool[]
+  testedAt: string
+}
+
+export interface ConnectorTool {
+  name: string
+  description: string
+}
+
+export interface ConnectorsSettings {
+  items: Connector[]
+  /** Bật / tắt máy chủ MCP có sẵn của Claude Code / Codex ở cấp app. Khoá `claude:<tên>` / `codex:<tên>`; vắng = bật. */
+  inherited: Record<string, boolean>
+}
+
 /** Cài đặt cấp app. */
 export interface AppSettings {
   general: GeneralSettings
   handoff: HandoffSettings
   adapters: AdaptersSettings
+  connectors: ConnectorsSettings
 }
 
 /** Phần ghi đè ở cấp workspace / agent; thiếu khoá = theo cấp trên. */
@@ -343,6 +391,8 @@ export interface SettingsOverrides {
   handoff?: Partial<HandoffSettings>
   /** Model / mức suy nghĩ theo CLI (ở cấp agent chỉ CLI của agent đó có tác dụng). */
   models?: Partial<Record<CliAdapterId, Partial<ModelSettings>>>
+  /** Bật / tắt connector (id) hoặc máy chủ MCP có sẵn (`claude:<tên>` / `codex:<tên>`). */
+  connectors?: Record<string, boolean>
 }
 
 /** Sửa ghi đè: khoá có mặt thay cả mục đó, `null` = bỏ mục đó (theo cấp trên). Khoá vắng mặt giữ nguyên. */
@@ -365,6 +415,8 @@ export interface AppSettingsPatch {
     codex?: Partial<CliAdapterSettings>
     terminal?: Partial<TerminalAdapterSettings>
   }
+  /** Chỉ phần bật / tắt máy chủ có sẵn; danh sách connector sửa qua IPC riêng (connectors:save / remove). */
+  connectors?: { inherited?: Record<string, boolean> }
 }
 
 export type OverrideLevel = 'workspace' | 'agent'
@@ -390,7 +442,7 @@ export const DEFAULT_ADAPTERS: AdaptersSettings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 2,
-  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS },
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} } },
   workspaces: {},
   agents: {}
 }
@@ -576,3 +628,130 @@ export interface ExternalAdapterStatus {
   error: string | null
   checkedAt: string
 }
+
+/** Máy chủ MCP có sẵn trong cấu hình Claude Code / Codex của người dùng (app chỉ bật / tắt, không sửa). */
+export interface InheritedServer {
+  /** `claude:<tên>` / `codex:<tên>`: khoá bật / tắt trong cài đặt. */
+  key: string
+  runtime: CliAdapterId
+  name: string
+  /** claude.ai = connector của tài khoản Claude; plugin = từ plugin Claude Code; user / local / project = phạm vi `claude mcp add`. */
+  source: 'claude.ai' | 'plugin' | 'user' | 'local' | 'project' | 'codex'
+  /** Lệnh hoặc URL (không có biến môi trường). */
+  target: string
+  /** Tình trạng CLI báo (vd. "Connected", "Needs authentication"). */
+  status: string
+  /** Chép được thành connector của stag.ai (có cấu hình đọc được). */
+  copyable: boolean
+}
+
+export interface InheritedScan {
+  runtime: CliAdapterId
+  /** Thư mục dự án đã quét (máy chủ phạm vi local / project phụ thuộc thư mục). */
+  cwd: string
+  servers: InheritedServer[]
+  error: string | null
+  scannedAt: string
+}
+
+/** Kết quả "Thử kết nối". */
+export interface ConnectorTestResult {
+  ok: boolean
+  server: string
+  tools: ConnectorTool[]
+  error: string | null
+  ms: number
+}
+
+/** Một bí mật đã lưu (không bao giờ gửi giá trị sang giao diện). */
+export interface SecretInfo {
+  name: string
+  updatedAt: string
+}
+
+export interface SecretsList {
+  /** Windows mã hoá được (safeStorage); false = không lưu được bí mật. */
+  available: boolean
+  items: SecretInfo[]
+}
+
+/** Dán JSON / chép máy chủ có sẵn: connector mới + bí mật tách ra từ giá trị trông như token. */
+export interface ConnectorImport {
+  connectors: Connector[]
+  /** Tên bí mật sẽ tạo (giá trị giữ ở main). */
+  secrets: string[]
+  errors: string[]
+}
+
+/** Một mục trong danh mục connector (Cài đặt → Connector → Danh mục), xem src/shared/connectorCatalog.json. */
+export interface CatalogEntry {
+  slug: string
+  name: string
+  description: string
+  categories: string[]
+  featured: boolean
+  docsUrl?: string
+  /** Tên file trong src/renderer/src/assets/connectors. */
+  logo?: string
+  logoDark?: string
+  methods: CatalogMethod[]
+}
+
+/** Một cách kết nối: oauth = đăng nhập trình duyệt (tự đăng ký client), oauth-app = OAuth app của bạn, key = API key, none = không cần, url = dán URL, stdio = chạy trên máy. */
+export interface CatalogMethod {
+  key: string
+  kind: 'oauth' | 'oauth-app' | 'key' | 'none' | 'url' | 'stdio'
+  label: string
+  capability?: { label: string; description: string }
+  guide: string
+  warnings: string[]
+  docs?: string
+  register?: string
+  serverUrl?: string
+  /** URL có chỗ trống `{field}` (vd. tên cửa hàng Shopify). */
+  serverUrlTemplate?: string
+  fields: Array<{ key: string; label: string; placeholder: string; help: string; pattern?: string }>
+  header?: { name: string; prefix: string }
+  keyLabel?: string
+  keyPlaceholder?: string
+  oauth?: { authorizationEndpoint?: string; tokenEndpoint?: string; scopes?: string[]; params?: Record<string, string> }
+  command?: string
+  args?: string[]
+}
+
+/** Ai được dùng connector mới: mọi agent / một workspace / vài agent. */
+export type ConnectAccess = { mode: 'all' } | { mode: 'workspace'; workspaceId: string } | { mode: 'agents'; agentIds: string[] }
+
+export interface ConnectRequest {
+  slug: string
+  method: string
+  access: ConnectAccess
+  /** Trường điền vào URL (vd. storeDomain). */
+  fields: Record<string, string>
+  /** API key (kind key) hoặc URL (kind url). */
+  value?: string
+  /** OAuth app của bạn (kind oauth-app). */
+  client?: { id: string; secret: string }
+}
+
+export interface ConnectResult {
+  id: string
+  test: ConnectorTestResult
+}
+
+/** Lần gọi tool của connector đang chờ người dùng duyệt (Cài đặt → Connector → Duyệt). */
+export interface ToolApproval {
+  id: string
+  workspaceId: string
+  agentId: string
+  agentName: string
+  connectorId: string
+  tool: string
+  /** Tham số của lần gọi (JSON, đã cắt ngắn). */
+  input: string
+  at: string
+  /** Hết hạn lúc này: quá hạn thì hỏi lại trong terminal của agent. */
+  expiresAt: string
+}
+
+export type ApprovalDecision = 'allow' | 'always' | 'deny'

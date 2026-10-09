@@ -19,6 +19,11 @@ import type { BrowserService } from './browser'
 import { independentSessionEnv, type AdapterService } from './adapters'
 import { codexArgs, findCodexRollout, parseCodexContext } from './codex'
 import { externalArgs, spawnSpec, type ExternalAdapterStore } from './externalAdapters'
+import { claudeServers, claudeSettingsExtra, codexConfiguredServers, codexConnectorArgs, connectorEnv, resolveCommands } from './connectors'
+import type { SecretStore } from './secrets'
+import type { OAuthService } from './oauth'
+import type { ApprovalQueue } from './approvals'
+import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
@@ -33,6 +38,7 @@ import { readTemplate } from './templates'
 import { TranscriptWatcher, transcriptPath } from './transcript'
 import { ensureIgnored, type WorkspaceStore } from './workspace'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
+import { effectiveConnectors, toolPolicy } from '@shared/connectors'
 
 /** Bản bàn giao agent viết (tool session_handoff), chờ phiên sau đọc. */
 interface Handoff {
@@ -93,7 +99,10 @@ export class AgentService {
     private activity: VaultActivityLog,
     private artifacts: ArtifactLog,
     private adapters: AdapterService,
-    private external: ExternalAdapterStore
+    private external: ExternalAdapterStore,
+    private secrets: SecretStore,
+    private oauth: OAuthService,
+    private approvals: ApprovalQueue
   ) {
     this.guard = new ScopeGuard(board)
   }
@@ -169,6 +178,12 @@ export class AgentService {
     if (kind === 'external' && !ext) throw new Error(`Adapter "${agent.adapterId}" của agent này đã bị gỡ. Cài lại ở Cài đặt → Adapter.`)
     if (kind !== 'claude' && kind !== 'codex' && !ext) throw new Error('Loại agent này chưa được hỗ trợ')
     const exe = ext ? await this.external.exe(ext) : (await this.adapters.exe(kind as 'claude' | 'codex')).path
+    // Connector (MCP) bật cho agent này; thiếu bí mật → báo lỗi ngay, trước khi ghi gì.
+    const conn = effectiveConnectors(this.settings.get(), agent.workspaceId, agent.id)
+    // Connector đăng nhập OAuth: làm mới token trước (hết hạn mà không làm mới được → báo lỗi, không mở phiên).
+    const fresh = await this.oauth.fresh(conn.servers.filter((c) => c.oauth).map((c) => ({ name: c.bearerSecret, label: c.label || c.id })))
+    const connEnv = connectorEnv(conn.servers, (n) => fresh.get(n) ?? this.secrets.get(n))
+    const connCmds = await resolveCommands(conn.servers, ws.path)
     // Adapter ngoài không có cách tiếp tục phiên (chưa biết id phiên của CLI đó).
     const resume = req.resume && !!agent.lastSessionId && !ext
     const open = await this.board.openTask(ws, agent.id)
@@ -222,7 +237,10 @@ export class AgentService {
       const rulesFile = sessionFile.replace(/\.md$/, '.rules.md')
       const note = ext.manifest.mcpConfigFlag ? '' : '\n\nNOTE: this CLI has no access to the stag MCP tools mentioned above (kanban, browser, handoff). Skip those steps.\n'
       await fs.writeFile(rulesFile, rules + note, 'utf8')
-      const l = externalArgs(ext, { rulesFile, prompt: opening, mcpFile: this.hub.mcpConfigFile() })
+      const own = ext.manifest.mcpConfigFlag
+        ? await this.hub.writeSessionConfigs(sessionFile.replace(/\.md$/, ''), claudeServers(conn.servers, connCmds), { allow: [], ask: [], deny: [], deniedMcpServers: [] })
+        : { mcpFile: undefined }
+      const l = externalArgs(ext, { rulesFile, prompt: opening, mcpFile: own.mcpFile ?? this.hub.mcpConfigFile() })
       const spec = spawnSpec(exe, l.args)
       command = spec.command
       args = spec.args
@@ -235,13 +253,15 @@ export class AgentService {
         permissionMode: agent.permissionMode,
         resumeId: codexResume,
         prompt: opening,
-        userArgs: this.adapters.launchArgs('codex', agent)
+        userArgs: [...codexConnectorArgs(conn, connCmds, await codexConfiguredServers(ws.path), connEnv), ...this.adapters.launchArgs('codex', agent)]
       })
       transcriptFile = (codexResume && (await findCodexRollout(codexResume))) || join(ws.path, '.sessions', `${sessionId}.rollout-pending`)
     } else {
       args = resume ? ['--resume', sessionId] : ['--session-id', sessionId]
       args.push('--name', agent.name, '--append-system-prompt', rules)
-      args.push(...this.hub.claudeArgs())
+      // Có connector / tắt máy chủ có sẵn → file --settings / --mcp-config riêng của phiên.
+      const own = await this.hub.writeSessionConfigs(sessionFile.replace(/\.md$/, ''), claudeServers(conn.servers, connCmds), claudeSettingsExtra(conn))
+      args.push(...this.hub.claudeArgs(own))
       if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
       // Model, mức suy nghĩ, tham số thêm (Cài đặt → Adapter).
       args.push(...this.adapters.launchArgs('claude', agent))
@@ -260,6 +280,8 @@ export class AgentService {
         env: {
           // Đặt trước để không đè được biến của app.
           ...userEnv,
+          // Bí mật của connector (xem connectors.ts): sau biến người dùng để không bị đè nhầm.
+          ...connEnv,
           ...this.hub.env(),
           STAG_AGENT_ID: agent.id,
           STAG_AGENT_NAME: agent.name,
@@ -335,8 +357,9 @@ export class AgentService {
     if (!run || run.ptyId !== ptyId) return
     this.running.delete(agentId)
     this.guard.endSession(agentId)
+    this.approvals.cancelAgent(agentId)
     run.transcript?.stop()
-    if (run.sessionFile) for (const f of [run.sessionFile, run.sessionFile.replace(/\.md$/, '.rules.md')]) rmSync(f, { force: true })
+    if (run.sessionFile) removeSessionFiles(run.sessionFile)
     const agent = this.data.agents.find((a) => a.id === agentId)
     if (!agent || agentKind(agent) === 'terminal') return
     this.board.setActivity(agent, 'stopped')
@@ -369,6 +392,35 @@ export class AgentService {
   }
 
   /**
+   * Tool connector ở mức "Hỏi trước" (Claude Code): giữ hook PreToolUse lại, hỏi người dùng ở Cài đặt → Connector →
+   * Duyệt. Hết giờ thì trả 'ask' để Claude hỏi trong terminal như thường. Codex tự hỏi trong terminal của nó.
+   */
+  private async connectorApproval(agent: Agent, p: HookPayload): Promise<PreToolUseReply | undefined> {
+    const m = /^mcp__(.+?)__(.+)$/.exec(p.tool_name ?? '')
+    if (!m || m[1] === 'stag') return undefined
+    const c = effectiveConnectors(this.settings.get(), agent.workspaceId, agent.id).servers.find((x) => x.id === m[1])
+    if (!c || toolPolicy(c, m[2]) !== 'ask') return undefined
+    this.board.setActivity(agent, 'waiting', { reason: 'permission', tool: p.tool_name })
+    const d = await this.approvals.ask({
+      workspaceId: agent.workspaceId,
+      agentId: agent.id,
+      agentName: agent.name,
+      connectorId: c.id,
+      tool: m[2],
+      input: p.tool_input
+    })
+    if (this.running.has(agent.id)) this.board.setActivity(agent, 'working', { tool: p.tool_name })
+    if (d === 'timeout') return hookReply('ask', 'stag.ai: chưa ai duyệt trong app (Cài đặt → Connector → Duyệt) — hỏi ở đây.')
+    if (d === 'deny')
+      return hookReply('deny', 'The user declined this tool call in stag.ai (Connectors → Review). Do not retry it or work around it; tell the user and ask what to do instead.')
+    if (d === 'always') {
+      const cur = this.settings.get().app.connectors.items.find((x) => x.id === c.id)
+      if (cur) await this.settings.saveConnector({ ...cur, toolPolicy: { ...cur.toolPolicy, [m[2]]: 'allow' } }).catch(() => {})
+    }
+    return hookReply('allow', 'stag.ai: người dùng đã cho phép trong app.')
+  }
+
+  /**
    * Hook từ phiên Claude Code / Codex của agent. Hook tới muộn sau khi phiên đã đóng thì bỏ qua.
    * Trả về câu trả lời cho hook (PreToolUse: khoá phạm vi, xem scopeGuard.ts) hoặc undefined = không can thiệp.
    */
@@ -389,7 +441,11 @@ export class AgentService {
       else if (payload.hook_event_name === 'Stop' && ask.submitted) this.handoffFailed(ctx.agent, ctx.run)
     }
     try {
-      if (payload.hook_event_name === 'PreToolUse') return await this.guard.preToolUse(ctx.ws, ctx.agent, agentKind(ctx.agent), payload)
+      if (payload.hook_event_name === 'PreToolUse') {
+        const approval = agentKind(ctx.agent) === 'claude' ? await this.connectorApproval(ctx.agent, payload) : undefined
+        if (approval) return approval
+        return await this.guard.preToolUse(ctx.ws, ctx.agent, agentKind(ctx.agent), payload)
+      }
       if (payload.hook_event_name === 'PostToolUse') {
         this.activity.onToolUse(ctx.ws, ctx.agent, payload)
         void this.artifacts.onToolUse(ctx.ws, ctx.agent, payload).catch((e) => console.error('[artifacts]', e))
@@ -600,7 +656,7 @@ export class AgentService {
     for (const run of this.running.values()) {
       run.transcript?.stop()
       this.ptys.kill(run.ptyId)
-      if (run.sessionFile) for (const f of [run.sessionFile, run.sessionFile.replace(/\.md$/, '.rules.md')]) rmSync(f, { force: true })
+      if (run.sessionFile) removeSessionFiles(run.sessionFile)
     }
     this.running.clear()
   }
@@ -692,4 +748,9 @@ function userLanguage(): string {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** File phiên trong .sessions/: file phiên + luật phiên (adapter ngoài) + cấu hình MCP / settings riêng (connector). */
+function removeSessionFiles(sessionFile: string): void {
+  for (const ext of ['.md', '.rules.md', '.mcp.json', '.settings.json']) rmSync(sessionFile.replace(/\.md$/, ext), { force: true })
 }

@@ -1,5 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
+import { homedir } from 'node:os'
+import { connectorSecrets, OAUTH_SECRET_PREFIX, parseMcpJson } from '@shared/connectors'
+import type { ApprovalDecision, CliAdapterId, ConnectRequest, ConnectResult, Connector, ConnectorImport, ConnectorTestResult } from '@shared/types'
+import { independentSessionEnv } from './adapters'
+import { importInherited, inheritedConfig, scanInherited, testConnector } from './connectors'
+import type { SecretStore } from './secrets'
+import type { OAuthService } from './oauth'
+import type { ApprovalQueue } from './approvals'
+import { connectFromCatalog } from './connect'
 import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
@@ -22,7 +31,7 @@ import type { WorkspaceStore } from './workspace'
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -150,6 +159,91 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.adapterExtRemove, (_e, id: string) => external.remove(String(id)))
   ipcMain.handle(IPC.adapterExtUpdate, (_e, id: string, patch: InstalledAdapterPatch) => external.update(String(id), patch ?? {}))
   ipcMain.handle(IPC.adapterExtCheck, (_e, id: string) => external.check(String(id)))
+  // ---- Connector (MCP) + bí mật ----
+  /** Thư mục chạy thử / quét: thư mục dự án của workspace (máy chủ phạm vi local / project phụ thuộc nó), không có thì thư mục nhà. */
+  const cwdOf = (workspaceId?: string | null): string => (workspaceId && workspaces.get(workspaceId)?.path) || homedir()
+  const cliEnv = (id: CliAdapterId): NodeJS.ProcessEnv => ({ ...independentSessionEnv(process.env), ...adapters.env(id) })
+  /** Lưu bí mật tách ra khi nhập (tên trùng bí mật đã có → không ghi đè, báo lại) rồi thêm connector. */
+  const saveImport = async (parsed: ReturnType<typeof parseMcpJson>): Promise<ConnectorImport> => {
+    const fresh = parsed.secrets.filter((x) => !secrets.has(x.name))
+    const kept = parsed.secrets.filter((x) => secrets.has(x.name)).map((x) => x.name)
+    if (parsed.connectors.length) {
+      if (fresh.length) await secrets.setMany(fresh)
+      await settings.addConnectors(parsed.connectors)
+    }
+    const errors = [...parsed.errors, ...kept.map((n) => `Bí mật ${n} đã có: giữ giá trị cũ (đổi ở Secrets nếu cần)`)]
+    return { connectors: parsed.connectors, secrets: fresh.map((x) => x.name), errors }
+  }
+  const takenIds = (): string[] => settings.get().app.connectors.items.map((c) => c.id)
+  ipcMain.handle(IPC.connectorSave, (_e, c: Connector, prevId?: string) => {
+    if (!c || typeof c !== 'object') throw new Error('Connector không hợp lệ')
+    return settings.saveConnector(c, typeof prevId === 'string' ? prevId : undefined)
+  })
+  ipcMain.handle(IPC.connectorRemove, (_e, id: string) => settings.removeConnector(String(id)))
+  ipcMain.handle(IPC.connectorImport, (_e, text: string) => saveImport(parseMcpJson(String(text ?? ''), takenIds())))
+  ipcMain.handle(IPC.connectorCopy, async (_e, runtime: CliAdapterId, name: string, workspaceId?: string) => {
+    if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
+    const exe = runtime === 'codex' ? (await adapters.exe('codex')).path : ''
+    const config = await inheritedConfig(runtime, String(name), exe, cwdOf(workspaceId), cliEnv(runtime))
+    if (!config) throw new Error(`Không đọc được cấu hình của "${name}" (máy chủ claude.ai / plugin không chép được).`)
+    return saveImport(importInherited(String(name), config, takenIds()))
+  })
+  /** Thử kết nối (làm mới token OAuth trước) rồi lưu danh sách tool. */
+  const runTest = async (id: string, workspaceId?: string): Promise<ConnectorTestResult> => {
+    const c = settings.get().app.connectors.items.find((x) => x.id === id)
+    if (!c) throw new Error('Connector không tồn tại')
+    let fresh: Map<string, string>
+    try {
+      fresh = await oauth.fresh(c.oauth ? [{ name: c.bearerSecret, label: c.label || c.id }] : [])
+    } catch (e) {
+      return { ok: false, server: '', tools: [], error: (e as Error).message, ms: 0 }
+    }
+    const r = await testConnector(c, (n) => fresh.get(n) ?? secrets.get(n), cwdOf(workspaceId), independentSessionEnv(process.env))
+    // Lưu danh sách tool để chọn mức cho từng tool (connector có thể vừa bị sửa / gỡ trong lúc chờ).
+    const cur = settings.get().app.connectors.items.find((x) => x.id === id)
+    if (r.ok && cur) await settings.saveConnector({ ...cur, tools: r.tools, testedAt: new Date().toISOString() })
+    return r
+  }
+  ipcMain.handle(IPC.connectorTest, (_e, id: string, workspaceId?: string) => runTest(String(id), workspaceId))
+  ipcMain.handle(IPC.connectorConnect, async (_e, req: ConnectRequest, workspaceId?: string): Promise<ConnectResult> => {
+    if (!req || typeof req.slug !== 'string' || typeof req.method !== 'string' || !req.access) throw new Error('Yêu cầu kết nối không hợp lệ')
+    const id = await connectFromCatalog(req, { settings, secrets, oauth })
+    return { id, test: await runTest(id, workspaceId) }
+  })
+  ipcMain.handle(IPC.connectorConnectCancel, () => oauth.cancel())
+  ipcMain.handle(IPC.connectorReauth, async (_e, id: string, workspaceId?: string) => {
+    const c = settings.get().app.connectors.items.find((x) => x.id === id)
+    if (!c?.oauth) throw new Error('Connector này không đăng nhập bằng OAuth')
+    await oauth.relogin(c.bearerSecret)
+    return runTest(c.id, workspaceId)
+  })
+  ipcMain.handle(IPC.approvalsList, () => approvals.list())
+  ipcMain.handle(IPC.approvalsAnswer, (_e, id: string, decision: ApprovalDecision) => {
+    if (decision !== 'allow' && decision !== 'always' && decision !== 'deny') throw new Error('Quyết định không hợp lệ')
+    approvals.answer(String(id), decision)
+  })
+  ipcMain.handle(IPC.connectorScan, async (_e, runtime: CliAdapterId, workspaceId?: string) => {
+    if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
+    const cwd = cwdOf(workspaceId)
+    let exe: string
+    try {
+      exe = (await adapters.exe(runtime)).path
+    } catch (e) {
+      return { runtime, cwd, servers: [], error: (e as Error).message, scannedAt: new Date().toISOString() }
+    }
+    return scanInherited(runtime, exe, cwd, cliEnv(runtime))
+  })
+  ipcMain.handle(IPC.secretsList, () => secrets.list())
+  ipcMain.handle(IPC.secretsSet, (_e, name: string, value: string) => {
+    if (typeof name !== 'string' || typeof value !== 'string') throw new Error('Bí mật không hợp lệ')
+    if (name.trim().toUpperCase().startsWith(OAUTH_SECRET_PREFIX)) throw new Error(`Tên bắt đầu bằng ${OAUTH_SECRET_PREFIX} dành cho đăng nhập OAuth của app, chọn tên khác.`)
+    return secrets.set(name.trim(), value)
+  })
+  ipcMain.handle(IPC.secretsRemove, (_e, name: string) => {
+    const users = settings.get().app.connectors.items.filter((c) => connectorSecrets(c).includes(name)).map((c) => c.id)
+    if (users.length) throw new Error(`Bí mật ${name} đang được dùng bởi: ${users.join(', ')}. Bỏ khỏi connector đó trước.`)
+    return secrets.remove(String(name))
+  })
   ipcMain.handle(IPC.pickFile, async (e, title: string, defaultPath?: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)!
     const r = await dialog.showOpenDialog(win, {

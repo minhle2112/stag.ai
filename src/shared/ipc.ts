@@ -100,6 +100,26 @@ export const IPC = {
   adapterExtUpdate: 'adapter-ext:update',
   adapterExtCheck: 'adapter-ext:check',
   adapterExtChanged: 'adapter-ext:changed',
+  /** Connector (MCP): thêm / sửa, gỡ, nhập JSON, chép máy chủ có sẵn, thử kết nối, quét máy chủ của Claude Code / Codex. */
+  connectorSave: 'connector:save',
+  connectorRemove: 'connector:remove',
+  connectorImport: 'connector:import',
+  connectorCopy: 'connector:copy',
+  connectorTest: 'connector:test',
+  connectorScan: 'connector:scan',
+  /** Bí mật: chỉ tên đi qua IPC theo chiều main → renderer; main báo khi danh sách đổi. */
+  secretsList: 'secrets:list',
+  secretsSet: 'secrets:set',
+  secretsRemove: 'secrets:remove',
+  secretsChanged: 'secrets:changed',
+  /** Connect từ danh mục (có thể mở trình duyệt đăng nhập OAuth), huỷ đăng nhập đang chờ, đăng nhập lại. */
+  connectorConnect: 'connector:connect',
+  connectorConnectCancel: 'connector:connect-cancel',
+  connectorReauth: 'connector:reauth',
+  /** Hàng chờ duyệt tool connector (Cài đặt → Connector → Duyệt); main báo khi đổi. */
+  approvalsList: 'approvals:list',
+  approvalsAnswer: 'approvals:answer',
+  approvalsChanged: 'approvals:changed',
   /** main → renderer: người dùng bấm thông báo của agent → mở agent đó (kèm workspaceId, agentId). */
   revealAgent: 'agent:reveal'
 } as const

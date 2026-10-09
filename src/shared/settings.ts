@@ -24,6 +24,7 @@ import {
   type ShellId,
   type TerminalAdapterSettings
 } from './types'
+import { normalizeConnectors, normalizeToggles } from './connectors'
 
 /** Chuẩn hoá cài đặt đọc từ file / nhận từ giao diện, dùng chung cho main và renderer. */
 
@@ -123,6 +124,8 @@ export function normalizeOverrides(raw: unknown): SettingsOverrides | null {
   if (Object.keys(handoff).length) out.handoff = handoff
   const models = normalizeModels(obj(raw).models)
   if (models) out.models = models
+  const connectors = normalizeToggles(obj(raw).connectors)
+  if (Object.keys(connectors).length) out.connectors = connectors
   return Object.keys(out).length ? out : null
 }
 
@@ -154,7 +157,7 @@ export function normalizeSettings(raw: unknown): Settings {
   if (r.version !== 2) {
     return {
       version: 2,
-      app: { general: normalizeGeneral({}), handoff: normalizeHandoff(r), adapters: normalizeAdapters({}) },
+      app: { general: normalizeGeneral({}), handoff: normalizeHandoff(r), adapters: normalizeAdapters({}), connectors: normalizeConnectors({}) },
       workspaces: {},
       agents: {}
     }
@@ -165,7 +168,8 @@ export function normalizeSettings(raw: unknown): Settings {
     app: {
       general: normalizeGeneral(app.general),
       handoff: normalizeHandoff(app.handoff),
-      adapters: normalizeAdapters(app.adapters, obj(app.general).terminalShell)
+      adapters: normalizeAdapters(app.adapters, obj(app.general).terminalShell),
+      connectors: normalizeConnectors(app.connectors)
     },
     workspaces: normalizeMap(r.workspaces),
     agents: normalizeMap(r.agents)
@@ -181,7 +185,10 @@ export function patchApp(app: AppSettings, patch: AppSettingsPatch): AppSettings
       claude: normalizeCli({ ...app.adapters.claude, ...patch.adapters?.claude }, app.adapters.claude),
       codex: normalizeCli({ ...app.adapters.codex, ...patch.adapters?.codex }, app.adapters.codex),
       terminal: normalizeTerminal({ ...app.adapters.terminal, ...patch.adapters?.terminal }, app.adapters.terminal)
-    }
+    },
+    connectors: patch.connectors?.inherited
+      ? { items: app.connectors.items, inherited: normalizeToggles(patch.connectors.inherited, true) }
+      : app.connectors
   }
 }
 

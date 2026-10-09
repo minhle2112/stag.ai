@@ -32,6 +32,10 @@ export interface SettingsFocus {
   /** id adapter ngoài (mở trang chi tiết của nó). */
   external?: string
   agentId?: string
+  /** id connector (mở trang chi tiết của nó). */
+  connector?: string
+  /** Mở thẳng mục Duyệt của Connector. */
+  review?: boolean
 }
 
 interface UiState {

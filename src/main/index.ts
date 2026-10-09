@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, Menu, nativeImage, protocol, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, protocol, safeStorage, shell, Tray } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AdapterService } from './adapters'
 import { AgentService } from './agents'
@@ -11,6 +11,9 @@ import { StatusHub } from './hub'
 import { registerIpc } from './ipc'
 import { Notifier } from './notifier'
 import { PtyManager } from './pty'
+import { SecretStore } from './secrets'
+import { OAuthService } from './oauth'
+import { ApprovalQueue } from './approvals'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
 import { WorkspaceStore } from './workspace'
@@ -57,7 +60,18 @@ const activity = new VaultActivityLog((workspaceId) => send(IPC.vaultActivityCha
 const artifacts = new ArtifactLog((workspaceId) => send(IPC.artifactsChanged, workspaceId))
 const adapters = new AdapterService(settings)
 const external = new ExternalAdapterStore(join(app.getPath('userData'), 'adapters'), (list) => send(IPC.adapterExtChanged, list))
-const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external)
+const secrets = new SecretStore(
+  join(app.getPath('userData'), 'secrets.json'),
+  {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (s) => safeStorage.encryptString(s),
+    decrypt: (b) => safeStorage.decryptString(b)
+  },
+  (list) => send(IPC.secretsChanged, list)
+)
+const oauth = new OAuthService(secrets, (url) => shell.openExternal(url))
+const approvals = new ApprovalQueue((list) => send(IPC.approvalsChanged, list))
+const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -203,6 +217,7 @@ app.whenReady().then(async () => {
   await workspaces.load()
   await settings.load()
   await external.load()
+  await secrets.load()
   await agents.load()
   await hub.start()
   protocol.handle('stag-file', (req) => {
@@ -212,7 +227,7 @@ app.whenReady().then(async () => {
     return serveArtifact(ws, decodeURIComponent(url.pathname.replace(/^\/+/, '')), req.headers.get('range'))
   })
   agents.attachHub(hub)
-  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external)
+  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals)
   createWindow()
   applyGeneral(settings.general())
   app.on('activate', () => {

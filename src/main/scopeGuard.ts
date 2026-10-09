@@ -78,10 +78,10 @@ function mentions(cmd: string, e: ScopeEntry, root: string, cwd: string): boolea
 
 /** Trả lời hook PreToolUse (cùng dạng cho Claude Code và Codex). */
 export interface PreToolUseReply {
-  hookSpecificOutput: { hookEventName: 'PreToolUse'; permissionDecision: 'ask' | 'deny'; permissionDecisionReason: string }
+  hookSpecificOutput: { hookEventName: 'PreToolUse'; permissionDecision: 'allow' | 'ask' | 'deny'; permissionDecisionReason: string }
 }
 
-const reply = (permissionDecision: 'ask' | 'deny', reason: string): PreToolUseReply => ({
+export const reply = (permissionDecision: 'allow' | 'ask' | 'deny', reason: string): PreToolUseReply => ({
   hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision, permissionDecisionReason: reason }
 })
 

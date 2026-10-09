@@ -1,15 +1,18 @@
 import { promises as fs } from 'node:fs'
 import { dirname } from 'node:path'
+import { normalizeConnector, validateConnector } from '@shared/connectors'
 import { normalizeSettings, patchApp, patchOverrides, resolveHandoff, resolveModel } from '@shared/settings'
 import {
   DEFAULT_SETTINGS,
   type AppSettingsPatch,
   type CliAdapterId,
+  type Connector,
   type GeneralSettings,
   type HandoffSettings,
   type ModelSettings,
   type OverrideLevel,
   type Settings,
+  type SettingsOverrides,
   type SettingsOverridesPatch
 } from '@shared/types'
 import { readText } from './fsutil'
@@ -71,6 +74,50 @@ export class SettingsStore {
     return this.commit({ ...this.value, [key]: map })
   }
 
+  /**
+   * Thêm / sửa một connector. `prevId` = id cũ khi đổi tên (ghi đè bật / tắt ở workspace / agent đi theo tên mới).
+   * Lỗi cấu hình → ném lỗi tiếng Việt.
+   */
+  async saveConnector(raw: Connector, prevId?: string): Promise<Settings> {
+    const c = normalizeConnector(raw)
+    if (!c) throw new Error('Tên máy chủ chỉ gồm a-z, 0-9, "_" và "-", tối đa 40 ký tự, bắt đầu bằng chữ / số.')
+    const items = this.value.app.connectors.items
+    const problem = validateConnector(c, items.filter((x) => x.id !== (prevId ?? c.id)).map((x) => x.id))
+    if (problem) throw new Error(problem)
+    const at = items.findIndex((x) => x.id === (prevId ?? c.id))
+    const next = at >= 0 ? items.map((x, i) => (i === at ? c : x)) : [...items, c]
+    const renamed = prevId && prevId !== c.id ? { from: prevId, to: c.id } : null
+    return this.commit({
+      ...this.value,
+      app: { ...this.value.app, connectors: { ...this.value.app.connectors, items: next } },
+      workspaces: renamed ? renameToggle(this.value.workspaces, renamed) : this.value.workspaces,
+      agents: renamed ? renameToggle(this.value.agents, renamed) : this.value.agents
+    })
+  }
+
+  /** Thêm nhiều connector (nhập JSON / chép máy chủ có sẵn) một lần ghi. */
+  async addConnectors(list: Connector[]): Promise<Settings> {
+    const items = [...this.value.app.connectors.items]
+    for (const raw of list) {
+      const c = normalizeConnector(raw)
+      const problem = c ? validateConnector(c, items.map((x) => x.id)) : 'Tên máy chủ không hợp lệ'
+      if (problem || !c) throw new Error(`${raw.id}: ${problem}`)
+      items.push(c)
+    }
+    return this.commit({ ...this.value, app: { ...this.value.app, connectors: { ...this.value.app.connectors, items } } })
+  }
+
+  /** Gỡ connector, cùng các ghi đè bật / tắt của nó. */
+  async removeConnector(id: string): Promise<Settings> {
+    const rm = { from: id, to: null }
+    return this.commit({
+      ...this.value,
+      app: { ...this.value.app, connectors: { ...this.value.app.connectors, items: this.value.app.connectors.items.filter((c) => c.id !== id) } },
+      workspaces: renameToggle(this.value.workspaces, rm),
+      agents: renameToggle(this.value.agents, rm)
+    })
+  }
+
   /** Workspace / agent bị xoá: bỏ ghi đè của nó (không có thì không ghi file). */
   async forget(level: OverrideLevel, ids: string[]): Promise<void> {
     const key = level === 'workspace' ? 'workspaces' : 'agents'
@@ -94,4 +141,23 @@ export class SettingsStore {
     this.onChange(this.value)
     return this.value
   }
+}
+
+/** Đổi khoá bật / tắt connector trong các ghi đè (`to: null` = bỏ). Ghi đè rỗng thì bỏ hẳn. */
+function renameToggle(map: Record<string, SettingsOverrides>, r: { from: string; to: string | null }): Record<string, SettingsOverrides> {
+  const out: Record<string, SettingsOverrides> = {}
+  for (const [id, o] of Object.entries(map)) {
+    if (!o.connectors || !(r.from in o.connectors)) {
+      out[id] = o
+      continue
+    }
+    const connectors = { ...o.connectors }
+    const v = connectors[r.from]
+    delete connectors[r.from]
+    if (r.to) connectors[r.to] = v
+    const next: SettingsOverrides = { ...o, connectors }
+    if (!Object.keys(connectors).length) delete next.connectors
+    if (Object.keys(next).length) out[id] = next
+  }
+  return out
 }
