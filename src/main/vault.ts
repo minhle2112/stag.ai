@@ -97,6 +97,19 @@ function notePath(vaultPath: string, rel: string): string {
   return full
 }
 
+/** Người dùng vừa lưu / tạo note trong app (plugin: sự kiện vault.note.changed, by 'user'). Main đặt một lần. */
+let userWriteListener: ((vaultPath: string, rel: string) => void) | null = null
+export function onUserNoteWrite(fn: ((vaultPath: string, rel: string) => void) | null): void {
+  userWriteListener = fn
+}
+const userWrote = (vaultPath: string, rel: string): void => {
+  try {
+    userWriteListener?.(vaultPath, rel.replace(/\\/g, '/'))
+  } catch (e) {
+    console.error('[vault]', e)
+  }
+}
+
 /** Đọc một note; chặn đường dẫn thoát ra ngoài vault. */
 export async function readNote(vaultPath: string, rel: string): Promise<string> {
   return fs.readFile(notePath(vaultPath, rel), 'utf8')
@@ -120,6 +133,7 @@ export async function writeNote(vaultPath: string, rel: string, text: string, ba
     if (disk !== base) return { status: 'conflict', disk }
   }
   await fs.writeFile(full, text, 'utf8')
+  userWrote(vaultPath, rel)
   return { status: 'saved' }
 }
 
@@ -148,6 +162,7 @@ export async function createNote(vaultPath: string, folder: string, name: string
     if ((e as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`Đã có note "${rel}"`)
     throw e
   }
+  userWrote(vaultPath, rel)
   return rel
 }
 

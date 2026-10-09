@@ -54,7 +54,11 @@ export class VaultActivityLog {
   private byWs = new Map<string, VaultActivity[]>()
   private pending = new Map<string, NodeJS.Timeout>()
 
-  constructor(private notify: (workspaceId: string) => void) {}
+  constructor(
+    private notify: (workspaceId: string) => void,
+    /** Agent vừa ghi các note này (rel trong vault; plugin: sự kiện vault.note.changed). */
+    private onWrite?: (ws: Workspace, agent: Agent, rels: string[]) => void
+  ) {}
 
   /** Ghi các note một lần gọi tool vừa đụng tới (hook PostToolUse). */
   onToolUse(ws: Workspace, agent: Agent, p: HookPayload): void {
@@ -72,6 +76,8 @@ export class VaultActivityLog {
     }
     this.byWs.set(ws.id, list.slice(-MAX_EVENTS))
     this.notifySoon(ws.id)
+    const written = touches.filter((t) => t.kind === 'write').map((t) => t.rel)
+    if (written.length) this.onWrite?.(ws, agent, written)
   }
 
   list(workspaceId: string): VaultActivity[] {

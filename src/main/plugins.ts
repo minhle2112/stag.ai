@@ -30,7 +30,7 @@ import {
 import { pluginOn } from '@shared/settings'
 import type { Settings } from '@shared/types'
 import { npmInstall, npmUninstall } from './externalAdapters'
-import { readText } from './fsutil'
+import { isInside, readText, realPathInside, relSlash } from './fsutil'
 import { scaffoldFiles } from './pluginScaffold'
 
 /**
@@ -89,6 +89,8 @@ export interface PluginHostApi {
   board(workspaceId: string): Promise<unknown[]>
   vaultRead(workspaceId: string, rel: string): Promise<string | null>
   vaultWrite(workspaceId: string, rel: string, content: string): Promise<void>
+  /** Thư mục dự án + vault của workspace (files.list / files.read), null = không có workspace này. */
+  workspacePaths(workspaceId: string): { path: string; vaultPath: string } | null
   notify(title: string, body: string): void
 }
 
@@ -158,7 +160,7 @@ const TIMEOUT = { initialize: 15_000, health: 5_000, tool: 120_000, action: 30_0
 const MAX_RUNS = 30
 const JOB_TICK_MS = 15_000
 /** Lời gọi từ trang của plugin (iframe) được chuyển cho host như lời gọi của worker. */
-const BRIDGE_HOST_METHODS = ['config.get', 'state.get', 'state.set', 'state.delete', 'agents.list', 'agent.sessions.send', 'board.list', 'vault.read', 'vault.write', 'notify']
+const BRIDGE_HOST_METHODS = ['config.get', 'state.get', 'state.set', 'state.delete', 'agents.list', 'agent.sessions.send', 'board.list', 'vault.read', 'vault.write', 'files.list', 'files.read', 'notify']
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.htm': 'text/html; charset=utf-8',
@@ -191,6 +193,8 @@ const NEEDS: Record<string, PluginCapability> = {
   'board.list': 'board.read',
   'vault.read': 'vault.read',
   'vault.write': 'vault.write',
+  'files.list': 'files.read',
+  'files.read': 'files.read',
   notify: 'ui.notify'
 }
 
@@ -752,12 +756,28 @@ export class PluginHost {
       case 'vault.write':
         await api.vaultWrite(s(p.workspaceId), s(p.path, 1000), typeof p.content === 'string' ? p.content : '')
         return null
+      case 'files.list': {
+        const ws = this.filesWorkspace(id, s(p.workspaceId))
+        return listProjectDir(ws.path, ws.vaultPath, typeof p.path === 'string' ? p.path.slice(0, 1000) : '')
+      }
+      case 'files.read': {
+        const ws = this.filesWorkspace(id, s(p.workspaceId))
+        return readProjectText(ws.path, ws.vaultPath, s(p.path, 1000))
+      }
       case 'notify':
         api.notify(s(p.title, 200), typeof p.body === 'string' ? p.body.slice(0, 500) : '')
         return null
       default:
         throw Object.assign(new Error(`stag.ai không có method "${method}"`), { code: -32601 })
     }
+  }
+
+  /** Workspace cho files.*: phải có, và plugin không bị tắt ở workspace đó. */
+  private filesWorkspace(id: string, workspaceId: string): { path: string; vaultPath: string } {
+    const ws = this.deps.api.workspacePaths(workspaceId)
+    if (!ws) throw Object.assign(new Error('Không có workspace này.'), { code: -32602 })
+    if (this.settings && !pluginOn(this.settings, id, workspaceId)) throw Object.assign(new Error('Plugin đang tắt ở workspace này.'), { code: -32001 })
+    return ws
   }
 
   private stateWrites = new Map<string, Promise<void>>()
@@ -786,15 +806,18 @@ export class PluginHost {
 
   /** Gửi sự kiện cho plugin đang chạy, có quyền, có khai sự kiện đó, và bật ở workspace / agent liên quan. */
   emit(ev: PluginEvent): void {
+    let sent = 0
     for (const e of this.entries) {
       const r = this.rt.get(e.manifest.id)
       if (!r?.proc || r.status.state !== 'ready') continue
       if (!e.approved.includes('events.subscribe') || !e.manifest.events.includes(ev.type)) continue
       if (this.settings && !pluginOn(this.settings, e.manifest.id, ev.workspaceId, ev.agentId)) continue
       r.status.events++
+      sent++
       this.notifyWorker(e.manifest.id, 'onEvent', { event: ev })
     }
-    this.changed()
+    // Sự kiện dày (artifact, vault): không plugin nào nghe thì khỏi báo giao diện.
+    if (sent) this.changed()
   }
 
   /** Tool của plugin cho một agent (máy chủ MCP stag): plugin chạy, đã duyệt agent.tools.register, bật cho agent đó. */
@@ -1126,6 +1149,105 @@ export class PluginWebhookServer {
     this.server?.close()
     this.server = null
     this.host.setWebhookBase(null)
+  }
+}
+
+// ---- files.list / files.read (quyền files.read) ----
+
+/** Không liệt kê (ngoài thư mục vault của workspace). */
+const FILES_SKIP = new Set(['.git', 'node_modules', '.sessions', '.stag'])
+/** Không liệt kê / đọc bên trong: dữ liệu của app, git (config có thể chứa mã truy cập trong địa chỉ remote). */
+const FILES_DENY = new Set(['.git', '.sessions', '.stag'])
+export const FILES_MAX_BYTES = 1024 * 1024
+const FILES_MAX_ENTRIES = 2000
+
+export interface ProjectFileEntry {
+  name: string
+  /** Tương đối so với thư mục dự án, dấu "/". */
+  path: string
+  type: 'file' | 'dir'
+  /** Byte (thư mục: 0). */
+  size: number
+}
+
+const rpcError = (message: string, code = -32602): Error => Object.assign(new Error(message), { code })
+
+/** Đường dẫn thật của `rel` trong dự án (chặn thoát ra ngoài, symlink trỏ ra ngoài, .git / .stag / .sessions, vault). */
+async function projectTarget(project: string, vault: string, rel: string): Promise<{ root: string; real: string; vault: string | null }> {
+  let real: string
+  try {
+    real = await realPathInside(project, rel)
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code
+    if (code === 'OUTSIDE') throw rpcError((e as Error).message)
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw rpcError(`Không thấy "${rel}" trong dự án.`)
+    throw rpcError(`Không mở được "${rel}": ${(e as Error).message}`, -32099)
+  }
+  const root = await fs.realpath(resolve(project))
+  if (relSlash(root, real).split('/').some((s) => FILES_DENY.has(s.toLowerCase()))) throw rpcError(`"${rel}" là dữ liệu của git / stag.ai, plugin không đọc được.`)
+  const v = await fs.realpath(resolve(vault)).catch(() => null)
+  if (v && isInside(v, real)) throw rpcError(`"${rel}" nằm trong vault: dùng ctx.vault.read (quyền vault.read).`)
+  return { root, real, vault: v }
+}
+
+/** Một thư mục trong dự án (không đệ quy), thư mục trước, tối đa 2000 mục. Bỏ .git, node_modules, .sessions, .stag, vault. */
+export async function listProjectDir(project: string, vault: string, rel: string): Promise<ProjectFileEntry[]> {
+  const { root, real, vault: v } = await projectTarget(project, vault, rel)
+  if (!(await fs.stat(real)).isDirectory()) throw rpcError(`"${rel}" không phải thư mục.`)
+  const out: ProjectFileEntry[] = []
+  for (const d of await fs.readdir(real, { withFileTypes: true })) {
+    if (out.length >= FILES_MAX_ENTRIES) break
+    if (FILES_SKIP.has(d.name.toLowerCase())) continue
+    const full = join(real, d.name)
+    let target = full
+    if (d.isSymbolicLink()) {
+      // Symlink / junction trỏ ra ngoài dự án: không hiện (đọc cũng bị chặn).
+      const t = await fs.realpath(full).catch(() => null)
+      if (!t || !isInside(root, t)) continue
+      target = t
+    }
+    if (v && isInside(v, target)) continue
+    const st = await fs.stat(target).catch(() => null)
+    if (!st || (!st.isFile() && !st.isDirectory())) continue
+    out.push({ name: d.name, path: relSlash(root, full), type: st.isDirectory() ? 'dir' : 'file', size: st.isFile() ? st.size : 0 })
+  }
+  return out.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.type === 'dir' ? -1 : 1))
+}
+
+/** Nội dung chữ (UTF-8) của một file trong dự án, tối đa 1 MB; file nhị phân / quá lớn → lỗi. */
+export async function readProjectText(project: string, vault: string, rel: string): Promise<{ text: string }> {
+  const { real } = await projectTarget(project, vault, rel)
+  const st = await fs.stat(real)
+  if (!st.isFile()) throw rpcError(`"${rel}" không phải file.`)
+  if (st.size > FILES_MAX_BYTES) throw rpcError(`"${rel}" quá lớn (${Math.ceil(st.size / 1024)} KB, tối đa 1 MB).`)
+  const buf = await fs.readFile(real)
+  if (buf.includes(0)) throw rpcError(`"${rel}" là file nhị phân, files.read chỉ đọc file chữ.`)
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(buf) }
+  } catch {
+    throw rpcError(`"${rel}" không phải chữ UTF-8.`)
+  }
+}
+
+/**
+ * Giới hạn sự kiện dày (agent ghi một file liên tục): mỗi khoá qua được một lần trong `ms`. Tính từ lần qua gần
+ * nhất (không trượt), nên ghi liên tục vẫn ra một sự kiện mỗi `ms`.
+ */
+export class KeyedThrottle {
+  private last = new Map<string, number>()
+
+  constructor(
+    private ms: number,
+    private clock: () => number = Date.now
+  ) {}
+
+  pass(key: string): boolean {
+    const t = this.clock()
+    const prev = this.last.get(key)
+    if (prev !== undefined && t - prev < this.ms) return false
+    this.last.set(key, t)
+    if (this.last.size > 2000) for (const [k, at] of this.last) if (t - at >= this.ms) this.last.delete(k)
+    return true
   }
 }
 

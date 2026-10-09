@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { statusTextFrom, cronProblem, describeCron, fillSlotUrl, pluginFolderFor, pluginIdFrom, newCapabilities, nextCronRun, normalizePluginConfig, parsePluginManifest, pluginToolName } from './plugins'
+import { PLUGIN_CAPABILITIES, PLUGIN_EVENTS, RISKY_CAPABILITIES, statusTextFrom, cronProblem, describeCron, fillSlotUrl, pluginFolderFor, pluginIdFrom, newCapabilities, nextCronRun, normalizePluginConfig, parsePluginManifest, pluginToolName } from './plugins'
 import { normalizeSettings, pluginOn } from './settings'
 import hello from '../../resources/plugin-catalog/stag-plugin-hello/package.json'
 
@@ -95,6 +95,22 @@ describe('manifest plugin', () => {
     expect(() => parsePluginManifest(pkg({ capabilities: ['jobs.schedule'], jobs: [{ key: 'a', schedule: '* * * * *' }] }))).toThrow(/cần worker/)
     expect(() => parsePluginManifest(pkg({ ...w, webhooks: [{ endpointKey: 'x' }] }))).toThrow(/webhooks.receive/)
     expect(() => parsePluginManifest(pkg({ ...w, capabilities: ['webhooks.receive'], webhooks: [{ endpointKey: 'A B' }] }))).toThrow(/endpointKey/)
+  })
+
+  it('sự kiện mới và quyền files.read', () => {
+    const w = { entrypoints: { worker: 'w.js' } }
+    const events = ['artifact.written', 'vault.note.changed', 'handoff.done', 'scope.conflict']
+    const m = parsePluginManifest(pkg({ ...w, capabilities: ['events.subscribe', 'files.read'], events })).manifest
+    expect(m.events).toEqual(events)
+    expect(m.capabilities).toEqual(['events.subscribe', 'files.read'])
+    for (const e of events) expect(PLUGIN_EVENTS[e as keyof typeof PLUGIN_EVENTS]).toBeTruthy()
+    expect(PLUGIN_CAPABILITIES['files.read']).toBe('Đọc file trong thư mục dự án của workspace')
+    // files.read đứng ngay trước http.outbound; không phải quyền nặng.
+    const keys = Object.keys(PLUGIN_CAPABILITIES)
+    expect(keys.indexOf('files.read')).toBe(keys.indexOf('http.outbound') - 1)
+    expect(RISKY_CAPABILITIES).not.toContain('files.read')
+    expect(PLUGIN_CAPABILITIES['events.subscribe']).toMatch(/tạo \/ sửa file/)
+    expect(() => parsePluginManifest(pkg({ ...w, capabilities: ['events.subscribe'], events: ['file.deleted'] }))).toThrow(/file.deleted/)
   })
 
   it('quyền mới khi cập nhật', () => {

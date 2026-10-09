@@ -83,6 +83,15 @@ describe('ScopeGuard — Claude Code', () => {
     expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('Agent a')
   })
 
+  it('báo onConflict (plugin: scope.conflict) mỗi lần hỏi, không báo khi không đụng', async () => {
+    const seen: unknown[] = []
+    guard.onConflict = (c) => seen.push({ ws: c.ws.id, agent: c.agent.id, hits: c.hits, owner: c.owner.agentName, task: c.owner.title, entry: c.entry, decision: c.decision })
+    await guard.preToolUse(ws, B, 'claude', edit(join(root, 'src', 'auth', 'login.ts')))
+    await guard.preToolUse(ws, B, 'claude', edit(join(root, 'src', 'ui', 'x.ts')))
+    await guard.preToolUse(ws, A, 'claude', edit(join(root, 'src', 'auth', 'x.ts')))
+    expect(seen).toEqual([{ ws: 'ws1', agent: 'b', hits: ['src/auth/login.ts'], owner: 'Agent a', task: 'Đăng nhập', entry: 'src/auth/', decision: 'ask' }])
+  })
+
   it('không hỏi: chính chủ, ngoài vùng khoá, vault, tool không sửa file', async () => {
     expect(await guard.preToolUse(ws, A, 'claude', edit(join(root, 'src', 'auth', 'x.ts')))).toBeUndefined()
     expect(await guard.preToolUse(ws, B, 'claude', edit(join(root, 'src', 'ui', 'x.ts')))).toBeUndefined()

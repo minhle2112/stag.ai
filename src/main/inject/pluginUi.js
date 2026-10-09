@@ -90,6 +90,11 @@ export const host = {
     read: (path, workspaceId) => call('vault.read', { workspaceId: wsId(workspaceId), path }),
     write: (path, content, workspaceId) => call('vault.write', { workspaceId: wsId(workspaceId), path, content })
   },
+  /** Quyền files.read: file trong thư mục dự án của workspace (path tương đối, '' = gốc dự án). */
+  files: {
+    list: (path = '', workspaceId) => call('files.list', { workspaceId: wsId(workspaceId), path }),
+    read: (path, workspaceId) => call('files.read', { workspaceId: wsId(workspaceId), path })
+  },
   notify: (title, body = '') => call('notify', { title, body }),
   /** Lời nhắn ngắn ở góc màn hình của app. */
   toast: (text) => call('ui.toast', { text: String(text) }),
