@@ -1,0 +1,24 @@
+{
+  "name": "stag-adapter-echo",
+  "version": "0.1.0",
+  "description": "Example stag.ai adapter: a tiny CLI that shows what stag.ai passes to an agent and echoes what you type.",
+  "private": true,
+  "license": "MIT",
+  "stagAdapter": {
+    "id": "echo",
+    "label": "Echo (mẫu)",
+    "description": "Adapter mẫu: in ra những gì stag.ai truyền cho một phiên agent rồi nhắc lại điều bạn gõ.",
+    "command": "node",
+    "args": ["{pkg}/cli.js"],
+    "versionArgs": ["{pkg}/cli.js", "--version"],
+    "install": "Cài Node.js: https://nodejs.org",
+    "models": [
+      { "id": "echo-small", "label": "Echo Small" },
+      { "id": "echo-large", "label": "Echo Large" }
+    ],
+    "modelFlag": "--model",
+    "rules": { "flag": "--rules" },
+    "prompt": { "flag": "--prompt" },
+    "mcpConfigFlag": "--mcp-config"
+  }
+}

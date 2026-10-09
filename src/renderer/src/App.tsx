@@ -6,10 +6,13 @@ import { agentKind, type AgentKind } from '@shared/types'
 import { CreateAgentDialog } from './components/CreateAgentDialog'
 import { Kanban } from './components/Kanban'
 import { ScopeAskDialog } from './components/ScopeAskDialog'
+import { SettingsPage } from './components/settings/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
-import { useAgents } from './store/agents'
+import { openAgent, useAgents } from './store/agents'
 import { useBoard } from './store/board'
+import { useSettings } from './store/settings'
+import { setTerminalFontSize } from './terminals'
 import { useUi, type MainTab } from './store/ui'
 import { useActiveWorkspace, useWorkspaces } from './store/workspaces'
 
@@ -26,10 +29,39 @@ export function App(): React.JSX.Element {
   // Lưới agent của workspace đã mở được giữ sống khi chuyển workspace/tab.
   const [visited, setVisited] = useState<string[]>([])
   const waiting = useWaitingCount(active?.id)
+  const settingsOpen = useUi((s) => s.settings !== null)
+  const terminalFontSize = useSettings((s) => s.value.app.general.terminalFontSize)
 
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => setTerminalFontSize(terminalFontSize), [terminalFontSize])
+
+  // Bấm thông báo Windows của một agent → mở đúng agent đó.
+  useEffect(
+    () =>
+      window.stag.onRevealAgent((wsId, agentId) => {
+        useUi.getState().closeSettings()
+        openAgent(wsId, agentId)
+      }),
+    []
+  )
+
+  // Ctrl+, mở / đóng Cài đặt (như VS Code). Bắt ở pha capture để terminal đang focus không nuốt mất.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === ',') {
+        e.preventDefault()
+        e.stopPropagation()
+        const ui = useUi.getState()
+        if (ui.settings) ui.closeSettings()
+        else ui.openSettings()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   useEffect(() => {
     if (active && !visited.includes(active.id)) setVisited([...visited, active.id])
@@ -102,6 +134,7 @@ export function App(): React.JSX.Element {
       <BrowserAskDialog />
       <ScopeAskDialog />
       <NewAgentDialog />
+      {settingsOpen && <SettingsPage />}
     </div>
   )
 }

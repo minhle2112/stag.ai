@@ -309,3 +309,48 @@ describe('Board: việc (task)', () => {
     await expect(fs.access(join(root, '.stag'))).rejects.toThrow()
   })
 })
+
+describe('Board: sự kiện để báo người dùng (thông báo Windows)', () => {
+  it('báo một lần khi agent chuyển sang chờ bạn (hết lượt / hỏi / xin quyền)', () => {
+    const events = vi.fn()
+    const board = new Board(() => {}, events)
+    const a = agent('a')
+    board.hook(a, { hook_event_name: 'UserPromptSubmit' })
+    board.hook(a, { hook_event_name: 'Stop' })
+    expect(events).toHaveBeenCalledTimes(1)
+    expect(events).toHaveBeenLastCalledWith({ kind: 'waiting', workspaceId: 'ws1', agentId: 'a', agentName: 'Agent a', reason: 'turn' })
+    // Vẫn đang chờ: "chờ lâu" (idle_prompt) không báo lại.
+    board.hook(a, { hook_event_name: 'Notification', notification_type: 'idle_prompt' })
+    expect(events).toHaveBeenCalledTimes(1)
+    board.hook(a, { hook_event_name: 'PreToolUse', tool_name: 'Bash' })
+    board.hook(a, { hook_event_name: 'PermissionRequest' })
+    expect(events).toHaveBeenCalledTimes(2)
+    expect(events).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'waiting', reason: 'permission' }))
+  })
+
+  it('không báo khi chính người dùng ngắt (Esc) hoặc lúc app đang tự bàn giao', () => {
+    const events = vi.fn()
+    const board = new Board(() => {}, events)
+    const a = agent('a')
+    board.hook(a, { hook_event_name: 'UserPromptSubmit' })
+    board.hook(a, { hook_event_name: 'Interrupt' })
+    expect(events).not.toHaveBeenCalled()
+    board.hook(a, { hook_event_name: 'UserPromptSubmit' })
+    board.setHandoff(a, 'asking')
+    board.hook(a, { hook_event_name: 'Stop' })
+    expect(events).not.toHaveBeenCalled()
+  })
+
+  it('task_done → báo xong việc (đóng thẻ bằng tay thì không)', async () => {
+    const events = vi.fn()
+    const board = new Board(() => {}, events)
+    const a = agent('a')
+    await board.startTask(ws, a, 's', 'Sửa lỗi', '')
+    await board.finishTask(ws, 'a', 'xong')
+    expect(events).toHaveBeenCalledWith({ kind: 'taskDone', workspaceId: 'ws1', agentId: 'a', agentName: 'Agent a', title: 'Sửa lỗi' })
+    const t2 = await board.startTask(ws, a, 's', 'Việc 2', '')
+    events.mockClear()
+    await board.closeTask(ws, t2.id, 'done')
+    expect(events).not.toHaveBeenCalled()
+  })
+})

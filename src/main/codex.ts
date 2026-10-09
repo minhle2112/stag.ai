@@ -68,6 +68,8 @@ export interface CodexLaunch {
   resumeId?: string
   /** Lời mở cho phiên mới. */
   prompt?: string
+  /** Model, mức suy nghĩ, tham số thêm người dùng chọn (Cài đặt → Adapter → Codex). */
+  userArgs?: string[]
 }
 
 /** Tham số cho codex.exe (truyền thẳng qua CreateProcess, không qua cmd.exe: luật phiên dài, nhiều dòng). */
@@ -97,7 +99,7 @@ export function codexArgs(o: CodexLaunch): string[] {
     const hook = codexHookCommand(o.hookUrl, reply)
     args.push('-c', `hooks.${ev}=[{hooks=[{type="command",command=${tomlString(hook)},timeout=${reply ? CODEX_REPLY_SECONDS + 10 : ev === 'Interrupt' ? 3 : 10}}]}]`)
   }
-  args.push(...codexPermissionArgs(o.permissionMode))
+  args.push(...codexPermissionArgs(o.permissionMode), ...(o.userArgs ?? []))
   if (!o.resumeId && o.prompt) args.push(o.prompt)
   return args
 }

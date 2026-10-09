@@ -67,6 +67,19 @@ export function onAgentExit(fn: (agentId: string, ptyId: string) => void): () =>
   return () => exitListeners.delete(fn)
 }
 
+/** Cỡ chữ mọi terminal (Settings → Chung → Terminal). */
+let fontSize = 13
+
+/** Đổi cỡ chữ: áp cho terminal đang có rồi canh lại kích thước (số cột/dòng đổi theo). */
+export function setTerminalFontSize(size: number): void {
+  if (size === fontSize) return
+  fontSize = size
+  for (const [agentId, e] of entries) {
+    e.term.options.fontSize = size
+    fitTerminal(agentId)
+  }
+}
+
 function entry(agentId: string): Entry {
   let e = entries.get(agentId)
   if (!e) {
@@ -75,7 +88,7 @@ function entry(agentId: string): Entry {
     el.style.height = '100%'
     const term = new Terminal({
       fontFamily: getComputedStyle(document.body).getPropertyValue('--font-mono') || 'Consolas, monospace',
-      fontSize: 13,
+      fontSize,
       cursorBlink: true,
       allowProposedApi: true,
       theme

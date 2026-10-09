@@ -1,14 +1,18 @@
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
-import type { AppSettings, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
+import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
+import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
+import type { ExternalAdapterStore } from './externalAdapters'
 import { artifactPath, type ArtifactLog } from './artifacts'
 import { artifactThumb } from './artifactThumb'
 import type { Board } from './board'
 import { toUrl, type BrowserService } from './browser'
 import { openInObsidian } from './obsidian'
+import type { Notifier } from './notifier'
 import type { PtyManager } from './pty'
 import type { SettingsStore } from './settings'
+import { detectShells } from './shells'
 import { prepareUserTemplates } from './templates'
 import { createNote, findRegisteredId, readNote, vaultTree, writeNote } from './vault'
 import type { VaultActivityLog } from './vaultActivity'
@@ -18,7 +22,7 @@ import type { WorkspaceStore } from './workspace'
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -29,14 +33,21 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.wsList, () => workspaces.list())
   ipcMain.handle(IPC.wsPick, async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)!
-    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục dự án', properties: ['openDirectory', 'createDirectory'] })
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Chọn thư mục dự án',
+      defaultPath: settings.general().projectsDir || undefined,
+      properties: ['openDirectory', 'createDirectory']
+    })
     return r.canceled ? null : r.filePaths[0]
   })
   ipcMain.handle(IPC.wsInspect, (_e, path: string) => workspaces.inspect(path))
   ipcMain.handle(IPC.wsCreate, (_e, req: CreateWorkspaceRequest) => workspaces.create(req))
   ipcMain.handle(IPC.wsRemove, async (_e, id: string) => {
+    const agentIds = (await agents.snapshot(id)).agents.map((a) => a.id)
     await agents.removeWorkspace(id)
     await workspaces.remove(id)
+    await settings.forget('agent', agentIds)
+    await settings.forget('workspace', [id])
   })
 
   ipcMain.handle(IPC.vaultTree, (_e, vaultPath: string) => vaultTree(vaultPath))
@@ -53,7 +64,10 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.agentCreate, (_e, req: CreateAgentRequest) => agents.create(req))
   ipcMain.handle(IPC.agentStart, (e, req: StartAgentRequest) => agents.start(e.sender, req))
   ipcMain.handle(IPC.agentStop, (_e, agentId: string) => agents.stop(agentId))
-  ipcMain.handle(IPC.agentRemove, (_e, agentId: string) => agents.remove(agentId))
+  ipcMain.handle(IPC.agentRemove, async (_e, agentId: string) => {
+    await agents.remove(agentId)
+    await settings.forget('agent', [agentId])
+  })
   ipcMain.handle(IPC.agentLayout, (_e, workspaceId: string, layout: LayoutNode | null) => agents.saveLayout(workspaceId, layout))
 
   const ws = (id: string): Workspace => {
@@ -85,7 +99,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.vaultSearch, (_e, vaultPath: string, query: string) => vaultIndexer.search(vaultPath, query))
   ipcMain.handle(IPC.vaultWatch, (e, vaultPath: string) => vaultWatchers.watch(vaultPath, e.sender))
   ipcMain.handle(IPC.settingsGet, () => settings.get())
-  ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<AppSettings>) => settings.set(patch))
+  ipcMain.handle(IPC.settingsSet, (_e, patch: AppSettingsPatch) => settings.setApp(patch))
   ipcMain.handle(IPC.agentHandoff, (_e, agentId: string) => agents.handoffNow(agentId))
   ipcMain.handle(IPC.artifactList, (_e, workspaceId: string) => artifacts.list(ws(workspaceId)))
   ipcMain.handle(IPC.artifactStat, (_e, workspaceId: string, rels: string[]) => artifacts.stat(ws(workspaceId), rels))
@@ -99,4 +113,51 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   })
   ipcMain.handle(IPC.artifactReveal, (_e, workspaceId: string, rel: string) => shell.showItemInFolder(artifactPath(ws(workspaceId), rel)))
   ipcMain.handle(IPC.vaultUnwatch, (e, vaultPath: string) => vaultWatchers.unwatch(vaultPath, e.sender))
+  ipcMain.handle(IPC.settingsOverride, (_e, level: OverrideLevel, id: string, patch: SettingsOverridesPatch) => {
+    if (level !== 'workspace' && level !== 'agent') throw new Error('Cấp cài đặt không hợp lệ')
+    if (!patch || typeof patch !== 'object') throw new Error('Ghi đè không hợp lệ')
+    return settings.setOverrides(level, id, patch)
+  })
+  ipcMain.handle(IPC.shellsList, () => detectShells())
+  ipcMain.handle(
+    IPC.appMeta,
+    (): AppMeta => ({
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      userData: app.getPath('userData'),
+      packaged: app.isPackaged
+    })
+  )
+  ipcMain.handle(IPC.pickFolder, async (e, title: string, defaultPath?: string) => {
+    const win = BrowserWindow.fromWebContents(e.sender)!
+    const r = await dialog.showOpenDialog(win, { title, defaultPath: defaultPath || undefined, properties: ['openDirectory', 'createDirectory'] })
+    return r.canceled ? null : r.filePaths[0]
+  })
+  ipcMain.handle(IPC.notifyTest, () => notifier.test())
+  ipcMain.handle(IPC.adapterCheck, (_e, id: string) => {
+    if (id !== 'claude' && id !== 'codex') throw new Error('Adapter không hợp lệ')
+    return adapters.check(id)
+  })
+  ipcMain.handle(IPC.adapterExtList, () => external.list())
+  ipcMain.handle(IPC.adapterExtInstall, (_e, req: AdapterInstallRequest) => {
+    if (req?.type !== 'npm' && req?.type !== 'local') throw new Error('Cách cài không hợp lệ')
+    if (req.type === 'npm' && typeof req.name !== 'string') throw new Error('Thiếu tên gói')
+    if (req.type === 'local' && typeof req.path !== 'string') throw new Error('Thiếu đường dẫn')
+    return external.install(req)
+  })
+  ipcMain.handle(IPC.adapterExtRemove, (_e, id: string) => external.remove(String(id)))
+  ipcMain.handle(IPC.adapterExtUpdate, (_e, id: string, patch: InstalledAdapterPatch) => external.update(String(id), patch ?? {}))
+  ipcMain.handle(IPC.adapterExtCheck, (_e, id: string) => external.check(String(id)))
+  ipcMain.handle(IPC.pickFile, async (e, title: string, defaultPath?: string) => {
+    const win = BrowserWindow.fromWebContents(e.sender)!
+    const r = await dialog.showOpenDialog(win, {
+      title,
+      defaultPath: defaultPath || undefined,
+      properties: ['openFile'],
+      filters: [{ name: 'Chương trình', extensions: ['exe'] }]
+    })
+    return r.canceled ? null : r.filePaths[0]
+  })
 }

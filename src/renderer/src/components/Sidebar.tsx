@@ -9,14 +9,13 @@ import { statusView } from '../status'
 import { CreateReport, CreateWorkspaceDialog } from './CreateWorkspaceDialog'
 import { ContextBadge, handoffNow } from './ContextBadge'
 import { RenameAgentDialog } from './RenameAgentDialog'
-import { SettingsDialog } from './SettingsDialog'
 
 export function Sidebar(): React.JSX.Element {
   const { items, setActive, add, remove } = useWorkspaces()
   const [inspection, setInspection] = useState<WorkspaceInspection | null>(null)
   const [report, setReport] = useState<CreateWorkspaceResult | null>(null)
   const [collapsed, setCollapsed] = useState<string[]>([])
-  const [settings, setSettings] = useState(false)
+  const openSettings = useUi((s) => s.openSettings)
 
   async function newWorkspace(): Promise<void> {
     const path = await window.stag.workspace.pick()
@@ -60,19 +59,12 @@ export function Sidebar(): React.JSX.Element {
       </div>
 
       <button
-        onClick={() => window.stag.openTemplates()}
+        onClick={() => openSettings()}
         className="m-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg"
-        title="Mở thư mục template vault để chỉnh mẫu"
-      >
-        Chỉnh template vault…
-      </button>
-      <button
-        onClick={() => setSettings(true)}
-        className="mx-2 mb-2 -mt-1 rounded-md px-2 py-1.5 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg"
+        title="Cài đặt (Ctrl+,). Chỉnh template vault: Cài đặt → Vault & mẫu"
       >
         Cài đặt…
       </button>
-      {settings && <SettingsDialog onClose={() => setSettings(false)} />}
 
       {inspection && (
         <CreateWorkspaceDialog
@@ -224,6 +216,7 @@ function AgentRow({
   const status = useBoard((s) => s.byWs[ws.id]?.statuses.find((x) => x.agentId === agent.id))
   const wsActive = useWorkspaces((s) => s.activeId === ws.id)
   const onAgentsTab = useUi((s) => s.tab === 'agents')
+  const openSettings = useUi((s) => s.openSettings)
   const selected = wsActive && onAgentsTab && state.focused === agent.id
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(false)
@@ -233,6 +226,7 @@ function AgentRow({
   const starting = !!state.starting[agent.id]
   const shown = leaves(state.layout).includes(agent.id)
   const terminal = agentKind(agent) === 'terminal'
+  const external = agentKind(agent) === 'external'
   const view = statusView(running, starting, status, agentKind(agent))
 
   /** Mở ô rồi mới mở phiên, để terminal đã có kích thước thật. */
@@ -332,10 +326,13 @@ function AgentRow({
             {!shown && item('Mở ô', () => openAgent(ws.id, agent.id))}
             {!running && !starting && item(terminal ? 'Mở terminal' : 'Phiên mới', () => openAndStart(false))}
             {!terminal && !running && !starting && agent.lastSessionId && item('Tiếp tục phiên trước', () => openAndStart(true))}
-            {!terminal && running && item('Bàn giao sang phiên mới', () => void handoffNow(agent.id))}
+            {!terminal && !external && running && item('Bàn giao sang phiên mới', () => void handoffNow(agent.id))}
             {running && item(terminal ? 'Đóng terminal' : 'Dừng phiên', () => stop(agent.id))}
             {shown && item('Đóng ô', () => hide(ws.id, agent.id))}
             {item('Đổi tên…', () => setRenaming(true))}
+            {external
+              ? item('Cài đặt adapter…', () => openSettings('adapters', { external: agent.adapterId }))
+              : !terminal && item('Model & effort…', () => openSettings('adapters', { adapter: agentKind(agent) as 'claude' | 'codex', agentId: agent.id }))}
             <div className="my-0.5 border-t border-line" />
             {item(terminal ? 'Xoá terminal…' : 'Xoá agent…', removeAgent, true)}
           </div>

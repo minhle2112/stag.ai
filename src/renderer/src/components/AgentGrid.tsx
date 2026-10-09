@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { agentKind, type Agent, type LayoutNode, type SplitDir, type Workspace } from '@shared/types'
 import { setRatio, type LayoutPath } from '../layout'
 import { useAgents, type WorkspaceAgents } from '../store/agents'
+import { useExternalAdapters } from '../store/externalAdapters'
 import { useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { statusView } from '../status'
@@ -218,6 +219,10 @@ function AgentCell({
   const focused = state.focused === agent.id
   const status = useBoard((s) => s.byWs[ws.id]?.statuses.find((x) => x.agentId === agent.id))
   const terminal = agentKind(agent) === 'terminal'
+  // Agent của adapter ngoài: hiện tên adapter (vd. Aider) cạnh vai trò.
+  const extLabel = useExternalAdapters((s) =>
+    agentKind(agent) === 'external' ? (s.items.find((x) => x.manifest.id === agent.adapterId)?.manifest.label ?? `${agent.adapterId} (đã gỡ)`) : null
+  )
   const view = statusView(running, starting, status, agentKind(agent))
 
   useEffect(() => {
@@ -256,6 +261,7 @@ function AgentCell({
         ) : (
           agent.role && <span className="truncate text-[12px] text-muted">{agent.role}</span>
         )}
+        {extLabel && <span className="shrink-0 rounded bg-line/60 px-1.5 text-[10.5px] text-muted">{extLabel}</span>}
         {view.waiting && <span className="truncate text-[12px] text-amber-300">{view.label}</span>}
         {status?.handoff && status.handoff !== 'failed' && <span className="truncate text-[12px] text-sky-300">{view.label}</span>}
         <div className="flex-1" />

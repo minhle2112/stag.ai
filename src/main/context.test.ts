@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AgentStatus, AppSettings } from '@shared/types'
+import type { AgentStatus, HandoffSettings } from '@shared/types'
 import {
   claudeConfigDir,
   contextPercent,
@@ -14,7 +14,6 @@ import {
   mergeContext,
   parseStatusLine
 } from './context'
-import { normalizeSettings } from './settings'
 
 describe('parseStatusLine', () => {
   // Rút gọn theo schema trong docs statusline của Claude Code.
@@ -104,7 +103,7 @@ describe('userStatusLine', () => {
 
 describe('handoffDue', () => {
   const now = Date.parse('2026-10-08T10:00:00Z')
-  const settings: AppSettings = { autoHandoff: true, handoffPercent: 80 }
+  const settings: HandoffSettings = { autoHandoff: true, handoffPercent: 80 }
   const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
     agentId: 'a',
     activity: 'waiting',
@@ -150,15 +149,5 @@ describe('handoffPrompt', () => {
     expect(p).toContain('83% full (handoff threshold 80%)')
     expect(p).toContain('session_handoff')
     expect(handoffPrompt(null, null)).toContain('the user asked')
-  })
-})
-
-describe('normalizeSettings', () => {
-  it('thiếu / sai kiểu → mặc định; % kẹp trong khoảng và làm tròn', () => {
-    expect(normalizeSettings(undefined)).toEqual({ autoHandoff: true, handoffPercent: 80 })
-    expect(normalizeSettings({ autoHandoff: 'yes', handoffPercent: '50' })).toEqual({ autoHandoff: true, handoffPercent: 80 })
-    expect(normalizeSettings({ autoHandoff: false, handoffPercent: 99 })).toEqual({ autoHandoff: false, handoffPercent: 95 })
-    expect(normalizeSettings({ handoffPercent: 5 }).handoffPercent).toBe(20)
-    expect(normalizeSettings({ handoffPercent: 66.6 }).handoffPercent).toBe(67)
   })
 })

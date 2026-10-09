@@ -78,7 +78,30 @@ export const IPC = {
   artifactOpen: 'artifact:open',
   artifactReveal: 'artifact:reveal',
   /** main → renderer: danh sách artifact của một workspace vừa đổi (kèm workspaceId). */
-  artifactsChanged: 'artifact:changed'
+  artifactsChanged: 'artifact:changed',
+  /** Ghi đè cài đặt của một workspace / agent (null = theo cấp trên). */
+  settingsOverride: 'settings:override',
+  /** Phiên bản app / Electron, thư mục dữ liệu (Settings → Giới thiệu). */
+  appMeta: 'app:meta',
+  /** Các shell có trên máy (Settings → Chung → Terminal). */
+  shellsList: 'shells:list',
+  /** Hộp thoại chọn thư mục (kèm tiêu đề và thư mục mở sẵn). */
+  pickFolder: 'dialog:pick-folder',
+  /** Gửi một thông báo thử (Settings → Chung → Thông báo). */
+  notifyTest: 'notify:test',
+  /** Kiểm tra một adapter CLI (file chạy, phiên bản, đăng nhập). */
+  adapterCheck: 'adapter:check',
+  /** Chọn một file .exe (Cài đặt → Adapter → đường dẫn). */
+  pickFile: 'dialog:pick-file',
+  /** Adapter ngoài (alpha): danh sách, cài từ npm / thư mục, gỡ, sửa, kiểm tra; main báo khi danh sách đổi. */
+  adapterExtList: 'adapter-ext:list',
+  adapterExtInstall: 'adapter-ext:install',
+  adapterExtRemove: 'adapter-ext:remove',
+  adapterExtUpdate: 'adapter-ext:update',
+  adapterExtCheck: 'adapter-ext:check',
+  adapterExtChanged: 'adapter-ext:changed',
+  /** main → renderer: người dùng bấm thông báo của agent → mở agent đó (kèm workspaceId, agentId). */
+  revealAgent: 'agent:reveal'
 } as const
 
 export interface AppInfo {
@@ -90,7 +113,8 @@ export interface AppInfo {
 export interface PtySpawnOptions {
   /** Lệnh chạy; bỏ trống = shell mặc định (PowerShell trên Windows). */
   command?: string
-  args?: string[]
+  /** Chuỗi = dòng lệnh thô đưa thẳng cho Windows (node-pty không tự thêm nháy), dùng khi chạy file .cmd qua cmd.exe. */
+  args?: string[] | string
   cwd: string
   cols: number
   rows: number

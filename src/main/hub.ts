@@ -62,6 +62,12 @@ export class StatusHub {
     return ['--settings', this.settingsFile, '--mcp-config', this.mcpFile]
   }
 
+  /** File cấu hình MCP kiểu Claude (`{ mcpServers: { stag } }`, token qua biến môi trường) cho adapter ngoài. */
+  mcpConfigFile(): string {
+    if (!this.server) throw new Error('StatusHub chưa chạy')
+    return this.mcpFile
+  }
+
   /** Địa chỉ hook / MCP cho CLI không dùng file cấu hình của app (Codex nhận qua `-c`). */
   endpoints(): { hookUrl: string; mcpUrl: string } {
     if (!this.server) throw new Error('StatusHub chưa chạy')

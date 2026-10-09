@@ -26,6 +26,9 @@ files:
 extraResources:
   - from: resources/templates
     to: templates
+  # index.ts đọc process.resourcesPath/icons/tray.png (icon khay khi chọn "thu xuống khay").
+  - from: resources/icons
+    to: icons
 
 asar: true
 # Module native (.node, winpty-agent.exe) không nạp/chạy được từ trong asar.

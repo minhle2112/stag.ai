@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { SplitDir } from '@shared/types'
+import type { AdapterId, SplitDir } from '@shared/types'
 
 /** 'vault' không còn là tab chính: mở bằng nút Vault ở góc phải thanh trên. */
 export type MainTab = 'kanban' | 'agents' | 'artifacts' | 'vault'
@@ -11,7 +11,35 @@ export interface NewAgentTarget {
   dir: SplitDir
 }
 
+/** Các mục của trang Settings, theo thứ tự trên menu trái. */
+export type SettingsSection =
+  | 'general'
+  | 'adapters'
+  | 'connectors'
+  | 'skills'
+  | 'plugins'
+  | 'secrets'
+  | 'handoff'
+  | 'scope'
+  | 'vault'
+  | 'browser'
+  | 'data'
+  | 'about'
+
+/** Mở Settings thẳng tới một adapter / một agent (vd. menu ⋯ của agent → Model & effort). */
+export interface SettingsFocus {
+  adapter?: AdapterId
+  /** id adapter ngoài (mở trang chi tiết của nó). */
+  external?: string
+  agentId?: string
+}
+
 interface UiState {
+  /** Trang Settings đang mở ở mục nào (null = đóng). */
+  settings: SettingsSection | null
+  settingsFocus: SettingsFocus | null
+  openSettings: (section?: SettingsSection, focus?: SettingsFocus) => void
+  closeSettings: () => void
   tab: MainTab
   browserOpen: boolean
   /** Số hộp thoại đang mở. Browser là view gốc nằm trên HTML nên phải ẩn khi có hộp thoại. */
@@ -26,6 +54,10 @@ interface UiState {
 }
 
 export const useUi = create<UiState>((set) => ({
+  settings: null,
+  settingsFocus: null,
+  openSettings: (section = 'general', focus) => set({ settings: section, settingsFocus: focus ?? null }),
+  closeSettings: () => set({ settings: null, settingsFocus: null }),
   tab: 'agents',
   browserOpen: false,
   modals: 0,

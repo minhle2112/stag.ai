@@ -87,6 +87,8 @@ export class BrowserService {
   private win: BrowserWindow | null = null
   /** Pane đang hiện browser của workspace nào, ở vị trí nào (null = không hiện view nào). */
   private shown: { wsId: string; rect: ViewRect } | null = null
+  /** Thu phóng giao diện app (Settings → Chung): vị trí renderer gửi là px CSS, view cần px cửa sổ. */
+  private zoom = 1
   private asks = new Map<string, PendingAsk>()
 
   constructor(private events: BrowserEvents) {}
@@ -288,13 +290,20 @@ export class BrowserService {
     this.layout()
   }
 
+  setZoom(factor: number): void {
+    if (factor === this.zoom) return
+    this.zoom = factor
+    this.layout()
+  }
+
   private layout(): void {
     for (const [wsId, b] of this.byWs) {
       for (const tab of b.tabs) {
         const visible = !!this.shown && this.shown.wsId === wsId && b.active === tab.id
         if (visible) {
           const r = this.shown!.rect
-          tab.view.setBounds({ x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) })
+          const z = this.zoom
+          tab.view.setBounds({ x: Math.round(r.x * z), y: Math.round(r.y * z), width: Math.round(r.width * z), height: Math.round(r.height * z) })
         }
         const wasVisible = tab.view.getVisible()
         tab.view.setVisible(visible)

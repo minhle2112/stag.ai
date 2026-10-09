@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import type { AgentStatus, AppSettings, ContextUsage } from '@shared/types'
+import type { AgentStatus, ContextUsage, HandoffSettings } from '@shared/types'
 import { exists, readText } from './fsutil'
 
 /**
@@ -113,7 +113,7 @@ export const HANDOFF_TYPING_MS = 8000
  * và chưa bàn giao (hoặc đã hỏng) trong phiên này.
  */
 export function handoffDue(
-  settings: AppSettings,
+  settings: HandoffSettings,
   status: AgentStatus | undefined,
   lastInputAt: number,
   now: number

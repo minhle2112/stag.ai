@@ -1,4 +1,4 @@
-import type { AgentKind, AgentStatus, AppSettings } from '@shared/types'
+import type { AgentKind, AgentStatus, HandoffSettings } from '@shared/types'
 
 export interface StatusView {
   /** Lớp Tailwind cho chấm trạng thái. */
@@ -28,6 +28,8 @@ export function statusView(running: boolean, starting: boolean, status: AgentSta
   // Bàn giao: phiên cũ đóng rồi mở phiên mới ngay, nên giữ nhãn này cả lúc tiến trình đã thoát.
   if (status?.handoff === 'restarting') return { dot: 'bg-sky-400 animate-pulse', label: 'đang chuyển sang phiên mới', waiting: false }
   if (!running) return { dot: 'bg-muted/50', label: 'phiên đã dừng', waiting: false }
+  // Adapter ngoài không có hook: chỉ biết phiên đang chạy.
+  if (kind === 'external' && (!status || status.activity === 'starting')) return { dot: 'bg-emerald-400/70', label: 'đang chạy', waiting: false }
   if (status?.activity === 'starting') return { dot: 'bg-muted animate-pulse', label: 'đang khởi động', waiting: false }
   if (status?.handoff === 'asking') return { dot: 'bg-sky-400 animate-pulse', label: 'đang viết bàn giao', waiting: false }
   if (status?.activity === 'waiting')
@@ -57,7 +59,7 @@ export function formatTokens(n: number): string {
 }
 
 /** Độ dài context của phiên để hiện trên ô terminal / thẻ kanban. null = chưa có số. */
-export function contextView(status: AgentStatus | undefined, settings: AppSettings): ContextView | null {
+export function contextView(status: AgentStatus | undefined, settings: HandoffSettings): ContextView | null {
   const c = status?.context
   if (!c) return null
   const failed = status?.handoff === 'failed'

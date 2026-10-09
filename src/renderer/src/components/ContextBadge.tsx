@@ -1,5 +1,5 @@
 import type { AgentStatus } from '@shared/types'
-import { useSettings } from '../store/settings'
+import { useHandoffFor } from '../store/settings'
 import { contextView } from '../status'
 
 const TONE = {
@@ -10,8 +10,8 @@ const TONE = {
 
 /** % context của phiên (hoặc số token khi chưa biết kích thước cửa sổ). Chưa có số thì không hiện gì. */
 export function ContextBadge({ status, className = '' }: { status: AgentStatus | undefined; className?: string }): React.JSX.Element | null {
-  const settings = useSettings((s) => s.value)
-  const v = contextView(status, settings)
+  const handoff = useHandoffFor(status?.agentId)
+  const v = contextView(status, handoff)
   if (!v) return null
   return (
     <span className={`shrink-0 font-mono text-[11px] tabular-nums ${TONE[v.tone]} ${className}`} title={v.title}>

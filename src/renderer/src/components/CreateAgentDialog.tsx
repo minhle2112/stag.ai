@@ -1,31 +1,26 @@
 import { useState } from 'react'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import type { AgentKind, PermissionMode } from '@shared/types'
+import { permissionModes } from '../permissionModes'
+import { useExternalAdapters } from '../store/externalAdapters'
+import { useSettings } from '../store/settings'
 import { Button, Modal } from './Modal'
 
 const ROLES = ['Lead', 'Dev', 'QA', 'Docs']
 
-/** Mức quyền theo CLI của agent (main đổi sang cờ của từng CLI, xem agents.ts / codex.ts). */
-function modes(kind: AgentKind): Array<{ id: PermissionMode; label: string; hint: string }> {
-  if (kind === 'codex')
-    return [
-      { id: 'default', label: 'Theo cài đặt Codex', hint: 'Như khi bạn tự chạy codex (~/.codex/config.toml).' },
-      { id: 'acceptEdits', label: 'Tự sửa file', hint: 'Sửa trong thư mục dự án không cần hỏi; ra ngoài sandbox thì hỏi.' },
-      { id: 'auto', label: 'Tự động', hint: 'Codex tự duyệt (approve-for-me), vẫn trong sandbox.' },
-      { id: 'plan', label: 'Chỉ đọc', hint: 'Sandbox chỉ đọc: đọc và đề xuất, không sửa gì.' }
-    ]
-  return [
-    { id: 'default', label: 'Theo cài đặt Claude Code', hint: 'Hỏi bạn như khi bạn tự chạy claude.' },
-    { id: 'acceptEdits', label: 'Tự sửa file', hint: 'Sửa file không cần hỏi; chạy lệnh vẫn hỏi.' },
-    { id: 'auto', label: 'Tự động', hint: 'Claude tự quyết, vẫn chặn việc rủi ro.' },
-    { id: 'plan', label: 'Chỉ lập kế hoạch', hint: 'Đọc và đề xuất, không sửa gì.' }
-  ]
+/** Một lựa chọn "Loại": adapter có sẵn, hoặc adapter ngoài (key `ext:<id>`). */
+interface KindOption {
+  key: string
+  kind: AgentKind
+  adapterId?: string
+  label: string
+  hint: string
 }
 
-const KINDS: Array<{ id: AgentKind; label: string; hint: string }> = [
-  { id: 'claude', label: 'Claude Code', hint: 'Agent có vai trò, bộ nhớ riêng, lên kanban.' },
-  { id: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI, cũng có vai trò, bộ nhớ, kanban.' },
-  { id: 'terminal', label: 'Terminal', hint: 'PowerShell trong thư mục dự án, không có bộ nhớ.' }
+const KINDS: KindOption[] = [
+  { key: 'claude', kind: 'claude', label: 'Claude Code', hint: 'Agent có vai trò, bộ nhớ riêng, lên kanban.' },
+  { key: 'codex', kind: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI, cũng có vai trò, bộ nhớ, kanban.' },
+  { key: 'terminal', kind: 'terminal', label: 'Terminal', hint: 'Shell trong thư mục dự án, không có bộ nhớ.' }
 ]
 
 interface Props {
@@ -34,15 +29,34 @@ interface Props {
   /** Tên các agent đã có trong workspace, để báo trùng ngay khi gõ. */
   takenNames: string[]
   onCancel: () => void
-  onSubmit: (v: { kind: AgentKind; name: string; role: string; permissionMode: PermissionMode }) => Promise<void>
+  onSubmit: (v: { kind: AgentKind; adapterId?: string; name: string; role: string; permissionMode: PermissionMode }) => Promise<void>
 }
 
 export function CreateAgentDialog({ suggestName, takenNames, onCancel, onSubmit }: Props): React.JSX.Element {
-  const [kind, setKind] = useState<AgentKind>('claude')
-  const [name, setName] = useState(suggestName('claude'))
+  const adapters = useSettings((s) => s.value.app.adapters)
+  const external = useExternalAdapters((s) => s.items)
+  // Adapter tắt ở Cài đặt → Adapter không hiện ở đây. Tắt hết thì vẫn hiện đủ (không để hộp này cụt).
+  const all: KindOption[] = [
+    ...KINDS.filter((k) => adapters[k.kind as 'claude' | 'codex' | 'terminal'].enabled),
+    ...external
+      .filter((a) => a.enabled)
+      .map((a) => ({
+        key: `ext:${a.manifest.id}`,
+        kind: 'external' as const,
+        adapterId: a.manifest.id,
+        label: a.manifest.label,
+        hint: a.manifest.description || 'Adapter ngoài (alpha).'
+      }))
+  ]
+  const kinds = all.length ? all : KINDS
+  const [key, setKey] = useState(kinds[0].key)
+  const opt = kinds.find((k) => k.key === key) ?? kinds[0]
+  const kind = opt.kind
+  const [name, setName] = useState(suggestName(kinds[0].kind))
   const terminal = kind === 'terminal'
   const [role, setRole] = useState('')
-  const [mode, setMode] = useState<PermissionMode>('default')
+  const defaultMode = (k: AgentKind): PermissionMode => (k === 'claude' || k === 'codex' ? adapters[k].defaultPermission : 'default')
+  const [mode, setMode] = useState<PermissionMode>(defaultMode(kinds[0].kind))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -56,7 +70,7 @@ export function CreateAgentDialog({ suggestName, takenNames, onCancel, onSubmit 
     setBusy(true)
     setError(null)
     try {
-      await onSubmit({ kind, name: trimmed, role: role.trim(), permissionMode: mode })
+      await onSubmit({ kind, adapterId: opt.adapterId, name: trimmed, role: role.trim(), permissionMode: mode })
     } catch (e) {
       setError(String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
       setBusy(false)
@@ -86,19 +100,20 @@ export function CreateAgentDialog({ suggestName, takenNames, onCancel, onSubmit 
         }}
       >
         <Label text="Loại">
-          <div className="grid grid-cols-3 gap-1.5">
-            {KINDS.map((k) => (
+          <div className={`grid gap-1.5 ${kinds.length === 1 ? 'grid-cols-1' : kinds.length === 2 || kinds.length === 4 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+            {kinds.map((k) => (
               <button
                 type="button"
-                key={k.id}
+                key={k.key}
                 title={k.hint}
                 onClick={() => {
                   // Tên còn là tên gợi ý của loại cũ thì đổi theo loại mới.
-                  if (name === suggestName(kind)) setName(suggestName(k.id))
-                  setKind(k.id)
+                  if (name === suggestName(kind)) setName(suggestName(k.kind))
+                  if (k.key !== key) setMode(defaultMode(k.kind))
+                  setKey(k.key)
                 }}
                 className={`rounded-md border px-2 py-1.5 text-left ${
-                  kind === k.id ? 'border-accent bg-accent/10' : 'border-line bg-panel-2 hover:border-accent/50'
+                  key === k.key ? 'border-accent bg-accent/10' : 'border-line bg-panel-2 hover:border-accent/50'
                 }`}
               >
                 <div>{k.label}</div>
@@ -138,9 +153,10 @@ export function CreateAgentDialog({ suggestName, takenNames, onCancel, onSubmit 
                 ))}
               </div>
             </Label>
+            {kind !== 'external' && (
             <Label text="Quyền">
               <div className="space-y-1">
-                {modes(kind).map((m) => (
+                {permissionModes(kind).map((m) => (
                   <label key={m.id} className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-panel-2">
                     <input type="radio" checked={mode === m.id} onChange={() => setMode(m.id)} className="mt-0.5" />
                     <span>
@@ -150,11 +166,12 @@ export function CreateAgentDialog({ suggestName, takenNames, onCancel, onSubmit 
                 ))}
               </div>
             </Label>
+            )}
           </>
         )}
         {terminal ? (
           <p className="text-[12px] text-muted">
-            Terminal mở PowerShell trong thư mục dự án. Đóng ô thì terminal vẫn chạy, mở lại ở thanh bên.
+            Terminal mở shell chọn ở Cài đặt → Adapter → Terminal, trong thư mục dự án. Đóng ô thì terminal vẫn chạy, mở lại ở thanh bên.
           </p>
         ) : (
           <p className="text-[12px] text-muted">

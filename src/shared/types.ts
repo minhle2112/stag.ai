@@ -148,9 +148,10 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'auto' | 'plan'
 
 /**
  * Loại ô trong lưới: agent chạy một CLI AI (có tên, vai trò, note bộ nhớ, luật phiên riêng), hoặc
- * terminal thường (PowerShell trong thư mục dự án, không có bộ nhớ, không lên kanban).
+ * terminal thường (shell trong thư mục dự án, không có bộ nhớ, không lên kanban).
+ * 'external' = agent chạy CLI của một adapter ngoài người dùng cài (xem `Agent.adapterId`).
  */
-export type AgentKind = 'claude' | 'codex' | 'terminal'
+export type AgentKind = 'claude' | 'codex' | 'terminal' | 'external'
 
 /** Agent tạo trước khi có loại ô là agent Claude Code. */
 export function agentKind(a: { kind?: AgentKind }): AgentKind {
@@ -169,6 +170,8 @@ export interface Agent {
   createdAt: string
   /** Phiên CLI gần nhất, để "tiếp tục phiên trước" (--resume). Terminal không có. */
   lastSessionId?: string
+  /** kind = 'external': id adapter ngoài (stagAdapter.id). */
+  adapterId?: string
 }
 
 export type SplitDir = 'row' | 'col'
@@ -194,6 +197,8 @@ export interface AgentsSnapshot {
 export interface CreateAgentRequest {
   workspaceId: string
   kind: AgentKind
+  /** kind = 'external': adapter ngoài nào. */
+  adapterId?: string
   name: string
   role: string
   permissionMode: PermissionMode
@@ -247,8 +252,8 @@ export interface AgentStatus {
   handoff?: HandoffState
 }
 
-/** Cài đặt của app (userData/settings.json). */
-export interface AppSettings {
+/** Bàn giao khi context gần đầy. Đặt được ở cấp app, ghi đè theo workspace / agent. */
+export interface HandoffSettings {
   /** Tự bàn giao sang phiên mới khi context đạt `handoffPercent`. */
   autoHandoff: boolean
   /** Ngưỡng % cửa sổ context để bàn giao (HANDOFF_MIN…HANDOFF_MAX). */
@@ -258,7 +263,155 @@ export interface AppSettings {
 export const HANDOFF_MIN = 20
 /** Claude Code tự compact ở khoảng 96,7% cửa sổ 1M (và ở 100% cửa sổ 200k): bàn giao phải trước đó. */
 export const HANDOFF_MAX = 95
-export const DEFAULT_SETTINGS: AppSettings = { autoHandoff: true, handoffPercent: 80 }
+
+/** Shell cho ô Terminal. Không có trên máy thì dùng PowerShell. */
+export type ShellId = 'powershell' | 'pwsh' | 'gitbash' | 'cmd'
+export type CloseAction = 'quit' | 'tray'
+
+/** Mục "Chung" của Settings (chỉ ở cấp app). */
+export interface GeneralSettings {
+  /** % thu phóng giao diện (ZOOM_MIN…ZOOM_MAX). */
+  zoom: number
+  /** Chạy cùng Windows (chỉ có tác dụng ở bản cài đặt). */
+  openAtLogin: boolean
+  /** Mở app thì vào lại workspace đang mở lần trước (tắt = workspace đầu danh sách). */
+  reopenLastWorkspace: boolean
+  /** Thư mục mở sẵn khi chọn thư mục cho workspace mới ('' = để Windows tự chọn). */
+  projectsDir: string
+  /** Cỡ chữ của mọi terminal (ô agent và ô Terminal). */
+  terminalFontSize: number
+  /** Báo khi agent chuyển sang chờ bạn (chỉ khi cửa sổ app không được chọn). */
+  notifyWaiting: boolean
+  /** Báo khi agent xong một việc trên kanban. */
+  notifyTaskDone: boolean
+  notifySound: boolean
+  /** Bấm × trên cửa sổ: thoát hẳn hay thu xuống khay (agent vẫn chạy). */
+  closeAction: CloseAction
+  /** Hỏi lại trước khi thoát nếu còn agent / terminal đang chạy. */
+  confirmQuitRunning: boolean
+}
+
+export const ZOOM_MIN = 70
+export const ZOOM_MAX = 150
+export const TERMINAL_FONT_MIN = 9
+export const TERMINAL_FONT_MAX = 24
+
+/** Adapter = cách app chạy một loại ô (Claude Code, Codex, Terminal). Trùng với AgentKind. */
+export type AdapterId = Exclude<AgentKind, 'external'>
+export type CliAdapterId = Exclude<AdapterId, 'terminal'>
+
+/** Model + mức suy nghĩ của một CLI. '' = theo cấu hình CLI của người dùng (~/.claude, ~/.codex). */
+export interface ModelSettings {
+  model: string
+  effort: string
+}
+
+/** Adapter chạy một CLI AI (Claude Code / Codex). */
+export interface CliAdapterSettings extends ModelSettings {
+  /** Hiện trong hộp "Thêm agent". Agent đã có vẫn chạy được khi tắt. */
+  enabled: boolean
+  /** File chạy ('' = tự tìm trong PATH). */
+  path: string
+  /** Mức quyền chọn sẵn khi thêm agent. */
+  defaultPermission: PermissionMode
+  /** Tham số thêm cho mọi phiên, cách nhau bằng dấu cách ("…" giữ khoảng trắng). */
+  extraArgs: string
+  /** Biến môi trường thêm, mỗi dòng KEY=value (dòng # là ghi chú). Không phải chỗ để key bí mật. */
+  env: string
+}
+
+export interface TerminalAdapterSettings {
+  enabled: boolean
+  shell: ShellId
+}
+
+export interface AdaptersSettings {
+  claude: CliAdapterSettings
+  codex: CliAdapterSettings
+  terminal: TerminalAdapterSettings
+}
+
+/** Cài đặt cấp app. */
+export interface AppSettings {
+  general: GeneralSettings
+  handoff: HandoffSettings
+  adapters: AdaptersSettings
+}
+
+/** Phần ghi đè ở cấp workspace / agent; thiếu khoá = theo cấp trên. */
+export interface SettingsOverrides {
+  handoff?: Partial<HandoffSettings>
+  /** Model / mức suy nghĩ theo CLI (ở cấp agent chỉ CLI của agent đó có tác dụng). */
+  models?: Partial<Record<CliAdapterId, Partial<ModelSettings>>>
+}
+
+/** Sửa ghi đè: khoá có mặt thay cả mục đó, `null` = bỏ mục đó (theo cấp trên). Khoá vắng mặt giữ nguyên. */
+export type SettingsOverridesPatch = { [K in keyof SettingsOverrides]?: SettingsOverrides[K] | null }
+
+/** Toàn bộ userData/settings.json: cấp app + ghi đè theo workspace và theo agent (app → workspace → agent). */
+export interface Settings {
+  version: 2
+  app: AppSettings
+  workspaces: Record<string, SettingsOverrides>
+  agents: Record<string, SettingsOverrides>
+}
+
+/** Sửa cấp app: chỉ các trường có mặt. */
+export interface AppSettingsPatch {
+  general?: Partial<GeneralSettings>
+  handoff?: Partial<HandoffSettings>
+  adapters?: {
+    claude?: Partial<CliAdapterSettings>
+    codex?: Partial<CliAdapterSettings>
+    terminal?: Partial<TerminalAdapterSettings>
+  }
+}
+
+export type OverrideLevel = 'workspace' | 'agent'
+
+export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPercent: 80 }
+export const DEFAULT_GENERAL: GeneralSettings = {
+  zoom: 100,
+  openAtLogin: false,
+  reopenLastWorkspace: true,
+  projectsDir: '',
+  terminalFontSize: 13,
+  notifyWaiting: true,
+  notifyTaskDone: true,
+  notifySound: true,
+  closeAction: 'quit',
+  confirmQuitRunning: true
+}
+const DEFAULT_CLI: CliAdapterSettings = { enabled: true, path: '', model: '', effort: '', defaultPermission: 'default', extraArgs: '', env: '' }
+export const DEFAULT_ADAPTERS: AdaptersSettings = {
+  claude: DEFAULT_CLI,
+  codex: DEFAULT_CLI,
+  terminal: { enabled: true, shell: 'powershell' }
+}
+export const DEFAULT_SETTINGS: Settings = {
+  version: 2,
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS },
+  workspaces: {},
+  agents: {}
+}
+
+/** Một shell tìm thấy trên máy (Settings → Adapter → Terminal). */
+export interface ShellInfo {
+  id: ShellId
+  label: string
+  path: string
+  args: string[]
+}
+
+/** Thông tin phiên bản cho Settings → Giới thiệu. */
+export interface AppMeta {
+  version: string
+  electron: string
+  chrome: string
+  node: string
+  userData: string
+  packaged: boolean
+}
 
 export type TaskStatus = 'open' | 'done' | 'dropped'
 
@@ -340,4 +493,86 @@ export interface ViewRect {
   y: number
   width: number
   height: number
+}
+
+/** Một model gợi ý cho ô Model của adapter. */
+export interface AdapterModel {
+  id: string
+  label: string
+  /** Mức suy nghĩ model này nhận (rỗng = không rõ). */
+  efforts: string[]
+}
+
+/** Kết quả kiểm tra một adapter CLI trên máy (Settings → Adapter). */
+export interface AdapterStatus {
+  id: CliAdapterId
+  /** File chạy dùng thật; null = không tìm thấy. */
+  path: string | null
+  source: 'auto' | 'custom'
+  version: string | null
+  login: { state: 'in' | 'out' | 'unknown'; detail: string }
+  /** Model trong cấu hình của người dùng (~/.claude/settings.json, ~/.codex/config.toml), nếu có. */
+  configModel: string | null
+  models: AdapterModel[]
+  /** Lỗi tìm / chạy CLI (tiếng Việt, hiện thẳng cho người dùng). */
+  error: string | null
+  checkedAt: string
+}
+
+/** Khai báo `stagAdapter` trong package.json của một adapter ngoài (xem docs/adapters.md). */
+export interface ExternalAdapterManifest {
+  /** a-z, 0-9, '-'; không trùng adapter có sẵn. */
+  id: string
+  label: string
+  description: string
+  /** Tên chương trình trong PATH, hoặc đường dẫn có {pkg} (thư mục gói). */
+  command: string
+  /** Luôn truyền cho mọi phiên ({pkg} được thay). */
+  args: string[]
+  versionArgs: string[]
+  /** Lệnh gợi ý khi không tìm thấy chương trình (vd. pip install aider-chat). */
+  install: string
+  homepage: string
+  models: Array<{ id: string; label: string }>
+  /** Cờ chọn model (vd. --model); '' = adapter không nhận model. */
+  modelFlag: string
+  /** Cách đưa luật phiên (một file .md app viết) cho CLI: qua cờ + đường dẫn, qua biến môi trường, hoặc không. */
+  rules: { flag: string } | { env: string } | null
+  /** Lời mở phiên: qua cờ, là tham số cuối, hoặc không gửi. */
+  prompt: { flag: string } | { positional: true } | null
+  /** CLI đọc được file cấu hình MCP kiểu Claude (`{ mcpServers }`): cờ nhận đường dẫn file đó; '' = không. */
+  mcpConfigFlag: string
+}
+
+export type ExternalAdapterSource = { type: 'npm'; name: string; version: string } | { type: 'local'; path: string }
+
+/** Một adapter ngoài đã cài (userData/adapters/registry.json). */
+export interface InstalledAdapter {
+  manifest: ExternalAdapterManifest
+  source: ExternalAdapterSource
+  /** Thư mục gói (có package.json). */
+  dir: string
+  /** version trong package.json của gói. */
+  version: string
+  installedAt: string
+  /** Hiện trong hộp Thêm agent. */
+  enabled: boolean
+  /** '' = mặc định của CLI. */
+  model: string
+  extraArgs: string
+  env: string
+}
+
+export type AdapterInstallRequest = { type: 'npm'; name: string; version?: string } | { type: 'local'; path: string }
+
+/** Sửa được từ Settings → Adapter → adapter ngoài. */
+export type InstalledAdapterPatch = Partial<Pick<InstalledAdapter, 'enabled' | 'model' | 'extraArgs' | 'env'>>
+
+/** Kiểm tra chương trình của một adapter ngoài. */
+export interface ExternalAdapterStatus {
+  id: string
+  path: string | null
+  version: string | null
+  error: string | null
+  checkedAt: string
 }

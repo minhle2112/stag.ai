@@ -24,6 +24,11 @@ export interface HookPayload {
   notification_type?: string
 }
 
+/** Chuyện đáng báo cho người dùng (thông báo Windows, xem notifier.ts). */
+export type BoardEvent =
+  | { kind: 'waiting'; workspaceId: string; agentId: string; agentName: string; reason: 'turn' | 'question' | 'permission' }
+  | { kind: 'taskDone'; workspaceId: string; agentId: string; agentName: string; title: string }
+
 /** Số file tối đa ghi vào một việc (vùng khoá); quá thì bỏ các file cũ nhất. */
 const MAX_TASK_FILES = 300
 
@@ -45,13 +50,25 @@ export class Board {
   /** Câu hỏi khoá phạm vi đang chờ người dùng (agent Codex, xem scopeGuard.ts). */
   private asks = new Map<string, { ask: ScopeAsk; workspaceId: string; done: (allow: boolean) => void }>()
 
-  constructor(private notify: (workspaceId: string) => void) {}
+  constructor(
+    private notify: (workspaceId: string) => void,
+    private events: (e: BoardEvent) => void = () => {}
+  ) {}
 
   // ---- hoạt động của agent ----
 
   setActivity(agent: Agent, activity: AgentActivity, extra: { reason?: WaitReason; tool?: string } = {}): void {
     const cur = this.status.get(agent.id)
     if (cur && cur.activity === activity && cur.reason === extra.reason && cur.tool === extra.tool) return
+    // Vừa chuyển sang chờ người dùng (không tính "chờ lâu" / bị chính người dùng ngắt, và lúc app đang tự lo bàn giao).
+    if (
+      activity === 'waiting' &&
+      cur?.activity !== 'waiting' &&
+      (extra.reason === 'turn' || extra.reason === 'question' || extra.reason === 'permission') &&
+      cur?.handoff !== 'asking' &&
+      cur?.handoff !== 'restarting'
+    )
+      this.events({ kind: 'waiting', workspaceId: agent.workspaceId, agentId: agent.id, agentName: agent.name, reason: extra.reason })
     this.status.set(agent.id, {
       agentId: agent.id,
       workspaceId: agent.workspaceId,
@@ -320,6 +337,7 @@ export class Board {
     task.doneAt = new Date().toISOString()
     task.summary = summary.trim()
     await this.save(ws)
+    this.events({ kind: 'taskDone', workspaceId: ws.id, agentId, agentName: task.agentName, title: task.title })
     return task
   }
 

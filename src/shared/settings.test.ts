@@ -1,0 +1,158 @@
+import { describe, expect, it } from 'vitest'
+import { normalizeGeneral, normalizeHandoff, normalizeOverrides, normalizeSettings, parseEnv, patchApp, patchOverrides, resolveHandoff, resolveModel, splitArgs } from './settings'
+import { DEFAULT_ADAPTERS, DEFAULT_GENERAL, DEFAULT_SETTINGS, type Settings } from './types'
+
+describe('normalizeHandoff', () => {
+  it('thiếu / sai kiểu → mặc định; % kẹp trong khoảng và làm tròn', () => {
+    expect(normalizeHandoff(undefined)).toEqual({ autoHandoff: true, handoffPercent: 80 })
+    expect(normalizeHandoff({ autoHandoff: 'yes', handoffPercent: '50' })).toEqual({ autoHandoff: true, handoffPercent: 80 })
+    expect(normalizeHandoff({ autoHandoff: false, handoffPercent: 99 })).toEqual({ autoHandoff: false, handoffPercent: 95 })
+    expect(normalizeHandoff({ handoffPercent: 5 }).handoffPercent).toBe(20)
+    expect(normalizeHandoff({ handoffPercent: 66.6 }).handoffPercent).toBe(67)
+  })
+})
+
+describe('normalizeGeneral', () => {
+  it('rỗng → mặc định', () => {
+    expect(normalizeGeneral(undefined)).toEqual(DEFAULT_GENERAL)
+  })
+
+  it('kẹp số, bỏ giá trị lạ, cắt khoảng trắng đường dẫn', () => {
+    const g = normalizeGeneral({
+      zoom: 400,
+      terminalFontSize: 3,
+      closeAction: 'minimize',
+      projectsDir: '  D:/code  ',
+      notifySound: false
+    })
+    expect(g.zoom).toBe(150)
+    expect(g.terminalFontSize).toBe(9)
+    expect(g.closeAction).toBe('quit')
+    expect(g.projectsDir).toBe('D:/code')
+    expect(g.notifySound).toBe(false)
+  })
+})
+
+describe('normalizeSettings', () => {
+  it('file bản 1 (chỉ có bàn giao ở gốc) → bản 2, giữ giá trị bàn giao', () => {
+    const s = normalizeSettings({ autoHandoff: false, handoffPercent: 70 })
+    expect(s.version).toBe(2)
+    expect(s.app.handoff).toEqual({ autoHandoff: false, handoffPercent: 70 })
+    expect(s.app.general).toEqual(DEFAULT_GENERAL)
+    expect(s.workspaces).toEqual({})
+    expect(s.agents).toEqual({})
+  })
+
+  it('file rỗng / hỏng kiểu → mặc định', () => {
+    expect(normalizeSettings(undefined)).toEqual(DEFAULT_SETTINGS)
+    expect(normalizeSettings({ version: 2, app: 'x', workspaces: [1], agents: null })).toEqual(DEFAULT_SETTINGS)
+  })
+
+  it('bản 2: giữ ghi đè hợp lệ, bỏ ghi đè rỗng / sai', () => {
+    const s = normalizeSettings({
+      version: 2,
+      app: { general: { zoom: 125 }, handoff: { handoffPercent: 60 } },
+      workspaces: { w1: { handoff: { handoffPercent: 50 } }, w2: { handoff: {} }, w3: { handoff: { autoHandoff: 'no' } } },
+      agents: { a1: { handoff: { autoHandoff: false, junk: 1 } } }
+    })
+    expect(s.app.general.zoom).toBe(125)
+    expect(s.app.handoff).toEqual({ autoHandoff: true, handoffPercent: 60 })
+    expect(s.workspaces).toEqual({ w1: { handoff: { handoffPercent: 50 } } })
+    expect(s.agents).toEqual({ a1: { handoff: { autoHandoff: false } } })
+  })
+})
+
+describe('normalizeOverrides', () => {
+  it('rỗng → null (theo cấp trên), % kẹp', () => {
+    expect(normalizeOverrides(null)).toBeNull()
+    expect(normalizeOverrides({ handoff: {} })).toBeNull()
+    expect(normalizeOverrides({ handoff: { handoffPercent: 120 } })).toEqual({ handoff: { handoffPercent: 95 } })
+  })
+})
+
+describe('patchApp', () => {
+  it('chỉ đổi trường có mặt, vẫn chuẩn hoá', () => {
+    const app = patchApp(DEFAULT_SETTINGS.app, { general: { zoom: 10 }, handoff: { autoHandoff: false } })
+    expect(app.general).toEqual({ ...DEFAULT_GENERAL, zoom: 70 })
+    expect(app.handoff).toEqual({ autoHandoff: false, handoffPercent: 80 })
+  })
+})
+
+describe('resolveHandoff', () => {
+  const s: Settings = {
+    ...DEFAULT_SETTINGS,
+    app: { ...DEFAULT_SETTINGS.app, handoff: { autoHandoff: true, handoffPercent: 80 } },
+    workspaces: { w1: { handoff: { handoffPercent: 60 } } },
+    agents: { a1: { handoff: { autoHandoff: false } }, a2: { handoff: { handoffPercent: 90 } } }
+  }
+
+  it('app → workspace → agent, cấp sau thắng từng trường', () => {
+    expect(resolveHandoff(s, 'w2', 'a9')).toEqual({ autoHandoff: true, handoffPercent: 80 })
+    expect(resolveHandoff(s, 'w1', null)).toEqual({ autoHandoff: true, handoffPercent: 60 })
+    expect(resolveHandoff(s, 'w1', 'a1')).toEqual({ autoHandoff: false, handoffPercent: 60 })
+    expect(resolveHandoff(s, 'w1', 'a2')).toEqual({ autoHandoff: true, handoffPercent: 90 })
+  })
+})
+
+describe('adapters', () => {
+  it('thiếu → mặc định; shell ô Terminal cũ (general.terminalShell của S0) được chuyển sang', () => {
+    const s = normalizeSettings({ version: 2, app: { general: { terminalShell: 'gitbash' } } })
+    expect(s.app.adapters.terminal).toEqual({ enabled: true, shell: 'gitbash' })
+    expect(s.app.adapters.claude).toEqual(DEFAULT_ADAPTERS.claude)
+    expect('terminalShell' in s.app.general).toBe(false)
+    // Đã có shell ở adapter thì bỏ qua giá trị cũ.
+    const t = normalizeSettings({ version: 2, app: { general: { terminalShell: 'gitbash' }, adapters: { terminal: { shell: 'cmd' } } } })
+    expect(t.app.adapters.terminal.shell).toBe('cmd')
+  })
+
+  it('bỏ model / mức suy nghĩ / quyền sai dạng, tham số thêm thành một dòng', () => {
+    const app = patchApp(DEFAULT_SETTINGS.app, {
+      adapters: { claude: { model: 'claude-opus-5-5[1m]', effort: 'High!', defaultPermission: 'yolo' as never, extraArgs: '--a\n--b' } }
+    })
+    expect(app.adapters.claude.model).toBe('claude-opus-5-5[1m]')
+    expect(app.adapters.claude.effort).toBe('')
+    expect(app.adapters.claude.defaultPermission).toBe('default')
+    expect(app.adapters.claude.extraArgs).toBe('--a --b')
+    expect(patchApp(app, { adapters: { claude: { model: 'rm -rf /' } } }).adapters.claude.model).toBe('claude-opus-5-5[1m]')
+    expect(app.adapters.codex).toEqual(DEFAULT_ADAPTERS.codex)
+  })
+
+  it('ghi đè model theo workspace / agent, chỉ CLI đã biết', () => {
+    expect(normalizeOverrides({ models: { claude: { model: 'sonnet' }, gemini: { model: 'x' }, codex: { effort: 'BAD' } } })).toEqual({
+      models: { claude: { model: 'sonnet' } }
+    })
+    const s: Settings = {
+      ...DEFAULT_SETTINGS,
+      app: { ...DEFAULT_SETTINGS.app, adapters: { ...DEFAULT_ADAPTERS, claude: { ...DEFAULT_ADAPTERS.claude, model: 'opus', effort: 'high' } } },
+      workspaces: { w1: { models: { claude: { model: 'sonnet' } } } },
+      agents: { a1: { models: { claude: { effort: 'low' } } } }
+    }
+    expect(resolveModel(s, 'claude', 'w2', null)).toEqual({ model: 'opus', effort: 'high' })
+    expect(resolveModel(s, 'claude', 'w1', 'a1')).toEqual({ model: 'sonnet', effort: 'low' })
+    expect(resolveModel(s, 'codex', 'w1', 'a1')).toEqual({ model: '', effort: '' })
+  })
+
+  it('patchOverrides: thay từng mục, null bỏ mục, không đụng mục khác', () => {
+    const cur = { handoff: { handoffPercent: 60 }, models: { codex: { model: 'gpt-5.6-terra' } } }
+    expect(patchOverrides(cur, { handoff: null })).toEqual({ models: { codex: { model: 'gpt-5.6-terra' } } })
+    expect(patchOverrides(cur, { models: { claude: { model: 'opus' } } })).toEqual({ handoff: { handoffPercent: 60 }, models: { claude: { model: 'opus' } } })
+    expect(patchOverrides({ handoff: { autoHandoff: false } }, { handoff: null })).toBeNull()
+  })
+})
+
+describe('splitArgs', () => {
+  it('tách theo khoảng trắng, giữ nội dung trong nháy', () => {
+    expect(splitArgs('')).toEqual([])
+    expect(splitArgs('  --verbose   --add-dir "C:\\My Docs\\x"  ')).toEqual(['--verbose', '--add-dir', 'C:\\My Docs\\x'])
+    expect(splitArgs('-c model="o3" ""')).toEqual(['-c', 'model=o3', ''])
+    expect(splitArgs('--say \\"hi\\"')).toEqual(['--say', '"hi"'])
+  })
+})
+
+describe('parseEnv', () => {
+  it('đọc TÊN=giá trị, bỏ ghi chú, báo dòng sai và biến của app', () => {
+    const r = parseEnv('# ghi chú\nFOO=1\n\n BAR = a=b \nnot valid\nSTAG_TOKEN=x\n=1')
+    expect(r.vars).toEqual({ FOO: '1', BAR: 'a=b' })
+    expect(r.errors).toEqual(['Dòng 5: cần dạng TÊN=giá trị', 'Dòng 6: STAG_TOKEN do app tự đặt, không đổi được', 'Dòng 7: cần dạng TÊN=giá trị'])
+  })
+})

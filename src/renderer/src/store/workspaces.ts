@@ -35,8 +35,9 @@ export const useWorkspaces = create<WorkspaceState>((set, get) => ({
   activeId: null,
   loaded: false,
   async load() {
-    const items = await window.stag.workspace.list()
-    const saved = readActive()
+    const [items, settings] = await Promise.all([window.stag.workspace.list(), window.stag.settings.get()])
+    // Settings → Chung: tắt "mở lại workspace lần trước" thì luôn vào workspace đầu danh sách.
+    const saved = settings.app.general.reopenLastWorkspace ? readActive() : null
     const activeId = items.some((w) => w.id === saved) ? saved : (items[0]?.id ?? null)
     set({ items, activeId, loaded: true })
   },

@@ -4,13 +4,24 @@ import type {
   Agent,
   AgentRun,
   AgentsSnapshot,
-  AppSettings,
+  AdapterInstallRequest,
+  AdapterStatus,
+  ExternalAdapterStatus,
+  InstalledAdapter,
+  InstalledAdapterPatch,
+  AppMeta,
+  AppSettingsPatch,
+  CliAdapterId,
   ArtifactEvent,
   ArtifactStat,
   ArtifactText,
   BoardSnapshot,
   BrowserPermissionAsk,
   NoteWriteResult,
+  OverrideLevel,
+  Settings,
+  SettingsOverridesPatch,
+  ShellInfo,
   VaultActivity,
   BrowserState,
   CreateAgentRequest,
@@ -82,10 +93,18 @@ const api = {
     }
   },
   settings: {
-    get: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.settingsGet),
-    set: (patch: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke(IPC.settingsSet, patch),
-    onChanged(cb: (s: AppSettings) => void): () => void {
-      const fn = (_e: IpcRendererEvent, s: AppSettings): void => cb(s)
+    get: (): Promise<Settings> => ipcRenderer.invoke(IPC.settingsGet),
+    /** Sửa cấp app (chỉ các trường có mặt). */
+    set: (patch: AppSettingsPatch): Promise<Settings> => ipcRenderer.invoke(IPC.settingsSet, patch),
+    /** Sửa ghi đè của một workspace / agent theo mục; mục = null → theo cấp trên. */
+    setOverrides: (level: OverrideLevel, id: string, patch: SettingsOverridesPatch): Promise<Settings> =>
+      ipcRenderer.invoke(IPC.settingsOverride, level, id, patch),
+    checkAdapter: (id: CliAdapterId): Promise<AdapterStatus> => ipcRenderer.invoke(IPC.adapterCheck, id),
+    shells: (): Promise<ShellInfo[]> => ipcRenderer.invoke(IPC.shellsList),
+    meta: (): Promise<AppMeta> => ipcRenderer.invoke(IPC.appMeta),
+    notifyTest: (): Promise<void> => ipcRenderer.invoke(IPC.notifyTest),
+    onChanged(cb: (s: Settings) => void): () => void {
+      const fn = (_e: IpcRendererEvent, s: Settings): void => cb(s)
       ipcRenderer.on(IPC.settingsChanged, fn)
       return () => ipcRenderer.removeListener(IPC.settingsChanged, fn)
     }
@@ -197,6 +216,29 @@ const api = {
     }
   },
   openFolder: (path: string): Promise<string> => ipcRenderer.invoke(IPC.openFolder, path),
+  /** Chọn một thư mục; null = huỷ. */
+  pickFolder: (title: string, defaultPath?: string): Promise<string | null> => ipcRenderer.invoke(IPC.pickFolder, title, defaultPath),
+  /** Adapter ngoài (alpha). */
+  externalAdapters: {
+    list: (): Promise<InstalledAdapter[]> => ipcRenderer.invoke(IPC.adapterExtList),
+    install: (req: AdapterInstallRequest): Promise<InstalledAdapter> => ipcRenderer.invoke(IPC.adapterExtInstall, req),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke(IPC.adapterExtRemove, id),
+    update: (id: string, patch: InstalledAdapterPatch): Promise<InstalledAdapter> => ipcRenderer.invoke(IPC.adapterExtUpdate, id, patch),
+    check: (id: string): Promise<ExternalAdapterStatus> => ipcRenderer.invoke(IPC.adapterExtCheck, id),
+    onChanged(cb: (list: InstalledAdapter[]) => void): () => void {
+      const fn = (_e: IpcRendererEvent, list: InstalledAdapter[]): void => cb(list)
+      ipcRenderer.on(IPC.adapterExtChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.adapterExtChanged, fn)
+    }
+  },
+  /** Chọn một file .exe; null = huỷ. */
+  pickFile: (title: string, defaultPath?: string): Promise<string | null> => ipcRenderer.invoke(IPC.pickFile, title, defaultPath),
+  /** Người dùng bấm thông báo của một agent. */
+  onRevealAgent(cb: (workspaceId: string, agentId: string) => void): () => void {
+    const fn = (_e: IpcRendererEvent, workspaceId: string, agentId: string): void => cb(workspaceId, agentId)
+    ipcRenderer.on(IPC.revealAgent, fn)
+    return () => ipcRenderer.removeListener(IPC.revealAgent, fn)
+  },
   openTemplates: (): Promise<string> => ipcRenderer.invoke(IPC.templatesOpen)
 }
 

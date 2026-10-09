@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs, rmSync } from 'node:fs'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { app, shell, type WebContents } from 'electron'
 import { IPC } from '@shared/ipc'
 import {
   type Agent,
   type AgentRun,
   type AgentsSnapshot,
-  type AppSettings,
   agentKind,
   type CreateAgentRequest,
   type LayoutNode,
@@ -17,7 +16,9 @@ import {
 } from '@shared/types'
 import type { Board, HookPayload } from './board'
 import type { BrowserService } from './browser'
-import { codexArgs, findCodexRollout, isCodexSessionVar, parseCodexContext, resolveCodex } from './codex'
+import { independentSessionEnv, type AdapterService } from './adapters'
+import { codexArgs, findCodexRollout, parseCodexContext } from './codex'
+import { externalArgs, spawnSpec, type ExternalAdapterStore } from './externalAdapters'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
@@ -26,6 +27,8 @@ import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
 import type { VaultActivityLog } from './vaultActivity'
 import type { PtyManager } from './pty'
+import type { SettingsStore } from './settings'
+import { resolveShell } from './shells'
 import { readTemplate } from './templates'
 import { TranscriptWatcher, transcriptPath } from './transcript'
 import { ensureIgnored, type WorkspaceStore } from './workspace'
@@ -67,55 +70,9 @@ const HANDOFF_TIMEOUT_MS = 15 * 60_000
 /** Chờ sau khi agent gọi session_handoff rồi mới đóng phiên (để kết quả tool kịp về và ghi transcript). */
 const HANDOFF_CLOSE_DELAY_MS = 2500
 
-/**
- * Tìm file chạy thật của Claude Code. Gọi thẳng claude.exe thay vì claude.cmd để tham số
- * (luật phiên nhiều dòng, có thể chứa chữ ngoài ASCII) không phải đi qua cách tách tham số của cmd.exe.
- */
-async function resolveClaude(): Promise<string> {
-  const dirs = (process.env.PATH ?? '').split(delimiter).filter(Boolean)
-  for (const dir of dirs) {
-    const exe = join(dir, 'claude.exe')
-    if (await exists(exe)) return exe
-  }
-  for (const dir of dirs) {
-    const shim = await readText(join(dir, 'claude.cmd'))
-    const target = shim && /"%dp0%\\?([^"]+?\.exe)"/i.exec(shim)
-    if (target && (await exists(join(dir, target[1])))) return join(dir, target[1])
-  }
-  throw new Error('Không tìm thấy Claude Code (claude) trong PATH. Cài bằng: npm install -g @anthropic-ai/claude-code')
-}
-
 /** Phần gửi được qua IPC (Running còn giữ watcher, biến template… chỉ dùng trong main). */
 function publicRun({ agentId, sessionId, ptyId, startedAt }: Running): AgentRun {
   return { agentId, sessionId, ptyId, startedAt }
-}
-
-/** Biến cấu hình Claude Code của người dùng — luôn giữ. */
-const USER_CLAUDE_CONFIG =
-  /^CLAUDE_CODE_(USE_|MAX_OUTPUT_TOKENS|GIT_BASH_PATH|SHELL|DISABLE_NONESSENTIAL|SKIP_|AUTO_COMPACT_WINDOW|DISABLE_1M_CONTEXT|MAX_CONTEXT_TOKENS)/
-
-/**
- * Nếu stag.ai được mở từ bên trong một phiên Claude Code (vd. terminal của Claude desktop), môi trường
- * mang dấu "phiên con" (CLAUDECODE, CLAUDE_CODE_CHILD_SESSION, token/socket của host…). Agent kế thừa
- * những biến này sẽ tưởng mình là phiên con và tắt lưu transcript (hỏng "tiếp tục phiên trước").
- * Agent của stag.ai là phiên độc lập, nên bỏ các biến đó, giữ biến cấu hình của người dùng.
- */
-export function independentSessionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const claude = !!(env.CLAUDECODE || env.CLAUDE_CODE_CHILD_SESSION)
-  // Mở từ trong một phiên Codex: biến thread / sandbox của phiên đó (xem codex.ts).
-  const codex = Object.keys(env).some(isCodexSessionVar)
-  if (!claude && !codex) return env
-  const out: NodeJS.ProcessEnv = {}
-  for (const [key, value] of Object.entries(env)) {
-    const hostMarker =
-      (claude &&
-        (/^(CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT)$/.test(key) ||
-          /^(CLAUDE_AGENT_SDK_|CLAUDE_PREVIEW_)/.test(key) ||
-          (key.startsWith('CLAUDE_CODE_') && !USER_CLAUDE_CONFIG.test(key)))) ||
-      isCodexSessionVar(key)
-    if (!hostMarker) out[key] = value
-  }
-  return out
 }
 
 export class AgentService {
@@ -132,9 +89,11 @@ export class AgentService {
     private workspaces: WorkspaceStore,
     private board: Board,
     private browser: BrowserService,
-    private settings: () => AppSettings,
+    private settings: SettingsStore,
     private activity: VaultActivityLog,
-    private artifacts: ArtifactLog
+    private artifacts: ArtifactLog,
+    private adapters: AdapterService,
+    private external: ExternalAdapterStore
   ) {
     this.guard = new ScopeGuard(board)
   }
@@ -178,14 +137,16 @@ export class AgentService {
     const taken = this.data.agents.some((a) => a.workspaceId === req.workspaceId && sameAgentName(a.name, name))
     if (taken) throw new Error(`Đã có agent tên "${name}" trong workspace này`)
     const terminal = req.kind === 'terminal'
+    if (req.kind === 'external' && !this.external.get(req.adapterId ?? '')) throw new Error('Adapter ngoài này không còn, cài lại ở Cài đặt → Adapter')
     const agent: Agent = {
       id: randomUUID(),
       workspaceId: req.workspaceId,
       kind: req.kind,
       name,
       role: terminal ? '' : req.role.trim(),
-      permissionMode: terminal ? 'default' : req.permissionMode,
-      createdAt: new Date().toISOString()
+      permissionMode: terminal || req.kind === 'external' ? 'default' : req.permissionMode,
+      createdAt: new Date().toISOString(),
+      ...(req.kind === 'external' ? { adapterId: req.adapterId } : {})
     }
     this.data.agents.push(agent)
     await this.save()
@@ -204,9 +165,12 @@ export class AgentService {
 
     if (!this.hub) throw new Error('Máy chủ trạng thái của app chưa sẵn sàng')
     const kind = agentKind(agent)
-    if (kind !== 'claude' && kind !== 'codex') throw new Error('Loại agent này chưa được hỗ trợ')
-    const exe = kind === 'codex' ? await resolveCodex() : await resolveClaude()
-    const resume = req.resume && !!agent.lastSessionId
+    const ext = kind === 'external' ? this.external.get(agent.adapterId ?? '') : undefined
+    if (kind === 'external' && !ext) throw new Error(`Adapter "${agent.adapterId}" của agent này đã bị gỡ. Cài lại ở Cài đặt → Adapter.`)
+    if (kind !== 'claude' && kind !== 'codex' && !ext) throw new Error('Loại agent này chưa được hỗ trợ')
+    const exe = ext ? await this.external.exe(ext) : (await this.adapters.exe(kind as 'claude' | 'codex')).path
+    // Adapter ngoài không có cách tiếp tục phiên (chưa biết id phiên của CLI đó).
+    const resume = req.resume && !!agent.lastSessionId && !ext
     const open = await this.board.openTask(ws, agent.id)
     // Phiên trước đã bàn giao: phiên mới (không phải tiếp tục phiên cũ) làm tiếp từ bản bàn giao.
     const handoff = resume ? undefined : this.data.handoffs?.[agent.id]
@@ -246,18 +210,41 @@ export class AgentService {
 
     const rules = await readTemplate('agent/rules.md', vars)
     const opening = handoff ? 'Continue from the handoff of the previous session.' : 'Start a new session.'
-    let args: string[]
+    let command = exe
+    let args: string[] | string
     let statusEnv: Record<string, string> = {}
+    // Biến người dùng thêm ở Cài đặt → Adapter (adapter ngoài: cả biến chứa đường dẫn luật phiên).
+    let userEnv: Record<string, string> = ext ? {} : this.adapters.env(kind as 'claude' | 'codex')
     // Transcript đoán trước. Codex: rollout của phiên cũ khi resume; phiên mới thì chưa có (theo sau, xem codexHook).
-    let transcriptFile: string
-    if (kind === 'codex') {
-      args = codexArgs({ rules, ...this.hub.endpoints(), permissionMode: agent.permissionMode, resumeId: codexResume, prompt: opening })
+    let transcriptFile: string | null
+    if (ext) {
+      // Luật phiên vào một file cạnh file phiên; CLI nhận qua cờ hoặc biến môi trường (stagAdapter.rules).
+      const rulesFile = sessionFile.replace(/\.md$/, '.rules.md')
+      const note = ext.manifest.mcpConfigFlag ? '' : '\n\nNOTE: this CLI has no access to the stag MCP tools mentioned above (kanban, browser, handoff). Skip those steps.\n'
+      await fs.writeFile(rulesFile, rules + note, 'utf8')
+      const l = externalArgs(ext, { rulesFile, prompt: opening, mcpFile: this.hub.mcpConfigFile() })
+      const spec = spawnSpec(exe, l.args)
+      command = spec.command
+      args = spec.args
+      userEnv = l.env
+      transcriptFile = null
+    } else if (kind === 'codex') {
+      args = codexArgs({
+        rules,
+        ...this.hub.endpoints(),
+        permissionMode: agent.permissionMode,
+        resumeId: codexResume,
+        prompt: opening,
+        userArgs: this.adapters.launchArgs('codex', agent)
+      })
       transcriptFile = (codexResume && (await findCodexRollout(codexResume))) || join(ws.path, '.sessions', `${sessionId}.rollout-pending`)
     } else {
       args = resume ? ['--resume', sessionId] : ['--session-id', sessionId]
       args.push('--name', agent.name, '--append-system-prompt', rules)
       args.push(...this.hub.claudeArgs())
       if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
+      // Model, mức suy nghĩ, tham số thêm (Cài đặt → Adapter).
+      args.push(...this.adapters.launchArgs('claude', agent))
       // `--` trước lời mở: `--mcp-config` nhận nhiều giá trị, không chặn lại thì nuốt luôn lời mở làm tên file.
       if (!resume) args.push('--', opening)
       // statusLine của app (cho biết kích thước cửa sổ context) thay statusLine của người dùng trong phiên
@@ -268,9 +255,11 @@ export class AgentService {
     }
     const ptyId = this.ptys.spawn(
       owner,
-      { command: exe, args, cwd: ws.path, cols: req.cols, rows: req.rows },
+      { command, args, cwd: ws.path, cols: req.cols, rows: req.rows },
       {
         env: {
+          // Đặt trước để không đè được biến của app.
+          ...userEnv,
           ...this.hub.env(),
           STAG_AGENT_ID: agent.id,
           STAG_AGENT_NAME: agent.name,
@@ -284,11 +273,14 @@ export class AgentService {
     )
     // Chỉ đọc phần ghi từ lúc này: `--resume` giữ nguyên transcript cũ, trong đó có thể đã có dòng ngắt
     // của lần trước. (Mở chỉ tốn một lần stat, xong trước khi claude kịp khởi động.)
-    const transcript = TranscriptWatcher.open(transcriptFile, {
-      onInterrupt: (i) => this.onInterrupt(agent.id, ptyId, i.at),
-      onContext: (c) => this.onContext(agent.id, ptyId, { used: c.used, size: c.size, at: c.at }),
-      contextParser: kind === 'codex' ? parseCodexContext : undefined
-    })
+    const transcript =
+      transcriptFile === null
+        ? null
+        : TranscriptWatcher.open(transcriptFile, {
+            onInterrupt: (i) => this.onInterrupt(agent.id, ptyId, i.at),
+            onContext: (c) => this.onContext(agent.id, ptyId, { used: c.used, size: c.size, at: c.at }),
+            contextParser: kind === 'codex' ? parseCodexContext : undefined
+          })
     const run: Running = {
       agentId: agent.id,
       sessionId,
@@ -298,7 +290,7 @@ export class AgentService {
       sessionFile,
       vars,
       transcript,
-      rolloutKnown: kind === 'codex' ? !transcriptFile.endsWith('.rollout-pending') : undefined
+      rolloutKnown: kind === 'codex' ? !transcriptFile!.endsWith('.rollout-pending') : undefined
     }
     this.running.set(agent.id, run)
     // Phiên mới: chờ hook đầu tiên (lời mở đầu). Tiếp tục phiên: Claude Code đứng chờ người dùng gõ.
@@ -313,13 +305,14 @@ export class AgentService {
   }
 
   /**
-   * Ô terminal thường: PowerShell trong thư mục dự án. Không luật phiên, không hook, không bộ nhớ,
+   * Ô terminal thường: shell chọn ở Settings → Chung (mặc định PowerShell) trong thư mục dự án. Không luật phiên, không hook, không bộ nhớ,
    * không lên kanban; bỏ biến "phiên con" như agent để chạy claude bên trong vẫn là phiên độc lập.
    */
-  private startTerminal(owner: WebContents, agent: Agent, ws: Workspace, req: StartAgentRequest): AgentRun {
+  private async startTerminal(owner: WebContents, agent: Agent, ws: Workspace, req: StartAgentRequest): Promise<AgentRun> {
+    const sh = await resolveShell(this.settings.get().app.adapters.terminal.shell)
     const ptyId = this.ptys.spawn(
       owner,
-      { args: ['-NoLogo'], cwd: ws.path, cols: req.cols, rows: req.rows },
+      { command: sh.path, args: sh.args, cwd: ws.path, cols: req.cols, rows: req.rows },
       { filterEnv: independentSessionEnv, onExit: () => this.finish(agent.id, ptyId) }
     )
     const run: Running = {
@@ -343,7 +336,7 @@ export class AgentService {
     this.running.delete(agentId)
     this.guard.endSession(agentId)
     run.transcript?.stop()
-    if (run.sessionFile) rmSync(run.sessionFile, { force: true })
+    if (run.sessionFile) for (const f of [run.sessionFile, run.sessionFile.replace(/\.md$/, '.rules.md')]) rmSync(f, { force: true })
     const agent = this.data.agents.find((a) => a.id === agentId)
     if (!agent || agentKind(agent) === 'terminal') return
     this.board.setActivity(agent, 'stopped')
@@ -457,7 +450,6 @@ export class AgentService {
 
   /** Định kỳ: phiên nào tới ngưỡng thì nhờ bàn giao; lời nhờ treo quá lâu thì coi là hỏng. */
   private checkHandoffs(): void {
-    const settings = this.settings()
     const now = Date.now()
     for (const run of this.running.values()) {
       const agent = this.data.agents.find((a) => a.id === run.agentId)
@@ -465,10 +457,15 @@ export class AgentService {
       const status = this.board.statusOf(agent.id)
       if (status?.handoff === 'asking' && run.handoffAsk && now - run.handoffAsk.at > HANDOFF_TIMEOUT_MS) {
         this.handoffFailed(agent, run)
-      } else if (handoffDue(settings, status, this.ptys.lastInputAt(run.ptyId), now)) {
+      } else if (handoffDue(this.settings.handoffFor(agent), status, this.ptys.lastInputAt(run.ptyId), now)) {
         this.askHandoff(agent, run, false)
       }
     }
+  }
+
+  /** Số agent / terminal đang có phiên chạy (hỏi lại trước khi thoát app). */
+  runningCount(): number {
+    return this.running.size
   }
 
   /**
@@ -491,7 +488,7 @@ export class AgentService {
     const pct = contextPercent(status?.context)
     run.handoffAsk = { at: Date.now(), submitted: false }
     this.board.setHandoff(agent, 'asking')
-    this.ptys.write(run.ptyId, handoffPrompt(manual ? null : pct, manual ? null : this.settings().handoffPercent), false)
+    this.ptys.write(run.ptyId, handoffPrompt(manual ? null : pct, manual ? null : this.settings.handoffFor(agent).handoffPercent), false)
     setTimeout(() => {
       if (this.running.get(agent.id) === run) this.ptys.write(run.ptyId, '\r', false)
     }, 400)
@@ -603,7 +600,7 @@ export class AgentService {
     for (const run of this.running.values()) {
       run.transcript?.stop()
       this.ptys.kill(run.ptyId)
-      if (run.sessionFile) rmSync(run.sessionFile, { force: true })
+      if (run.sessionFile) for (const f of [run.sessionFile, run.sessionFile.replace(/\.md$/, '.rules.md')]) rmSync(f, { force: true })
     }
     this.running.clear()
   }
