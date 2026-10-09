@@ -308,6 +308,18 @@ export interface VoiceSettings {
   unloadMinutes: number
   /** Từ gợi ý thêm (tên riêng, thuật ngữ tiếng Anh hay dùng), giúp nhận đúng chính tả. */
   hotwords: string[]
+  /** Tự lấy từ gợi ý trong workspace (tên file, hàm, class, thư viện) và từ đang hiện trong ô agent. */
+  workspaceVocab: boolean
+  /** Luật thay từ sau khi nhận dạng ("hen đồ click" → "handleClick"). */
+  replacements: VoiceReplacement[]
+  /** Lệnh nói: "xuống dòng" → xuống dòng thật. */
+  commands: boolean
+}
+
+export interface VoiceReplacement {
+  /** Cụm máy hay nghe ra (khớp trọn cụm, không phân biệt hoa thường). */
+  from: string
+  to: string
 }
 
 export interface HandoffSettings {
@@ -515,7 +527,7 @@ export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPerc
 export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true, exempt: [] }
 export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
 export const VOICE_UNLOAD_MAX = 120
-export const DEFAULT_VOICE: VoiceSettings = { enabled: true, hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [] }
+export const DEFAULT_VOICE: VoiceSettings = { enabled: true, hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true }
 export const DEFAULT_GENERAL: GeneralSettings = {
   zoom: 100,
   openAtLogin: false,

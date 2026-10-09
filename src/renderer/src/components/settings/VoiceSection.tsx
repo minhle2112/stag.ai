@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { formatMb, VOICE_HOTKEYS, VOICE_MODEL, type VoiceHotkey } from '@shared/voice'
-import type { VoiceSettings } from '@shared/types'
+import { formatReplacements, parseReplacements } from '@shared/voiceVocab'
+import type { VoiceReplacement, VoiceSettings } from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { useVoice } from '../../store/voice'
+import { useWorkspaces } from '../../store/workspaces'
 import { ErrorBar, Group, Row, SectionTitle, Select, SmallButton, Switch, useSaveError } from './controls'
 
 const UNLOAD: Array<{ value: number; label: string }> = [
@@ -54,7 +56,9 @@ export function VoiceSection(): React.JSX.Element {
 
       <MicGroup micId={v.micId} onChange={(micId) => set({ micId })} />
 
-      <HotwordsGroup value={v.hotwords} onSave={(hotwords) => set({ hotwords })} />
+      <HotwordsGroup value={v.hotwords} onSave={(hotwords) => set({ hotwords })} auto={v.workspaceVocab} onAuto={(workspaceVocab) => set({ workspaceVocab })} />
+
+      <FixGroup rules={v.replacements} onRules={(replacements) => set({ replacements })} commands={v.commands} onCommands={(commands) => set({ commands })} />
 
       <Group title="Bộ nhớ (RAM)">
         <Row
@@ -166,10 +170,26 @@ function MicGroup({ micId, onChange }: { micId: string; onChange: (id: string) =
   )
 }
 
-/** Từ gợi ý: mỗi dòng một mục, lưu khi rời ô. */
-function HotwordsGroup({ value, onSave }: { value: string[]; onSave: (v: string[]) => void }): React.JSX.Element {
-  const [text, setText] = useState(value.join('\n'))
-  useEffect(() => setText(value.join('\n')), [value])
+/** Ô nhập nhiều dòng, lưu khi rời ô (chỉ khi khác giá trị đã lưu). */
+function useDraft(saved: string): [string, (t: string) => void] {
+  const [text, setText] = useState(saved)
+  useEffect(() => setText(saved), [saved])
+  return [text, setText]
+}
+
+/** Từ gợi ý: tự lấy từ workspace + danh sách tự thêm (mỗi dòng một mục, lưu khi rời ô). */
+function HotwordsGroup({
+  value,
+  onSave,
+  auto,
+  onAuto
+}: {
+  value: string[]
+  onSave: (v: string[]) => void
+  auto: boolean
+  onAuto: (v: boolean) => void
+}): React.JSX.Element {
+  const [text, setText] = useDraft(value.join('\n'))
   const commit = (): void => {
     const next = text
       .split(/\r?\n/)
@@ -179,20 +199,112 @@ function HotwordsGroup({ value, onSave }: { value: string[]; onSave: (v: string[
   }
   return (
     <Group title="Từ gợi ý">
+      <Row
+        label="Tự gợi ý từ trong workspace"
+        desc="Tên file, hàm, class, thư viện của dự án, từ code đang hiện trong ô agent và từ hay dùng (commit, push, npm…). Giúp nhận đúng chính tả từ tiếng Anh. Chỉ đọc file trên máy, không gửi đi đâu."
+      >
+        <Switch label="Tự gợi ý từ trong workspace" checked={auto} onChange={onAuto} />
+      </Row>
+      {auto && <WorkspaceTerms />}
       <div className="px-4 py-3">
         <p className="mb-2 text-[12px] leading-relaxed text-muted">
-          Tên riêng, tên hàm, thư viện bạn hay nói (vd. <span className="font-mono">handleClick</span>, <span className="font-mono">zustand</span>) — mỗi dòng một
-          mục, viết đúng chính tả muốn ra. Tên agent trong workspace được thêm tự động. Nên giữ danh sách ngắn (dưới 40 mục): quá dài thì nhận dạng chậm và
-          dễ lẫn.
+          Từ bạn tự thêm (luôn được ưu tiên): tên riêng, tên hàm, thư viện bạn hay nói (vd. <span className="font-mono">handleClick</span>,{' '}
+          <span className="font-mono">zustand</span>) — mỗi dòng một mục, viết đúng chính tả muốn ra. Tên agent được thêm tự động.
         </p>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onBlur={commit}
-          rows={6}
+          rows={5}
           spellCheck={false}
           aria-label="Từ gợi ý"
           placeholder={'handleClick\nzustand\nnpm install'}
+          className="w-full resize-y rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-accent"
+        />
+      </div>
+    </Group>
+  )
+}
+
+/** Xem từ vựng app đã lấy từ workspace đang mở (để biết vì sao một từ được / không được nhận đúng). */
+function WorkspaceTerms(): React.JSX.Element | null {
+  const ws = useWorkspaces((s) => s.items.find((w) => w.id === s.activeId))
+  const [terms, setTerms] = useState<string[] | null>(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    setTerms(null)
+    setOpen(false)
+  }, [ws?.id])
+  if (!ws) return null
+  const show = (): void => {
+    setOpen(true)
+    if (!terms) void window.stag.voice.vocab(ws.id).then(setTerms, () => setTerms([]))
+  }
+  return (
+    <Row
+      label={`Từ của workspace "${ws.name}"`}
+      desc={
+        open ? (
+          terms === null ? (
+            'Đang quét…'
+          ) : terms.length ? (
+            <span className="font-mono text-[11px] leading-relaxed">
+              {terms.length} từ, quan trọng nhất trước: {terms.slice(0, 80).join(', ')}
+              {terms.length > 80 ? '…' : ''}
+            </span>
+          ) : (
+            'Không tìm thấy từ nào (thư mục trống hoặc không đọc được).'
+          )
+        ) : (
+          'Mỗi lần nói, app chọn khoảng 60 từ hợp nhất: từ bạn thêm, tên agent, từ đang hiện trong ô, rồi đến từ của workspace.'
+        )
+      }
+    >
+      {!open && <SmallButton onClick={show}>Xem</SmallButton>}
+    </Row>
+  )
+}
+
+/** Sửa chữ sau khi nhận dạng: luật thay từ + lệnh nói. */
+function FixGroup({
+  rules,
+  onRules,
+  commands,
+  onCommands
+}: {
+  rules: VoiceReplacement[]
+  onRules: (r: VoiceReplacement[]) => void
+  commands: boolean
+  onCommands: (v: boolean) => void
+}): React.JSX.Element {
+  const saved = formatReplacements(rules)
+  const [text, setText] = useDraft(saved)
+  const commit = (): void => {
+    const next = parseReplacements(text)
+    if (formatReplacements(next) !== saved) onRules(next)
+    else setText(saved)
+  }
+  return (
+    <Group title="Sửa chữ sau khi nhận dạng">
+      <Row
+        label={'Nói "xuống dòng" để xuống dòng'}
+        desc={'"…sửa hàm này, xuống dòng, rồi chạy test" → hai dòng. Nói "ký tự xuống dòng" hay "dấu xuống dòng" thì giữ nguyên chữ.'}
+      >
+        <Switch label="Lệnh xuống dòng" checked={commands} onChange={onCommands} />
+      </Row>
+      <div className="px-4 py-3">
+        <p className="mb-2 text-[12px] leading-relaxed text-muted">
+          Luật thay từ cho những chỗ máy hay nghe sai — mỗi dòng <span className="font-mono">chữ máy ra → chữ bạn muốn</span>, khớp trọn cụm, không phân biệt hoa
+          thường. Tên hàm bị tách (<span className="font-mono">handle click</span>) hay sai hoa thường thì app tự sửa theo từ gợi ý, không cần luật.
+        </p>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          rows={4}
+          spellCheck={false}
+          aria-label="Luật thay từ"
+          placeholder={'hen đồ click → handleClick\nsu tan → zustand'}
           className="w-full resize-y rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-accent"
         />
       </div>

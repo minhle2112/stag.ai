@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CHUNK_MAX_S, CHUNK_MIN_S, cleanHotwords, echoAt, findSplit, isHotkeyDown, isHotkeyUp, joinChunks, nextCut, trimSilence, VOICE_RATE } from './voice'
+import { appendText, CHUNK_MAX_S, CHUNK_MIN_S, cleanHotwords, echoAt, findSplit, isHotkeyDown, isHotkeyUp, joinChunks, nextCut, trimSilence, VOICE_RATE } from './voice'
 
 const key = (code: string, mods: Partial<{ ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }> = {}) => ({
   code,
@@ -108,5 +108,15 @@ describe('gợi ý từ', () => {
 
   it('joinChunks bỏ đoạn rỗng và khoảng trắng thừa', () => {
     expect(joinChunks([' một ', '', 'hai', '  '])).toBe('một hai')
+  })
+
+  it('appendText: nói thêm nối bằng dấu cách, hoặc đúng một lần xuống dòng nếu có lệnh "xuống dòng" ở chỗ nối', () => {
+    expect(appendText('', 'một')).toBe('một')
+    expect(appendText('', '\nmột')).toBe('một')
+    expect(appendText('một ', ' hai')).toBe('một hai')
+    expect(appendText('một\n', 'hai')).toBe('một\nhai')
+    expect(appendText('một', '\nhai')).toBe('một\nhai')
+    expect(appendText('một\n', '\n\nhai')).toBe('một\nhai')
+    expect(appendText('một', '  ')).toBe('một')
   })
 })

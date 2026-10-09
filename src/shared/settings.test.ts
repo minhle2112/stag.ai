@@ -209,6 +209,18 @@ describe('giọng nói (V1)', () => {
     expect(normalizeVoice({ hotwords: ['handleClick', 'a, b', '', 'handleClick', 5] }).hotwords).toEqual(['handleClick', 'a b'])
   })
 
+  it('V2: luật thay từ bỏ mục hỏng / trùng vế trái, gộp khoảng trắng; tự gợi ý + lệnh nói mặc định bật', () => {
+    const v = normalizeVoice({
+      replacements: [{ from: ' hen  đồ click ', to: 'handleClick' }, { from: 'HEN ĐỒ CLICK', to: 'x' }, { from: '', to: 'y' }, { from: 'a' }, 'rác', { from: 'b', to: 'dòng 1\ndòng 2' }]
+    })
+    expect(v.replacements).toEqual([
+      { from: 'hen đồ click', to: 'handleClick' },
+      { from: 'b', to: 'dòng 1 dòng 2' }
+    ])
+    expect(v).toMatchObject({ workspaceVocab: true, commands: true })
+    expect(normalizeVoice({ workspaceVocab: false, commands: 0 })).toMatchObject({ workspaceVocab: false, commands: true })
+  })
+
   it('settings.json cũ không có voice → mặc định; patchApp chỉ đổi trường có mặt', () => {
     expect(normalizeSettings({ version: 2, app: {} }).app.voice).toEqual(DEFAULT_VOICE)
     const app = patchApp(DEFAULT_SETTINGS.app, { voice: { hotkey: 'f9' } })

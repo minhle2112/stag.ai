@@ -27,6 +27,7 @@ import type { PluginEvent } from '@shared/plugins'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
 import { WorkspaceStore } from './workspace'
+import { VocabCache } from './voiceVocab'
 import { samePath } from './fsutil'
 import type { GeneralSettings } from '@shared/types'
 
@@ -437,7 +438,7 @@ app.whenReady().then(async () => {
       }))
   })
   registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins)
-  registerVoiceIpc(voice)
+  registerVoiceIpc(voice, new VocabCache(), workspaces)
   createWindow()
   applyGeneral(settings.general())
   app.on('activate', () => {

@@ -32,6 +32,7 @@ import type { VaultActivityLog } from './vaultActivity'
 import { VaultIndexer, VaultWatchers } from './vaultIndex'
 import type { WorkspaceStore } from './workspace'
 import type { VoiceService } from './voice'
+import type { VocabCache } from './voiceVocab'
 
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
@@ -352,7 +353,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
 }
 
 /** Gõ bằng giọng nói (V1): model + nhận dạng. Âm thanh chỉ đi renderer → main → tiến trình nhận dạng, không ghi ra đĩa. */
-export function registerVoiceIpc(voice: VoiceService): void {
+export function registerVoiceIpc(voice: VoiceService, vocab: VocabCache, workspaces: WorkspaceStore): void {
   ipcMain.handle(IPC.voiceStatus, () => voice.get())
   ipcMain.handle(IPC.voiceDownload, () => {
     void voice.download()
@@ -367,5 +368,9 @@ export function registerVoiceIpc(voice: VoiceService): void {
     if (samples.length > 30 * 16000) throw new Error('Đoạn âm thanh quá dài.')
     const words = Array.isArray(hotwords) ? hotwords.filter((x): x is string => typeof x === 'string') : []
     return voice.transcribe(samples, words)
+  })
+  ipcMain.handle(IPC.voiceVocab, (_e, workspaceId: unknown) => {
+    const ws = typeof workspaceId === 'string' ? workspaces.get(workspaceId) : undefined
+    return ws?.path ? vocab.get(ws.path) : []
   })
 }

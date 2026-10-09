@@ -172,7 +172,9 @@ export const IPC = {
   voicePrewarm: 'voice:prewarm',
   /** Tắt tiến trình nhận dạng ngay (trả RAM). */
   voiceUnload: 'voice:unload',
-  voiceTranscribe: 'voice:transcribe'
+  voiceTranscribe: 'voice:transcribe',
+  /** Từ vựng của workspace (tên file, hàm, class, thư viện) để gợi ý cho máy nhận dạng. */
+  voiceVocab: 'voice:vocab'
 } as const
 
 export interface AppInfo {

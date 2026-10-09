@@ -34,6 +34,7 @@ import {
   type ShellId,
   type TerminalAdapterSettings,
   type VoiceHotkey,
+  type VoiceReplacement,
   type VoiceSettings,
   VOICE_UNLOAD_MAX
 } from './types'
@@ -121,8 +122,29 @@ export function normalizeVoice(raw: unknown): VoiceSettings {
       (Array.isArray(r.hotwords) ? r.hotwords : []).map((x) => (typeof x === 'string' ? x.replace(/,/g, ' ').replace(/\s+/g, ' ') : x)),
       200,
       60
-    )
+    ),
+    workspaceVocab: bool(r.workspaceVocab, d.workspaceVocab),
+    replacements: normalizeReplacements(r.replacements),
+    commands: bool(r.commands, d.commands)
   }
+}
+
+/** Luật thay từ: bỏ mục hỏng / trùng vế trái (không phân biệt hoa thường), tối đa 200 luật. */
+function normalizeReplacements(v: unknown): VoiceReplacement[] {
+  const out: VoiceReplacement[] = []
+  const seen = new Set<string>()
+  for (const x of Array.isArray(v) ? v : []) {
+    const r = obj(x)
+    if (typeof r.from !== 'string' || typeof r.to !== 'string') continue
+    const from = r.from.replace(/\s+/g, ' ').trim().slice(0, 60)
+    const to = r.to.replace(/[\r\n]+/g, ' ').trim().slice(0, 120)
+    const k = from.toLowerCase()
+    if (!from || !to || seen.has(k)) continue
+    seen.add(k)
+    out.push({ from, to })
+    if (out.length >= 200) break
+  }
+  return out
 }
 export const CLI_ADAPTERS: readonly CliAdapterId[] = ['claude', 'codex']
 

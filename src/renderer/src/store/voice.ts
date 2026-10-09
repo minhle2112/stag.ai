@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import { joinChunks, nextCut, trimSilence, type VoiceStatus } from '@shared/voice'
+import { appendText, joinChunks, nextCut, trimSilence, type VoiceStatus } from '@shared/voice'
+import { contextTerms, GENERAL_TERMS, pickHotwords, postProcess } from '@shared/voiceVocab'
 import { MicCapture } from '../voice/capture'
-import { pasteIntoTerminal } from '../terminals'
+import { pasteIntoTerminal, terminalText } from '../terminals'
 import { useAgents } from './agents'
 import { useSettings } from './settings'
 
@@ -63,6 +64,14 @@ interface Session {
   /** Thả phím trước khi micro kịp mở. */
   released: boolean
   heard: boolean
+  vocab: Promise<Vocab>
+}
+
+const VOCAB_WAIT_MS = 1500
+
+interface Vocab {
+  hot: string[]
+  terms: string[]
 }
 let session: Session | null = null
 
@@ -70,10 +79,27 @@ function errText(e: unknown): string {
   return String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
 
-/** Từ gợi ý: danh sách trong Cài đặt + tên agent của workspace. */
-function hotwordsFor(wsId: string): string[] {
-  const agents = useAgents.getState().byWs[wsId]?.agents ?? []
-  return [...useSettings.getState().value.app.voice.hotwords, ...agents.map((a) => a.name)]
+/**
+ * Từ vựng của lượt nói (tính một lần lúc bắt đầu, trong lúc mở micro): `hot` = gợi ý gửi cho máy nhận dạng (có giới hạn),
+ * `terms` = mọi từ code biết được, để sửa dạng chữ sau khi nhận dạng. Tắt "Tự gợi ý từ" thì chỉ còn từ tự thêm + tên agent.
+ */
+async function vocabFor(target: VoiceTarget): Promise<Vocab> {
+  const vs = useSettings.getState().value.app.voice
+  const agents = (useAgents.getState().byWs[target.wsId]?.agents ?? []).map((a) => a.name)
+  const auto = vs.workspaceVocab
+  const context = auto ? contextTerms(terminalText(target.agentId)) : []
+  // Lần quét đầu của repo lớn có thể lâu: không bắt lượt nói chờ quá VOCAB_WAIT_MS (lần sau đã có sẵn).
+  const workspace = auto
+    ? await Promise.race([
+        window.stag.voice.vocab(target.wsId).catch(() => [] as string[]),
+        new Promise<string[]>((r) => setTimeout(() => r([]), VOCAB_WAIT_MS))
+      ])
+    : []
+  const general = auto ? GENERAL_TERMS : []
+  return {
+    hot: pickHotwords({ manual: vs.hotwords, agents, context, workspace, general }),
+    terms: [...vs.hotwords, ...agents, ...context, ...workspace, ...general]
+  }
 }
 
 function send(s: Session, raw: Float32Array): void {
@@ -84,8 +110,8 @@ function send(s: Session, raw: Float32Array): void {
     return
   }
   s.heard = true
-  const words = hotwordsFor(s.target.wsId)
-  s.parts.push(window.stag.voice.transcribe(chunk.slice(), words).then((r) => r.text))
+  const samples = chunk.slice()
+  s.parts.push(s.vocab.then((v) => window.stag.voice.transcribe(samples, v.hot)).then((r) => r.text))
 }
 
 /** Gửi các đoạn đã đủ dài (đang nói) hoặc phần còn lại (`final`). */
@@ -114,7 +140,7 @@ export async function beginVoice(target: VoiceTarget): Promise<void> {
   useVoice.setState({ target, phase: 'opening', text: keepText, error: '', needsModel: false, level: 0 })
   if (v.status.model !== 'ready') return fail('Chưa tải model nhận dạng giọng nói.', true)
   void window.stag.voice.prewarm()
-  const s: Session = { target, parts: [], start: 0, timer: null, released: false, heard: false }
+  const s: Session = { target, parts: [], start: 0, timer: null, released: false, heard: false, vocab: vocabFor(target).catch(() => ({ hot: [], terms: [] })) }
   session = s
   try {
     await mic.open(useSettings.getState().value.app.voice.micId)
@@ -145,7 +171,8 @@ export async function endVoice(): Promise<void> {
   flush(s, all, true)
   let text = ''
   try {
-    text = joinChunks(await Promise.all(s.parts))
+    const vs = useSettings.getState().value.app.voice
+    text = postProcess(joinChunks(await Promise.all(s.parts)), { terms: (await s.vocab).terms, rules: vs.replacements, commands: vs.commands })
   } catch (e) {
     if (session === s) fail(`Nhận dạng lỗi: ${errText(e)}`)
     return
@@ -153,12 +180,12 @@ export async function endVoice(): Promise<void> {
   if (session !== s) return
   session = null
   const prev = useVoice.getState().text
-  if (!text) {
+  if (!text.trim()) {
     // Nói thêm mà không ra chữ: giữ khung xem trước như cũ.
     if (prev) return useVoice.setState({ phase: 'preview' })
     return fail(s.heard ? 'Không nhận ra câu nào. Thử nói rõ hơn hoặc gần micro hơn.' : 'Không nghe thấy gì. Kiểm tra micro trong Cài đặt → Giọng nói.')
   }
-  const merged = joinChunks([prev, text])
+  const merged = appendText(prev, text)
   if (useSettings.getState().value.app.voice.preview) useVoice.setState({ phase: 'preview', text: merged })
   else insertVoice(merged)
 }

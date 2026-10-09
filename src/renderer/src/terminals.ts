@@ -172,6 +172,15 @@ export function pasteIntoTerminal(agentId: string, text: string): boolean {
   return true
 }
 
+/** Chữ ở `lines` dòng cuối của terminal (lấy từ code đang hiện trong ô làm gợi ý giọng nói). */
+export function terminalText(agentId: string, lines = 200): string {
+  const b = entries.get(agentId)?.term.buffer.active
+  if (!b) return ''
+  const out: string[] = []
+  for (let i = Math.max(0, b.length - lines); i < b.length; i++) out.push(b.getLine(i)?.translateToString(true) ?? '')
+  return out.join('\n')
+}
+
 export function focusTerminal(agentId: string): void {
   entries.get(agentId)?.term.focus()
 }

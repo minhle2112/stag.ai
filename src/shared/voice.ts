@@ -186,6 +186,18 @@ export function joinChunks(parts: readonly string[]): string {
     .join(' ')
 }
 
+/**
+ * Nối lần nói thêm vào chữ đang xem trước: chỗ nối có xuống dòng (lệnh "xuống dòng") thì giữ đúng một lần xuống dòng,
+ * không thì cách một dấu cách. Chưa có chữ thì bỏ xuống dòng ở đầu.
+ */
+export function appendText(prev: string, next: string): string {
+  const a = prev.replace(/[ \t]+$/, '')
+  const b = next.replace(/^[ \t]+/, '')
+  if (!a.trim()) return b.replace(/^\s+/, '')
+  if (!b.trim()) return a
+  return a.endsWith('\n') || b.startsWith('\n') ? `${a.replace(/\n+$/, '')}\n${b.replace(/^\n+/, '')}` : `${a} ${b}`
+}
+
 /** Tốc độ tải để hiện "x MB / y MB". */
 export function formatMb(bytes: number): string {
   return `${Math.round(bytes / 1e6).toLocaleString('vi-VN')} MB`

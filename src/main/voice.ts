@@ -5,6 +5,7 @@ import { join, relative } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { cleanHotwords, VOICE_MODEL, type VoiceModel, type VoiceResult, type VoiceStatus } from '@shared/voice'
+import { HOTWORD_MAX } from '@shared/voiceVocab'
 import type { VoiceSettings } from '@shared/types'
 import type { SpawnWorker, WorkerProc } from './plugins'
 
@@ -228,7 +229,7 @@ export class VoiceService {
     await this.ensureWorker()
     this.touch()
     try {
-      return (await this.call('transcribe', { samples, hotwords: cleanHotwords(hotwords), language: 'Vietnamese' })) as VoiceResult
+      return (await this.call('transcribe', { samples, hotwords: cleanHotwords(hotwords, HOTWORD_MAX), language: 'Vietnamese' })) as VoiceResult
     } finally {
       this.touch()
     }

@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { ENGINES } from './engines.mjs'
 
 const root = resolve(import.meta.dirname, '..', '..')
@@ -14,13 +15,23 @@ const modelDir = join(bench, 'models')
 const sentences = JSON.parse(readFileSync(join(import.meta.dirname, 'sentences.json'), 'utf8'))
 const THREADS = Number(process.env.THREADS || 4)
 
-/** Bảng từ của "workspace": mọi thuật ngữ trong bộ câu + vài tên khác của dự án (để gợi ý không quá dễ). */
-const GLOSSARY_ALL = [
-  ...new Set([
-    ...sentences.flatMap((s) => s.terms),
-    'Kanban', 'BrowserPane', 'AgentGrid', 'vitest', 'Obsidian', 'TypeScript', 'node-pty', 'xterm', 'ipcMain', 'artifact'
-  ])
-]
+/**
+ * Bảng từ của "workspace": mọi thuật ngữ trong bộ câu + vài tên khác của dự án (để gợi ý không quá dễ).
+ * HINTS_FILE=<json>: dùng danh sách khác (vd. gợi ý tự động của V2 — xem auto-hints.ts), dạng [..] hoặc { hot: [..] }.
+ */
+const hintsFile = process.env.HINTS_FILE ? JSON.parse(readFileSync(process.env.HINTS_FILE, 'utf8')) : null
+const GLOSSARY_ALL = hintsFile
+  ? (Array.isArray(hintsFile) ? hintsFile : hintsFile.hot)
+  : [
+      ...new Set([
+        ...sentences.flatMap((s) => s.terms),
+        'Kanban', 'BrowserPane', 'AgentGrid', 'vitest', 'Obsidian', 'TypeScript', 'node-pty', 'xterm', 'ipcMain', 'artifact'
+      ])
+    ]
+// POST_MODULE=<mjs>: sửa chữ sau nhận dạng như app (export post(text)), chấm trên chữ đã sửa; giữ chữ gốc ở `raw`.
+// HINTS_FILE có `perSentence: { s01: [..] }` → mỗi câu một danh sách (mô phỏng từ đang hiện trong ô agent).
+const hintsFor = (id) => hintsFile?.perSentence?.[id] ?? GLOSSARY
+const post = process.env.POST_MODULE ? (await import(pathToFileURL(resolve(process.env.POST_MODULE)).href)).post : (t) => t
 // HINT_LIMIT: chỉ giữ N mục đầu (thử xem danh sách ngắn có bớt lỗi chép danh sách vào câu không).
 const GLOSSARY = process.env.HINT_LIMIT ? GLOSSARY_ALL.slice(0, Number(process.env.HINT_LIMIT)) : GLOSSARY_ALL
 
@@ -89,11 +100,11 @@ async function runOne(id, withHints) {
   const loadMs = performance.now() - t0
   const hotwords = withHints && e.hints === 'hotwords' ? GLOSSARY.map((t) => spoken(t).toUpperCase()).join('/') : undefined
 
-  const decode = (file, noHints = false) => {
+  const decode = (file, noHints = false, list = hints) => {
     const wave = sherpa.readWave(file)
     const stream = hotwords && !noHints ? rec.createStream(hotwords) : rec.createStream()
     for (const [k, v] of Object.entries(e.stream ?? {})) if (v) stream.setOption(k, v)
-    if (hints && !noHints && e.hints === 'qwen') stream.setOption('hotwords', hints.join(','))
+    if (list && !noHints && e.hints === 'qwen') stream.setOption('hotwords', list.join(','))
     stream.acceptWaveform({ samples: wave.samples, sampleRate: wave.sampleRate })
     const t = performance.now()
     rec.decode(stream)
@@ -105,17 +116,19 @@ async function runOne(id, withHints) {
   const rows = []
   for (const s of files) {
     const ref = existsSync(join(recDir, `${s.id}.txt`)) ? readFileSync(join(recDir, `${s.id}.txt`), 'utf8').trim() : s.text
-    let r = decode(join(recDir, `${s.id}.wav`))
+    const list = hints ? hintsFor(s.id) : null
+    let r = decode(join(recDir, `${s.id}.wav`), false, list)
     let echo = false
     // ECHO_GUARD=1: phát hiện chép danh sách → nhận dạng lại không gợi ý (tốn thêm một lượt, hiếm khi xảy ra).
-    if (hints && echoAt(r.text, GLOSSARY) >= 0) {
+    if (list && echoAt(r.text, list) >= 0) {
       echo = true
       if (process.env.ECHO_GUARD === '1') {
         const again = decode(join(recDir, `${s.id}.wav`), true)
         r = { ...again, ms: r.ms + again.ms }
       }
     }
-    rows.push({ id: s.id, ref, hyp: r.text, echo, ms: Math.round(r.ms), sec: +r.sec.toFixed(2), ...score(ref, r.text, s.terms) })
+    const hyp = post(r.text, s.id)
+    rows.push({ id: s.id, ref, hyp, raw: r.text, echo, ms: Math.round(r.ms), sec: +r.sec.toFixed(2), ...score(ref, hyp, s.terms) })
   }
   return { id, hints: withHints, loadMs: Math.round(loadMs), rssMb: Math.round((process.memoryUsage().rss - rss0) / 1e6), rows }
 }
@@ -137,7 +150,8 @@ async function main() {
   if (!engines.length) throw new Error('chưa có model nào: chạy download.mjs trước')
   const results = []
   for (const e of engines)
-    for (const h of e.hints ? [false, true] : [false]) {
+    // HINTS_ONLY=1: bỏ lượt không gợi ý (đã biết).
+    for (const h of e.hints ? (process.env.HINTS_ONLY === '1' ? [true] : [false, true]) : [false]) {
       process.stdout.write(`${e.id}${h ? ' +gợi ý' : ''} … `)
       try {
         const out = execFileSync(process.execPath, [import.meta.filename, '--child', e.id, h ? '1' : '0'], {

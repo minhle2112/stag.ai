@@ -349,6 +349,8 @@ const api = {
     unload: (): Promise<void> => ipcRenderer.invoke(IPC.voiceUnload),
     /** Một đoạn âm thanh 16 kHz mono (≤ ~12 s) + từ gợi ý. */
     transcribe: (samples: Float32Array, hotwords: string[]): Promise<VoiceResult> => ipcRenderer.invoke(IPC.voiceTranscribe, samples, hotwords),
+    /** Từ vựng của workspace, quan trọng nhất trước ([] nếu không đọc được). */
+    vocab: (workspaceId: string): Promise<string[]> => ipcRenderer.invoke(IPC.voiceVocab, workspaceId),
     onChanged(cb: (s: VoiceStatus) => void): () => void {
       const fn = (_e: IpcRendererEvent, s: VoiceStatus): void => cb(s)
       ipcRenderer.on(IPC.voiceChanged, fn)
