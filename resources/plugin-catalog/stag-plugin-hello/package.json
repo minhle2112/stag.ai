@@ -9,7 +9,7 @@
     "id": "stag.hello",
     "apiVersion": 1,
     "displayName": "Hello",
-    "description": "Plugin mẫu: tool word_count cho agent, nút \"Chào\" ở thanh bên, nút mở trang tài liệu, tab trang riêng \"Hello\", trang cài đặt \"Số liệu\", đếm việc agent làm xong, tổng kết mỗi giờ, webhook \"ping\".",
+    "description": "Plugin mẫu: tool word_count cho agent, nút \"Chào\" ở thanh bên, nút mở trang tài liệu, tab trang riêng \"Hello\", trang cài đặt \"Số liệu\", widget trong lưới agent, chữ trên thanh trạng thái, đếm việc agent làm xong, tổng kết mỗi giờ, webhook \"ping\".",
     "author": "stag.ai",
     "categories": [
       "example"
@@ -19,6 +19,7 @@
       "ui.sidebar.register",
       "ui.action.register",
       "ui.page.register",
+      "ui.dashboardWidget.register",
       "instance.settings.register",
       "events.subscribe",
       "agents.read",
@@ -114,6 +115,19 @@
           "id": "data",
           "displayName": "Số liệu",
           "path": "settings.html"
+        },
+        {
+          "type": "dashboardWidget",
+          "id": "board",
+          "displayName": "Hello · việc xong",
+          "path": "widget.html"
+        },
+        {
+          "type": "statusBarItem",
+          "id": "done",
+          "displayName": "Hello",
+          "dataKey": "statusBar",
+          "action": "hello"
         }
       ]
     },

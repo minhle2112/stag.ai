@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hello — widget</title>
+    <link rel="stylesheet" href="/__stag/ui.css" />
+    <link rel="stylesheet" href="./hello.css" />
+    <style>
+      main {
+        padding: 10px 12px;
+      }
+      table {
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="muted" style="margin: 0 0 6px">Widget của Hello (slot dashboardWidget): việc xong của agent trong workspace này.</p>
+      <table>
+        <tbody id="rows"></tbody>
+      </table>
+    </main>
+    <script type="module">
+      import { host } from '/__stag/ui.js'
+      const rows = document.getElementById('rows')
+      async function load() {
+        const stats = await host.getData('stats')
+        rows.replaceChildren(
+          ...stats.agents.map((a) => {
+            const tr = document.createElement('tr')
+            for (const v of [a.name, a.running ? 'đang chạy' : '', String(a.done)]) tr.append(Object.assign(document.createElement('td'), { textContent: v }))
+            return tr
+          })
+        )
+        if (!stats.agents.length) rows.innerHTML = '<tr><td class="muted">Chưa có agent.</td></tr>'
+      }
+      await host.ready
+      host.on('stats', load)
+      await load()
+    </script>
+  </body>
+</html>

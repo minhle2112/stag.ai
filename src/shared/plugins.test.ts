@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cronProblem, describeCron, fillSlotUrl, pluginFolderFor, pluginIdFrom, newCapabilities, nextCronRun, normalizePluginConfig, parsePluginManifest, pluginToolName } from './plugins'
+import { statusTextFrom, cronProblem, describeCron, fillSlotUrl, pluginFolderFor, pluginIdFrom, newCapabilities, nextCronRun, normalizePluginConfig, parsePluginManifest, pluginToolName } from './plugins'
 import { normalizeSettings, pluginOn } from './settings'
 import hello from '../../resources/plugin-catalog/stag-plugin-hello/package.json'
 
@@ -16,8 +16,11 @@ describe('manifest plugin', () => {
       ['agentMenu', 'stats'],
       ['globalToolbarButton', 'browser'],
       ['page', 'index.html'],
-      ['settingsPage', 'settings.html']
+      ['settingsPage', 'settings.html'],
+      ['dashboardWidget', 'widget.html'],
+      ['statusBarItem', 'hello']
     ])
+    expect(h.manifest.ui.slots.at(-1)?.dataKey).toBe('statusBar')
     expect(h.manifest.entrypoints).toEqual({ worker: './worker.mjs', ui: './ui' })
     expect(h.manifest.jobs).toEqual([{ key: 'summary', displayName: 'Tổng kết', description: expect.any(String), schedule: '0 * * * *' }])
     expect(h.manifest.webhooks.map((w) => w.endpointKey)).toEqual(['ping'])
@@ -43,7 +46,8 @@ describe('manifest plugin', () => {
     expect(() => parsePluginManifest(pkg({ events: ['task.done'], entrypoints: { worker: 'w.js' } }))).toThrow(/events.subscribe/)
   })
 
-  it('trang (page / settingsPage), việc theo lịch, webhook', () => {
+  it('trang (page / settingsPage / dashboardWidget), thanh trạng thái, việc theo lịch, webhook', () => {
+    const w0 = { entrypoints: { worker: 'w.js' } }
     const ui = { entrypoints: { ui: 'ui' }, capabilities: ['ui.page.register', 'instance.settings.register'] }
     const a = parsePluginManifest(pkg({ ...ui, ui: { slots: [{ type: 'page', id: 'p' }, { type: 'settingsPage', id: 's', path: './x/set.html' }] } }))
     expect(a.manifest.ui.slots).toEqual([
@@ -56,6 +60,29 @@ describe('manifest plugin', () => {
     expect(() => parsePluginManifest(pkg({ ...ui, ui: { slots: [{ type: 'page', id: 'p', path: 'a.js' }] } }))).toThrow(/\.html/)
     expect(() => parsePluginManifest(pkg({ ...ui, ui: { slots: [{ type: 'page', id: 'p' }, { type: 'page', id: 'p' }] } }))).toThrow(/trùng id/)
     expect(() => parsePluginManifest(pkg({ entrypoints: { ui: 'C:/x' } }))).toThrow(/entrypoints.ui/)
+
+    // Widget trong lưới agent + chữ trên thanh trạng thái.
+    const wg = parsePluginManifest(
+      pkg({
+        entrypoints: { ui: 'ui', worker: 'w.js' },
+        capabilities: ['ui.dashboardWidget.register', 'ui.action.register'],
+        ui: { slots: [{ type: 'dashboardWidget', id: 'w', path: 'w.html' }, { type: 'statusBarItem', id: 'st', displayName: 'Trạng thái', dataKey: 'status' }, { type: 'statusBarItem', id: 'go', open: { url: 'https://x.dev' } }] }
+      })
+    )
+    expect(wg.manifest.ui.slots).toEqual([
+      { type: 'dashboardWidget', id: 'w', displayName: 'w', path: 'w.html' },
+      { type: 'statusBarItem', id: 'st', displayName: 'Trạng thái', dataKey: 'status' },
+      { type: 'statusBarItem', id: 'go', displayName: 'go', open: { url: 'https://x.dev', target: 'browser' } }
+    ])
+    expect(() => parsePluginManifest(pkg({ ...ui, ui: { slots: [{ type: 'dashboardWidget', id: 'w' }] } }))).toThrow(/ui.dashboardWidget.register/)
+    expect(() => parsePluginManifest(pkg({ capabilities: ['ui.action.register'], ui: { slots: [{ type: 'statusBarItem', id: 's', dataKey: 'x' }] } }))).toThrow(/không có entrypoints.worker/)
+    expect(() => parsePluginManifest(pkg({ ...w0, capabilities: ['ui.action.register'], ui: { slots: [{ type: 'statusBarItem', id: 's', dataKey: 'Bad Key' }] } }))).toThrow(/dataKey/)
+    expect(() => parsePluginManifest(pkg({ capabilities: ['ui.action.register'], ui: { slots: [{ type: 'clock', id: 's' }] } }))).toThrow(/statusBarItem/)
+    expect(statusTextFrom('  3 việc ')).toEqual({ text: '3 việc', tone: 'default' })
+    expect(statusTextFrom({ text: 'Lỗi', tone: 'error', tooltip: 'x' })).toEqual({ text: 'Lỗi', tone: 'error', tooltip: 'x' })
+    expect(statusTextFrom({ text: 'a', tone: 'pink' })).toEqual({ text: 'a', tone: 'default' })
+    expect(statusTextFrom({ text: '' })).toBeNull()
+    expect(statusTextFrom(null)).toBeNull()
 
     const w = { entrypoints: { worker: 'w.js' } }
     const b = parsePluginManifest(

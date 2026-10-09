@@ -38,10 +38,19 @@ const plugin = definePlugin({
       return { agents: rows, lastPing: (await ctx.state.get('lastPing')) ?? null, lastSummary: (await ctx.state.get('lastSummary')) ?? null }
     })
 
+    // Thanh trạng thái (slot statusBarItem "done", dataKey "statusBar"): tổng việc xong; app đọc lại khi worker phát "statusBar".
+    ctx.data.register('statusBar', async () => {
+      const { agents } = await ctx.agents.list()
+      let total = 0
+      for (const a of agents) total += (await ctx.state.get(`done:${a.id}`)) ?? 0
+      return { text: `Hello · ${total} việc xong`, tooltip: 'Số việc agent đã xong kể từ khi cài Hello. Bấm để chào.', tone: total ? 'ok' : 'default' }
+    })
+
     ctx.actions.register('reset', async () => {
       const { agents } = await ctx.agents.list()
       for (const a of agents) await ctx.state.delete(`done:${a.id}`)
       ctx.streams.emit('stats', { reset: true })
+      ctx.streams.emit('statusBar', {})
       return { message: 'Đã đặt lại số việc xong.' }
     })
 
@@ -50,6 +59,7 @@ const plugin = definePlugin({
       await ctx.state.set(key, ((await ctx.state.get(key)) ?? 0) + 1)
       ctx.logger.info(`${e.agentName} xong việc: ${e.data.title}`)
       ctx.streams.emit('stats', { agentId: e.agentId })
+      ctx.streams.emit('statusBar', {})
     })
     ctx.events.on('agent.session.started', async (e) => ctx.logger.info(`Phiên mới: ${e.agentName}`))
 

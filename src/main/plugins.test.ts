@@ -218,8 +218,13 @@ describe('PluginHost: trang, việc theo lịch, webhook', () => {
 
     const ctx = { workspaceId: 'w1', workspaceName: 'Proj' }
     host.emit({ type: 'task.done', at: '', workspaceId: 'w1', agentId: 'a1', agentName: 'Lead', data: { title: 'x' } })
-    await until(() => streams.length === 1)
-    expect(streams[0]).toEqual(['stag.hello', 'stats', { agentId: 'a1' }])
+    await until(() => streams.length === 2)
+    expect(streams).toEqual([
+      ['stag.hello', 'stats', { agentId: 'a1' }],
+      ['stag.hello', 'statusBar', {}]
+    ])
+    expect(await host.bridge('stag.hello', 'data.get', { key: 'statusBar' }, ctx)).toEqual({ text: 'Hello · 1 việc xong', tooltip: expect.any(String), tone: 'ok' })
+    expect((await host.uiFile('stag.hello', 'widget.html'))?.path).toBe(join(HELLO, 'ui', 'widget.html'))
     expect(await host.bridge('stag.hello', 'data.get', { key: 'stats' }, ctx)).toEqual({
       agents: [
         { id: 'a1', name: 'Lead', workspace: 'Proj', running: true, done: 1 },
@@ -229,7 +234,7 @@ describe('PluginHost: trang, việc theo lịch, webhook', () => {
       lastSummary: null
     })
     expect(await host.bridge('stag.hello', 'action.perform', { key: 'reset' }, ctx)).toEqual({ message: 'Đã đặt lại số việc xong.' })
-    await until(() => streams.length === 2)
+    await until(() => streams.length === 4)
     await host.bridge('stag.hello', 'state.set', { key: 'k', value: 1 }, ctx)
     expect(await host.bridge('stag.hello', 'state.get', { key: 'k' }, ctx)).toBe(1)
     await expect(host.bridge('stag.hello', 'vault.read', { workspaceId: 'w1', path: 'a.md' }, ctx)).rejects.toThrow(/chưa được cấp quyền "vault.read"/)

@@ -17,8 +17,9 @@ export const RESERVED_PLUGIN_IDS = ['stag', 'stag.ai', 'claude', 'codex', 'termi
 /** Quyền plugin xin; người dùng duyệt trước khi plugin chạy. Nhãn tiếng Việt cho hộp duyệt quyền. */
 export const PLUGIN_CAPABILITIES = {
   'ui.sidebar.register': 'Thêm mục ở thanh bên trái',
-  'ui.action.register': 'Thêm nút ở thanh trên cùng và trong menu ⋯ của agent',
+  'ui.action.register': 'Thêm nút ở thanh trên cùng, thanh trạng thái và trong menu ⋯ của agent',
   'ui.page.register': 'Thêm trang riêng (tab trên thanh trên cùng)',
+  'ui.dashboardWidget.register': 'Thêm ô widget vào lưới agent của workspace',
   'instance.settings.register': 'Thêm trang cài đặt riêng trong Cài đặt → Plugin',
   'agent.tools.register': 'Thêm tool cho agent (qua máy chủ MCP stag)',
   'events.subscribe': 'Nhận sự kiện của app (phiên agent mở / đóng, agent chờ bạn, việc bắt đầu / xong)',
@@ -90,17 +91,42 @@ export interface PluginTool {
  *   của agent. Bấm → `open` (mở URL, mẫu có {config.x} / {workspace.name} / {workspace.path} / {agent.name} /
  *   {agent.id}) hoặc `action` (gọi performAction của worker).
  * - Trang (khung cách ly, file trong thư mục `entrypoints.ui`): `page` = tab riêng cạnh Kanban / Agents / Artifacts;
- *   `settingsPage` = tab riêng trong trang plugin ở Cài đặt → Plugin. `path` = file HTML trong thư mục đó.
+ *   `settingsPage` = tab riêng trong trang plugin ở Cài đặt → Plugin; `dashboardWidget` = ô trong lưới agent (người dùng
+ *   thêm từ nút "+ Widget" của lưới). `path` = file HTML trong thư mục đó.
+ * - `statusBarItem` = chữ ngắn trên thanh trạng thái dưới cùng (quyền ui.action.register). Chữ = displayName, hoặc
+ *   worker `getData(dataKey)` trả `string | {text, tooltip?, tone?: 'default'|'ok'|'warn'|'error'}`; app đọc lại khi
+ *   mở, mỗi 60 s và khi worker `streams.emit('statusBar', …)`. Bấm → `open` / `action` (không bắt buộc).
  */
 export type PluginButtonSlotType = 'sidebar' | 'globalToolbarButton' | 'agentMenu'
-export type PluginPageSlotType = 'page' | 'settingsPage'
+export type PluginPageSlotType = 'page' | 'settingsPage' | 'dashboardWidget'
+export type PluginStatusSlotType = 'statusBarItem'
 export interface PluginSlot {
-  type: PluginButtonSlotType | PluginPageSlotType
+  type: PluginButtonSlotType | PluginPageSlotType | PluginStatusSlotType
   id: string
   displayName: string
   open?: { url: string; target: 'browser' | 'external' }
   action?: string
   path?: string
+  /** statusBarItem: khoá getData của worker cho chữ hiện ra. */
+  dataKey?: string
+}
+
+/** Kết quả getData(dataKey) của slot statusBarItem (đã chuẩn hoá). */
+export interface PluginStatusText {
+  text: string
+  tooltip?: string
+  tone: 'default' | 'ok' | 'warn' | 'error'
+}
+
+/** Chuẩn hoá giá trị worker trả cho statusBarItem; null = không hiện. */
+export function statusTextFrom(v: unknown): PluginStatusText | null {
+  if (typeof v === 'string') return v.trim() ? { text: v.trim().slice(0, 80), tone: 'default' } : null
+  if (!v || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  const text = typeof o.text === 'string' ? o.text.trim().slice(0, 80) : ''
+  if (!text) return null
+  const tone = o.tone === 'ok' || o.tone === 'warn' || o.tone === 'error' ? o.tone : 'default'
+  return { text, tone, ...(typeof o.tooltip === 'string' && o.tooltip ? { tooltip: o.tooltip.slice(0, 300) } : {}) }
 }
 
 /** Việc theo lịch (cron 5 trường theo giờ máy). */
@@ -241,20 +267,29 @@ export function parsePluginManifest(pkg: unknown): { manifest: PluginManifest; n
   }
   if (webhooks.length && !capabilities.includes('webhooks.receive')) fail('webhooks', 'cần quyền "webhooks.receive"')
 
+  const SLOT_TYPES: PluginSlot['type'][] = ['sidebar', 'globalToolbarButton', 'agentMenu', 'page', 'settingsPage', 'dashboardWidget', 'statusBarItem']
   const slots: PluginSlot[] = []
   for (const [i, raw] of (Array.isArray(obj(m.ui).slots) ? (obj(m.ui).slots as unknown[]) : []).entries()) {
     const s = obj(raw)
-    const type = s.type
-    if (type !== 'sidebar' && type !== 'globalToolbarButton' && type !== 'agentMenu' && type !== 'page' && type !== 'settingsPage')
-      fail(`ui.slots[${i}].type`, 'chỉ hỗ trợ sidebar / globalToolbarButton / agentMenu / page / settingsPage')
+    const type = s.type as PluginSlot['type']
+    if (!SLOT_TYPES.includes(type))
+      fail(`ui.slots[${i}].type`, `chỉ hỗ trợ ${SLOT_TYPES.join(' / ')}`)
     const sid = str(s.id, 40)
     if (!PLUGIN_SLOT_RE.test(sid)) fail(`ui.slots[${i}].id`, 'chữ thường, số, "_", "-"')
     if (slots.some((x) => x.id === sid)) fail(`ui.slots[${i}].id`, `trùng id "${sid}"`)
     const need: PluginCapability =
-      type === 'sidebar' ? 'ui.sidebar.register' : type === 'page' ? 'ui.page.register' : type === 'settingsPage' ? 'instance.settings.register' : 'ui.action.register'
+      type === 'sidebar'
+        ? 'ui.sidebar.register'
+        : type === 'page'
+          ? 'ui.page.register'
+          : type === 'settingsPage'
+            ? 'instance.settings.register'
+            : type === 'dashboardWidget'
+              ? 'ui.dashboardWidget.register'
+              : 'ui.action.register'
     if (!capabilities.includes(need)) fail(`ui.slots[${i}]`, `slot ${type} cần quyền "${need}"`)
     const slot: PluginSlot = { type, id: sid, displayName: str(s.displayName, 60) || sid }
-    if (type === 'page' || type === 'settingsPage') {
+    if (type === 'page' || type === 'settingsPage' || type === 'dashboardWidget') {
       if (!uiDir) fail(`ui.slots[${i}]`, `slot ${type} cần thư mục giao diện "entrypoints.ui"`)
       const path = (str(s.path, 200) || 'index.html').replace(/^\.\//, '')
       if (!safeRelPath(path) || !/\.html?$/i.test(path)) fail(`ui.slots[${i}].path`, 'phải là file .html trong thư mục giao diện')
@@ -262,13 +297,19 @@ export function parsePluginManifest(pkg: unknown): { manifest: PluginManifest; n
       slots.push(slot)
       continue
     }
+    if (type === 'statusBarItem' && s.dataKey !== undefined) {
+      const dataKey = str(s.dataKey, 40)
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,39}$/.test(dataKey)) fail(`ui.slots[${i}].dataKey`, 'chữ, số, "_", "-", "." (bắt đầu bằng chữ)')
+      if (!worker) fail(`ui.slots[${i}].dataKey`, 'slot đọc dữ liệu worker nhưng gói không có entrypoints.worker')
+      slot.dataKey = dataKey
+    }
     const open = obj(s.open)
     if (Object.keys(open).length) {
       const url = str(open.url, 1000)
       if (!/^(https?:\/\/|\{config\.[A-Za-z_][A-Za-z0-9_]*\})/.test(url)) fail(`ui.slots[${i}].open.url`, 'phải bắt đầu bằng http(s):// hoặc {config.<trường>}')
       slot.open = { url, target: open.target === 'external' ? 'external' : 'browser' }
     } else if (str(s.action, 60)) slot.action = str(s.action, 60)
-    else fail(`ui.slots[${i}]`, 'cần "open" (mở URL) hoặc "action" (gọi worker)')
+    else if (type !== 'statusBarItem') fail(`ui.slots[${i}]`, 'cần "open" (mở URL) hoặc "action" (gọi worker)')
     if (slot.action && !worker) fail(`ui.slots[${i}].action`, 'slot gọi worker nhưng gói không có entrypoints.worker')
     slots.push(slot)
   }
