@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeGeneral, normalizeHandoff, normalizeOverrides, normalizeSettings, parseEnv, patchApp, patchOverrides, resolveHandoff, resolveModel, splitArgs } from './settings'
+import { browserToolsOn, normalizeBrowser, normalizeOrigin, normalizeScope, resolveScope, normalizeGeneral, normalizeHandoff, normalizeOverrides, normalizeSettings, parseEnv, patchApp, patchOverrides, resolveHandoff, resolveModel, splitArgs } from './settings'
 import { DEFAULT_ADAPTERS, DEFAULT_GENERAL, DEFAULT_SETTINGS, type Settings } from './types'
 
 describe('normalizeHandoff', () => {
@@ -154,5 +154,45 @@ describe('parseEnv', () => {
     const r = parseEnv('# ghi chú\nFOO=1\n\n BAR = a=b \nnot valid\nSTAG_TOKEN=x\n=1')
     expect(r.vars).toEqual({ FOO: '1', BAR: 'a=b' })
     expect(r.errors).toEqual(['Dòng 5: cần dạng TÊN=giá trị', 'Dòng 6: STAG_TOKEN do app tự đặt, không đổi được', 'Dòng 7: cần dạng TÊN=giá trị'])
+  })
+})
+
+describe('khoá phạm vi + trình duyệt (S5)', () => {
+  it('chuẩn hoá: mặc định, bỏ giá trị lạ, origin gọn', () => {
+    expect(normalizeScope({})).toEqual({ mode: 'ask', guessShell: true, exempt: [] })
+    expect(normalizeScope({ mode: 'nope', guessShell: 1, exempt: [' docs/** ', '', 'docs/**', 3] })).toEqual({ mode: 'ask', guessShell: true, exempt: ['docs/**'] })
+    expect(normalizeBrowser({})).toEqual({ homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false })
+    const b = normalizeBrowser({ homePage: 'localhost:5173/app', searchEngine: 'bing', externalPages: 'deny', allowedOrigins: ['github.com', 'https://github.com/x', 'ftp://a', 'http://10.0.0.2:8080/'] })
+    expect(b).toMatchObject({ homePage: 'https://localhost:5173/app', searchEngine: 'bing', externalPages: 'deny', allowedOrigins: ['https://github.com', 'http://10.0.0.2:8080'] })
+    expect(normalizeBrowser({ homePage: 'javascript:alert(1)' }).homePage).toBe('')
+    expect(normalizeBrowser({ homePage: 'http://127.0.0.1:3000' }).homePage).toBe('http://127.0.0.1:3000')
+    expect(normalizeOrigin('  ')).toBeNull()
+  })
+
+  it('đọc file cũ không có scope / browser → mặc định; patchApp sửa từng trường', () => {
+    const s = normalizeSettings({ version: 2, app: {} })
+    expect(s.app.scope).toEqual(DEFAULT_SETTINGS.app.scope)
+    expect(s.app.browser).toEqual(DEFAULT_SETTINGS.app.browser)
+    const app = patchApp(s.app, { scope: { mode: 'block' }, browser: { keepCookies: true } })
+    expect(app.scope).toEqual({ mode: 'block', guessShell: true, exempt: [] })
+    expect(app.browser.keepCookies).toBe(true)
+    expect(app.browser.agentTools).toBe(true)
+  })
+
+  it('ghi đè theo cấp: mode agent → workspace → app, exempt cộng dồn; tool trình duyệt bật / tắt theo cấp', () => {
+    const s = normalizeSettings({
+      version: 2,
+      app: { scope: { mode: 'ask', exempt: ['*.lock'] }, browser: { agentTools: true } },
+      workspaces: { w1: { scope: { mode: 'warn', exempt: ['docs/**'], bogus: 1 }, browser: { agentTools: false } } },
+      agents: { a1: { scope: { mode: 'off' }, browser: { agentTools: true } } }
+    })
+    expect(s.workspaces.w1).toEqual({ scope: { mode: 'warn', exempt: ['docs/**'] }, browser: { agentTools: false } })
+    expect(resolveScope(s, 'w1', 'a2')).toEqual({ mode: 'warn', guessShell: true, exempt: ['*.lock', 'docs/**'] })
+    expect(resolveScope(s, 'w1', 'a1').mode).toBe('off')
+    expect(resolveScope(s, null, null)).toEqual({ mode: 'ask', guessShell: true, exempt: ['*.lock'] })
+    expect(browserToolsOn(s, 'w1', 'a2')).toBe(false)
+    expect(browserToolsOn(s, 'w1', 'a1')).toBe(true)
+    expect(browserToolsOn(s, 'w2', null)).toBe(true)
+    expect(normalizeOverrides({ scope: { mode: 'zzz' }, browser: { agentTools: 'x' } })).toBeNull()
   })
 })

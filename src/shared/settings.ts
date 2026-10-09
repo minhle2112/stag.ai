@@ -2,8 +2,10 @@ import { normalizeSkills, normalizeSkillToggles } from './skills'
 import { PLUGIN_ID_RE } from './plugins'
 import {
   DEFAULT_ADAPTERS,
+  DEFAULT_BROWSER,
   DEFAULT_GENERAL,
   DEFAULT_HANDOFF,
+  DEFAULT_SCOPE,
   HANDOFF_MAX,
   HANDOFF_MIN,
   TERMINAL_FONT_MAX,
@@ -13,13 +15,18 @@ import {
   type AdaptersSettings,
   type AppSettings,
   type AppSettingsPatch,
+  type BrowserSettings,
   type CliAdapterId,
   type CliAdapterSettings,
   type CloseAction,
+  type ExternalPagePolicy,
   type GeneralSettings,
   type HandoffSettings,
   type ModelSettings,
   type PermissionMode,
+  type ScopeLockSettings,
+  type ScopeMode,
+  type SearchEngine,
   type Settings,
   type SettingsOverrides,
   type SettingsOverridesPatch,
@@ -41,6 +48,60 @@ const oneOf = <T extends string>(v: unknown, all: readonly T[], d: T): T => (all
 const SHELLS: readonly ShellId[] = ['powershell', 'pwsh', 'gitbash', 'cmd']
 const CLOSE_ACTIONS: readonly CloseAction[] = ['quit', 'tray']
 const PERMISSIONS: readonly PermissionMode[] = ['default', 'acceptEdits', 'auto', 'plan']
+export const SCOPE_MODES: readonly ScopeMode[] = ['ask', 'block', 'warn', 'off']
+const SEARCH_ENGINES: readonly SearchEngine[] = ['google', 'duckduckgo', 'bing']
+const EXTERNAL_POLICIES: readonly ExternalPagePolicy[] = ['ask', 'allow', 'deny']
+
+/** Danh sách chuỗi gọn: bỏ trống / trùng, cắt độ dài, tối đa `max` mục. */
+function strList(v: unknown, max: number, len: number, ok: (x: string) => boolean = () => true): string[] {
+  const out: string[] = []
+  for (const x of Array.isArray(v) ? v : []) {
+    const t = typeof x === 'string' ? x.trim().slice(0, len) : ''
+    if (t && ok(t) && !out.includes(t) && out.length < max) out.push(t)
+  }
+  return out
+}
+
+/** Origin http(s) chuẩn (`https://github.com`, `http://192.168.1.5:8080`), null nếu không phải. */
+export function normalizeOrigin(input: string): string | null {
+  const t = input.trim()
+  if (!t) return null
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : `https://${t}`)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null
+  } catch {
+    return null
+  }
+}
+
+export function normalizeScope(raw: unknown): ScopeLockSettings {
+  const r = obj(raw)
+  return {
+    mode: oneOf(r.mode, SCOPE_MODES, DEFAULT_SCOPE.mode),
+    guessShell: bool(r.guessShell, DEFAULT_SCOPE.guessShell),
+    exempt: strList(r.exempt, 100, 300)
+  }
+}
+
+/** Trang mở cho tab mới: địa chỉ http(s) đầy đủ; gõ thiếu giao thức thì thêm https://; không hợp lệ → '' (trang trống). */
+function normalizeHomePage(v: unknown): string {
+  const t = typeof v === 'string' ? v.trim().slice(0, 2000) : ''
+  if (!t) return ''
+  const url = /^https?:\/\//i.test(t) ? t : `https://${t}`
+  return normalizeOrigin(url) ? url : ''
+}
+
+export function normalizeBrowser(raw: unknown): BrowserSettings {
+  const r = obj(raw)
+  return {
+    homePage: normalizeHomePage(r.homePage),
+    searchEngine: oneOf(r.searchEngine, SEARCH_ENGINES, DEFAULT_BROWSER.searchEngine),
+    agentTools: bool(r.agentTools, DEFAULT_BROWSER.agentTools),
+    externalPages: oneOf(r.externalPages, EXTERNAL_POLICIES, DEFAULT_BROWSER.externalPages),
+    allowedOrigins: strList(r.allowedOrigins, 200, 300).map((o) => normalizeOrigin(o)).filter((o, i, a): o is string => !!o && a.indexOf(o) === i),
+    keepCookies: bool(r.keepCookies, DEFAULT_BROWSER.keepCookies)
+  }
+}
 export const CLI_ADAPTERS: readonly CliAdapterId[] = ['claude', 'codex']
 
 /** Tên model: chữ, số và . _ : - / [ ] @ (vd. `opus`, `claude-opus-5-5[1m]`, `gpt-5.6-terra`). '' = theo cấu hình CLI. */
@@ -132,6 +193,15 @@ export function normalizeOverrides(raw: unknown): SettingsOverrides | null {
   if (Object.keys(skills).length) out.skills = skills
   const plugins = normalizePluginToggles(obj(raw).plugins)
   if (Object.keys(plugins).length) out.plugins = plugins
+  const sc = obj(obj(raw).scope)
+  const scope: Partial<ScopeLockSettings> = {}
+  if (SCOPE_MODES.includes(sc.mode as ScopeMode)) scope.mode = sc.mode as ScopeMode
+  if (typeof sc.guessShell === 'boolean') scope.guessShell = sc.guessShell
+  const exempt = strList(sc.exempt, 100, 300)
+  if (exempt.length) scope.exempt = exempt
+  if (Object.keys(scope).length) out.scope = scope
+  const br = obj(obj(raw).browser)
+  if (typeof br.agentTools === 'boolean') out.browser = { agentTools: br.agentTools }
   return Object.keys(out).length ? out : null
 }
 
@@ -163,7 +233,16 @@ export function normalizeSettings(raw: unknown): Settings {
   if (r.version !== 2) {
     return {
       version: 2,
-      app: { general: normalizeGeneral({}), handoff: normalizeHandoff(r), adapters: normalizeAdapters({}), connectors: normalizeConnectors({}), skills: normalizeSkills({}), plugins: { toggles: {} } },
+      app: {
+        general: normalizeGeneral({}),
+        handoff: normalizeHandoff(r),
+        adapters: normalizeAdapters({}),
+        connectors: normalizeConnectors({}),
+        skills: normalizeSkills({}),
+        plugins: { toggles: {} },
+        scope: normalizeScope({}),
+        browser: normalizeBrowser({})
+      },
       workspaces: {},
       agents: {}
     }
@@ -177,7 +256,9 @@ export function normalizeSettings(raw: unknown): Settings {
       adapters: normalizeAdapters(app.adapters, obj(app.general).terminalShell),
       connectors: normalizeConnectors(app.connectors),
       skills: normalizeSkills(app.skills),
-      plugins: { toggles: normalizePluginToggles(obj(app.plugins).toggles) }
+      plugins: { toggles: normalizePluginToggles(obj(app.plugins).toggles) },
+      scope: normalizeScope(app.scope),
+      browser: normalizeBrowser(app.browser)
     },
     workspaces: normalizeMap(r.workspaces),
     agents: normalizeMap(r.agents)
@@ -198,7 +279,9 @@ export function patchApp(app: AppSettings, patch: AppSettingsPatch): AppSettings
       ? { items: app.connectors.items, inherited: normalizeToggles(patch.connectors.inherited, true) }
       : app.connectors,
     skills: patch.skills ? { toggles: normalizeSkillToggles(patch.skills.toggles) } : app.skills,
-    plugins: patch.plugins ? { toggles: normalizePluginToggles(patch.plugins.toggles) } : app.plugins
+    plugins: patch.plugins ? { toggles: normalizePluginToggles(patch.plugins.toggles) } : app.plugins,
+    scope: normalizeScope({ ...app.scope, ...patch.scope }),
+    browser: normalizeBrowser({ ...app.browser, ...patch.browser })
   }
 }
 
@@ -225,6 +308,28 @@ export function resolveHandoff(s: Settings, workspaceId: string | null | undefin
     ...(workspaceId ? s.workspaces[workspaceId]?.handoff : undefined),
     ...(agentId ? s.agents[agentId]?.handoff : undefined)
   }
+}
+
+/**
+ * Khoá phạm vi thực tế của một agent: mode / guessShell theo app → workspace → agent (cấp sau thắng);
+ * exempt = của app cộng của workspace.
+ */
+export function resolveScope(s: Settings, workspaceId: string | null | undefined, agentId: string | null | undefined): ScopeLockSettings {
+  const w = workspaceId ? s.workspaces[workspaceId]?.scope : undefined
+  const a = agentId ? s.agents[agentId]?.scope : undefined
+  return {
+    mode: a?.mode ?? w?.mode ?? s.app.scope.mode,
+    guessShell: a?.guessShell ?? w?.guessShell ?? s.app.scope.guessShell,
+    exempt: [...new Set([...s.app.scope.exempt, ...(w?.exempt ?? [])])]
+  }
+}
+
+/** Agent có được dùng tool trình duyệt không: agent → workspace → app. */
+export function browserToolsOn(s: Settings, workspaceId: string | null | undefined, agentId: string | null | undefined): boolean {
+  const a = agentId ? s.agents[agentId]?.browser?.agentTools : undefined
+  if (a !== undefined) return a
+  const w = workspaceId ? s.workspaces[workspaceId]?.browser?.agentTools : undefined
+  return w ?? s.app.browser.agentTools
 }
 
 /** Model / mức suy nghĩ thực tế của một CLI cho một agent: app → workspace → agent. */

@@ -10,6 +10,8 @@ import { SkillsSection } from './SkillsSection'
 import { PluginsSection } from './PluginsSection'
 import { GeneralSection } from './GeneralSection'
 import { HandoffSection } from './HandoffSection'
+import { ScopeSection } from './ScopeSection'
+import { BrowserSection } from './BrowserSection'
 
 interface NavItem {
   id: SettingsSection
@@ -30,9 +32,9 @@ const NAV: NavItem[][] = [
   ],
   [
     { id: 'handoff', label: 'Agent & bàn giao' },
-    { id: 'scope', label: 'Khoá phạm vi', soon: 'S5' },
+    { id: 'scope', label: 'Khoá phạm vi' },
     { id: 'vault', label: 'Vault & mẫu' },
-    { id: 'browser', label: 'Trình duyệt', soon: 'S5' }
+    { id: 'browser', label: 'Trình duyệt' }
   ],
   [
     { id: 'data', label: 'Dữ liệu' },
@@ -41,16 +43,8 @@ const NAV: NavItem[][] = [
 ]
 
 /** Mô tả các mục chưa làm (theo kế hoạch Settings đã chốt 2026-10-09). */
-const SOON: Partial<Record<SettingsSection, { title: string; points: string[] }>> = {
-  scope: {
-    title: 'Khoá phạm vi',
-    points: ['Khi agent sửa vào vùng của agent khác: hỏi bạn / chặn / chỉ cảnh báo.', 'Hiện tại app luôn hỏi bạn.']
-  },
-  browser: {
-    title: 'Trình duyệt',
-    points: ['Trang mở mặc định của tab mới.', 'Cho agent dùng trình duyệt trong app hay không.']
-  }
-}
+/** Mục chưa làm (nav có `soon`): tiêu đề + các ý dự kiến. */
+const SOON: Partial<Record<SettingsSection, { title: string; points: string[] }>> = {}
 
 export function SettingsPage(): React.JSX.Element {
   const section = useUi((s) => s.settings) ?? 'general'
@@ -131,6 +125,10 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
       return <SecretsSection />
     case 'handoff':
       return <HandoffSection />
+    case 'scope':
+      return <ScopeSection />
+    case 'browser':
+      return <BrowserSection />
     case 'vault':
       return <VaultSection />
     case 'data':

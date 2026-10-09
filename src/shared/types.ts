@@ -261,6 +261,38 @@ export interface AgentStatus {
 }
 
 /** Bàn giao khi context gần đầy. Đặt được ở cấp app, ghi đè theo workspace / agent. */
+/**
+ * Khoá phạm vi (Settings S5): agent định sửa vào phạm vi việc đang mở của agent khác thì
+ * `ask` = hỏi bạn (Claude: hộp quyền trong terminal; Codex: hộp thoại của app), `block` = chặn luôn,
+ * `warn` = cho sửa, chỉ cảnh báo (kanban + kết quả task_start), `off` = tắt hẳn (không khoá, không cảnh báo).
+ */
+export type ScopeMode = 'ask' | 'block' | 'warn' | 'off'
+export interface ScopeLockSettings {
+  mode: ScopeMode
+  /** Đoán lệnh shell có ghi vào chỗ bị khoá không (Bash / PowerShell / exec_command). */
+  guessShell: boolean
+  /** Mẫu đường dẫn không bao giờ khoá (cú pháp như phạm vi việc, vd. `docs/**`, `*.lock`); cộng thêm vault / .git / .sessions / .stag. */
+  exempt: string[]
+}
+
+/** Trình duyệt trong app (Settings S5). */
+export type SearchEngine = 'google' | 'duckduckgo' | 'bing'
+export type ExternalPagePolicy = 'ask' | 'allow' | 'deny'
+export interface BrowserSettings {
+  /** Trang mở khi bạn bấm "+" tab mới ('' = trang trống). */
+  homePage: string
+  /** Chữ gõ vào thanh địa chỉ không phải địa chỉ → tìm bằng. */
+  searchEngine: SearchEngine
+  /** Cho agent dùng trình duyệt (tool browser_* trong MCP stag). Ghi đè được theo workspace / agent. */
+  agentTools: boolean
+  /** Agent mở trang ngoài localhost: hỏi bạn / luôn cho / luôn chặn. */
+  externalPages: ExternalPagePolicy
+  /** Origin luôn cho agent mở (không hỏi), vd. `https://github.com`. */
+  allowedOrigins: string[]
+  /** Giữ cookie / đăng nhập của trình duyệt mỗi workspace sau khi tắt app. */
+  keepCookies: boolean
+}
+
 export interface HandoffSettings {
   /** Tự bàn giao sang phiên mới khi context đạt `handoffPercent`. */
   autoHandoff: boolean
@@ -394,6 +426,8 @@ export interface AppSettings {
   connectors: ConnectorsSettings
   skills: SkillsSettings
   plugins: PluginsSettings
+  scope: ScopeLockSettings
+  browser: BrowserSettings
 }
 
 export interface PluginsSettings {
@@ -420,6 +454,10 @@ export interface SettingsOverrides {
   skills?: Record<string, boolean>
   /** Bật / tắt plugin (khoá = id plugin): ẩn slot, tool, sự kiện của nó ở cấp này. */
   plugins?: Record<string, boolean>
+  /** Khoá phạm vi: workspace đổi được mode / guessShell và thêm exempt (cộng với app); agent chỉ đổi mode. */
+  scope?: Partial<ScopeLockSettings>
+  /** Trình duyệt: chỉ bật / tắt tool trình duyệt của agent. */
+  browser?: { agentTools?: boolean }
 }
 
 /** Sửa ghi đè: khoá có mặt thay cả mục đó, `null` = bỏ mục đó (theo cấp trên). Khoá vắng mặt giữ nguyên. */
@@ -448,11 +486,15 @@ export interface AppSettingsPatch {
   skills?: { toggles: Record<string, boolean> }
   /** Thay cả map bật / tắt plugin ở cấp app. */
   plugins?: { toggles: Record<string, boolean> }
+  scope?: Partial<ScopeLockSettings>
+  browser?: Partial<BrowserSettings>
 }
 
 export type OverrideLevel = 'workspace' | 'agent'
 
 export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPercent: 80 }
+export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true, exempt: [] }
+export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
 export const DEFAULT_GENERAL: GeneralSettings = {
   zoom: 100,
   openAtLogin: false,
@@ -473,7 +515,7 @@ export const DEFAULT_ADAPTERS: AdaptersSettings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 2,
-  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} } },
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, browser: DEFAULT_BROWSER },
   workspaces: {},
   agents: {}
 }
