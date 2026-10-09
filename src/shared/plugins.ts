@@ -22,7 +22,8 @@ export const PLUGIN_CAPABILITIES = {
   'ui.dashboardWidget.register': 'Thêm ô widget vào lưới agent của workspace',
   'instance.settings.register': 'Thêm trang cài đặt riêng trong Cài đặt → Plugin',
   'agent.tools.register': 'Thêm tool cho agent (qua máy chủ MCP stag)',
-  'events.subscribe': 'Nhận sự kiện của app (phiên agent mở / đóng, agent chờ bạn, việc bắt đầu / xong)',
+  'events.subscribe':
+    'Nhận sự kiện của app (phiên agent mở / đóng, agent chờ bạn, việc bắt đầu / xong, agent tạo / sửa file, note vault đổi, bàn giao phiên, đụng phạm vi việc của agent khác)',
   'agents.read': 'Xem danh sách workspace, agent và trạng thái của họ',
   'agent.sessions.send': 'Gõ chữ vào terminal của agent đang chạy',
   'board.read': 'Xem các việc trên kanban',
@@ -33,6 +34,7 @@ export const PLUGIN_CAPABILITIES = {
   'ui.notify': 'Hiện thông báo',
   'jobs.schedule': 'Tự chạy việc theo lịch',
   'webhooks.receive': 'Nhận webhook qua một địa chỉ cục bộ trên máy này',
+  'files.read': 'Đọc file trong thư mục dự án của workspace',
   'http.outbound': 'Gọi ra Internet'
 } as const
 export type PluginCapability = keyof typeof PLUGIN_CAPABILITIES
@@ -45,7 +47,11 @@ export const PLUGIN_EVENTS = {
   'agent.session.stopped': 'Phiên agent đóng',
   'agent.waiting': 'Agent chờ bạn (xong lượt / hỏi / xin quyền)',
   'task.started': 'Agent bắt đầu một việc',
-  'task.done': 'Agent xong việc'
+  'task.done': 'Agent xong việc',
+  'artifact.written': 'Agent tạo / sửa file trong dự án',
+  'vault.note.changed': 'Note trong vault được ghi (agent hoặc bạn sửa)',
+  'handoff.done': 'Agent bàn giao xong, app mở phiên mới',
+  'scope.conflict': 'Agent định sửa file thuộc việc đang mở của agent khác'
 } as const
 export type PluginEventType = keyof typeof PLUGIN_EVENTS
 
@@ -55,7 +61,15 @@ export interface PluginEvent {
   workspaceId: string
   agentId?: string
   agentName?: string
-  /** Thêm tuỳ sự kiện: reason (agent.waiting), title / scope (task.*), kind (session). */
+  /**
+   * Thêm tuỳ sự kiện:
+   * - agent.waiting: reason; task.started: title, scope; task.done: title; agent.session.*: kind
+   * - artifact.written: path (tương đối so với dự án, "/"), kind ('write' = tạo / ghi cả file, 'edit' = sửa)
+   * - vault.note.changed: path (tương đối so với vault), by ('agent' | 'user'); by 'user' thì không có agentId
+   * - handoff.done: percent (% context lúc bàn giao, số nguyên; null nếu chưa biết), fromSessionId, summary (bản bàn giao)
+   * - scope.conflict: path, paths, ownerAgentId, ownerAgentName, taskTitle, entry, command?, decision
+   *   ('ask' = Claude Code hỏi trong terminal, 'allowed' / 'denied' = bạn trả lời trong app với Codex)
+   */
   data: Record<string, unknown>
 }
 

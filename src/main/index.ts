@@ -16,16 +16,17 @@ import { SecretStore } from './secrets'
 import { OAuthService } from './oauth'
 import { ApprovalQueue } from './approvals'
 import { SkillLibrary } from './skills'
-import { PluginHost, PluginWebhookServer, type SpawnWorker } from './plugins'
+import { KeyedThrottle, PluginHost, PluginWebhookServer, type SpawnWorker } from './plugins'
 import pluginUiCss from './inject/pluginUi.css?raw'
 import pluginUiJs from './inject/pluginUi.js?raw'
 import { independentSessionEnv } from './adapters'
-import { putNote, readNote } from './vault'
+import { onUserNoteWrite, putNote, readNote } from './vault'
 import { agentKind } from '@shared/types'
 import type { PluginEvent } from '@shared/plugins'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
 import { WorkspaceStore } from './workspace'
+import { samePath } from './fsutil'
 import type { GeneralSettings } from '@shared/types'
 
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
@@ -84,8 +85,30 @@ const notifier = new Notifier(
     send(IPC.revealAgent, workspaceId, agentId)
   }
 )
-const activity = new VaultActivityLog((workspaceId) => send(IPC.vaultActivityChanged, workspaceId))
-const artifacts = new ArtifactLog((workspaceId) => send(IPC.artifactsChanged, workspaceId))
+/** Sự kiện plugin từ nguồn dày (agent ghi một file liên tục): mỗi file / note một sự kiện mỗi 5 giây. */
+const eventGate = new KeyedThrottle(5000)
+const activity = new VaultActivityLog(
+  (workspaceId) => send(IPC.vaultActivityChanged, workspaceId),
+  (ws, a, rels) => {
+    for (const rel of rels)
+      if (eventGate.pass(`vault|${ws.id}|${a.id}|${rel.toLowerCase()}`)) plugins.emit(pluginEvent('vault.note.changed', a, { path: rel, by: 'agent' }))
+  }
+)
+const artifacts = new ArtifactLog(
+  (workspaceId) => send(IPC.artifactsChanged, workspaceId),
+  (ws, a, files) => {
+    // Chỉ tạo / sửa (file bị xoá không phải "written").
+    for (const f of files)
+      if (f.kind !== 'delete' && eventGate.pass(`artifact|${ws.id}|${a.id}|${f.rel.toLowerCase()}`))
+        plugins.emit(pluginEvent('artifact.written', a, { path: f.rel, kind: f.kind }))
+  }
+)
+// Người dùng lưu / tạo note trong app (Vault).
+onUserNoteWrite((vaultPath, rel) => {
+  const ws = workspaces.list().find((w) => samePath(w.vaultPath, vaultPath))
+  if (ws && eventGate.pass(`vault-user|${ws.id}|${rel.toLowerCase()}`))
+    plugins.emit({ type: 'vault.note.changed', at: new Date().toISOString(), workspaceId: ws.id, data: { path: rel, by: 'user' } })
+})
 const adapters = new AdapterService(settings)
 const external = new ExternalAdapterStore(join(app.getPath('userData'), 'adapters'), (list) => send(IPC.adapterExtChanged, list))
 const secrets = new SecretStore(
@@ -164,6 +187,10 @@ const plugins = new PluginHost(join(app.getPath('userData'), 'plugins'), {
       const ws = workspaces.get(workspaceId)
       if (!ws) throw new Error('Không có workspace này.')
       await putNote(ws.vaultPath, rel, content)
+    },
+    workspacePaths: (workspaceId) => {
+      const ws = workspaces.get(workspaceId)
+      return ws ? { path: ws.path, vaultPath: ws.vaultPath } : null
     },
     notify: (title, body) => new Notification({ title, body }).show()
   }
@@ -361,6 +388,20 @@ app.whenReady().then(async () => {
   await webhooks.start().catch((e) => console.error('[plugins] webhook server', e))
   agents.attachPlugins({
     onSession: (type, a) => plugins.emit(pluginEvent(type, a, { kind: agentKind(a) })),
+    onHandoff: (a, d) => plugins.emit(pluginEvent('handoff.done', a, { ...d, summary: d.summary.slice(0, 20_000) })),
+    onScopeConflict: (c) =>
+      plugins.emit(
+        pluginEvent('scope.conflict', c.agent, {
+          path: c.hits[0],
+          paths: c.hits,
+          ownerAgentId: c.owner.agentId,
+          ownerAgentName: c.owner.agentName,
+          taskTitle: c.owner.title,
+          entry: c.entry,
+          ...(c.command ? { command: c.command } : {}),
+          decision: c.decision
+        })
+      ),
     tools: (a, ws) =>
       plugins.toolsFor(ws.id, a.id).map((t) => ({
         name: t.mcpName,

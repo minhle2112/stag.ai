@@ -177,7 +177,11 @@ export class ArtifactLog {
   private ignored = new Set<string>()
   private paths = new Map<string, Workspace>()
 
-  constructor(private notify: (workspaceId: string) => void) {}
+  constructor(
+    private notify: (workspaceId: string) => void,
+    /** Mỗi lần ghi nhận (kể cả lần gộp vào dòng cũ): các file vừa tạo / sửa / xoá (plugin: sự kiện artifact.written). */
+    private onRecord?: (ws: Workspace, agent: Agent, files: Array<{ rel: string; kind: ArtifactEvent['kind'] }>) => void
+  ) {}
 
   private file(ws: Workspace): string {
     return join(ws.path, '.stag', 'artifacts.json')
@@ -231,6 +235,7 @@ export class ArtifactLog {
     }
     if (list.length > MAX_EVENTS) list.splice(0, list.length - MAX_EVENTS)
     this.changed(ws)
+    this.onRecord?.(ws, agent, found)
   }
 
   /**

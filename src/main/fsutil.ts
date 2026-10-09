@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 export async function exists(p: string): Promise<boolean> {
   try {
@@ -52,6 +52,34 @@ function normPath(p: string): string {
 /** So sánh đường dẫn Windows không phân biệt hoa thường / kiểu dấu gạch, bỏ dấu phân cách cuối. */
 export function samePath(a: string, b: string): boolean {
   return normPath(a) === normPath(b)
+}
+
+/** `p` nằm trong (hoặc chính là) thư mục `root` — cả hai là đường dẫn tuyệt đối đã chuẩn hoá. Windows: không phân biệt hoa thường. */
+export function isInside(root: string, p: string): boolean {
+  const win = process.platform === 'win32'
+  const r = win ? root.toLowerCase() : root
+  const x = win ? p.toLowerCase() : p
+  return x === r || x.startsWith(r.endsWith(sep) ? r : r + sep)
+}
+
+/**
+ * Đường dẫn thật (đã giải symlink / junction) của `rel` trong thư mục `root`. Chặn đường dẫn tuyệt đối, `..`, và
+ * symlink trỏ ra ngoài `root`. `rel` rỗng = chính `root`. File không có → ném lỗi ENOENT của fs.
+ */
+export async function realPathInside(root: string, rel: string): Promise<string> {
+  const outside = (): Error => Object.assign(new Error('Đường dẫn phải nằm trong thư mục dự án'), { code: 'OUTSIDE' })
+  if (rel.includes('\0') || isAbsolute(rel) || /^[A-Za-z]:/.test(rel) || /^[\\/]/.test(rel)) throw outside()
+  const parts = rel.split(/[\\/]+/).filter((s) => s && s !== '.')
+  if (parts.includes('..')) throw outside()
+  const realRoot = await fs.realpath(resolve(root))
+  const real = await fs.realpath(resolve(realRoot, ...parts))
+  if (!isInside(realRoot, real)) throw outside()
+  return real
+}
+
+/** Đường dẫn tương đối dạng "a/b.txt" của `p` so với `root` (p nằm trong root). */
+export function relSlash(root: string, p: string): string {
+  return relative(root, p).split(sep).join('/')
 }
 
 const NAME_CHAR = /[\p{L}\p{M}\p{N}_-]/u

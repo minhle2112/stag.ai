@@ -1,12 +1,19 @@
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { normalizeSettings } from '@shared/settings'
 import type { PluginEvent } from '@shared/plugins'
-import { forkWorker, PluginHost, PluginWebhookServer, type PluginHostApi } from './plugins'
+import type { Agent, Workspace } from '@shared/types'
+import { ArtifactLog } from './artifacts'
+import { forkWorker, KeyedThrottle, PluginHost, PluginWebhookServer, type PluginHostApi } from './plugins'
+import { onUserNoteWrite, writeNote } from './vault'
+import { VaultActivityLog } from './vaultActivity'
 // @ts-expect-error plugin kèm app viết bằng JS thuần
 import { dayOf, renderLog } from '../../resources/plugin-catalog/stag-plugin-task-log/worker.mjs'
+
+// artifacts.ts → workspace.ts có import `app` của Electron (không dùng tới ở đây).
+vi.mock('electron', () => ({ app: { isPackaged: false, getAppPath: () => '', getPath: () => '' } }))
 
 const HELLO = resolve('resources/plugin-catalog/stag-plugin-hello')
 /** Plugin chỉ có nút mở địa chỉ (không có worker). */
@@ -40,6 +47,8 @@ let notes: string[]
 let sent: Array<[string, string]>
 let boardTasks: unknown[] = []
 let vaultWrites: Array<[string, string, string]> = []
+/** Thư mục dự án / vault theo workspace (files.list / files.read). */
+let wsPaths: Record<string, { path: string; vaultPath: string }> = {}
 
 const api: PluginHostApi = {
   agents: () => ({
@@ -57,6 +66,7 @@ const api: PluginHostApi = {
   vaultWrite: async (ws, path, content) => {
     vaultWrites.push([ws, path, content])
   },
+  workspacePaths: (id) => wsPaths[id] ?? null,
   notify: (title, body) => notes.push(`${title}|${body}`)
 }
 
@@ -74,6 +84,7 @@ beforeEach(async () => {
   sent = []
   boardTasks = []
   vaultWrites = []
+  wsPaths = {}
   host = new PluginHost(join(tmp, 'plugins'), { spawn: forkWorker, api })
   await host.applySettings(normalizeSettings({ version: 2 }))
 })
@@ -381,5 +392,206 @@ describe('PluginHost: plugin kèm app, tạo plugin từ mẫu', () => {
     await fs.writeFile(join(parent, 'stag-plugin-z', 'a.txt'), 'x')
     await expect(host.scaffold({ parentDir: parent, name: 'Z', id: 'my.z', template: 'basic' })).rejects.toThrow(/đã có file/)
     await expect(host.scaffold({ parentDir: parent, name: 'Z', id: 'Bad Id', template: 'basic' })).rejects.toThrow(/Mã plugin/)
+  })
+})
+
+describe('PluginHost: sự kiện mới + quyền files.read', () => {
+  const SDK = resolve('resources/plugin-sdk/stag-plugin-sdk.mjs').replace(/\\/g, '/')
+  const A: Agent = { id: 'a1', workspaceId: 'w1', name: 'Lead', role: '', permissionMode: 'default', createdAt: '2026-01-01T00:00:00.000Z' }
+
+  /** Plugin thử: ghi sự kiện vào nhật ký, action "ls" gọi ctx.files.list / read. */
+  async function filesPlugin(dir: string, caps: string[]): Promise<string> {
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(
+      join(dir, 'w.mjs'),
+      `import { definePlugin, runWorker } from 'file:///${SDK}'
+runWorker(definePlugin({ async setup(ctx) {
+  for (const t of ['artifact.written', 'vault.note.changed', 'handoff.done', 'scope.conflict'])
+    ctx.events.on(t, async (e) => ctx.logger.info('EV ' + JSON.stringify({ type: e.type, ws: e.workspaceId, agent: e.agentName ?? null, data: e.data })))
+  ctx.actions.register('ls', async (params, run) => {
+    try {
+      const list = await ctx.files.list(run.workspaceId)
+      const { text } = await ctx.files.read(run.workspaceId, 'src/a.txt')
+      return { message: JSON.stringify({ names: list.map((x) => x.name), text }) }
+    } catch (e) { return { message: 'ERR ' + e.message } }
+  })
+} }))`
+    )
+    await fs.writeFile(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'files',
+        version: '1.0.0',
+        stagPlugin: {
+          id: 'acme.files',
+          capabilities: ['ui.sidebar.register', 'events.subscribe', ...caps],
+          entrypoints: { worker: 'w.mjs' },
+          events: ['artifact.written', 'vault.note.changed', 'handoff.done', 'scope.conflict'],
+          ui: { slots: [{ type: 'sidebar', id: 'ls', action: 'ls' }] }
+        }
+      })
+    )
+    return dir
+  }
+
+  const evLogs = (): Array<{ type: string; ws: string; agent: string | null; data: Record<string, unknown> }> =>
+    host
+      .list()
+      .find((p) => p.manifest.id === 'acme.files')!
+      .logs.filter((l) => l.message.startsWith('EV '))
+      .map((l) => JSON.parse(l.message.slice(3)))
+
+  it('KeyedThrottle: mỗi khoá một lần trong khoảng, không trượt', () => {
+    let t = 0
+    const g = new KeyedThrottle(5000, () => t)
+    expect(g.pass('a')).toBe(true)
+    t = 1000
+    expect(g.pass('a')).toBe(false)
+    expect(g.pass('b')).toBe(true)
+    t = 4999
+    expect(g.pass('a')).toBe(false)
+    t = 5000
+    expect(g.pass('a')).toBe(true) // ghi liên tục vẫn ra một sự kiện mỗi 5 s
+    t = 9000
+    expect(g.pass('a')).toBe(false)
+    expect(g.pass('b')).toBe(true)
+  })
+
+  it('sự kiện mới tới worker qua emit: artifact (từ ArtifactLog, có giới hạn), vault agent / người dùng, bàn giao, đụng phạm vi', async () => {
+    await host.install({ type: 'local', path: await filesPlugin(join(tmp, 'files'), []) })
+    await host.approve('acme.files')
+    const proj = join(tmp, 'proj')
+    await fs.mkdir(join(proj, 'src'), { recursive: true })
+    const ws: Workspace = { id: 'w1', name: 'Proj', path: proj, vaultPath: join(proj, 'Proj memory'), createdAt: '' }
+    const ev = (type: PluginEvent['type'], a: Agent | null, data: Record<string, unknown>): PluginEvent => ({
+      type,
+      at: new Date().toISOString(),
+      workspaceId: ws.id,
+      ...(a ? { agentId: a.id, agentName: a.name } : {}),
+      data
+    })
+
+    // Như index.ts: ArtifactLog → KeyedThrottle → emit.
+    const gate = new KeyedThrottle(5000)
+    const artifacts = new ArtifactLog(
+      () => {},
+      (w, a, files) => {
+        for (const f of files) if (f.kind !== 'delete' && gate.pass(`${w.id}|${a.id}|${f.rel.toLowerCase()}`)) host.emit(ev('artifact.written', a, { path: f.rel, kind: f.kind }))
+      }
+    )
+    const write = (file: string, tool = 'Write'): Promise<void> => artifacts.onToolUse(ws, A, { hook_event_name: 'PostToolUse', tool_name: tool, tool_input: { file_path: file }, cwd: proj })
+    await write(join(proj, 'src', 'a.ts'))
+    await write(join(proj, 'src', 'a.ts'), 'Edit') // cùng file trong 5 s → bỏ
+    await write(join(proj, 'src', 'b.ts'), 'Edit')
+    await write(join(ws.vaultPath, 'x.md')) // note vault không phải artifact
+
+    const activity = new VaultActivityLog(
+      () => {},
+      (w, a, rels) => rels.forEach((rel) => host.emit(ev('vault.note.changed', a, { path: rel, by: 'agent' })))
+    )
+    activity.onToolUse(ws, A, { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: join(ws.vaultPath, 'r.md') } }) // đọc: không có sự kiện
+    activity.onToolUse(ws, A, { hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: join(ws.vaultPath, '30 Features', 'Login.md') } })
+
+    await fs.mkdir(ws.vaultPath, { recursive: true })
+    const userWrites: Array<[string, string]> = []
+    onUserNoteWrite((vaultPath, rel) => {
+      userWrites.push([vaultPath, rel])
+      host.emit(ev('vault.note.changed', null, { path: rel, by: 'user' }))
+    })
+    try {
+      await writeNote(ws.vaultPath, 'u.md', 'mới', null)
+      expect(await writeNote(ws.vaultPath, 'u.md', 'x', 'cũ')).toMatchObject({ status: 'conflict' }) // không lưu → không báo
+    } finally {
+      onUserNoteWrite(null)
+    }
+    expect(userWrites).toEqual([[ws.vaultPath, 'u.md']])
+
+    host.emit(ev('handoff.done', A, { percent: 81, fromSessionId: 's1', summary: 'Xong phần đăng nhập' }))
+    host.emit(ev('scope.conflict', A, { path: 'src/auth/x.ts', ownerAgentName: 'Coder', decision: 'ask' }))
+    host.emit(ev('task.done', A, { title: 'không khai' })) // plugin không khai task.done
+
+    await until(() => evLogs().length === 6)
+    expect(evLogs()).toEqual([
+      { type: 'artifact.written', ws: 'w1', agent: 'Lead', data: { path: 'src/a.ts', kind: 'write' } },
+      { type: 'artifact.written', ws: 'w1', agent: 'Lead', data: { path: 'src/b.ts', kind: 'edit' } },
+      { type: 'vault.note.changed', ws: 'w1', agent: 'Lead', data: { path: '30 Features/Login.md', by: 'agent' } },
+      { type: 'vault.note.changed', ws: 'w1', agent: null, data: { path: 'u.md', by: 'user' } },
+      { type: 'handoff.done', ws: 'w1', agent: 'Lead', data: { percent: 81, fromSessionId: 's1', summary: 'Xong phần đăng nhập' } },
+      { type: 'scope.conflict', ws: 'w1', agent: 'Lead', data: { path: 'src/auth/x.ts', ownerAgentName: 'Coder', decision: 'ask' } }
+    ])
+    expect(host.list().find((p) => p.manifest.id === 'acme.files')!.status.events).toBe(6)
+
+    // Tắt ở workspace → không nhận.
+    await host.applySettings(normalizeSettings({ version: 2, workspaces: { w1: { plugins: { 'acme.files': false } } } }))
+    host.emit(ev('handoff.done', A, { percent: 90 }))
+    expect(host.list().find((p) => p.manifest.id === 'acme.files')!.status.events).toBe(6)
+    await artifacts.flush()
+  })
+
+  it('files.list / files.read: cần quyền, chỉ trong dự án, bỏ thư mục của app / git / vault, chặn nhị phân và file lớn', async () => {
+    const proj = join(tmp, 'proj')
+    const vault = join(proj, 'Proj memory')
+    const outside = join(tmp, 'outside')
+    for (const d of ['src', 'node_modules/x', '.git', '.stag', '.sessions', vault, outside]) await fs.mkdir(resolve(proj, d), { recursive: true })
+    await fs.writeFile(join(proj, 'src', 'a.txt'), 'xin chào\n')
+    await fs.writeFile(join(proj, 'README.md'), '# Proj')
+    await fs.writeFile(join(proj, '.git', 'config'), '[remote] url=https://token@x')
+    await fs.writeFile(join(proj, '.stag', 'artifacts.json'), '{}')
+    await fs.writeFile(join(vault, '_INDEX.md'), 'vault')
+    await fs.writeFile(join(outside, 'secret.txt'), 'bí mật')
+    await fs.writeFile(join(proj, 'bin.dat'), Buffer.from([1, 2, 0, 3]))
+    await fs.writeFile(join(proj, 'big.txt'), 'x'.repeat(1024 * 1024 + 1))
+    await fs.writeFile(join(proj, 'latin1.txt'), Buffer.from([0x63, 0x61, 0x66, 0xe9])) // "café" Latin-1
+    await fs.symlink(outside, join(proj, 'escape'), 'junction')
+    await fs.symlink(join(proj, 'src'), join(proj, 'src-link'), 'junction')
+    wsPaths = { w1: { path: proj, vaultPath: vault } }
+    const ctx = { workspaceId: 'w1' }
+
+    // Không có quyền files.read: worker và trang đều bị từ chối.
+    const dir = await filesPlugin(join(tmp, 'files'), [])
+    await host.install({ type: 'local', path: dir })
+    await host.approve('acme.files')
+    expect(await host.runSlot('acme.files', 'ls', ctx)).toEqual({ message: 'ERR Plugin chưa được cấp quyền "files.read".' })
+    await expect(host.bridge('acme.files', 'files.list', { workspaceId: 'w1' }, ctx)).rejects.toThrow(/chưa được cấp quyền "files.read"/)
+    await expect(host.bridge('acme.files', 'files.read', { workspaceId: 'w1', path: 'README.md' }, ctx)).rejects.toThrow(/chưa được cấp quyền "files.read"/)
+
+    // Xin thêm quyền → chờ duyệt lại → chạy được.
+    await filesPlugin(dir, ['files.read'])
+    expect((await host.reload('acme.files')).status.state).toBe('upgrade_pending')
+    await host.approve('acme.files')
+    expect(JSON.parse((await host.runSlot('acme.files', 'ls', ctx)).message!)).toEqual({
+      names: ['src', 'src-link', 'big.txt', 'bin.dat', 'latin1.txt', 'README.md'],
+      text: 'xin chào\n'
+    })
+    const list = (path?: string): Promise<unknown> => host.bridge('acme.files', 'files.list', { workspaceId: 'w1', ...(path !== undefined ? { path } : {}) }, ctx)
+    const read = (path: string): Promise<unknown> => host.bridge('acme.files', 'files.read', { workspaceId: 'w1', path }, ctx)
+    expect(await list('src')).toEqual([{ name: 'a.txt', path: 'src/a.txt', type: 'file', size: 10 }])
+    expect(await list('src-link')).toEqual([{ name: 'a.txt', path: 'src/a.txt', type: 'file', size: 10 }])
+    expect(await list()).toContainEqual({ name: 'README.md', path: 'README.md', type: 'file', size: 6 })
+    expect(await read('src\\a.txt')).toEqual({ text: 'xin chào\n' })
+    expect(await read('./README.md')).toEqual({ text: '# Proj' })
+
+    // Thoát ra ngoài dự án.
+    await expect(read('../outside/secret.txt')).rejects.toThrow(/trong thư mục dự án/)
+    await expect(read('src/../../outside/secret.txt')).rejects.toThrow(/trong thư mục dự án/)
+    await expect(read(join(outside, 'secret.txt'))).rejects.toThrow(/trong thư mục dự án/)
+    await expect(read('/etc/passwd')).rejects.toThrow(/trong thư mục dự án/)
+    await expect(read('escape/secret.txt')).rejects.toThrow(/trong thư mục dự án/)
+    await expect(list('escape')).rejects.toThrow(/trong thư mục dự án/)
+    // Thư mục của app / git / vault.
+    await expect(read('.git/config')).rejects.toThrow(/dữ liệu của git/)
+    await expect(list('.stag')).rejects.toThrow(/dữ liệu của git/)
+    await expect(read('Proj memory/_INDEX.md')).rejects.toThrow(/vault/)
+    // Nhị phân, quá lớn, không phải UTF-8, không có, thư mục.
+    await expect(read('bin.dat')).rejects.toThrow(/nhị phân/)
+    await expect(read('big.txt')).rejects.toThrow(/quá lớn/)
+    await expect(read('latin1.txt')).rejects.toThrow(/UTF-8/)
+    await expect(read('nope.txt')).rejects.toThrow(/Không thấy/)
+    await expect(read('src')).rejects.toThrow(/không phải file/)
+    await expect(list('README.md')).rejects.toThrow(/không phải thư mục/)
+    // Workspace không có / plugin tắt ở workspace đó.
+    await expect(host.bridge('acme.files', 'files.list', { workspaceId: 'w9' }, ctx)).rejects.toThrow(/Không có workspace/)
+    await host.applySettings(normalizeSettings({ version: 2, workspaces: { w1: { plugins: { 'acme.files': false } } } }))
+    await expect(list()).rejects.toThrow(/tắt ở workspace/)
   })
 })

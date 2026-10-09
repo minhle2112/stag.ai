@@ -84,6 +84,12 @@ export function runWorker(def) {
       read: (workspaceId, path) => call('vault.read', { workspaceId, path }),
       write: (workspaceId, path, content) => call('vault.write', { workspaceId, path, content })
     },
+    // Quyền files.read: một thư mục của dự án (không đệ quy; bỏ .git, node_modules, .sessions, .stag, vault) →
+    // [{ name, path, type: 'file' | 'dir', size }]; đọc file chữ UTF-8 ≤ 1 MB → { text }. path tương đối so với dự án.
+    files: {
+      list: (workspaceId, path = '') => call('files.list', { workspaceId, path }),
+      read: (workspaceId, path) => call('files.read', { workspaceId, path })
+    },
     notify: (title, body) => call('notify', { title, body })
   }
 

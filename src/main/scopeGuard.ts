@@ -85,6 +85,22 @@ export const reply = (permissionDecision: 'allow' | 'ask' | 'deny', reason: stri
   hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision, permissionDecisionReason: reason }
 })
 
+/**
+ * Agent định sửa trong vùng khoá của việc đang mở của agent khác. `decision`: 'ask' = Claude Code hỏi trong terminal
+ * (chưa biết kết quả), 'allowed' / 'denied' = người dùng trả lời trong app (Codex).
+ */
+export interface ScopeConflict {
+  ws: Workspace
+  agent: Agent
+  /** Các chỗ đụng (file tương đối, hoặc mục khoá mà lệnh shell nhắc tới). */
+  hits: string[]
+  /** Việc đang mở giữ vùng khoá (chỗ đụng đầu tiên). */
+  owner: Task
+  entry: string
+  command?: string
+  decision: 'ask' | 'allowed' | 'denied'
+}
+
 /** Một chỗ đụng: `grant` = khoá ghi nhớ khi người dùng cho qua, `label` = chữ hiện cho người dùng. */
 interface Hit {
   grant: string
@@ -104,6 +120,9 @@ export class ScopeGuard {
   /** agentId → chỗ người dùng đã cho qua trong phiên hiện tại (file tương đối chữ thường, hoặc `sh:<mục khoá>`). */
   private grants = new Map<string, Set<string>>()
 
+  /** Báo mỗi lần đụng vùng khoá phải hỏi người dùng (plugin: sự kiện scope.conflict). */
+  onConflict?: (c: ScopeConflict) => void
+
   constructor(private board: Board) {}
 
   async preToolUse(ws: Workspace, agent: Agent, kind: AgentKind, p: HookPayload): Promise<PreToolUseReply | undefined> {
@@ -115,7 +134,15 @@ export class ScopeGuard {
     const [first] = hits
     const what = hits.length > 1 ? `${first.label} (+${hits.length - 1} chỗ khác)` : first.label
     const shortCmd = cmd && (cmd.length > 160 ? `${cmd.slice(0, 157)}…` : cmd)
+    const conflict = (decision: ScopeConflict['decision']): void => {
+      try {
+        this.onConflict?.({ ws, agent, hits: hits.map((h) => h.label), owner: first.task, entry: first.entry, command: shortCmd ?? undefined, decision })
+      } catch (e) {
+        console.error('[scope]', e)
+      }
+    }
     if (kind !== 'codex') {
+      conflict('ask')
       const action = cmd ? `Lệnh này có thể sửa ${what}` : `${what}`
       return reply(
         'ask',
@@ -128,6 +155,7 @@ export class ScopeGuard {
       { file: what, command: shortCmd ?? undefined, holder: { agentName: first.task.agentName, title: first.task.title, entry: first.entry } },
       SCOPE_ASK_MS
     )
+    conflict(allow ? 'allowed' : 'denied')
     if (allow) {
       for (const h of hits) this.grant(agent.id, h.grant)
       return undefined

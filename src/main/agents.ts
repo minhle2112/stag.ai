@@ -114,10 +114,13 @@ export class AgentService {
   private pluginHooks: {
     onSession?: (type: 'agent.session.started' | 'agent.session.stopped', agent: Agent) => void
     tools?: (agent: Agent, ws: Workspace) => ExtraTool[]
+    onHandoff?: (agent: Agent, data: { percent: number | null; fromSessionId: string; summary: string }) => void
+    onScopeConflict?: ScopeGuard['onConflict']
   } = {}
 
   attachPlugins(hooks: AgentService['pluginHooks']): void {
     this.pluginHooks = hooks
+    this.guard.onConflict = hooks.onScopeConflict
   }
 
   /** Mọi agent + phiên đang chạy (cho plugin có quyền agents.read). */
@@ -612,6 +615,8 @@ export class AgentService {
     await this.save()
     run.handoffAsk = undefined
     this.board.setHandoff(ctx.agent, 'restarting')
+    const pct = contextPercent(this.board.statusOf(agentId)?.context)
+    this.pluginHooks.onHandoff?.(ctx.agent, { percent: pct == null ? null : Math.round(pct), fromSessionId: run.sessionId, summary })
     setTimeout(() => {
       if (this.running.get(agentId) === run) this.ptys.kill(run.ptyId)
     }, HANDOFF_CLOSE_DELAY_MS)
