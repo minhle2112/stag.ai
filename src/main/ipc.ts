@@ -11,7 +11,7 @@ import type { OAuthService } from './oauth'
 import type { ApprovalQueue } from './approvals'
 import { connectFromCatalog } from './connect'
 import { readSkillDir, scanSkills, type SkillLibrary } from './skills'
-import type { PluginHost } from './plugins'
+import type { PluginCallContext, PluginHost } from './plugins'
 import type { PluginInstallRequest } from '@shared/plugins'
 import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AdapterService } from './adapters'
@@ -318,17 +318,19 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.pluginsRestart, (_e, id: string) => plugins.restart(pluginId(id)))
   ipcMain.handle(IPC.pluginsConfig, (_e, id: string, config: Record<string, unknown>) => plugins.setConfig(pluginId(id), config && typeof config === 'object' ? config : {}))
   ipcMain.handle(IPC.pluginsHealth, (_e, id: string) => plugins.health(pluginId(id)))
-  ipcMain.handle(IPC.pluginsSlot, (_e, id: string, slotId: string, workspaceId?: string, agentId?: string) => {
-    const ws = workspaceId ? workspaces.get(workspaceId) : undefined
-    const agent = agentId ? agents.pluginView().find((x) => x.agent.id === agentId)?.agent : undefined
-    return plugins.runSlot(pluginId(id), String(slotId), {
-      workspaceId: ws?.id,
-      workspaceName: ws?.name,
-      workspacePath: ws?.path,
-      agentId: agent?.id,
-      agentName: agent?.name
-    })
-  })
+  const callContext = (workspaceId?: string, agentId?: string): PluginCallContext => {
+    const ws = typeof workspaceId === 'string' ? workspaces.get(workspaceId) : undefined
+    const agent = typeof agentId === 'string' ? agents.pluginView().find((x) => x.agent.id === agentId)?.agent : undefined
+    return { workspaceId: ws?.id, workspaceName: ws?.name, workspacePath: ws?.path, agentId: agent?.id, agentName: agent?.name }
+  }
+  ipcMain.handle(IPC.pluginsSlot, (_e, id: string, slotId: string, workspaceId?: string, agentId?: string) =>
+    plugins.runSlot(pluginId(id), String(slotId), callContext(workspaceId, agentId))
+  )
+  ipcMain.handle(IPC.pluginsBridge, (_e, id: string, method: string, params: Record<string, unknown>, workspaceId?: string, agentId?: string) =>
+    plugins.bridge(pluginId(id), String(method), params && typeof params === 'object' ? params : {}, callContext(workspaceId, agentId))
+  )
+  ipcMain.handle(IPC.pluginsRunJob, (_e, id: string, key: string) => plugins.runJob(pluginId(id), String(key), 'manual'))
+  ipcMain.handle(IPC.pluginsRotateWebhook, (_e, id: string) => plugins.rotateWebhookToken(pluginId(id)))
   ipcMain.handle(IPC.pickFile, async (e, title: string, defaultPath?: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)!
     const r = await dialog.showOpenDialog(win, {

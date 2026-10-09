@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fillSlotUrl, newCapabilities, normalizePluginConfig, parsePluginManifest, pluginToolName } from './plugins'
+import { cronProblem, describeCron, fillSlotUrl, newCapabilities, nextCronRun, normalizePluginConfig, parsePluginManifest, pluginToolName } from './plugins'
 import { normalizeSettings, pluginOn } from './settings'
 import hello from '../../examples/stag-plugin-hello/package.json'
 
@@ -11,11 +11,16 @@ describe('manifest plugin', () => {
     expect(h).toMatchObject({ name: 'stag-plugin-hello', version: '1.0.0', manifest: { id: 'stag.hello', entrypoints: { worker: './worker.mjs' } } })
     expect(h.manifest.tools.map((t) => t.name)).toEqual(['word_count'])
     expect(h.manifest.instanceConfigSchema?.properties.maxWords).toMatchObject({ type: 'integer', default: 500, minimum: 1 })
-    expect(h.manifest.ui.slots.map((s) => [s.type, s.action ?? s.open?.target])).toEqual([
+    expect(h.manifest.ui.slots.map((s) => [s.type, s.action ?? s.open?.target ?? s.path])).toEqual([
       ['sidebar', 'hello'],
       ['agentMenu', 'stats'],
-      ['globalToolbarButton', 'browser']
+      ['globalToolbarButton', 'browser'],
+      ['page', 'index.html'],
+      ['settingsPage', 'settings.html']
     ])
+    expect(h.manifest.entrypoints).toEqual({ worker: './worker.mjs', ui: './ui' })
+    expect(h.manifest.jobs).toEqual([{ key: 'summary', displayName: 'Tổng kết', description: expect.any(String), schedule: '0 * * * *' }])
+    expect(h.manifest.webhooks.map((w) => w.endpointKey)).toEqual(['ping'])
     const c = parsePluginManifest(
       pkg({ capabilities: ['ui.action.register'], ui: { slots: [{ type: 'globalToolbarButton', id: 'go', open: { url: 'https://x.dev/{workspace.name}', target: 'external' } }] } })
     )
@@ -36,6 +41,33 @@ describe('manifest plugin', () => {
     expect(() => parsePluginManifest(pkg({ ui: { slots: [{ type: 'sidebar', id: 's', open: { url: 'https://x' } }] } }))).toThrow(/ui.sidebar.register/)
     expect(() => parsePluginManifest(pkg({ capabilities: ['ui.action.register'], ui: { slots: [{ type: 'agentMenu', id: 's', action: 'go' }] } }))).toThrow(/không có entrypoints.worker/)
     expect(() => parsePluginManifest(pkg({ events: ['task.done'], entrypoints: { worker: 'w.js' } }))).toThrow(/events.subscribe/)
+  })
+
+  it('trang (page / settingsPage), việc theo lịch, webhook', () => {
+    const ui = { entrypoints: { ui: 'ui' }, capabilities: ['ui.page.register', 'instance.settings.register'] }
+    const a = parsePluginManifest(pkg({ ...ui, ui: { slots: [{ type: 'page', id: 'p' }, { type: 'settingsPage', id: 's', path: './x/set.html' }] } }))
+    expect(a.manifest.ui.slots).toEqual([
+      { type: 'page', id: 'p', displayName: 'p', path: 'index.html' },
+      { type: 'settingsPage', id: 's', displayName: 's', path: 'x/set.html' }
+    ])
+    expect(() => parsePluginManifest(pkg({ capabilities: ['ui.page.register'], ui: { slots: [{ type: 'page', id: 'p' }] } }))).toThrow(/entrypoints.ui/)
+    expect(() => parsePluginManifest(pkg({ entrypoints: { ui: 'ui' }, ui: { slots: [{ type: 'page', id: 'p' }] } }))).toThrow(/ui.page.register/)
+    expect(() => parsePluginManifest(pkg({ ...ui, ui: { slots: [{ type: 'page', id: 'p', path: '../a.html' }] } }))).toThrow(/path/)
+    expect(() => parsePluginManifest(pkg({ ...ui, ui: { slots: [{ type: 'page', id: 'p', path: 'a.js' }] } }))).toThrow(/\.html/)
+    expect(() => parsePluginManifest(pkg({ ...ui, ui: { slots: [{ type: 'page', id: 'p' }, { type: 'page', id: 'p' }] } }))).toThrow(/trùng id/)
+    expect(() => parsePluginManifest(pkg({ entrypoints: { ui: 'C:/x' } }))).toThrow(/entrypoints.ui/)
+
+    const w = { entrypoints: { worker: 'w.js' } }
+    const b = parsePluginManifest(
+      pkg({ ...w, capabilities: ['jobs.schedule', 'webhooks.receive'], jobs: [{ key: 'sync', schedule: '*/5 * * * *' }], webhooks: [{ endpointKey: 'gh-push', displayName: 'GitHub' }] })
+    )
+    expect(b.manifest.jobs).toEqual([{ key: 'sync', displayName: 'sync', description: '', schedule: '*/5 * * * *' }])
+    expect(b.manifest.webhooks).toEqual([{ endpointKey: 'gh-push', displayName: 'GitHub', description: '' }])
+    expect(() => parsePluginManifest(pkg({ ...w, jobs: [{ key: 'a', schedule: '* * * * *' }] }))).toThrow(/jobs.schedule/)
+    expect(() => parsePluginManifest(pkg({ ...w, capabilities: ['jobs.schedule'], jobs: [{ key: 'a', schedule: '61 * * * *' }] }))).toThrow(/jobs\[0\].schedule: trường phút/)
+    expect(() => parsePluginManifest(pkg({ capabilities: ['jobs.schedule'], jobs: [{ key: 'a', schedule: '* * * * *' }] }))).toThrow(/cần worker/)
+    expect(() => parsePluginManifest(pkg({ ...w, webhooks: [{ endpointKey: 'x' }] }))).toThrow(/webhooks.receive/)
+    expect(() => parsePluginManifest(pkg({ ...w, capabilities: ['webhooks.receive'], webhooks: [{ endpointKey: 'A B' }] }))).toThrow(/endpointKey/)
   })
 
   it('quyền mới khi cập nhật', () => {
@@ -63,6 +95,32 @@ describe('cấu hình, URL slot, tên tool', () => {
     })
     expect(url).toBe('http://127.0.0.1:5177/?company=D%E1%BB%B1%20%C3%A1n%20A%26B&a=Lead&x=http%3A%2F%2F127.0.0.1%3A5177%2F')
     expect(fillSlotUrl('https://x/{workspace.name}', { config: {} })).toBe('https://x/')
+  })
+
+  it('cron: đọc, lần chạy kế tiếp, mô tả', () => {
+    expect(cronProblem('0 * * * *')).toBeNull()
+    expect(cronProblem('* * * *')).toMatch(/5 trường/)
+    expect(cronProblem('0 24 * * *')).toMatch(/giờ/)
+    expect(cronProblem('0 9 * * 1-5,7')).toBeNull()
+    const at = (s: string): string => {
+      const d = nextCronRun(s, new Date(2026, 9, 9, 10, 17, 30))!
+      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()} ${d.getHours()}:${d.getMinutes()}`
+    }
+    // 2026-10-09 là thứ Sáu.
+    expect(at('* * * * *')).toBe('2026-10-9 10:18')
+    expect(at('0 * * * *')).toBe('2026-10-9 11:0')
+    expect(at('*/15 * * * *')).toBe('2026-10-9 10:30')
+    expect(at('0 9 * * 1-5')).toBe('2026-10-12 9:0')
+    expect(at('30 8 1 * *')).toBe('2026-11-1 8:30')
+    expect(at('0 0 29 2 *')).toBe('2028-2-29 0:0')
+    // Giới hạn cả ngày lẫn thứ → một trong hai (như cron chuẩn): ngày 13 hoặc Chủ nhật.
+    expect(at('0 12 13 * 0')).toBe('2026-10-11 12:0')
+    expect(nextCronRun('0 0 31 2 *', new Date(2026, 0, 1))).toBeNull()
+    expect(describeCron('0 * * * *')).toBe('Đầu mỗi giờ')
+    expect(describeCron('*/5 * * * *')).toBe('Mỗi 5 phút')
+    expect(describeCron('30 18 * * *')).toBe('Hằng ngày lúc 18:30')
+    expect(describeCron('0 9 * * 1-5')).toBe('Thứ 2–6 lúc 09:00')
+    expect(describeCron('0 9 1 * *')).toBe('0 9 1 * *')
   })
 
   it('tên tool MCP', () => {

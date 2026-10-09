@@ -2,7 +2,8 @@ import { create } from 'zustand'
 import type { AdapterId, SplitDir } from '@shared/types'
 
 /** 'vault' không còn là tab chính: mở bằng nút Vault ở góc phải thanh trên. */
-export type MainTab = 'kanban' | 'agents' | 'artifacts' | 'vault'
+/** `plugin:<id>/<slot>` = trang riêng của plugin (slot page). */
+export type MainTab = 'kanban' | 'agents' | 'artifacts' | 'vault' | `plugin:${string}`
 
 /** Hộp thoại tạo agent: ô mới đặt cạnh ô `agentId` theo hướng `dir`. */
 export interface NewAgentTarget {

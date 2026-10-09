@@ -1,5 +1,6 @@
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, protocol, safeStorage, shell, Tray, utilityProcess } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, protocol, safeStorage, session, shell, Tray, utilityProcess } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AdapterService } from './adapters'
 import { AgentService } from './agents'
@@ -15,7 +16,9 @@ import { SecretStore } from './secrets'
 import { OAuthService } from './oauth'
 import { ApprovalQueue } from './approvals'
 import { SkillLibrary } from './skills'
-import { PluginHost, type SpawnWorker } from './plugins'
+import { PluginHost, PluginWebhookServer, type SpawnWorker } from './plugins'
+import pluginUiCss from './inject/pluginUi.css?raw'
+import pluginUiJs from './inject/pluginUi.js?raw'
 import { independentSessionEnv } from './adapters'
 import { readNote, writeNote } from './vault'
 import { agentKind } from '@shared/types'
@@ -34,7 +37,11 @@ if (process.env.STAG_USER_DATA) app.setPath('userData', process.env.STAG_USER_DA
 const primary = app.requestSingleInstanceLock()
 
 // Ảnh / video agent tạo ra (tab Artifacts): `stag-file://<workspaceId>/<đường dẫn trong dự án>`. Phải đăng ký trước khi app sẵn sàng.
-protocol.registerSchemesAsPrivileged([{ scheme: 'stag-file', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
+// Trang của plugin (iframe cách ly): `stag-plugin://<id plugin>/<file trong entrypoints.ui>`.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'stag-file', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  { scheme: 'stag-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+])
 
 const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
@@ -125,6 +132,7 @@ const plugins = new PluginHost(join(app.getPath('userData'), 'plugins'), {
   spawn: spawnUtility,
   env: independentSessionEnv(process.env),
   onChange: (list) => send(IPC.pluginsChanged, list),
+  onStream: (id, channel, data) => send(IPC.pluginsStream, id, channel, data),
   api: {
     agents: () => ({
       workspaces: workspaces.list().map((w) => ({ id: w.id, name: w.name, path: w.path })),
@@ -157,6 +165,7 @@ const plugins = new PluginHost(join(app.getPath('userData'), 'plugins'), {
     notify: (title, body) => new Notification({ title, body }).show()
   }
 })
+const webhooks = new PluginWebhookServer(plugins)
 const pluginEvent = (type: PluginEvent['type'], a: { id: string; name: string; workspaceId: string }, data: Record<string, unknown> = {}): PluginEvent => ({
   type,
   at: new Date().toISOString(),
@@ -299,6 +308,12 @@ function createWindow(): void {
     }
   })
 
+  // Khung con trong cửa sổ app (trang plugin, xem trước HTML) không được tự điều hướng ra ngoài: chỉ trang của plugin
+  // (stag-plugin:) và nội dung nhúng (about:srcdoc / about:blank). CSP frame-src của trang app không chặn việc này.
+  win.webContents.on('will-frame-navigate', (e) => {
+    if (e.isMainFrame) return
+    if (!/^(stag-plugin:|about:(srcdoc|blank))/i.test(e.url)) e.preventDefault()
+  })
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
@@ -321,9 +336,26 @@ app.whenReady().then(async () => {
     if (!ws) return new Response('Not found', { status: 404 })
     return serveArtifact(ws, decodeURIComponent(url.pathname.replace(/^\/+/, '')), req.headers.get('range'))
   })
+  protocol.handle('stag-plugin', async (req) => {
+    const url = new URL(req.url)
+    const id = url.hostname
+    const rel = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+    const headers = plugins.uiHeaders(id)
+    if (rel === '__stag/ui.js') return new Response(pluginUiJs, { headers: { ...headers, 'Content-Type': 'text/javascript; charset=utf-8' } })
+    if (rel === '__stag/ui.css') return new Response(pluginUiCss, { headers: { ...headers, 'Content-Type': 'text/css; charset=utf-8' } })
+    const file = await plugins.uiFile(id, rel)
+    if (!file) return new Response('Not found', { status: 404, headers })
+    return new Response(await readFile(file.path), { headers: { ...headers, 'Content-Type': file.type } })
+  })
+  // Khung con trong cửa sổ app (trang plugin, xem trước HTML) không được tải trang web. Trang plugin tự đặt
+  // location.href ra ngoài thì will-frame-navigate không bắn và CSP frame-src cũng không chặn, nên chặn ở phiên mặc định
+  // (chỉ cửa sổ app dùng; trình duyệt trong app có phiên riêng).
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (d, cb) => cb({ cancel: d.resourceType === 'subFrame' }))
   agents.attachHub(hub)
   await plugins.load()
   await plugins.applySettings(settings.get())
+  plugins.startScheduler()
+  await webhooks.start().catch((e) => console.error('[plugins] webhook server', e))
   agents.attachPlugins({
     onSession: (type, a) => plugins.emit(pluginEvent(type, a, { kind: agentKind(a) })),
     tools: (a, ws) =>
@@ -359,7 +391,8 @@ app.on('before-quit', () => {
   tray = null
   void artifacts.flush()
   browser.shutdown()
-  void plugins.stopAll()
+  webhooks.stop()
+  void plugins.shutdown()
   agents.shutdown()
   hub.stop()
 })

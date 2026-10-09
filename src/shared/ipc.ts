@@ -150,6 +150,10 @@ export const IPC = {
   pluginsHealth: 'plugins:health',
   pluginsSlot: 'plugins:slot',
   pluginsChanged: 'plugins:changed',
+  pluginsBridge: 'plugins:bridge',
+  pluginsRunJob: 'plugins:runJob',
+  pluginsRotateWebhook: 'plugins:rotateWebhook',
+  pluginsStream: 'plugins:stream',
   /** main → renderer: người dùng bấm thông báo của agent → mở agent đó (kèm workspaceId, agentId). */
   revealAgent: 'agent:reveal'
 } as const

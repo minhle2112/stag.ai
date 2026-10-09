@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hello — Số liệu</title>
+    <link rel="stylesheet" href="/__stag/ui.css" />
+    <link rel="stylesheet" href="./hello.css" />
+    <style>
+      main {
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="muted" style="margin: 0">Trang cài đặt riêng của Hello (slot settingsPage). Số việc xong của mọi agent, đếm từ sự kiện <code>task.done</code>.</p>
+      <table>
+        <thead>
+          <tr><th>Agent</th><th>Workspace</th><th>Việc xong</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="row">
+        <button id="reset">Đặt lại số đếm</button>
+        <button id="summary">Tổng kết ngay</button>
+        <span class="muted" id="msg"></span>
+      </div>
+    </main>
+    <script type="module">
+      import { host } from '/__stag/ui.js'
+      const rows = document.getElementById('rows')
+      const msg = document.getElementById('msg')
+      async function load() {
+        const stats = await host.getData('stats')
+        rows.replaceChildren(
+          ...stats.agents.map((a) => {
+            const tr = document.createElement('tr')
+            for (const v of [a.name, a.workspace, String(a.done)]) tr.append(Object.assign(document.createElement('td'), { textContent: v }))
+            return tr
+          })
+        )
+        if (!stats.agents.length) rows.innerHTML = '<tr><td colspan="3" class="muted">Chưa có agent.</td></tr>'
+      }
+      document.getElementById('reset').onclick = async () => {
+        msg.textContent = (await host.action('reset')).message
+        await load()
+      }
+      // "Tổng kết ngay" chạy cùng đoạn mã với việc theo lịch, qua một action.
+      document.getElementById('summary').onclick = async () => {
+        msg.textContent = (await host.action('summaryNow')).message
+      }
+      await host.ready
+      host.on('stats', load)
+      await load()
+    </script>
+  </body>
+</html>

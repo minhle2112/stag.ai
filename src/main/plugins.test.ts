@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { normalizeSettings } from '@shared/settings'
 import type { PluginEvent } from '@shared/plugins'
-import { forkWorker, PluginHost, type PluginHostApi } from './plugins'
+import { forkWorker, PluginHost, PluginWebhookServer, type PluginHostApi } from './plugins'
 
 const HELLO = resolve('examples/stag-plugin-hello')
 /** Plugin chỉ có nút mở địa chỉ (không có worker). */
@@ -188,5 +188,102 @@ runWorker(definePlugin({ async setup(ctx) {
     await host.remove('acme.link')
     expect(host.list().map((p) => p.manifest.id)).toEqual(['stag.hello'])
     await expect(host.install({ type: 'local', path: join(tmp, 'nope') })).rejects.toThrow(/Không thấy thư mục/)
+  })
+})
+
+describe('PluginHost: trang, việc theo lịch, webhook', () => {
+  it('trang plugin: file giao diện trong gói, CSP, cầu nối kiểm quyền, dữ liệu đẩy lên trang', async () => {
+    const streams: Array<[string, string, unknown]> = []
+    host = new PluginHost(join(tmp, 'plugins'), { spawn: forkWorker, api, onStream: (id, channel, data) => streams.push([id, channel, data]) })
+    await host.applySettings(normalizeSettings({ version: 2 }))
+    await host.install({ type: 'local', path: HELLO })
+    expect(await host.uiFile('stag.hello', 'index.html')).toBeNull() // chưa duyệt
+    await host.approve('stag.hello')
+    expect(await host.uiFile('stag.hello', 'index.html')).toEqual({ path: join(HELLO, 'ui', 'index.html'), type: 'text/html; charset=utf-8' })
+    expect((await host.uiFile('stag.hello', 'hello.js'))?.type).toBe('text/javascript; charset=utf-8')
+    expect(await host.uiFile('stag.hello', '../worker.mjs')).toBeNull()
+    expect(await host.uiFile('stag.hello', 'nope.html')).toBeNull()
+    const csp = host.uiHeaders('stag.hello')['Content-Security-Policy']
+    expect(csp).toContain('connect-src stag-plugin://stag.hello;')
+    expect(csp).toContain("frame-src 'none'")
+    expect(csp).not.toContain('https:')
+
+    const ctx = { workspaceId: 'w1', workspaceName: 'Proj' }
+    host.emit({ type: 'task.done', at: '', workspaceId: 'w1', agentId: 'a1', agentName: 'Lead', data: { title: 'x' } })
+    await until(() => streams.length === 1)
+    expect(streams[0]).toEqual(['stag.hello', 'stats', { agentId: 'a1' }])
+    expect(await host.bridge('stag.hello', 'data.get', { key: 'stats' }, ctx)).toEqual({
+      agents: [
+        { id: 'a1', name: 'Lead', workspace: 'Proj', running: true, done: 1 },
+        { id: 'a2', name: 'Coder', workspace: 'Proj', running: false, done: 0 }
+      ],
+      lastPing: null,
+      lastSummary: null
+    })
+    expect(await host.bridge('stag.hello', 'action.perform', { key: 'reset' }, ctx)).toEqual({ message: 'Đã đặt lại số việc xong.' })
+    await until(() => streams.length === 2)
+    await host.bridge('stag.hello', 'state.set', { key: 'k', value: 1 }, ctx)
+    expect(await host.bridge('stag.hello', 'state.get', { key: 'k' }, ctx)).toBe(1)
+    await expect(host.bridge('stag.hello', 'vault.read', { workspaceId: 'w1', path: 'a.md' }, ctx)).rejects.toThrow(/chưa được cấp quyền "vault.read"/)
+    await expect(host.bridge('stag.hello', 'shutdown', {}, ctx)).rejects.toThrow(/không gọi được/)
+    await expect(host.bridge('stag.hello', 'data.get', { key: 'nope' }, ctx)).rejects.toThrow(/chưa được đăng ký/)
+  })
+
+  it('việc theo lịch: lần tới, chạy tay, tới giờ thì chạy, không chạy chồng', async () => {
+    await host.install({ type: 'local', path: HELLO })
+    expect(host.list()[0].jobs).toEqual([{ key: 'summary', nextRun: null, running: false }])
+    await expect(host.runJob('stag.hello', 'summary')).rejects.toThrow(/chưa được duyệt/)
+    await host.approve('stag.hello')
+    const next = Date.parse(host.list()[0].jobs[0].nextRun!)
+    expect(new Date(next).getMinutes()).toBe(0)
+    expect(next).toBeGreaterThan(Date.now())
+
+    const run = await host.runJob('stag.hello', 'summary')
+    expect(run).toMatchObject({ key: 'summary', trigger: 'manual', ok: true })
+    expect(host.list()[0].logs.some((l) => l.message === 'Tổng kết (manual): Chưa agent nào xong việc.')).toBe(true)
+
+    await host.tickJobs(new Date(next - 1000))
+    expect(host.list()[0].jobRuns.length).toBe(1) // chưa tới giờ
+    await host.tickJobs(new Date(next + 5000))
+    const info = host.list()[0]
+    expect(info.jobRuns.map((r) => [r.trigger, r.ok])).toEqual([
+      ['schedule', true],
+      ['manual', true]
+    ])
+    expect(Date.parse(info.jobs[0].nextRun!)).toBe(next + 3600_000)
+    await expect(host.runJob('stag.hello', 'nope')).rejects.toThrow(/không có việc/)
+    await expect(Promise.all([host.runJob('stag.hello', 'summary'), host.runJob('stag.hello', 'summary')])).rejects.toThrow(/đang chạy/)
+  })
+
+  it('webhook: địa chỉ có mã bí mật, chuyển cho worker, ghi lần nhận, đổi mã', async () => {
+    const server = new PluginWebhookServer(host)
+    try {
+      const base = await server.start(0)
+      await host.install({ type: 'local', path: HELLO })
+      await host.approve('stag.hello')
+      const url = host.list()[0].webhookUrls.ping
+      expect(url.startsWith(`${base}/plugins/stag.hello/webhooks/ping?token=`)).toBe(true)
+      expect(url).toMatch(/token=[0-9a-f]{36}$/)
+      expect(JSON.stringify(host.list())).not.toContain('webhookToken')
+      const post = (u: string, body: string, type = 'application/json'): Promise<Response> => fetch(u, { method: 'POST', headers: { 'Content-Type': type }, body })
+
+      const r = await post(url, '{"hi":1}')
+      expect(r.status).toBe(200)
+      expect(await r.json()).toMatchObject({ ok: true })
+      expect(await host.bridge('stag.hello', 'state.get', { key: 'lastPing' }, {})).toMatchObject({ body: { hi: 1 } })
+      expect((await post(url.replace(/token=\w+/, 'token=bad'), '{}')).status).toBe(404)
+      expect((await fetch(url)).status).toBe(405)
+      expect((await post(url, '{bad')).status).toBe(400)
+      expect((await post(`${base}/plugins/stag.hello/webhooks/nope?token=x`, '{}')).status).toBe(404)
+      expect(host.list()[0].deliveries.map((d) => d.status)).toEqual([400, 200])
+
+      await host.rotateWebhookToken('stag.hello')
+      expect((await post(url, '{}')).status).toBe(404)
+      const url2 = host.list()[0].webhookUrls.ping
+      await host.applySettings(normalizeSettings({ version: 2, app: { plugins: { toggles: { 'stag.hello': false } } } }))
+      expect((await post(url2, '{}')).status).toBe(503)
+    } finally {
+      server.stop()
+    }
   })
 })

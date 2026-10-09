@@ -1,0 +1,26 @@
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+header p {
+  margin: 0;
+}
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

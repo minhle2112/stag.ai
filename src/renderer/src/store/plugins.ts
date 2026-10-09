@@ -36,19 +36,31 @@ export function slotsOf(items: InstalledPlugin[], settings: Settings, type: Plug
   return out
 }
 
+/** Lỗi IPC gọn lại (bỏ tiền tố "Error invoking remote method …"). */
+export function pluginErr(e: unknown): string {
+  return String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+}
+
+/** Mở địa chỉ http(s) plugin đưa: trình duyệt trong app (cần workspace) hoặc trình duyệt mặc định. */
+export async function openPluginUrl(url: string, target: 'browser' | 'external' | undefined, workspaceId?: string): Promise<void> {
+  if (!/^https?:\/\/\S+$/i.test(url)) throw new Error(`Địa chỉ không hợp lệ: "${url}"`)
+  if (target !== 'external' && workspaceId) {
+    await window.stag.browser.newTab(workspaceId, url)
+    useUi.getState().setBrowserOpen(true)
+  } else window.open(url)
+}
+
 /** Bấm một slot: mở URL (trình duyệt trong app / trình duyệt mặc định) hoặc hiện lời nhắn của plugin. */
 export async function runSlot(p: InstalledPlugin, slot: PluginSlot, workspaceId?: string, agentId?: string): Promise<void> {
   const toast = usePluginToast.getState()
   try {
     const r = await window.stag.plugins.runSlot(p.manifest.id, slot.id, workspaceId, agentId)
-    if (r.openUrl) {
-      if (r.target === 'browser' && workspaceId) {
-        await window.stag.browser.newTab(workspaceId, r.openUrl)
-        useUi.getState().setBrowserOpen(true)
-      } else window.open(r.openUrl)
-    }
+    if (r.openUrl) await openPluginUrl(r.openUrl, r.target, workspaceId)
     if (r.message) toast.show(`${p.manifest.displayName}: ${r.message}`)
   } catch (e) {
-    toast.show(`${p.manifest.displayName}: ${String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`, true)
+    toast.show(`${p.manifest.displayName}: ${pluginErr(e)}`, true)
   }
 }
+
+/** Mã tab chính của trang plugin (slot page). */
+export const pageTab = (pluginId: string, slotId: string): `plugin:${string}` => `plugin:${pluginId}/${slotId}`

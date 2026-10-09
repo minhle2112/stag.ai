@@ -1,9 +1,13 @@
 import { fork } from 'node:child_process'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { createServer, type IncomingMessage, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { extname, join, resolve, sep } from 'node:path'
 import {
   fillSlotUrl,
   newCapabilities,
+  nextCronRun,
   normalizePluginConfig,
   parsePluginManifest,
   pluginToolName,
@@ -11,10 +15,12 @@ import {
   type PluginCapability,
   type PluginEvent,
   type PluginInstallRequest,
+  type PluginJobRun,
   type PluginLog,
   type PluginManifest,
   type PluginStatus,
-  type PluginTool
+  type PluginTool,
+  type PluginWebhookDelivery
 } from '@shared/plugins'
 import { pluginOn } from '@shared/settings'
 import type { Settings } from '@shared/types'
@@ -30,6 +36,10 @@ import { readText } from './fsutil'
  * userData/plugins/registry.json — danh sách đã cài (manifest, nguồn, quyền đã duyệt, cấu hình)
  * userData/plugins/npm/          — gói cài từ npm (`--ignore-scripts`)
  * userData/plugins/state/<id>.json — dữ liệu riêng của plugin (ctx.state)
+ * userData/plugins/webhooks.json — cổng máy chủ webhook (giữ nguyên giữa các lần mở app)
+ *
+ * Trang của plugin (slot page / settingsPage) là file trong thư mục `entrypoints.ui`, mở trong iframe cách ly qua
+ * giao thức `stag-plugin://<id>/…` (uiFile + uiHeaders); trang gọi app qua postMessage → bridge().
  */
 
 /** Một worker đang chạy, che khác biệt giữa utilityProcess (app) và child_process.fork (test). */
@@ -94,6 +104,8 @@ interface Entry {
   installedAt: string
   approved: PluginCapability[]
   config: Record<string, unknown>
+  /** Mã bí mật trong địa chỉ webhook (chỉ ở userData, không ra vault). */
+  webhookToken?: string
 }
 
 interface Pending {
@@ -117,13 +129,51 @@ interface Runtime {
   /** Xong khi worker hiện tại thoát. */
   exited: Promise<void>
   markExited: () => void
+  /** Lần chạy kế tiếp của từng việc theo lịch (ms), tính lúc worker sẵn sàng. */
+  jobNext: Map<string, number>
+  jobRunning: Set<string>
+  jobRuns: PluginJobRun[]
+  deliveries: PluginWebhookDelivery[]
+}
+
+/** Một yêu cầu webhook (đã đọc thân). */
+export interface WebhookRequest {
+  method: string
+  headers: Record<string, string>
+  query: Record<string, string>
+  rawBody: string
 }
 
 const MAX_LOGS = 200
 const RESTART_WINDOW_MS = 10 * 60_000
 const MAX_RESTARTS = 3
 const HEALTH_MS = 30_000
-const TIMEOUT = { initialize: 15_000, health: 5_000, tool: 120_000, action: 30_000, data: 15_000, config: 10_000, shutdown: 3_000 }
+const TIMEOUT = { initialize: 15_000, health: 5_000, tool: 120_000, action: 30_000, data: 15_000, config: 10_000, shutdown: 3_000, job: 10 * 60_000, webhook: 30_000 }
+const MAX_RUNS = 30
+const JOB_TICK_MS = 15_000
+/** Lời gọi từ trang của plugin (iframe) được chuyển cho host như lời gọi của worker. */
+const BRIDGE_HOST_METHODS = ['config.get', 'state.get', 'state.set', 'state.delete', 'agents.list', 'agent.sessions.send', 'board.list', 'vault.read', 'vault.write', 'notify']
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.wasm': 'application/wasm'
+}
 
 /** Lời gọi worker → host cần quyền gì (không có trong bảng = không cần quyền). */
 const NEEDS: Record<string, PluginCapability> = {
@@ -146,12 +196,26 @@ export class PluginHost {
   private busy: Promise<unknown> = Promise.resolve()
   private changeTimer: ReturnType<typeof setTimeout> | null = null
   private settings: Settings | null = null
+  private jobTimer: ReturnType<typeof setInterval> | null = null
+  /** Gốc địa chỉ webhook, vd. http://127.0.0.1:43123 (máy chủ webhook đặt khi chạy). */
+  private webhookBase: string | null = null
 
   constructor(
     /** userData/plugins */
     private root: string,
-    private deps: { spawn: SpawnWorker; api: PluginHostApi; onChange?: (list: InstalledPlugin[]) => void; env?: NodeJS.ProcessEnv }
+    private deps: {
+      spawn: SpawnWorker
+      api: PluginHostApi
+      onChange?: (list: InstalledPlugin[]) => void
+      /** Worker gửi dữ liệu trực tiếp cho trang của nó (ctx.streams.emit). */
+      onStream?: (pluginId: string, channel: string, data: unknown) => void
+      env?: NodeJS.ProcessEnv
+    }
   ) {}
+
+  get dataRoot(): string {
+    return this.root
+  }
 
   private get file(): string {
     return join(this.root, 'registry.json')
@@ -187,7 +251,11 @@ export class PluginHost {
         healthTimer: null,
         restartTimer: null,
         exited: Promise.resolve(),
-        markExited: () => {}
+        markExited: () => {},
+        jobNext: new Map(),
+        jobRunning: new Set(),
+        jobRuns: [],
+        deliveries: []
       }
       this.rt.set(id, r)
     }
@@ -208,7 +276,22 @@ export class PluginHost {
     if (missing.length) state = e.approved.length || !e.manifest.capabilities.length ? 'upgrade_pending' : 'approval_pending'
     else if (!this.enabled(e)) state = 'disabled'
     else if (!e.manifest.entrypoints.worker) state = 'ready'
-    return { ...e, status: { ...r.status, state, pid: r.proc?.pid ?? null }, logs: r.logs.slice(-MAX_LOGS) }
+    const { webhookToken, ...rest } = e
+    const webhookUrls: Record<string, string> = {}
+    if (this.webhookBase && webhookToken)
+      for (const w of e.manifest.webhooks) webhookUrls[w.endpointKey] = `${this.webhookBase}/plugins/${encodeURIComponent(e.manifest.id)}/webhooks/${w.endpointKey}?token=${webhookToken}`
+    return {
+      ...rest,
+      status: { ...r.status, state, pid: r.proc?.pid ?? null },
+      logs: r.logs.slice(-MAX_LOGS),
+      jobs: e.manifest.jobs.map((j) => {
+        const next = r.jobNext.get(j.key)
+        return { key: j.key, nextRun: next && state === 'ready' ? new Date(next).toISOString() : null, running: r.jobRunning.has(j.key) }
+      }),
+      jobRuns: r.jobRuns.slice(),
+      webhookUrls,
+      deliveries: r.deliveries.slice()
+    }
   }
 
   list(): InstalledPlugin[] {
@@ -286,7 +369,13 @@ export class PluginHost {
       installedAt: old?.installedAt ?? now(),
       // Cài lại: giữ quyền đã duyệt (chỉ những quyền manifest mới vẫn xin); quyền mới → chờ duyệt.
       approved: old ? old.approved.filter((c) => manifest.capabilities.includes(c)) : [],
-      config: normalizePluginConfig(manifest.instanceConfigSchema, old?.config ?? {}).config
+      config: normalizePluginConfig(manifest.instanceConfigSchema, old?.config ?? {}).config,
+      ...(manifest.webhooks.length || old?.webhookToken ? { webhookToken: old?.webhookToken ?? newToken() } : {})
+    }
+    if (manifest.entrypoints.ui) {
+      const ui = resolve(dir, manifest.entrypoints.ui)
+      if (!ui.startsWith(dir + sep) || !(await fs.stat(ui).catch(() => null))?.isDirectory())
+        throw new Error(`Không thấy thư mục giao diện "${manifest.entrypoints.ui}" trong gói.`)
     }
     if (old) await this.stop(old.manifest.id)
     this.entries = old ? this.entries.map((e) => (e === old ? entry : e)) : [...this.entries, entry]
@@ -415,6 +504,7 @@ export class PluginHost {
     r.status.state = 'ready'
     this.log(id, 'info', `Worker chạy (pid ${proc.pid ?? '?'})`)
     r.healthTimer = setInterval(() => void this.checkHealth(id), HEALTH_MS)
+    this.planJobs(e, r, new Date())
     this.changed()
   }
 
@@ -538,6 +628,11 @@ export class PluginHost {
     if (m.method === 'log') {
       const level = m.params?.level === 'error' || m.params?.level === 'warn' ? m.params.level : 'info'
       this.log(id, level, String(m.params?.message ?? ''))
+      return
+    }
+    if (m.method === 'streams.emit') {
+      const channel = typeof m.params?.channel === 'string' ? m.params.channel.slice(0, 100) : ''
+      if (channel) this.deps.onStream?.(id, channel, m.params?.data ?? null)
       return
     }
     if (m.id === undefined || !m.method) return
@@ -688,6 +783,298 @@ export class PluginHost {
     if (typeof res?.message === 'string') out.message = res.message.slice(0, 1000)
     return out
   }
+
+  // ---- việc theo lịch ----
+
+  /** Tính lần chạy kế tiếp cho mọi việc của plugin (lúc worker sẵn sàng). Lịch hỏng đã bị chặn lúc đọc manifest. */
+  private planJobs(e: Entry, r: Runtime, from: Date): void {
+    r.jobNext.clear()
+    if (!e.approved.includes('jobs.schedule')) return
+    for (const j of e.manifest.jobs) {
+      const next = nextCronRun(j.schedule, from)
+      if (next) r.jobNext.set(j.key, next.getTime())
+    }
+  }
+
+  /** Bắt đầu đồng hồ việc theo lịch (app gọi một lần; test gọi tickJobs trực tiếp). */
+  startScheduler(): void {
+    if (this.jobTimer) return
+    this.jobTimer = setInterval(() => void this.tickJobs(new Date()), JOB_TICK_MS)
+    this.jobTimer.unref?.()
+  }
+
+  /** Chạy những việc đã tới giờ. Bỏ lỡ lúc app tắt / máy ngủ thì chạy một lần rồi tính lịch tiếp. */
+  async tickJobs(at: Date): Promise<void> {
+    const runs: Promise<unknown>[] = []
+    for (const e of this.entries) {
+      const r = this.rt.get(e.manifest.id)
+      if (!r?.proc || r.status.state !== 'ready' || !this.runnable(e)) continue
+      for (const [key, next] of r.jobNext) {
+        if (next > at.getTime()) continue
+        const j = e.manifest.jobs.find((x) => x.key === key)
+        const n = j ? nextCronRun(j.schedule, at) : null
+        if (n) r.jobNext.set(key, n.getTime())
+        else r.jobNext.delete(key)
+        runs.push(this.runJob(e.manifest.id, key, 'schedule').catch(() => {}))
+      }
+    }
+    await Promise.all(runs)
+  }
+
+  /** Chạy một việc (theo lịch hoặc người dùng bấm "Chạy ngay"). Việc đang chạy thì không chạy chồng. */
+  async runJob(id: string, key: string, trigger: PluginJobRun['trigger'] = 'manual'): Promise<PluginJobRun> {
+    const e = this.get(id)
+    const job = e.manifest.jobs.find((j) => j.key === key)
+    if (!job) throw new Error(`Plugin không có việc "${key}".`)
+    if (!e.approved.includes('jobs.schedule') || !this.runnable(e)) throw new Error(`Plugin ${e.manifest.displayName} chưa được duyệt quyền hoặc đang tắt.`)
+    const r = this.runtime(id)
+    if (!r.proc || r.status.state !== 'ready') throw new Error('Worker của plugin không chạy.')
+    if (r.jobRunning.has(key)) throw new Error(`Việc "${job.displayName}" đang chạy.`)
+    const run: PluginJobRun = { runId: newToken(8), key, trigger, startedAt: now(), finishedAt: null, ok: null }
+    r.jobRunning.add(key)
+    r.jobRuns.unshift(run)
+    if (r.jobRuns.length > MAX_RUNS) r.jobRuns.length = MAX_RUNS
+    this.changed()
+    try {
+      await this.call(id, 'runJob', { job: { key, runId: run.runId, trigger, scheduledAt: run.startedAt } }, TIMEOUT.job)
+      run.ok = true
+    } catch (err) {
+      run.ok = false
+      run.error = (err as Error).message.slice(0, 500)
+      this.log(id, 'error', `Việc ${key}: ${run.error}`)
+    } finally {
+      run.finishedAt = now()
+      r.jobRunning.delete(key)
+      this.changed()
+    }
+    return run
+  }
+
+  // ---- webhook ----
+
+  setWebhookBase(base: string | null): void {
+    this.webhookBase = base
+    this.changed()
+  }
+
+  /** Đổi mã bí mật của địa chỉ webhook (địa chỉ cũ thôi dùng được). */
+  async rotateWebhookToken(id: string): Promise<InstalledPlugin> {
+    const e = this.get(id)
+    e.webhookToken = newToken()
+    await this.save()
+    this.log(id, 'info', 'Đã đổi mã địa chỉ webhook')
+    this.changed()
+    return this.info(e)
+  }
+
+  /** Một yêu cầu POST /plugins/<id>/webhooks/<endpointKey>?token=… tới máy chủ webhook. */
+  async handleWebhook(id: string, endpointKey: string, req: WebhookRequest): Promise<{ status: number; body: unknown }> {
+    const e = this.entries.find((x) => x.manifest.id === id)
+    const ep = e?.manifest.webhooks.find((w) => w.endpointKey === endpointKey)
+    const given = req.query.token || (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+    if (!e || !ep || !e.webhookToken || !sameSecret(given, e.webhookToken)) return { status: 404, body: { error: 'not found' } }
+    if (req.method !== 'POST') return { status: 405, body: { error: 'POST only' } }
+    const r = this.runtime(id)
+    const delivery: PluginWebhookDelivery = { requestId: newToken(8), endpointKey, at: now(), status: 0, ms: 0 }
+    const t0 = Date.now()
+    const done = (status: number, body: unknown, error?: string): { status: number; body: unknown } => {
+      delivery.status = status
+      delivery.ms = Date.now() - t0
+      if (error) delivery.error = error.slice(0, 500)
+      r.deliveries.unshift(delivery)
+      if (r.deliveries.length > MAX_RUNS) r.deliveries.length = MAX_RUNS
+      this.changed()
+      return { status, body }
+    }
+    if (!e.approved.includes('webhooks.receive') || !this.runnable(e) || !r.proc || r.status.state !== 'ready')
+      return done(503, { error: 'plugin not running' }, 'Plugin không chạy (chưa duyệt, đang tắt hoặc lỗi)')
+    let parsedBody: unknown
+    if (/json/i.test(req.headers['content-type'] ?? '') && req.rawBody) {
+      try {
+        parsedBody = JSON.parse(req.rawBody)
+      } catch {
+        return done(400, { error: 'invalid JSON' }, 'Thân yêu cầu không phải JSON hợp lệ')
+      }
+    }
+    const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => !['authorization', 'cookie'].includes(k)))
+    try {
+      const res = (await this.call(id, 'handleWebhook', { endpointKey, requestId: delivery.requestId, headers, query: omit(req.query, 'token'), rawBody: req.rawBody, parsedBody }, TIMEOUT.webhook)) as {
+        status?: number
+        body?: unknown
+      } | null
+      const status = typeof res?.status === 'number' && res.status >= 200 && res.status < 600 ? Math.floor(res.status) : 200
+      return done(status, res?.body ?? { ok: true })
+    } catch (err) {
+      this.log(id, 'error', `Webhook ${endpointKey}: ${(err as Error).message}`)
+      return done(500, { error: 'plugin error' }, (err as Error).message)
+    }
+  }
+
+  // ---- trang của plugin (iframe cách ly) ----
+
+  /** File giao diện của plugin cho giao thức stag-plugin://<id>/<rel>. null = không có / chưa được chạy. */
+  async uiFile(id: string, rel: string): Promise<{ path: string; type: string } | null> {
+    const e = this.entries.find((x) => x.manifest.id === id)
+    if (!e?.manifest.entrypoints.ui || !this.runnable(e)) return null
+    const base = resolve(e.dir, e.manifest.entrypoints.ui)
+    const file = resolve(base, rel || 'index.html')
+    if (!file.startsWith(base + sep)) return null
+    const st = await fs.stat(file).catch(() => null)
+    if (!st?.isFile()) return null
+    return { path: file, type: MIME[extname(file).toLowerCase()] ?? 'application/octet-stream' }
+  }
+
+  /**
+   * Header cho mọi file của trang plugin: CSP chỉ cho tải từ chính gói (gọi mạng chỉ khi có quyền http.outbound),
+   * không nhúng khung khác; CORS mở vì trang chạy với origin "null" (iframe sandbox không allow-same-origin).
+   */
+  uiHeaders(id: string): Record<string, string> {
+    const e = this.entries.find((x) => x.manifest.id === id)
+    const self = `stag-plugin://${id}`
+    const net = e?.approved.includes('http.outbound') ? ' https: http:' : ''
+    return {
+      'Content-Security-Policy': [
+        `default-src ${self}`,
+        `script-src ${self} 'unsafe-inline'`,
+        `style-src ${self} 'unsafe-inline'`,
+        `img-src ${self} data: blob:${net}`,
+        `font-src ${self} data:`,
+        `media-src ${self} data: blob:${net}`,
+        `connect-src ${self}${net}`,
+        "frame-src 'none'",
+        "object-src 'none'",
+        "form-action 'none'",
+        "base-uri 'none'"
+      ].join('; '),
+      'Access-Control-Allow-Origin': '*',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store'
+    }
+  }
+
+  /**
+   * Lời gọi từ trang của plugin (qua postMessage → giao diện app → IPC). Ngữ cảnh (workspace / agent) do app điền,
+   * không lấy từ trang. data.get / action.perform → worker; còn lại như lời gọi worker → host (kiểm quyền).
+   */
+  async bridge(id: string, method: string, params: Record<string, unknown>, ctx: PluginCallContext): Promise<unknown> {
+    const e = this.get(id)
+    if (!this.runnable(e)) throw new Error(`Plugin ${e.manifest.displayName} chưa được duyệt quyền hoặc đang tắt.`)
+    if (method === 'data.get' || method === 'action.perform') {
+      const key = typeof params.key === 'string' ? params.key.slice(0, 100) : ''
+      if (!key) throw new Error('Thiếu "key".')
+      const r = this.runtime(id)
+      if (!r.proc || r.status.state !== 'ready') throw new Error('Worker của plugin không chạy.')
+      const p = params.params && typeof params.params === 'object' ? params.params : {}
+      return method === 'data.get'
+        ? this.call(id, 'getData', { key, params: p, context: ctx }, TIMEOUT.data)
+        : this.call(id, 'performAction', { key, params: p, context: ctx }, TIMEOUT.action)
+    }
+    if (!BRIDGE_HOST_METHODS.includes(method)) throw new Error(`Trang plugin không gọi được "${method}".`)
+    return this.hostCall(id, method, params)
+  }
+
+  /** Dừng worker + đồng hồ việc theo lịch (thoát app). */
+  async shutdown(): Promise<void> {
+    if (this.jobTimer) clearInterval(this.jobTimer)
+    this.jobTimer = null
+    await this.stopAll()
+  }
+}
+
+/** Máy chủ webhook cục bộ (127.0.0.1), cổng giữ nguyên giữa các lần mở app (lưu trong webhooks.json). */
+export class PluginWebhookServer {
+  private server: Server | null = null
+
+  constructor(private host: PluginHost) {}
+
+  /** Chạy; trả về gốc địa chỉ, vd. http://127.0.0.1:43123. `port` = 0 → chọn cổng trống (test). */
+  async start(port?: number): Promise<string> {
+    const file = join(this.host.dataRoot, 'webhooks.json')
+    let want = port
+    if (want === undefined) {
+      try {
+        want = Number((JSON.parse((await readText(file)) ?? '{}') as { port?: number }).port) || 0
+      } catch {
+        want = 0
+      }
+    }
+    const server = createServer((req, res) => {
+      void this.handle(req).then(
+        ({ status, body }) => {
+          res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify(body))
+        },
+        () => {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end('{"error":"internal"}')
+        }
+      )
+    })
+    const listen = (p: number): Promise<void> =>
+      new Promise((ok, bad) => {
+        server.once('error', bad)
+        server.listen(p, '127.0.0.1', () => {
+          server.off('error', bad)
+          ok()
+        })
+      })
+    try {
+      await listen(want)
+    } catch {
+      await listen(0) // cổng cũ bị chiếm → cổng mới (địa chỉ webhook đổi theo)
+    }
+    this.server = server
+    const actual = (server.address() as AddressInfo).port
+    if (port === undefined && actual !== want) {
+      await fs.mkdir(this.host.dataRoot, { recursive: true })
+      await fs.writeFile(file, JSON.stringify({ port: actual }), 'utf8')
+    }
+    const base = `http://127.0.0.1:${actual}`
+    this.host.setWebhookBase(base)
+    return base
+  }
+
+  private async handle(req: IncomingMessage): Promise<{ status: number; body: unknown }> {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    const m = /^\/plugins\/([^/]+)\/webhooks\/([^/]+)\/?$/.exec(url.pathname)
+    if (!m) return { status: 404, body: { error: 'not found' } }
+    const chunks: Buffer[] = []
+    let size = 0
+    for await (const c of req) {
+      size += (c as Buffer).length
+      if (size > 1024 * 1024) return { status: 413, body: { error: 'body too large (1 MB max)' } }
+      chunks.push(c as Buffer)
+    }
+    const headers: Record<string, string> = {}
+    for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers[k.toLowerCase()] = Array.isArray(v) ? v.join(', ') : v
+    return this.host.handleWebhook(decodeURIComponent(m[1]), decodeURIComponent(m[2]), {
+      method: req.method ?? 'GET',
+      headers,
+      query: Object.fromEntries(url.searchParams),
+      rawBody: Buffer.concat(chunks).toString('utf8')
+    })
+  }
+
+  stop(): void {
+    this.server?.close()
+    this.server = null
+    this.host.setWebhookBase(null)
+  }
+}
+
+function newToken(bytes = 18): string {
+  return randomBytes(bytes).toString('hex')
+}
+
+function sameSecret(a: string, b: string): boolean {
+  const x = Buffer.from(a)
+  const y = Buffer.from(b)
+  return x.length === y.length && timingSafeEqual(x, y)
+}
+
+function omit(o: Record<string, string>, key: string): Record<string, string> {
+  const { [key]: _drop, ...rest } = o
+  return rest
 }
 
 function stateKey(p: Record<string, unknown>): string {

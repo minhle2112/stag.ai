@@ -2,14 +2,14 @@
   "name": "stag-plugin-hello",
   "version": "1.0.0",
   "private": true,
-  "description": "Plugin mẫu của stag.ai: tool đếm chữ cho agent, nút chào ở thanh bên, ghi nhật ký việc xong.",
+  "description": "Plugin mẫu của stag.ai: tool đếm chữ cho agent, nút và trang riêng, đếm việc agent làm xong, việc theo lịch, webhook.",
   "license": "MIT",
   "type": "module",
   "stagPlugin": {
     "id": "stag.hello",
     "apiVersion": 1,
     "displayName": "Hello",
-    "description": "Plugin mẫu: tool word_count cho agent, nút \"Chào\" ở thanh bên, nút mở trang tài liệu ở thanh trên cùng, đếm việc agent làm xong.",
+    "description": "Plugin mẫu: tool word_count cho agent, nút \"Chào\" ở thanh bên, nút mở trang tài liệu, tab trang riêng \"Hello\", trang cài đặt \"Số liệu\", đếm việc agent làm xong, tổng kết mỗi giờ, webhook \"ping\".",
     "author": "stag.ai",
     "categories": [
       "example"
@@ -18,14 +18,19 @@
       "agent.tools.register",
       "ui.sidebar.register",
       "ui.action.register",
+      "ui.page.register",
+      "instance.settings.register",
       "events.subscribe",
       "agents.read",
       "plugin.state.read",
       "plugin.state.write",
-      "ui.notify"
+      "ui.notify",
+      "jobs.schedule",
+      "webhooks.receive"
     ],
     "entrypoints": {
-      "worker": "./worker.mjs"
+      "worker": "./worker.mjs",
+      "ui": "./ui"
     },
     "instanceConfigSchema": {
       "type": "object",
@@ -97,8 +102,35 @@
             "url": "{config.docsUrl}/?workspace={workspace.name}",
             "target": "browser"
           }
+        },
+        {
+          "type": "page",
+          "id": "home",
+          "displayName": "Hello",
+          "path": "index.html"
+        },
+        {
+          "type": "settingsPage",
+          "id": "data",
+          "displayName": "Số liệu",
+          "path": "settings.html"
         }
       ]
-    }
+    },
+    "jobs": [
+      {
+        "key": "summary",
+        "displayName": "Tổng kết",
+        "description": "Ghi vào nhật ký số việc mỗi agent đã xong.",
+        "schedule": "0 * * * *"
+      }
+    ],
+    "webhooks": [
+      {
+        "endpointKey": "ping",
+        "displayName": "Ping",
+        "description": "Nhận một JSON bất kỳ, lưu lại và hiện ngay trên trang Hello."
+      }
+    ]
   }
 }

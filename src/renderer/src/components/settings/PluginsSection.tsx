@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
+  describeCron,
   PLUGIN_CAPABILITIES,
   PLUGIN_EVENTS,
   pluginToolName,
@@ -10,6 +11,7 @@ import {
   type PluginState
 } from '@shared/plugins'
 import { usePlugins } from '../../store/plugins'
+import { PluginFrame } from '../PluginFrame'
 import { useSettings } from '../../store/settings'
 import { useUi } from '../../store/ui'
 import { Button, Modal } from '../Modal'
@@ -33,7 +35,13 @@ const STATE: Record<PluginState, { label: string; tone: Tone }> = {
   upgrade_pending: { label: 'Chờ duyệt quyền mới', tone: 'warn' }
 }
 const TONE_TEXT: Record<Tone, string> = { ok: 'text-emerald-300 border-emerald-500/40', warn: 'text-amber-300 border-amber-400/40', bad: 'text-red-300 border-red-500/40', muted: 'text-muted border-line' }
-const SLOT: Record<string, string> = { sidebar: 'Thanh bên', globalToolbarButton: 'Thanh trên cùng', agentMenu: 'Menu ⋯ của agent' }
+const SLOT: Record<string, string> = {
+  sidebar: 'Thanh bên',
+  globalToolbarButton: 'Thanh trên cùng',
+  agentMenu: 'Menu ⋯ của agent',
+  page: 'Tab trang riêng',
+  settingsPage: 'Trang cài đặt'
+}
 
 const pluginSetApp =
   (id: string) =>
@@ -104,8 +112,8 @@ function PluginList(p: {
         </button>
       </div>
       <p className="mb-4 text-[12.5px] leading-relaxed text-muted">
-        Plugin mở rộng chính app stag.ai: thêm nút ở thanh bên / thanh trên cùng / menu agent, thêm tool cho agent, nghe sự kiện của app. Mỗi plugin chạy trong
-        tiến trình riêng và chỉ chạy sau khi bạn duyệt quyền.
+        Plugin mở rộng chính app stag.ai: thêm nút và trang riêng, thêm tool cho agent, nghe sự kiện của app, chạy việc theo lịch, nhận webhook. Mỗi plugin chạy
+        trong tiến trình riêng và chỉ chạy sau khi bạn duyệt quyền.
       </p>
       <div className="mb-5 rounded-md border border-amber-400/30 bg-amber-400/[0.07] px-3 py-2.5 text-[12px] leading-relaxed text-amber-200/90">
         Plugin là tính năng alpha. Plugin chạy chương trình trên máy bạn với quyền của bạn; quyền bạn duyệt chỉ giới hạn những gì nó làm <b>qua stag.ai</b>{' '}
@@ -148,8 +156,10 @@ function PluginList(p: {
                     x.manifest.id,
                     x.source.type === 'npm' ? `npm ${x.source.name}` : 'thư mục',
                     x.manifest.tools.length ? `${x.manifest.tools.length} tool` : '',
-                    x.manifest.ui.slots.length ? `${x.manifest.ui.slots.length} nút` : '',
-                    x.manifest.events.length ? `${x.manifest.events.length} sự kiện` : ''
+                    x.manifest.ui.slots.length ? `${x.manifest.ui.slots.length} nút / trang` : '',
+                    x.manifest.events.length ? `${x.manifest.events.length} sự kiện` : '',
+                    x.manifest.jobs.length ? `${x.manifest.jobs.length} việc theo lịch` : '',
+                    x.manifest.webhooks.length ? `${x.manifest.webhooks.length} webhook` : ''
                   ]
                     .filter(Boolean)
                     .join(' · ')}
@@ -167,7 +177,8 @@ function PluginList(p: {
 
 // ---- trang một plugin ----
 
-type Tab = 'config' | 'status' | 'about'
+/** `page:<slot>` = trang cài đặt riêng của plugin (slot settingsPage). */
+type Tab = 'config' | 'status' | 'about' | `page:${string}`
 
 function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack: () => void }): React.JSX.Element {
   const m = p.manifest
@@ -176,6 +187,14 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
   const [busy, setBusy] = useState('')
   const [confirmRemove, setConfirmRemove] = useState(false)
   const pending = p.status.state === 'approval_pending' || p.status.state === 'upgrade_pending'
+  const settingsPages = m.ui.slots.filter((x) => x.type === 'settingsPage')
+  const tabs: Array<[Tab, string]> = [
+    ['config', 'Cấu hình'],
+    ...settingsPages.map((x): [Tab, string] => [`page:${x.id}`, x.displayName]),
+    ['status', 'Trạng thái'],
+    ['about', 'Giới thiệu']
+  ]
+  const pageSlot = tab.startsWith('page:') ? settingsPages.find((x) => `page:${x.id}` === tab) : undefined
 
   const act = (label: string, fn: () => Promise<unknown>): void => {
     setBusy(label)
@@ -211,13 +230,7 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
       {p.status.state === 'error' && p.status.lastError && <ErrorBar error={p.status.lastError} />}
 
       <div className="mb-3 flex items-center gap-1 border-b border-line">
-        {(
-          [
-            ['config', 'Cấu hình'],
-            ['status', 'Trạng thái'],
-            ['about', 'Giới thiệu']
-          ] as Array<[Tab, string]>
-        ).map(([id, label]) => (
+        {tabs.map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -250,6 +263,14 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
       </div>
 
       {tab === 'config' && <ConfigForm p={p} />}
+      {pageSlot &&
+        (p.status.state === 'ready' ? (
+          <div className="overflow-hidden rounded-lg border border-line">
+            <PluginFrame plugin={p} slot={pageSlot} autoHeight />
+          </div>
+        ) : (
+          <div className="text-[12.5px] text-muted">Trang này mở được khi plugin đã được duyệt quyền, đang bật và đang chạy.</div>
+        ))}
       {tab === 'status' && <StatusTab p={p} />}
       {tab === 'about' && <AboutTab p={p} />}
     </>
@@ -449,16 +470,20 @@ function StatusTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
         </Block>
       )}
       {m.ui.slots.length > 0 && (
-        <Block title="Nút">
+        <Block title="Nút và trang">
           {m.ui.slots.map((x) => (
             <div key={x.id} className="flex items-baseline gap-3 px-4 py-2 text-[12.5px]">
               <span className="w-40 shrink-0 text-muted">{SLOT[x.type]}</span>
               <span className="font-medium">{x.displayName}</span>
-              <span className="truncate font-mono text-[11px] text-muted">{x.open ? `mở ${x.open.url} (${x.open.target === 'browser' ? 'trong app' : 'trình duyệt'})` : `gọi ${x.action}`}</span>
+              <span className="truncate font-mono text-[11px] text-muted">
+                {x.path ? `${m.entrypoints.ui}/${x.path}` : x.open ? `mở ${x.open.url} (${x.open.target === 'browser' ? 'trong app' : 'trình duyệt'})` : `gọi ${x.action}`}
+              </span>
             </div>
           ))}
         </Block>
       )}
+      {m.jobs.length > 0 && <JobsBlock p={p} />}
+      {m.webhooks.length > 0 && <WebhooksBlock p={p} />}
       {m.events.length > 0 && (
         <Block title="Sự kiện nhận">
           {m.events.map((e) => (
@@ -488,10 +513,134 @@ function StatusTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
   )
 }
 
-function Block({ title, children }: { title: string; children: ReactNode }): React.JSX.Element {
+const clock = (iso: string | null | undefined): string => (iso ? new Date(iso).toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' }) : '—')
+
+function JobsBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
+  const m = p.manifest
+  const [error, setError] = useState('')
+  const ready = p.status.state === 'ready'
+  return (
+    <Block title="Việc theo lịch" note="Giờ máy; chỉ chạy khi app đang mở. Lỡ giờ lúc máy ngủ thì chạy bù một lần.">
+      {error && <div className="px-4 py-2 text-[12px] text-red-300">{error}</div>}
+      {m.jobs.map((j) => {
+        const st = p.jobs.find((x) => x.key === j.key)
+        const last = p.jobRuns.find((r) => r.key === j.key)
+        return (
+          <div key={j.key} className="flex items-start gap-3 px-4 py-2.5 text-[12.5px]">
+            <div className="min-w-0 flex-1">
+              <div>
+                <span className="font-medium">{j.displayName}</span> <code className="text-[11px] text-muted">{j.key}</code>
+              </div>
+              {j.description && <div className="mt-0.5 text-[11.5px] text-muted">{j.description}</div>}
+              <div className="mt-1 text-[11.5px] text-muted">
+                {describeCron(j.schedule)} <code className="text-[11px]">({j.schedule})</code> · lần tới: {st?.running ? 'đang chạy' : clock(st?.nextRun)}
+                {last && (
+                  <>
+                    {' '}
+                    · lần trước: {clock(last.startedAt)}{' '}
+                    <span className={last.ok === false ? 'text-red-300' : last.ok ? 'text-emerald-300' : ''}>
+                      {last.ok === null ? 'đang chạy' : last.ok ? 'xong' : `lỗi: ${last.error ?? ''}`}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+            <SmallButton
+              disabled={!ready || st?.running}
+              onClick={() => {
+                setError('')
+                window.stag.plugins.runJob(m.id, j.key).catch((e) => setError(errText(e)))
+              }}
+            >
+              {st?.running ? 'Đang chạy…' : 'Chạy ngay'}
+            </SmallButton>
+          </div>
+        )
+      })}
+      {p.jobRuns.length > 0 && (
+        <details className="px-4 py-2 text-[12px]">
+          <summary className="cursor-pointer text-muted">Các lần chạy gần đây ({p.jobRuns.length})</summary>
+          <div className="mt-1.5 space-y-0.5 font-mono text-[11.5px]">
+            {p.jobRuns.map((r) => (
+              <div key={r.runId} className={r.ok === false ? 'text-red-300' : ''}>
+                <span className="text-muted">{clock(r.startedAt)}</span> {r.key} · {r.trigger === 'manual' ? 'bấm tay' : 'theo lịch'} ·{' '}
+                {r.ok === null ? 'đang chạy' : r.ok ? `xong (${Math.max(0, Date.parse(r.finishedAt ?? r.startedAt) - Date.parse(r.startedAt))} ms)` : `lỗi: ${r.error ?? ''}`}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </Block>
+  )
+}
+
+function WebhooksBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
+  const m = p.manifest
+  const [copied, setCopied] = useState('')
+  const [confirm, setConfirm] = useState(false)
+  return (
+    <Block
+      title="Webhook"
+      note="Địa chỉ chỉ nhận yêu cầu từ chính máy này (127.0.0.1). Dịch vụ ngoài Internet cần một tunnel (vd. cloudflared, ngrok) trỏ về địa chỉ này. Địa chỉ có mã bí mật: đừng dán vào chỗ công khai."
+    >
+      {m.webhooks.map((w) => {
+        const url = p.webhookUrls[w.endpointKey]
+        return (
+          <div key={w.endpointKey} className="px-4 py-2.5 text-[12.5px]">
+            <div>
+              <span className="font-medium">{w.displayName}</span> <code className="text-[11px] text-muted">POST · {w.endpointKey}</code>
+            </div>
+            {w.description && <div className="mt-0.5 text-[11.5px] text-muted">{w.description}</div>}
+            <div className="mt-1.5 flex items-center gap-2">
+              <code className="min-w-0 flex-1 select-text truncate rounded border border-line bg-bg px-2 py-1 text-[11px]">{url ?? 'Máy chủ webhook chưa chạy.'}</code>
+              {url && (
+                <SmallButton
+                  onClick={() =>
+                    void navigator.clipboard.writeText(url).then(() => {
+                      setCopied(w.endpointKey)
+                      setTimeout(() => setCopied(''), 1500)
+                    })
+                  }
+                >
+                  {copied === w.endpointKey ? 'Đã chép' : 'Chép'}
+                </SmallButton>
+              )}
+            </div>
+          </div>
+        )
+      })}
+      <div className="flex items-center gap-2 px-4 py-2 text-[12px]">
+        <span className="flex-1 text-muted">Lộ địa chỉ? Đổi mã bí mật, địa chỉ cũ thôi dùng được.</span>
+        <button
+          type="button"
+          onClick={() => (confirm ? void window.stag.plugins.rotateWebhook(m.id).then(() => setConfirm(false)) : setConfirm(true))}
+          onBlur={() => setConfirm(false)}
+          className={`rounded-md px-3 py-1 text-[12px] ${confirm ? 'bg-red-500/90 text-white' : 'bg-panel-2 text-muted hover:text-fg'}`}
+        >
+          {confirm ? 'Bấm lần nữa để đổi' : 'Đổi mã'}
+        </button>
+      </div>
+      {p.deliveries.length > 0 && (
+        <details className="px-4 py-2 text-[12px]">
+          <summary className="cursor-pointer text-muted">Lần nhận gần đây ({p.deliveries.length})</summary>
+          <div className="mt-1.5 space-y-0.5 font-mono text-[11.5px]">
+            {p.deliveries.map((d) => (
+              <div key={d.requestId} className={d.status >= 400 ? 'text-red-300' : ''}>
+                <span className="text-muted">{clock(d.at)}</span> {d.endpointKey} · {d.status} · {d.ms} ms{d.error ? ` · ${d.error}` : ''}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </Block>
+  )
+}
+
+function Block({ title, note, children }: { title: string; note?: string; children: ReactNode }): React.JSX.Element {
   return (
     <div>
       <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">{title}</div>
+      {note && <p className="-mt-0.5 mb-1.5 text-[11.5px] leading-relaxed text-muted">{note}</p>}
       <div className="divide-y divide-line rounded-lg border border-line bg-panel">{children}</div>
     </div>
   )
@@ -514,6 +663,7 @@ function AboutTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
         {row('Nguồn', p.source.type === 'npm' ? `npm · ${p.source.name}@${p.source.version}` : `thư mục · ${p.source.path}`)}
         {row('Thư mục', <span className="font-mono text-[11.5px]">{p.dir}</span>)}
         {row('Worker', m.entrypoints.worker ? <code>{m.entrypoints.worker}</code> : 'không có')}
+        {m.entrypoints.ui && row('Giao diện', <code>{m.entrypoints.ui}</code>)}
         {row('Cài lúc', new Date(p.installedAt).toLocaleString())}
         {m.categories.length > 0 && row('Nhóm', m.categories.join(', '))}
       </div>

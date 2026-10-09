@@ -7,6 +7,10 @@
 //       ctx.tools.register('word_count', async (params, run) => ({ content: '42' }))
 //       ctx.actions.register('hello', async (params, run) => ({ message: 'Xin chào' }))
 //       ctx.events.on('task.done', async (event) => ctx.logger.info(event.data.title))
+//       ctx.data.register('stats', async (params, run) => ({ done: 3 }))        // trang plugin: host.getData('stats')
+//       ctx.jobs.register('summary', async (job) => { /* chạy theo lịch trong manifest.jobs */ })
+//       ctx.webhooks.register('ping', async (req) => ({ status: 200, body: { ok: true } }))
+//       ctx.streams.emit('feed', { text: 'hi' })                               // đẩy thẳng tới trang plugin đang mở
 //     },
 //     async onValidateConfig(config) { return { ok: true } },
 //     async onHealth() { return { status: 'ok' } }
@@ -32,6 +36,8 @@ export function runWorker(def) {
   const tools = new Map()
   const actions = new Map()
   const data = new Map()
+  const jobs = new Map()
+  const webhooks = new Map()
   const listeners = new Map()
   let events = Promise.resolve()
 
@@ -57,6 +63,9 @@ export function runWorker(def) {
     tools: { register: (name, fn) => tools.set(name, fn) },
     actions: { register: (key, fn) => actions.set(key, fn) },
     data: { register: (key, fn) => data.set(key, fn) },
+    jobs: { register: (key, fn) => jobs.set(key, fn) },
+    webhooks: { register: (endpointKey, fn) => webhooks.set(endpointKey, fn) },
+    streams: { emit: (channel, payload) => send({ jsonrpc: '2.0', method: 'streams.emit', params: { channel, data: payload } }) },
     events: {
       on: (type, fn) => listeners.set(type, [...(listeners.get(type) ?? []), fn])
     },
@@ -116,6 +125,17 @@ export function runWorker(def) {
       const fn = data.get(p.key)
       if (!fn) throw new Error(`Data "${p.key}" chưa được đăng ký trong setup()`)
       return fn(p.params ?? {}, p.context)
+    },
+    async runJob(p) {
+      const fn = jobs.get(p.job.key)
+      if (!fn) throw new Error(`Job "${p.job.key}" chưa được đăng ký trong setup()`)
+      await fn(p.job)
+      return { ok: true }
+    },
+    async handleWebhook(p) {
+      const fn = webhooks.get(p.endpointKey) ?? def.onWebhook
+      if (!fn) throw new Error(`Webhook "${p.endpointKey}" chưa được đăng ký trong setup()`)
+      return (await fn(p)) ?? null
     }
   }
 

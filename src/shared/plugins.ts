@@ -9,6 +9,8 @@ export const PLUGIN_API_VERSION = 1
 export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9._-]{1,63}$/
 export const PLUGIN_TOOL_RE = /^[a-z][a-z0-9_]{0,39}$/
 export const PLUGIN_SLOT_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/
+/** Khoá việc theo lịch / webhook. */
+export const PLUGIN_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/
 /** id dành riêng cho chính app. */
 export const RESERVED_PLUGIN_IDS = ['stag', 'stag.ai', 'claude', 'codex', 'terminal']
 
@@ -16,6 +18,8 @@ export const RESERVED_PLUGIN_IDS = ['stag', 'stag.ai', 'claude', 'codex', 'termi
 export const PLUGIN_CAPABILITIES = {
   'ui.sidebar.register': 'Thêm mục ở thanh bên trái',
   'ui.action.register': 'Thêm nút ở thanh trên cùng và trong menu ⋯ của agent',
+  'ui.page.register': 'Thêm trang riêng (tab trên thanh trên cùng)',
+  'instance.settings.register': 'Thêm trang cài đặt riêng trong Cài đặt → Plugin',
   'agent.tools.register': 'Thêm tool cho agent (qua máy chủ MCP stag)',
   'events.subscribe': 'Nhận sự kiện của app (phiên agent mở / đóng, agent chờ bạn, việc bắt đầu / xong)',
   'agents.read': 'Xem danh sách workspace, agent và trạng thái của họ',
@@ -26,6 +30,8 @@ export const PLUGIN_CAPABILITIES = {
   'plugin.state.read': 'Đọc dữ liệu riêng của plugin',
   'plugin.state.write': 'Ghi dữ liệu riêng của plugin',
   'ui.notify': 'Hiện thông báo',
+  'jobs.schedule': 'Tự chạy việc theo lịch',
+  'webhooks.receive': 'Nhận webhook qua một địa chỉ cục bộ trên máy này',
   'http.outbound': 'Gọi ra Internet'
 } as const
 export type PluginCapability = keyof typeof PLUGIN_CAPABILITIES
@@ -79,16 +85,37 @@ export interface PluginTool {
 }
 
 /**
- * Slot giao diện. `sidebar` = mục ở thanh bên; `globalToolbarButton` = nút trên thanh trên cùng; `agentMenu` = mục
- * trong menu ⋯ của agent. Bấm → `open` (mở URL, mẫu có {config.x} / {workspace.name} / {workspace.path} /
- * {agent.name} / {agent.id}) hoặc `action` (gọi performAction của worker).
+ * Slot giao diện.
+ * - Nút: `sidebar` = mục ở thanh bên; `globalToolbarButton` = nút trên thanh trên cùng; `agentMenu` = mục trong menu ⋯
+ *   của agent. Bấm → `open` (mở URL, mẫu có {config.x} / {workspace.name} / {workspace.path} / {agent.name} /
+ *   {agent.id}) hoặc `action` (gọi performAction của worker).
+ * - Trang (khung cách ly, file trong thư mục `entrypoints.ui`): `page` = tab riêng cạnh Kanban / Agents / Artifacts;
+ *   `settingsPage` = tab riêng trong trang plugin ở Cài đặt → Plugin. `path` = file HTML trong thư mục đó.
  */
+export type PluginButtonSlotType = 'sidebar' | 'globalToolbarButton' | 'agentMenu'
+export type PluginPageSlotType = 'page' | 'settingsPage'
 export interface PluginSlot {
-  type: 'sidebar' | 'globalToolbarButton' | 'agentMenu'
+  type: PluginButtonSlotType | PluginPageSlotType
   id: string
   displayName: string
   open?: { url: string; target: 'browser' | 'external' }
   action?: string
+  path?: string
+}
+
+/** Việc theo lịch (cron 5 trường theo giờ máy). */
+export interface PluginJob {
+  key: string
+  displayName: string
+  description: string
+  schedule: string
+}
+
+/** Điểm nhận webhook: POST tới địa chỉ cục bộ của app (InstalledPlugin.webhookUrls). */
+export interface PluginWebhook {
+  endpointKey: string
+  displayName: string
+  description: string
 }
 
 export interface PluginManifest {
@@ -100,10 +127,13 @@ export interface PluginManifest {
   categories: string[]
   capabilities: PluginCapability[]
   /** Đường dẫn trong gói. Không có worker: chỉ slot `open` (mở URL). */
-  entrypoints: { worker?: string }
+  /** worker: file JS chạy trong tiến trình riêng; ui: thư mục file giao diện (slot page / settingsPage). */
+  entrypoints: { worker?: string; ui?: string }
   instanceConfigSchema: PluginConfigSchema | null
   tools: PluginTool[]
   events: PluginEventType[]
+  jobs: PluginJob[]
+  webhooks: PluginWebhook[]
   ui: { slots: PluginSlot[] }
 }
 
@@ -165,6 +195,8 @@ export function parsePluginManifest(pkg: unknown): { manifest: PluginManifest; n
   const e = obj(m.entrypoints)
   const worker = str(e.worker, 200)
   if (worker && !safeRelPath(worker)) fail('entrypoints.worker', 'phải là đường dẫn trong gói, vd. "./dist/worker.js"')
+  const uiDir = str(e.ui, 200)
+  if (uiDir && !safeRelPath(uiDir)) fail('entrypoints.ui', 'phải là thư mục trong gói, vd. "./ui"')
 
   const tools: PluginTool[] = []
   for (const [i, raw] of (Array.isArray(m.tools) ? m.tools : []).entries()) {
@@ -186,16 +218,50 @@ export function parsePluginManifest(pkg: unknown): { manifest: PluginManifest; n
   }
   if (events.length && !capabilities.includes('events.subscribe')) fail('events', 'cần quyền "events.subscribe"')
 
+  const jobs: PluginJob[] = []
+  for (const [i, raw] of (Array.isArray(m.jobs) ? m.jobs : []).entries()) {
+    const j = obj(raw)
+    const key = str(j.key ?? j.jobKey, 40)
+    if (!PLUGIN_KEY_RE.test(key)) fail(`jobs[${i}].key`, 'chữ thường, số, "_", "-"')
+    if (jobs.some((x) => x.key === key)) fail(`jobs[${i}].key`, `trùng khoá "${key}"`)
+    const schedule = str(j.schedule, 100)
+    const cronErr = cronProblem(schedule)
+    if (cronErr) fail(`jobs[${i}].schedule`, cronErr)
+    jobs.push({ key, displayName: str(j.displayName, 80) || key, description: str(j.description, 500), schedule })
+  }
+  if (jobs.length && !capabilities.includes('jobs.schedule')) fail('jobs', 'cần quyền "jobs.schedule"')
+
+  const webhooks: PluginWebhook[] = []
+  for (const [i, raw] of (Array.isArray(m.webhooks) ? m.webhooks : []).entries()) {
+    const w = obj(raw)
+    const endpointKey = str(w.endpointKey ?? w.key, 40)
+    if (!PLUGIN_KEY_RE.test(endpointKey)) fail(`webhooks[${i}].endpointKey`, 'chữ thường, số, "_", "-"')
+    if (webhooks.some((x) => x.endpointKey === endpointKey)) fail(`webhooks[${i}].endpointKey`, `trùng khoá "${endpointKey}"`)
+    webhooks.push({ endpointKey, displayName: str(w.displayName, 80) || endpointKey, description: str(w.description, 500) })
+  }
+  if (webhooks.length && !capabilities.includes('webhooks.receive')) fail('webhooks', 'cần quyền "webhooks.receive"')
+
   const slots: PluginSlot[] = []
   for (const [i, raw] of (Array.isArray(obj(m.ui).slots) ? (obj(m.ui).slots as unknown[]) : []).entries()) {
     const s = obj(raw)
     const type = s.type
-    if (type !== 'sidebar' && type !== 'globalToolbarButton' && type !== 'agentMenu') fail(`ui.slots[${i}].type`, 'chỉ hỗ trợ sidebar / globalToolbarButton / agentMenu')
+    if (type !== 'sidebar' && type !== 'globalToolbarButton' && type !== 'agentMenu' && type !== 'page' && type !== 'settingsPage')
+      fail(`ui.slots[${i}].type`, 'chỉ hỗ trợ sidebar / globalToolbarButton / agentMenu / page / settingsPage')
     const sid = str(s.id, 40)
     if (!PLUGIN_SLOT_RE.test(sid)) fail(`ui.slots[${i}].id`, 'chữ thường, số, "_", "-"')
-    const need: PluginCapability = type === 'sidebar' ? 'ui.sidebar.register' : 'ui.action.register'
+    if (slots.some((x) => x.id === sid)) fail(`ui.slots[${i}].id`, `trùng id "${sid}"`)
+    const need: PluginCapability =
+      type === 'sidebar' ? 'ui.sidebar.register' : type === 'page' ? 'ui.page.register' : type === 'settingsPage' ? 'instance.settings.register' : 'ui.action.register'
     if (!capabilities.includes(need)) fail(`ui.slots[${i}]`, `slot ${type} cần quyền "${need}"`)
     const slot: PluginSlot = { type, id: sid, displayName: str(s.displayName, 60) || sid }
+    if (type === 'page' || type === 'settingsPage') {
+      if (!uiDir) fail(`ui.slots[${i}]`, `slot ${type} cần thư mục giao diện "entrypoints.ui"`)
+      const path = (str(s.path, 200) || 'index.html').replace(/^\.\//, '')
+      if (!safeRelPath(path) || !/\.html?$/i.test(path)) fail(`ui.slots[${i}].path`, 'phải là file .html trong thư mục giao diện')
+      slot.path = path.replace(/\\/g, '/')
+      slots.push(slot)
+      continue
+    }
     const open = obj(s.open)
     if (Object.keys(open).length) {
       const url = str(open.url, 1000)
@@ -206,7 +272,8 @@ export function parsePluginManifest(pkg: unknown): { manifest: PluginManifest; n
     if (slot.action && !worker) fail(`ui.slots[${i}].action`, 'slot gọi worker nhưng gói không có entrypoints.worker')
     slots.push(slot)
   }
-  if ((tools.length || events.length) && !worker) fail('entrypoints.worker', 'plugin có tool / sự kiện thì cần worker')
+  if ((tools.length || events.length || jobs.length || webhooks.length) && !worker)
+    fail('entrypoints.worker', 'plugin có tool / sự kiện / việc theo lịch / webhook thì cần worker')
 
   return {
     manifest: {
@@ -217,10 +284,12 @@ export function parsePluginManifest(pkg: unknown): { manifest: PluginManifest; n
       author: str(m.author, 100) || (typeof p.author === 'string' ? str(p.author, 100) : str(obj(p.author).name, 100)),
       categories: (Array.isArray(m.categories) ? m.categories : []).filter((c): c is string => typeof c === 'string').slice(0, 10),
       capabilities,
-      entrypoints: worker ? { worker } : {},
+      entrypoints: { ...(worker ? { worker } : {}), ...(uiDir ? { ui: uiDir } : {}) },
       instanceConfigSchema: parseConfigSchema(m.instanceConfigSchema),
       tools,
       events,
+      jobs,
+      webhooks,
       ui: { slots }
     },
     name: str(p.name, 214),
@@ -284,6 +353,118 @@ export function fillSlotUrl(template: string, ctx: SlotContext): string {
   })
 }
 
+// ---- cron (việc theo lịch) ----
+
+const CRON_FIELDS: Array<{ name: string; min: number; max: number }> = [
+  { name: 'phút', min: 0, max: 59 },
+  { name: 'giờ', min: 0, max: 23 },
+  { name: 'ngày', min: 1, max: 31 },
+  { name: 'tháng', min: 1, max: 12 },
+  { name: 'thứ', min: 0, max: 7 }
+]
+
+export interface CronSpec {
+  minute: Set<number>
+  hour: Set<number>
+  dom: Set<number>
+  month: Set<number>
+  /** 0 = Chủ nhật (7 cũng là Chủ nhật). */
+  dow: Set<number>
+  domAny: boolean
+  dowAny: boolean
+}
+
+/** Đọc biểu thức cron 5 trường: `*`, `*\/n`, `a`, `a-b`, `a-b/n`, `a,b`. Lỗi → ném lỗi tiếng Việt. */
+export function parseCron(expr: string): CronSpec {
+  const parts = expr.trim().split(/\s+/)
+  if (parts.length !== 5) throw new Error('cần 5 trường "phút giờ ngày tháng thứ", vd. "0 9 * * 1-5"')
+  const sets = parts.map((part, i) => {
+    const f = CRON_FIELDS[i]
+    const out = new Set<number>()
+    for (const item of part.split(',')) {
+      const m = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(item)
+      if (!m) throw new Error(`trường ${f.name} "${part}" không hợp lệ`)
+      const step = m[4] ? Number(m[4]) : 1
+      let lo = f.min
+      let hi = f.max
+      if (m[1] !== '*') {
+        lo = Number(m[2])
+        hi = m[3] !== undefined ? Number(m[3]) : m[4] ? f.max : lo
+      }
+      if (lo < f.min || hi > f.max || lo > hi || step < 1) throw new Error(`trường ${f.name} "${part}" ngoài khoảng ${f.min}–${f.max}`)
+      for (let v = lo; v <= hi; v += step) out.add(i === 4 && v === 7 ? 0 : v)
+    }
+    return out
+  })
+  return { minute: sets[0], hour: sets[1], dom: sets[2], month: sets[3], dow: sets[4], domAny: parts[2] === '*', dowAny: parts[4] === '*' }
+}
+
+/** Lỗi của biểu thức cron (null = hợp lệ). */
+export function cronProblem(expr: string): string | null {
+  if (!expr) return 'cần lịch chạy dạng cron, vd. "0 * * * *" (đầu mỗi giờ)'
+  try {
+    parseCron(expr)
+    return null
+  } catch (e) {
+    return (e as Error).message
+  }
+}
+
+function cronDayOk(c: CronSpec, d: Date): boolean {
+  const dom = c.dom.has(d.getDate())
+  const dow = c.dow.has(d.getDay())
+  // Như cron chuẩn: giới hạn cả ngày lẫn thứ → khớp một trong hai.
+  if (!c.domAny && !c.dowAny) return dom || dow
+  return dom && dow
+}
+
+/** Lần chạy kế tiếp sau `from` (theo giờ máy), null nếu không có trong 2 năm tới. */
+export function nextCronRun(expr: string | CronSpec, from: Date): Date | null {
+  const c = typeof expr === 'string' ? parseCron(expr) : expr
+  const d = new Date(from.getTime())
+  d.setSeconds(0, 0)
+  d.setMinutes(d.getMinutes() + 1)
+  const limit = from.getTime() + 2 * 366 * 24 * 3600_000
+  while (d.getTime() <= limit) {
+    if (!c.month.has(d.getMonth() + 1)) {
+      d.setMonth(d.getMonth() + 1, 1)
+      d.setHours(0, 0, 0, 0)
+      continue
+    }
+    if (!cronDayOk(c, d)) {
+      d.setDate(d.getDate() + 1)
+      d.setHours(0, 0, 0, 0)
+      continue
+    }
+    if (!c.hour.has(d.getHours())) {
+      d.setHours(d.getHours() + 1, 0, 0, 0)
+      continue
+    }
+    if (!c.minute.has(d.getMinutes())) {
+      d.setMinutes(d.getMinutes() + 1, 0, 0)
+      continue
+    }
+    return d
+  }
+  return null
+}
+
+/** Mô tả ngắn tiếng Việt cho vài lịch hay gặp; còn lại trả nguyên biểu thức. */
+export function describeCron(expr: string): string {
+  const p = expr.trim().split(/\s+/)
+  if (p.length !== 5) return expr
+  const [mi, h, dom, mon, dow] = p
+  const rest = dom === '*' && mon === '*' && dow === '*'
+  if (rest && h === '*' && mi === '*') return 'Mỗi phút'
+  if (rest && h === '*' && /^\*\/\d+$/.test(mi)) return `Mỗi ${mi.slice(2)} phút`
+  if (rest && h === '*' && /^\d+$/.test(mi)) return mi === '0' ? 'Đầu mỗi giờ' : `Phút ${mi} mỗi giờ`
+  if (rest && /^\*\/\d+$/.test(h) && /^\d+$/.test(mi)) return `Mỗi ${h.slice(2)} giờ (phút ${mi})`
+  const at = /^\d+$/.test(h) && /^\d+$/.test(mi) ? `${h.padStart(2, '0')}:${mi.padStart(2, '0')}` : null
+  if (at && rest) return `Hằng ngày lúc ${at}`
+  if (at && dom === '*' && mon === '*' && dow === '1-5') return `Thứ 2–6 lúc ${at}`
+  return expr
+}
+
 /** Tên tool trong máy chủ MCP stag: `<id plugin>__<tool>` (id đổi ".", "-" thành "_"), tối đa 64 ký tự. */
 export function pluginToolName(pluginId: string, tool: string): string {
   return `${pluginId.replace(/[^a-z0-9_]/g, '_')}__${tool}`.slice(0, 64)
@@ -310,6 +491,34 @@ export interface PluginStatus {
   events: number
 }
 
+/** Một lần chạy việc theo lịch. */
+export interface PluginJobRun {
+  runId: string
+  key: string
+  trigger: 'schedule' | 'manual'
+  startedAt: string
+  finishedAt: string | null
+  ok: boolean | null
+  error?: string
+}
+
+/** Một lần nhận webhook. */
+export interface PluginWebhookDelivery {
+  requestId: string
+  endpointKey: string
+  at: string
+  status: number
+  ms: number
+  error?: string
+}
+
+/** Trạng thái một việc theo lịch. */
+export interface PluginJobStatus {
+  key: string
+  nextRun: string | null
+  running: boolean
+}
+
 /** Plugin đã cài (gửi cho giao diện). */
 export interface InstalledPlugin {
   manifest: PluginManifest
@@ -325,6 +534,11 @@ export interface InstalledPlugin {
   config: Record<string, unknown>
   status: PluginStatus
   logs: PluginLog[]
+  jobs: PluginJobStatus[]
+  jobRuns: PluginJobRun[]
+  /** Địa chỉ nhận webhook (có mã bí mật), theo endpointKey. Rỗng khi máy chủ webhook chưa chạy. */
+  webhookUrls: Record<string, string>
+  deliveries: PluginWebhookDelivery[]
 }
 
 export type PluginInstallRequest = { type: 'npm'; name: string; version?: string } | { type: 'local'; path: string }

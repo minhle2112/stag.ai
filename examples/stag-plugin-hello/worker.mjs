@@ -21,12 +21,64 @@ const plugin = definePlugin({
       return { message: `${run.agentName ?? 'Agent'} đã xong ${done} việc kể từ khi cài Hello.` }
     })
 
+    // Trang "Hello" / "Số liệu": số việc xong của từng agent (cả workspace nếu trang mở trong một workspace).
+    ctx.data.register('stats', async (_params, run) => {
+      const { workspaces, agents } = await ctx.agents.list()
+      const rows = []
+      for (const a of agents) {
+        if (a.kind === 'terminal' || (run.workspaceId && a.workspaceId !== run.workspaceId)) continue
+        rows.push({
+          id: a.id,
+          name: a.name,
+          workspace: workspaces.find((w) => w.id === a.workspaceId)?.name ?? '',
+          running: a.running,
+          done: (await ctx.state.get(`done:${a.id}`)) ?? 0
+        })
+      }
+      return { agents: rows, lastPing: (await ctx.state.get('lastPing')) ?? null, lastSummary: (await ctx.state.get('lastSummary')) ?? null }
+    })
+
+    ctx.actions.register('reset', async () => {
+      const { agents } = await ctx.agents.list()
+      for (const a of agents) await ctx.state.delete(`done:${a.id}`)
+      ctx.streams.emit('stats', { reset: true })
+      return { message: 'Đã đặt lại số việc xong.' }
+    })
+
     ctx.events.on('task.done', async (e) => {
       const key = `done:${e.agentId}`
       await ctx.state.set(key, ((await ctx.state.get(key)) ?? 0) + 1)
       ctx.logger.info(`${e.agentName} xong việc: ${e.data.title}`)
+      ctx.streams.emit('stats', { agentId: e.agentId })
     })
     ctx.events.on('agent.session.started', async (e) => ctx.logger.info(`Phiên mới: ${e.agentName}`))
+
+    const summarize = async (trigger) => {
+      const { agents } = await ctx.agents.list()
+      const parts = []
+      for (const a of agents) {
+        const n = (await ctx.state.get(`done:${a.id}`)) ?? 0
+        if (n) parts.push(`${a.name}: ${n}`)
+      }
+      const text = parts.length ? `Việc đã xong — ${parts.join(', ')}` : 'Chưa agent nào xong việc.'
+      await ctx.state.set('lastSummary', { at: new Date().toISOString(), text, trigger })
+      ctx.logger.info(`Tổng kết (${trigger}): ${text}`)
+      ctx.streams.emit('stats', { summary: text })
+      return text
+    }
+    // Việc theo lịch "summary" (đầu mỗi giờ, xem manifest.jobs); trang "Số liệu" gọi cùng đoạn mã qua action.
+    ctx.jobs.register('summary', (job) => summarize(job.trigger))
+    ctx.actions.register('summaryNow', async () => ({ message: await summarize('page') }))
+
+    // Webhook "ping": lưu thân yêu cầu, đẩy lên trang Hello.
+    ctx.webhooks.register('ping', async (req) => {
+      const ping = { at: new Date().toISOString(), body: req.parsedBody ?? req.rawBody.slice(0, 2000) }
+      await ctx.state.set('lastPing', ping)
+      ctx.logger.info(`Webhook ping: ${JSON.stringify(ping.body).slice(0, 200)}`)
+      ctx.streams.emit('ping', ping)
+      return { status: 200, body: { ok: true, received: ping.at } }
+    })
+
     ctx.logger.info('Hello đã sẵn sàng')
   },
 

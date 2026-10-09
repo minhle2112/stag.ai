@@ -1,0 +1,105 @@
+/* Màu + kiểu cơ bản của stag.ai cho trang plugin: <link rel="stylesheet" href="/__stag/ui.css" /> */
+:root {
+  --stag-bg: #0f1115;
+  --stag-panel: #161920;
+  --stag-panel-2: #1d212a;
+  --stag-line: #2a2f3a;
+  --stag-fg: #e6e8ee;
+  --stag-muted: #8b93a7;
+  --stag-accent: #6ea8fe;
+  --stag-ok: #6ee7b7;
+  --stag-warn: #fcd34d;
+  --stag-bad: #fca5a5;
+  --stag-font: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --stag-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
+  color-scheme: dark;
+}
+html,
+body {
+  margin: 0;
+  background: var(--stag-bg);
+  color: var(--stag-fg);
+  font: 13px/1.5 var(--stag-font);
+}
+h1,
+h2,
+h3 {
+  margin: 0 0 0.5em;
+  font-weight: 600;
+}
+h1 {
+  font-size: 18px;
+}
+h2 {
+  font-size: 15px;
+}
+h3 {
+  font-size: 13px;
+}
+a {
+  color: var(--stag-accent);
+}
+code,
+pre {
+  font-family: var(--stag-mono);
+  font-size: 12px;
+}
+.muted {
+  color: var(--stag-muted);
+}
+.card {
+  border: 1px solid var(--stag-line);
+  border-radius: 8px;
+  background: var(--stag-panel);
+  padding: 12px 14px;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  border: 1px solid var(--stag-line);
+  border-radius: 6px;
+  background: var(--stag-panel-2);
+  padding: 4px 12px;
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--stag-muted);
+}
+button.primary {
+  border-color: transparent;
+  background: var(--stag-fg);
+  color: var(--stag-bg);
+}
+input,
+select,
+textarea {
+  border: 1px solid var(--stag-line);
+  border-radius: 6px;
+  background: var(--stag-bg);
+  padding: 4px 8px;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--stag-accent);
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+th,
+td {
+  border-bottom: 1px solid var(--stag-line);
+  padding: 6px 8px;
+  text-align: left;
+}
+th {
+  color: var(--stag-muted);
+  font-weight: 500;
+}

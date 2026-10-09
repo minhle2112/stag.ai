@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hello</title>
+    <link rel="stylesheet" href="/__stag/ui.css" />
+    <link rel="stylesheet" href="./hello.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Hello <span class="muted" id="ws"></span></h1>
+          <p class="muted">Trang mẫu của plugin Hello: chạy trong khung cách ly, lấy dữ liệu từ worker qua <code>host.getData</code>.</p>
+        </div>
+        <button class="primary" id="hello">Chào</button>
+      </header>
+
+      <section class="card">
+        <h2>Việc agent đã xong</h2>
+        <table>
+          <thead>
+            <tr><th>Agent</th><th>Đang chạy</th><th>Việc xong</th></tr>
+          </thead>
+          <tbody id="agents"><tr><td colspan="3" class="muted">Đang tải…</td></tr></tbody>
+        </table>
+        <p class="muted" id="summary"></p>
+      </section>
+
+      <section class="card">
+        <h2>Webhook "ping" gần nhất</h2>
+        <p class="muted">Gửi thử: chép địa chỉ ở Cài đặt → Plugin → Hello → Trạng thái → Webhook, rồi <code>curl -X POST -H "Content-Type: application/json" -d "{\"hi\":1}" "&lt;địa chỉ&gt;"</code>.</p>
+        <pre id="ping" class="muted">Chưa nhận gì.</pre>
+      </section>
+    </main>
+    <script type="module" src="./hello.js"></script>
+  </body>
+</html>

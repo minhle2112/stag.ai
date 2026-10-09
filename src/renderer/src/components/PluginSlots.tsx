@@ -38,7 +38,7 @@ export function ToolbarPluginButtons(): React.JSX.Element {
           key={`${plugin.manifest.id}:${slot.id}`}
           onClick={() => void runSlot(plugin, slot, ws?.id)}
           title={`${plugin.manifest.displayName} (plugin)`}
-          className="rounded-md px-3 py-1 text-muted hover:text-fg"
+          className="whitespace-nowrap rounded-md px-3 py-1 text-muted hover:text-fg"
         >
           {slot.displayName}
         </button>

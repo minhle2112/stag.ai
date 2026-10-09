@@ -1,4 +1,4 @@
-import type { InstalledPlugin, PluginInstallRequest } from '@shared/plugins'
+import type { InstalledPlugin, PluginInstallRequest, PluginJobRun } from '@shared/plugins'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type {
@@ -292,6 +292,17 @@ const api = {
       const fn = (_e: IpcRendererEvent, list: InstalledPlugin[]): void => cb(list)
       ipcRenderer.on(IPC.pluginsChanged, fn)
       return () => ipcRenderer.removeListener(IPC.pluginsChanged, fn)
+    },
+    /** Lời gọi từ trang của plugin (iframe); ngữ cảnh workspace / agent do app điền. */
+    bridge: (id: string, method: string, params: Record<string, unknown>, workspaceId?: string, agentId?: string): Promise<unknown> =>
+      ipcRenderer.invoke(IPC.pluginsBridge, id, method, params, workspaceId, agentId),
+    runJob: (id: string, key: string): Promise<PluginJobRun> => ipcRenderer.invoke(IPC.pluginsRunJob, id, key),
+    rotateWebhook: (id: string): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsRotateWebhook, id),
+    /** Worker đẩy dữ liệu cho trang của nó (ctx.streams.emit). */
+    onStream(cb: (id: string, channel: string, data: unknown) => void): () => void {
+      const fn = (_e: IpcRendererEvent, id: string, channel: string, data: unknown): void => cb(id, channel, data)
+      ipcRenderer.on(IPC.pluginsStream, fn)
+      return () => ipcRenderer.removeListener(IPC.pluginsStream, fn)
     }
   },
   /** Lần gọi tool connector đang chờ duyệt. */

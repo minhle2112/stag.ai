@@ -8,11 +8,13 @@ import { Kanban } from './components/Kanban'
 import { ScopeAskDialog } from './components/ScopeAskDialog'
 import { ApprovalToast } from './components/ApprovalToast'
 import { PluginToast, ToolbarPluginButtons } from './components/PluginSlots'
+import { PluginFrame } from './components/PluginFrame'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
 import { openAgent, useAgents } from './store/agents'
 import { useBoard } from './store/board'
+import { pageTab, slotsOf, usePlugins } from './store/plugins'
 import { useSettings } from './store/settings'
 import { setTerminalFontSize } from './terminals'
 import { useUi, type MainTab } from './store/ui'
@@ -33,6 +35,11 @@ export function App(): React.JSX.Element {
   const waiting = useWaitingCount(active?.id)
   const settingsOpen = useUi((s) => s.settings !== null)
   const terminalFontSize = useSettings((s) => s.value.app.general.terminalFontSize)
+  const settingsValue = useSettings((s) => s.value)
+  const pluginItems = usePlugins((s) => s.items)
+  // Trang riêng của plugin (slot page) đang chạy và bật cho workspace này: thêm tab sau Artifacts.
+  const pages = slotsOf(pluginItems, settingsValue, 'page', active?.id)
+  const page = tab.startsWith('plugin:') ? pages.find((x) => pageTab(x.plugin.manifest.id, x.slot.id) === tab) : undefined
 
   useEffect(() => {
     load()
@@ -89,6 +96,19 @@ export function App(): React.JSX.Element {
               )}
             </button>
           ))}
+          {pages.map(({ plugin, slot }) => {
+            const id = pageTab(plugin.manifest.id, slot.id)
+            return (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                title={`${plugin.manifest.displayName} (plugin)`}
+                className={`whitespace-nowrap rounded-md px-3 py-1 ${tab === id ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
+              >
+                {slot.displayName}
+              </button>
+            )
+          })}
           <div className="flex-1" />
           {active && <span className="mr-2 truncate text-[12px] text-muted">{active.path}</span>}
           <ToolbarPluginButtons />
@@ -130,6 +150,15 @@ export function App(): React.JSX.Element {
               </div>
             )}
             {active && tab === 'kanban' && <Kanban key={active.id} workspace={active} />}
+            {active && tab.startsWith('plugin:') && (
+              <div className="absolute inset-0">
+                {page ? (
+                  <PluginFrame plugin={page.plugin} slot={page.slot} workspace={active} />
+                ) : (
+                  <Placeholder text="Trang này của plugin không còn mở được (plugin đã gỡ, đang tắt hoặc chưa chạy). Xem Cài đặt → Plugin." />
+                )}
+              </div>
+            )}
           </section>
           {browserOpen && active && <BrowserDock workspace={active} />}
         </div>
