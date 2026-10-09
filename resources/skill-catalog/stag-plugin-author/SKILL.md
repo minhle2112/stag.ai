@@ -47,19 +47,19 @@ my-plugin/
 
 Rules (the app refuses the package otherwise, naming the field):
 - `id`: `a-z 0-9 . _ -`, 2–64 chars; not `stag`, `claude`, `codex`, `terminal`. Changing it later loses the plugin's stored data.
-- Every feature needs its capability; tools / events / jobs / webhooks / `action` buttons need a worker; `page` / `settingsPage` need `entrypoints.ui`.
+- Every feature needs its capability; tools / events / jobs / webhooks / `action` buttons / `dataKey` need a worker; `page` / `settingsPage` / `dashboardWidget` need `entrypoints.ui`.
 - Tool names `a-z0-9_`; agents see them in the `stag` MCP server as `<id with . and - turned into _>__<tool>` (e.g. `my_weekly__word_count`). Write the description for the agent.
 - `instanceConfigSchema`: object of `string | number | integer | boolean` fields with `title`, `description`, `default`, `enum`, `minimum`, `maximum`, `format: "url" | "textarea"`. Config is stored as plain text: never put tokens or passwords there.
 - Cron `schedule`: 5 fields, local time, `*`, `*/n`, `a-b`, `a,b` (day of week 0 or 7 = Sunday).
-- Slots: `sidebar` (left sidebar), `globalToolbarButton` (top bar), `agentMenu` (agent ⋯ menu) with either `"open": { "url": "{config.x}/…?ws={workspace.name}", "target": "browser" | "external" }` or `"action": "<key>"`; `page` (main tab next to Kanban / Agents / Artifacts) and `settingsPage` (tab in the plugin's Settings page) with `path` to an `.html` file in the UI folder.
+- Slots: `sidebar` (left sidebar), `globalToolbarButton` (top bar), `agentMenu` (agent ⋯ menu) with either `"open": { "url": "{config.x}/…?ws={workspace.name}", "target": "browser" | "external" }` or `"action": "<key>"`; `page` (main tab next to Kanban / Agents / Artifacts) `settingsPage` (tab in the plugin's Settings page) and `dashboardWidget` (a cell in the agent grid, added by the user with "+ Widget") with `path` to an `.html` file in the UI folder; `statusBarItem` (short text in the status bar under the grid): text = `displayName`, or the worker's `getData(dataKey)` returning a string or `{ text, tooltip?, tone?: 'default' | 'ok' | 'warn' | 'error' }` (≤ 80 chars), re-read on open, every 60 s and when the worker calls `ctx.streams.emit('statusBar', {})`; `open` / `action` optional.
 - A new version that asks for more capabilities stops until the user approves again — ask for the least you need.
 
 | Capability | Allows |
 | --- | --- |
-| `ui.sidebar.register` / `ui.action.register` | `sidebar` / `globalToolbarButton` + `agentMenu` slots |
-| `ui.page.register` / `instance.settings.register` | `page` / `settingsPage` slots |
+| `ui.sidebar.register` / `ui.action.register` | `sidebar` / `globalToolbarButton` + `agentMenu` + `statusBarItem` slots |
+| `ui.page.register` / `instance.settings.register` / `ui.dashboardWidget.register` | `page` / `settingsPage` / `dashboardWidget` slots |
 | `agent.tools.register` | `tools` |
-| `events.subscribe` | `events`: `agent.session.started`, `agent.session.stopped`, `agent.waiting`, `task.started`, `task.done` |
+| `events.subscribe` | `events`: see the event list under Worker |
 | `agents.read` | `ctx.agents.list()` → `{ workspaces: [{id,name,path}], agents: [{id,name,role,kind,workspaceId,running,activity}] }` |
 | `agent.sessions.send` | `ctx.agents.send(agentId, text)` — types into the agent's terminal (risky) |
 | `board.read` | `ctx.board.list(workspaceId)` → kanban tasks `{id, agentId, agentName, title, scope, status: open|done|dropped, createdAt, doneAt?, summary?, files?}` |
@@ -68,6 +68,7 @@ Rules (the app refuses the package otherwise, naming the field):
 | `ui.notify` | `ctx.notify(title, body)` — Windows notification |
 | `jobs.schedule` | `jobs` |
 | `webhooks.receive` | `webhooks` |
+| `files.read` | `ctx.files.list` / `ctx.files.read` — files in the workspace's project folder (text ≤ 1 MB; `.git`, `.stag`, `.sessions`, `node_modules` and the vault are excluded; secret-bearing files such as `.env*`, `.mcp.json`, `.npmrc`, `*.pem`, `*.key` are listed but cannot be read) |
 | `http.outbound` | Declares network use; also lets UI pages fetch / load images from the network |
 
 ## Worker
@@ -85,6 +86,8 @@ runWorker(
       ctx.jobs.register('weekly', async (job) => {}) // job.key, job.runId, job.trigger: 'schedule' | 'manual'
       ctx.webhooks.register('github', async (req) => ({ status: 200, body: { ok: true } })) // req.headers, req.query, req.rawBody, req.parsedBody
       ctx.streams.emit('stats', { count: 4 }) // push to open pages: host.on('stats', fn)
+      const entries = await ctx.files.list(run.workspaceId, 'src') // [{ name, path, type: 'file'|'dir', size }], one level, dirs first
+      const { text } = await ctx.files.read(run.workspaceId, 'src/index.ts') // UTF-8 text ≤ 1 MB; throws for binary / too big / outside the project
     },
     async onValidateConfig(config) { return { ok: true } }, // { ok: false, errors: ['…'] } rejects a save
     async onConfigChanged(config) {},
@@ -96,6 +99,7 @@ runWorker(
 
 - `run` (call context): `workspaceId`, `workspaceName`, `workspacePath`, `agentId`, `agentName` — filled by the app (the workspace being viewed, or the agent calling the tool).
 - `ctx.config.get()` returns the current config; `ctx.logger.info / warn / error` and stdout / stderr go to the plugin's log (Settings → Plugin → Trạng thái).
+- Events (`e.type`, `e.at`, `e.workspaceId`, `e.agentId?`, `e.agentName?`, `e.data`): `agent.session.started` / `agent.session.stopped` (`kind`), `agent.waiting` (`reason`), `task.started` (`title`, `scope`), `task.done` (`title`), `artifact.written` (`{ path, kind: 'write'|'edit' }`), `vault.note.changed` (`{ path, by: 'agent'|'user' }`, not fired for the plugin's own writes), `handoff.done` (`{ percent, fromSessionId, summary }`), `scope.conflict` (`{ path, paths, ownerAgentId, ownerAgentName, taskTitle, entry, command?, decision: 'ask'|'allowed'|'denied' }`). `artifact.written` / `vault.note.changed` are limited to one event per file per 5 s.
 - Events arrive one at a time, in order. A call without the capability throws `Plugin chưa được cấp quyền "<capability>"`.
 - The worker is restarted after a crash (3 times in 10 minutes, then it stays in "Lỗi").
 - Jobs run only while the app is open; a job is never run twice at once; 10 minute limit.
@@ -116,7 +120,7 @@ Pages run in a sandboxed iframe with origin `null`: no `window.stag`, no access 
   host.onContext((ctx) => {}) // user switched workspace
   await host.toast(r.message)
   await host.openUrl('https://example.com', 'browser')
-  // also: host.config.get(), host.state.*, host.agents.list(), host.board.list(), host.vault.read(path) / write(path, text), host.notify(title, body)
+  // also: host.config.get(), host.state.*, host.agents.list(), host.board.list(), host.vault.read(path) / write(path, text), host.files.list(path?) / read(path), host.notify(title, body)
 </script>
 ```
 

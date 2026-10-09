@@ -54,7 +54,7 @@ export function PluginToast(): React.JSX.Element | null {
   return (
     <div
       role="status"
-      className={`fixed bottom-4 left-64 z-30 max-w-md rounded-lg border px-4 py-2.5 text-[12.5px] shadow-xl ${bad ? 'border-red-500/40 bg-[#2a1416] text-red-200' : 'border-line bg-panel text-fg'}`}
+      className={`fixed bottom-9 left-64 z-30 max-w-md rounded-lg border px-4 py-2.5 text-[12.5px] shadow-xl ${bad ? 'border-red-500/40 bg-[#2a1416] text-red-200' : 'border-line bg-panel text-fg'}`}
     >
       <div className="flex items-start gap-3">
         <span className="min-w-0 flex-1 whitespace-pre-wrap">{text}</span>

@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { extname, join, resolve, sep } from 'node:path'
+import { basename, extname, join, resolve, sep } from 'node:path'
 import {
   fillSlotUrl,
   newCapabilities,
@@ -1158,6 +1158,8 @@ export class PluginWebhookServer {
 const FILES_SKIP = new Set(['.git', 'node_modules', '.sessions', '.stag'])
 /** Không liệt kê / đọc bên trong: dữ liệu của app, git (config có thể chứa mã truy cập trong địa chỉ remote). */
 const FILES_DENY = new Set(['.git', '.sessions', '.stag'])
+/** Tên file hay chứa mã bí mật (biến môi trường, cấu hình MCP / npm, khoá riêng): liệt kê được, không đọc được. */
+const FILES_SECRET = /^(\.env(\..*)?|\.mcp\.json|\.npmrc|\.pypirc|\.netrc|\.git-credentials|settings\.local\.json|id_(rsa|dsa|ecdsa|ed25519)|.*\.(pem|key|pfx|p12))$/i
 export const FILES_MAX_BYTES = 1024 * 1024
 const FILES_MAX_ENTRIES = 2000
 
@@ -1217,6 +1219,7 @@ export async function listProjectDir(project: string, vault: string, rel: string
 /** Nội dung chữ (UTF-8) của một file trong dự án, tối đa 1 MB; file nhị phân / quá lớn → lỗi. */
 export async function readProjectText(project: string, vault: string, rel: string): Promise<{ text: string }> {
   const { real } = await projectTarget(project, vault, rel)
+  if (FILES_SECRET.test(basename(real))) throw rpcError(`"${rel}" thường chứa mã bí mật (API key, mật khẩu), plugin không đọc được.`)
   const st = await fs.stat(real)
   if (!st.isFile()) throw rpcError(`"${rel}" không phải file.`)
   if (st.size > FILES_MAX_BYTES) throw rpcError(`"${rel}" quá lớn (${Math.ceil(st.size / 1024)} KB, tối đa 1 MB).`)

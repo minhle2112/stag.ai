@@ -52,18 +52,19 @@ Mẫu đầy đủ: `resources/plugin-catalog/stag-plugin-hello` (tool, nút g�
 | `entrypoints.ui` | Thư mục giao diện trong gói (slot `page` / `settingsPage`) |
 | `instanceConfigSchema` | JSON Schema object; trường `string` / `number` / `integer` / `boolean`, `enum`, `default`, `minimum` / `maximum`, `format: "url" \| "textarea"`. Cấu hình lưu dạng chữ thường, không ghi token / mật khẩu |
 | `tools` | Tên `a-z0-9_`. Agent thấy trong máy chủ MCP `stag` với tên `<id>__<tool>` (id đổi `.` `-` thành `_`), vd. `stag_hello__word_count`. Dùng được với Claude Code và Codex; không hỏi lại từng lần gọi (đã duyệt quyền) |
-| `events` | `agent.session.started`, `agent.session.stopped`, `agent.waiting`, `task.started`, `task.done` |
+| `events` | `agent.session.started`, `agent.session.stopped`, `agent.waiting`, `task.started`, `task.done`, `artifact.written`, `vault.note.changed`, `handoff.done`, `scope.conflict` (xem [Sự kiện](#sự-kiện)) |
 | `jobs` | `{ key, displayName, description, schedule }`. `schedule` = cron 5 trường theo giờ máy (`*`, `*/n`, `a-b`, `a,b`; thứ 0 hoặc 7 = Chủ nhật) |
 | `webhooks` | `{ endpointKey, displayName, description }`. App cho mỗi điểm một địa chỉ cục bộ có mã bí mật |
-| `ui.slots` | Nút: `sidebar` (thanh bên), `globalToolbarButton` (thanh trên cùng), `agentMenu` (menu ⋯ của agent), mỗi nút có `open: { url, target: "browser" \| "external" }` (mẫu URL với `{config.x}`, `{workspace.name}`, `{workspace.path}`, `{workspace.id}`, `{agent.name}`, `{agent.id}`) hoặc `action` (gọi worker). Trang: `page` (tab cạnh Kanban / Agents / Artifacts, theo workspace đang xem), `settingsPage` (tab trong trang plugin ở Cài đặt → Plugin), có `path` = file `.html` trong `entrypoints.ui` (mặc định `index.html`) |
+| `ui.slots` | Nút: `sidebar` (thanh bên), `globalToolbarButton` (thanh trên cùng), `agentMenu` (menu ⋯ của agent), mỗi nút có `open: { url, target: "browser" \| "external" }` (mẫu URL với `{config.x}`, `{workspace.name}`, `{workspace.path}`, `{workspace.id}`, `{agent.name}`, `{agent.id}`) hoặc `action` (gọi worker). Trang: `page` (tab cạnh Kanban / Agents / Artifacts, theo workspace đang xem), `settingsPage` (tab trong trang plugin ở Cài đặt → Plugin), có `path` = file `.html` trong `entrypoints.ui` (mặc định `index.html`). Widget: `dashboardWidget` (ô trong lưới agent, cũng có `path`, xem [Widget trong lưới agent](#widget-trong-lưới-agent)). Thanh trạng thái: `statusBarItem`, chữ = `displayName` hoặc lấy từ worker qua `dataKey`, `open` / `action` không bắt buộc (xem [Thanh trạng thái](#thanh-trạng-thái)) |
 
 ## Quyền
 
 | Quyền | Cho phép |
 | --- | --- |
 | `ui.sidebar.register` | Slot `sidebar` |
-| `ui.action.register` | Slot `globalToolbarButton`, `agentMenu` |
+| `ui.action.register` | Slot `globalToolbarButton`, `agentMenu`, `statusBarItem` |
 | `ui.page.register` | Slot `page` |
+| `ui.dashboardWidget.register` | Slot `dashboardWidget` |
 | `instance.settings.register` | Slot `settingsPage` |
 | `agent.tools.register` | `tools` |
 | `events.subscribe` | `events` |
@@ -75,7 +76,22 @@ Mẫu đầy đủ: `resources/plugin-catalog/stag-plugin-hello` (tool, nút g�
 | `ui.notify` | `ctx.notify(title, body)` — thông báo Windows |
 | `jobs.schedule` | `jobs` |
 | `webhooks.receive` | `webhooks` |
+| `files.read` | `ctx.files.list(workspaceId, path?)` / `ctx.files.read(workspaceId, path)` — đọc file trong thư mục dự án (xem [Worker](#worker)) |
 | `http.outbound` | Chỉ là khai báo (worker là chương trình Node, tự gọi mạng được) |
+
+## Sự kiện
+
+| Sự kiện | Khi nào | `data` |
+| --- | --- | --- |
+| `agent.session.started` / `stopped` | Phiên agent mở / đóng | `kind` |
+| `agent.waiting` | Agent chờ bạn | `reason` |
+| `task.started` / `task.done` | Agent bắt đầu / xong việc | `title`, `scope` (started) |
+| `artifact.written` | Agent tạo / sửa file trong dự án (không gồm vault, thư mục ẩn, node_modules; mỗi file tối đa 1 sự kiện / 5 giây) | `path` (tương đối, "/"), `kind`: `write` \| `edit` |
+| `vault.note.changed` | Agent ghi note, hoặc bạn lưu / tạo note trong app (plugin tự ghi thì không báo; mỗi note tối đa 1 sự kiện / 5 giây) | `path` (trong vault), `by`: `agent` \| `user` (`user` thì không có `agentId`) |
+| `handoff.done` | Agent gọi `session_handoff`, app đóng phiên cũ và mở phiên mới | `percent` (% context, có thể null), `fromSessionId`, `summary` |
+| `scope.conflict` | Agent định sửa file thuộc việc đang mở của agent khác | `path`, `paths`, `ownerAgentId`, `ownerAgentName`, `taskTitle`, `entry`, `command?`, `decision`: `ask` (Claude Code hỏi trong terminal) \| `allowed` \| `denied` (bạn trả lời trong app, Codex) |
+
+Mọi sự kiện có `type`, `at`, `workspaceId`, và `agentId` / `agentName` khi biết. Plugin chỉ nhận sự kiện đã khai trong `events` và của workspace đang bật plugin.
 
 ## Worker
 
@@ -103,7 +119,8 @@ runWorker(
 ```
 
 - Host → worker: `initialize`, `health` (30 giây / lần), `validateConfig`, `configChanged`, `shutdown`, `onEvent` (thông báo, xử lý lần lượt), `executeTool`, `performAction`, `getData`, `runJob`, `handleWebhook`.
-- Worker → host: `config.get`, `state.*`, `agents.list`, `agent.sessions.send`, `board.list`, `vault.read`, `vault.write`, `notify`; thông báo `log`, `streams.emit`. Thiếu quyền → lỗi `-32001`.
+- Worker → host: `config.get`, `state.*`, `agents.list`, `agent.sessions.send`, `board.list`, `vault.read`, `vault.write`, `files.list`, `files.read`, `notify`; thông báo `log`, `streams.emit`. Thiếu quyền → lỗi `-32001`.
+- Đọc file dự án (files.read): `ctx.files.list(workspaceId, path = '')` → `[{ name, path, type: 'file' | 'dir', size }]` của một thư mục (không đệ quy, thư mục trước, tối đa 2000 mục; bỏ `.git`, `node_modules`, `.sessions`, `.stag`, vault, symlink trỏ ra ngoài). `ctx.files.read(workspaceId, path)` → `{ text }`, chỉ file chữ UTF-8 tối đa 1 MB. `path` tương đối so với thư mục dự án; đường dẫn tuyệt đối, `..`, symlink / junction ra ngoài, bên trong `.git` / `.stag` / `.sessions` và vault (dùng `ctx.vault.read`) đều bị từ chối. File hay chứa mã bí mật (`.env*`, `.mcp.json`, `.npmrc`, `.netrc`, `.git-credentials`, `settings.local.json`, `id_rsa`…, `*.pem` / `*.key` / `*.pfx` / `*.p12`) vẫn hiện trong danh sách nhưng không đọc được. Plugin tắt ở workspace nào thì không đọc được workspace đó.
 - `run` (ngữ cảnh lần gọi): `workspaceId`, `workspaceName`, `workspacePath`, `agentId`, `agentName`.
 - stdout / stderr của worker vào nhật ký. Worker thoát bất ngờ → khởi động lại (1 s, 2 s, 3 s); quá 3 lần trong 10 phút → "Lỗi", bấm "Khởi động lại" sau khi sửa.
 
@@ -127,7 +144,31 @@ SDK của trang do app phục vụ sẵn ở `/__stag/ui.js` (kèm màu của ap
 </script>
 ```
 
-Còn có `host.config.get()`, `host.state.get / set / delete`, `host.agents.list / send`, `host.board.list()`, `host.vault.read(path) / write(path, content)`, `host.notify(title, body)` — cùng quyền như worker. Ngữ cảnh (workspace) do app điền, trang không tự khai. Trang cài đặt (`settingsPage`) tự cao theo nội dung.
+Còn có `host.config.get()`, `host.state.get / set / delete`, `host.agents.list / send`, `host.board.list()`, `host.vault.read(path) / write(path, content)`, `host.files.list(path?) / read(path)`, `host.notify(title, body)` — cùng quyền như worker. Ngữ cảnh (workspace) do app điền, trang không tự khai. Trang cài đặt (`settingsPage`) tự cao theo nội dung.
+
+## Widget trong lưới agent
+
+Slot `dashboardWidget` (quyền `ui.dashboardWidget.register`) giống slot `page`: có `path` là file `.html` trong `entrypoints.ui`, nhưng mở thành một ô trong lưới của tab Agents.
+
+- Người dùng bấm "+ Widget" cạnh "+ Agent" (nút chỉ hiện khi có widget của plugin đang chạy và bật cho workspace đó), chọn "tên plugin · tên slot"; ô mới chia đôi ô đang chọn. Mỗi widget chỉ mở một ô trong một workspace.
+- Ô kéo để đổi chỗ như ô agent, × chỉ đóng ô. Lưới (kể cả widget) được lưu, mở lại app vẫn còn.
+- Trang widget chạy trong cùng khung cách ly, có cùng `host` như trang `page`; `host.ready` trả `slotType: 'dashboardWidget'` và workspace của lưới. Khung luôn lấp đầy ô (không tự cao theo nội dung), nên trang nên gọn và tự cuộn khi dài.
+- Muốn widget tự cập nhật: worker gọi `ctx.streams.emit('<kênh>', …)`, trang nghe `host.on('<kênh>', …)` — như widget mẫu của Hello (`ui/widget.html`, kênh `stats`).
+- Plugin bị gỡ, tắt hoặc ngừng chạy thì ô vẫn giữ chỗ, hiện lời nhắc kèm nút đóng ô.
+
+## Thanh trạng thái
+
+Slot `statusBarItem` thêm một mục chữ ngắn vào thanh trạng thái ở dưới cùng vùng làm việc (dưới lưới agent / Kanban). Thanh chỉ hiện khi có ít nhất một mục của plugin đang chạy và bật cho workspace đang xem.
+
+- Không có `dataKey`: chữ = `displayName`.
+- Có `dataKey`: app gọi `getData(dataKey)` của worker (`ctx.data.register`, `run` có workspace đang xem). Worker trả chuỗi, hoặc `{ text, tooltip?, tone? }` với `tone` là `default` / `ok` / `warn` / `error` (chấm xanh / vàng / đỏ trước chữ). Chữ tối đa 80 ký tự, tooltip 300.
+- App đọc lại khi mở, khi đổi workspace, khi worker khởi động lại, mỗi 60 giây, và ngay khi worker gọi `ctx.streams.emit('statusBar', …)` (dữ liệu kèm theo không dùng).
+- Trả rỗng hoặc lỗi → mục bị ẩn (lỗi ghi vào console của app).
+- Có `open` / `action` thì bấm được như nút ở thanh bên; không có thì chỉ để xem.
+
+```json
+{ "type": "statusBarItem", "id": "done", "displayName": "Hello", "dataKey": "statusBar", "action": "hello" }
+```
 
 ## Việc theo lịch
 
@@ -145,6 +186,5 @@ Mã bí mật mỗi plugin (cũng nhận ở header `Authorization: Bearer <mã>
 
 ## Chưa có
 
-- Widget, ô mới trong lưới agent, mục trên thanh trạng thái.
-- Cấu hình dạng bí mật (dùng Cài đặt → Secrets sau này), danh mục plugin, kiểm SHA-256.
+- Cấu hình dạng bí mật (dùng Cài đặt → Secrets sau này), kiểm SHA-256 cho plugin kèm app.
 - Chạy plugin viết cho Paperclip (giao thức worker khác; chỉ tên manifest / quyền giống).

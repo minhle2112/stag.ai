@@ -12,6 +12,7 @@ import {
   type PluginCatalogEntry,
   type PluginCapability,
   type PluginConfigField,
+  type PluginSlot,
   type PluginState
 } from '@shared/plugins'
 import { usePlugins } from '../../store/plugins'
@@ -39,12 +40,14 @@ const STATE: Record<PluginState, { label: string; tone: Tone }> = {
   upgrade_pending: { label: 'Chờ duyệt quyền mới', tone: 'warn' }
 }
 const TONE_TEXT: Record<Tone, string> = { ok: 'text-emerald-300 border-emerald-500/40', warn: 'text-amber-300 border-amber-400/40', bad: 'text-red-300 border-red-500/40', muted: 'text-muted border-line' }
-const SLOT: Record<string, string> = {
+const SLOT: Record<PluginSlot['type'], string> = {
   sidebar: 'Thanh bên',
   globalToolbarButton: 'Thanh trên cùng',
   agentMenu: 'Menu ⋯ của agent',
   page: 'Tab trang riêng',
-  settingsPage: 'Trang cài đặt'
+  settingsPage: 'Trang cài đặt',
+  dashboardWidget: 'Widget trong lưới agent',
+  statusBarItem: 'Thanh trạng thái'
 }
 
 const pluginSetApp =
@@ -546,7 +549,12 @@ function StatusTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
               <span className="w-40 shrink-0 text-muted">{SLOT[x.type]}</span>
               <span className="font-medium">{x.displayName}</span>
               <span className="truncate font-mono text-[11px] text-muted">
-                {x.path ? `${m.entrypoints.ui}/${x.path}` : x.open ? `mở ${x.open.url} (${x.open.target === 'browser' ? 'trong app' : 'trình duyệt'})` : `gọi ${x.action}`}
+                {[
+                  x.dataKey && `chữ từ dữ liệu "${x.dataKey}"`,
+                  x.path ? `${m.entrypoints.ui}/${x.path}` : x.open ? `mở ${x.open.url} (${x.open.target === 'browser' ? 'trong app' : 'trình duyệt'})` : x.action && `gọi ${x.action}`
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </span>
             </div>
           ))}

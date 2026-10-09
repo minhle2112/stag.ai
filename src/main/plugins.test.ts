@@ -588,6 +588,12 @@ runWorker(definePlugin({ async setup(ctx) {
     await expect(read('latin1.txt')).rejects.toThrow(/UTF-8/)
     await expect(read('nope.txt')).rejects.toThrow(/Không thấy/)
     await expect(read('src')).rejects.toThrow(/không phải file/)
+    // File hay chứa mã bí mật: thấy trong danh sách nhưng không đọc được.
+    for (const f of ['.env', 'src/.env.local', '.mcp.json', 'deploy.PEM']) {
+      await fs.writeFile(join(proj, f), 'TOKEN=abc')
+      await expect(read(f)).rejects.toThrow(/mã bí mật/)
+    }
+    expect(await list()).toContainEqual({ name: '.env', path: '.env', type: 'file', size: 9 })
     await expect(list('README.md')).rejects.toThrow(/không phải thư mục/)
     // Workspace không có / plugin tắt ở workspace đó.
     await expect(host.bridge('acme.files', 'files.list', { workspaceId: 'w9' }, ctx)).rejects.toThrow(/Không có workspace/)

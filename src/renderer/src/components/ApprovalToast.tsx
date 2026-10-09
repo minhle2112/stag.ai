@@ -14,7 +14,7 @@ export function ApprovalToast(): React.JSX.Element | null {
     <button
       type="button"
       onClick={() => open('connectors', { review: true })}
-      className="fixed bottom-4 right-4 z-30 flex max-w-sm items-center gap-3 rounded-xl border border-amber-400/50 bg-panel px-4 py-3 text-left shadow-2xl hover:bg-panel-2"
+      className="fixed bottom-9 right-4 z-30 flex max-w-sm items-center gap-3 rounded-xl border border-amber-400/50 bg-panel px-4 py-3 text-left shadow-2xl hover:bg-panel-2"
     >
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[13px] font-bold text-black">{items.length}</span>
       <span className="min-w-0">
