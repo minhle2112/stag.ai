@@ -470,7 +470,8 @@ function DiscoverView({ onOpen, onInstall, msg }: { onOpen: (slug: string) => vo
     <>
       <h1 className="mb-1 text-[18px] font-semibold tracking-tight">Khám phá skill</h1>
       <p className="mb-4 text-[12.5px] leading-relaxed text-muted">
-        Skill dùng chung kèm app, lấy từ danh mục skill của Paperclip (MIT). Cài = chép vào thư viện của stag.ai để bật cho agent, sửa thoải mái.
+        Skill dùng chung kèm app: phần lớn lấy từ danh mục skill của Paperclip (MIT), cộng skill riêng của stag.ai (vd. viết plugin). Cài = chép vào thư viện của
+        stag.ai để bật cho agent, sửa thoải mái.
       </p>
       <div className="mb-4 flex items-center gap-2 rounded-md border border-line bg-panel px-3 py-1.5">
         <SearchIcon className="h-4 w-4 text-muted" />
@@ -491,7 +492,7 @@ function DiscoverView({ onOpen, onInstall, msg }: { onOpen: (slug: string) => vo
             <SkillRow
               key={e.slug}
               name={e.name}
-              by="Danh mục · Paperclip"
+              by={e.source === 'stag.ai' ? 'Danh mục · stag.ai' : 'Danh mục · Paperclip'}
               description={e.description}
               footer={[`${e.files} file`, ...e.tags.slice(0, 3)]}
               onOpen={() => onOpen(e.slug)}

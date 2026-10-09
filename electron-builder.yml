@@ -32,6 +32,11 @@ extraResources:
   # skills.ts đọc process.resourcesPath/skill-catalog (Cài đặt → Skill → Khám phá).
   - from: resources/skill-catalog
     to: skill-catalog
+  # plugins.ts: plugin kèm app (Cài đặt → Plugin → Có sẵn) + SDK chép vào plugin mới tạo từ mẫu.
+  - from: resources/plugin-catalog
+    to: plugin-catalog
+  - from: resources/plugin-sdk
+    to: plugin-sdk
 
 asar: true
 # Module native (.node, winpty-agent.exe) không nạp/chạy được từ trong asar.

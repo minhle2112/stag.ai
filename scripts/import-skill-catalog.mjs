@@ -15,7 +15,9 @@ const out = 'resources/skill-catalog'
 const KEEP = ['agent-browser', 'design-critique', 'doc-maintenance', 'github-pr-workflow', 'qa-acceptance', 'simplified-english', 'wireframe']
 
 const { packageVersion, skills } = JSON.parse(readFileSync(join(pkg, 'generated/catalog.json'), 'utf8'))
-rmSync(out, { recursive: true, force: true })
+// Skill riêng của stag.ai (source: "stag.ai", vd. stag-plugin-author) được giữ nguyên; chỉ làm mới phần của Paperclip.
+const own = existsSync(join(out, 'catalog.json')) ? JSON.parse(readFileSync(join(out, 'catalog.json'), 'utf8')).entries.filter((e) => e.source === 'stag.ai') : []
+for (const slug of KEEP) rmSync(join(out, slug), { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 
 /** Frontmatter chỉ còn name + description (giữ nguyên dòng gốc của hai khoá đó). */
@@ -53,7 +55,7 @@ for (const slug of KEEP) {
   })
 }
 
-writeFileSync(join(out, 'catalog.json'), JSON.stringify({ source: `@paperclipai/skills-catalog ${packageVersion} (MIT)`, entries }, null, 1) + '\n')
+writeFileSync(join(out, 'catalog.json'), JSON.stringify({ source: `@paperclipai/skills-catalog ${packageVersion} (MIT) + stag.ai`, entries: [...entries, ...own] }, null, 1) + '\n')
 const lic = existsSync(join(pkg, 'LICENSE')) ? readFileSync(join(pkg, 'LICENSE'), 'utf8').trim() : ''
 writeFileSync(join(out, 'LICENSE.md'), `# Skill catalog\n\nSkills adapted from @paperclipai/skills-catalog ${packageVersion} (frontmatter trimmed to name + description).\n\n\`\`\`\n${lic}\n\`\`\`\n`)
 console.log(`${entries.length} skill`)

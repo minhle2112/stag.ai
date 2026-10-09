@@ -1,5 +1,5 @@
 {
- "source": "@paperclipai/skills-catalog 0.3.1 (MIT)",
+ "source": "@paperclipai/skills-catalog 0.3.1 (MIT) + stag.ai",
  "entries": [
   {
    "slug": "agent-browser",
@@ -98,6 +98,20 @@
    ],
    "files": 7,
    "bytes": 63982
+  },
+  {
+   "slug": "stag-plugin-author",
+   "name": "stag-plugin-author",
+   "description": "Write or change a stag.ai plugin — the stagPlugin manifest in package.json, the Node worker (tools for agents, buttons, events, scheduled jobs, webhooks) and sandboxed UI pages — following the stag.ai plugin API and its capability model.",
+   "category": "stag.ai",
+   "tags": [
+    "stag.ai",
+    "plugin",
+    "extension"
+   ],
+   "files": 2,
+   "bytes": 16279,
+   "source": "stag.ai"
   }
  ]
 }

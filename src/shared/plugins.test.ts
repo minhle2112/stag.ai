@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { cronProblem, describeCron, fillSlotUrl, newCapabilities, nextCronRun, normalizePluginConfig, parsePluginManifest, pluginToolName } from './plugins'
+import { cronProblem, describeCron, fillSlotUrl, pluginFolderFor, pluginIdFrom, newCapabilities, nextCronRun, normalizePluginConfig, parsePluginManifest, pluginToolName } from './plugins'
 import { normalizeSettings, pluginOn } from './settings'
-import hello from '../../examples/stag-plugin-hello/package.json'
+import hello from '../../resources/plugin-catalog/stag-plugin-hello/package.json'
 
 const pkg = (m: Record<string, unknown>, extra: Record<string, unknown> = {}): unknown => ({ name: 'p', version: '1.2.3', ...extra, stagPlugin: { id: 'acme.x', ...m } })
 
@@ -121,6 +121,14 @@ describe('cấu hình, URL slot, tên tool', () => {
     expect(describeCron('30 18 * * *')).toBe('Hằng ngày lúc 18:30')
     expect(describeCron('0 9 * * 1-5')).toBe('Thứ 2–6 lúc 09:00')
     expect(describeCron('0 9 1 * *')).toBe('0 9 1 * *')
+  })
+
+  it('gợi ý mã + thư mục cho plugin mới', () => {
+    expect(pluginIdFrom('Báo cáo tuần')).toBe('my.bao-cao-tuan')
+    expect(pluginIdFrom('Đồng hồ  Ổn định!')).toBe('my.dong-ho-on-dinh')
+    expect(pluginIdFrom('***')).toBe('')
+    expect(pluginFolderFor('my.bao-cao')).toBe('stag-plugin-bao-cao')
+    expect(pluginFolderFor('acme.x_y')).toBe('stag-plugin-x-y')
   })
 
   it('tên tool MCP', () => {

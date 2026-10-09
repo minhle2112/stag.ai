@@ -12,7 +12,7 @@ import type { ApprovalQueue } from './approvals'
 import { connectFromCatalog } from './connect'
 import { readSkillDir, scanSkills, type SkillLibrary } from './skills'
 import type { PluginCallContext, PluginHost } from './plugins'
-import type { PluginInstallRequest } from '@shared/plugins'
+import type { PluginInstallRequest, PluginScaffoldRequest } from '@shared/plugins'
 import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
@@ -307,6 +307,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.pluginsInstall, (_e, req: PluginInstallRequest) => {
     if (req?.type === 'npm' && typeof req.name === 'string') return plugins.install({ type: 'npm', name: req.name, version: typeof req.version === 'string' ? req.version : undefined })
     if (req?.type === 'local' && typeof req.path === 'string') return plugins.install({ type: 'local', path: req.path })
+    if (req?.type === 'catalog' && typeof req.slug === 'string') return plugins.install({ type: 'catalog', slug: req.slug })
     throw new Error('Yêu cầu cài không hợp lệ')
   })
   ipcMain.handle(IPC.pluginsApprove, (_e, id: string) => plugins.approve(pluginId(id)))
@@ -329,6 +330,11 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.pluginsBridge, (_e, id: string, method: string, params: Record<string, unknown>, workspaceId?: string, agentId?: string) =>
     plugins.bridge(pluginId(id), String(method), params && typeof params === 'object' ? params : {}, callContext(workspaceId, agentId))
   )
+  ipcMain.handle(IPC.pluginsCatalog, () => plugins.catalog())
+  ipcMain.handle(IPC.pluginsScaffold, (_e, req: PluginScaffoldRequest) => {
+    if (!req || typeof req.parentDir !== 'string' || typeof req.name !== 'string' || typeof req.id !== 'string') throw new Error('Yêu cầu tạo plugin không hợp lệ')
+    return plugins.scaffold({ parentDir: req.parentDir, name: req.name, id: req.id, template: req.template === 'page' ? 'page' : 'basic' })
+  })
   ipcMain.handle(IPC.pluginsRunJob, (_e, id: string, key: string) => plugins.runJob(pluginId(id), String(key), 'manual'))
   ipcMain.handle(IPC.pluginsRotateWebhook, (_e, id: string) => plugins.rotateWebhookToken(pluginId(id)))
   ipcMain.handle(IPC.pickFile, async (e, title: string, defaultPath?: string) => {

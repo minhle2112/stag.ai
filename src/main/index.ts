@@ -20,7 +20,7 @@ import { PluginHost, PluginWebhookServer, type SpawnWorker } from './plugins'
 import pluginUiCss from './inject/pluginUi.css?raw'
 import pluginUiJs from './inject/pluginUi.js?raw'
 import { independentSessionEnv } from './adapters'
-import { readNote, writeNote } from './vault'
+import { putNote, readNote } from './vault'
 import { agentKind } from '@shared/types'
 import type { PluginEvent } from '@shared/plugins'
 import { SettingsStore } from './settings'
@@ -133,6 +133,9 @@ const plugins = new PluginHost(join(app.getPath('userData'), 'plugins'), {
   env: independentSessionEnv(process.env),
   onChange: (list) => send(IPC.pluginsChanged, list),
   onStream: (id, channel, data) => send(IPC.pluginsStream, id, channel, data),
+  // Plugin kèm app + SDK chép vào plugin mới (đóng gói qua extraResources).
+  catalogDir: app.isPackaged ? join(process.resourcesPath, 'plugin-catalog') : join(app.getAppPath(), 'resources', 'plugin-catalog'),
+  sdkFile: join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources'), 'plugin-sdk', 'stag-plugin-sdk.mjs'),
   api: {
     agents: () => ({
       workspaces: workspaces.list().map((w) => ({ id: w.id, name: w.name, path: w.path })),
@@ -160,7 +163,7 @@ const plugins = new PluginHost(join(app.getPath('userData'), 'plugins'), {
     vaultWrite: async (workspaceId, rel, content) => {
       const ws = workspaces.get(workspaceId)
       if (!ws) throw new Error('Không có workspace này.')
-      await writeNote(ws.vaultPath, rel, content, null)
+      await putNote(ws.vaultPath, rel, content)
     },
     notify: (title, body) => new Notification({ title, body }).show()
   }

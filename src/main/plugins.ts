@@ -10,14 +10,19 @@ import {
   nextCronRun,
   normalizePluginConfig,
   parsePluginManifest,
+  PLUGIN_ID_RE,
+  pluginFolderFor,
   pluginToolName,
+  RESERVED_PLUGIN_IDS,
   type InstalledPlugin,
+  type PluginCatalogEntry,
   type PluginCapability,
   type PluginEvent,
   type PluginInstallRequest,
   type PluginJobRun,
   type PluginLog,
   type PluginManifest,
+  type PluginScaffoldRequest,
   type PluginStatus,
   type PluginTool,
   type PluginWebhookDelivery
@@ -26,11 +31,12 @@ import { pluginOn } from '@shared/settings'
 import type { Settings } from '@shared/types'
 import { npmInstall, npmUninstall } from './externalAdapters'
 import { readText } from './fsutil'
+import { scaffoldFiles } from './pluginScaffold'
 
 /**
  * Plugin của stag.ai (alpha, Cài đặt → Plugin). Mỗi plugin có worker chạy trong tiến trình riêng (Electron
  * utilityProcess; test dùng Node fork), nói JSON-RPC 2.0 qua kênh tin nhắn của tiến trình (SDK:
- * examples/stag-plugin-sdk). Plugin chỉ chạy sau khi người dùng duyệt quyền; cập nhật xin thêm quyền → chờ duyệt lại.
+ * resources/plugin-sdk). Plugin chỉ chạy sau khi người dùng duyệt quyền; cập nhật xin thêm quyền → chờ duyệt lại.
  * Quyền giới hạn những gì plugin làm **qua stag.ai** (API host); worker vẫn là chương trình chạy với quyền của bạn.
  *
  * userData/plugins/registry.json — danh sách đã cài (manifest, nguồn, quyền đã duyệt, cấu hình)
@@ -210,6 +216,10 @@ export class PluginHost {
       /** Worker gửi dữ liệu trực tiếp cho trang của nó (ctx.streams.emit). */
       onStream?: (pluginId: string, channel: string, data: unknown) => void
       env?: NodeJS.ProcessEnv
+      /** resources/plugin-catalog: plugin kèm app (mục "Có sẵn"). */
+      catalogDir?: string
+      /** resources/plugin-sdk/stag-plugin-sdk.mjs: chép vào plugin mới tạo từ mẫu. */
+      sdkFile?: string
     }
   ) {}
 
@@ -228,6 +238,57 @@ export class PluginHost {
     } catch {
       this.entries = []
     }
+    // Plugin kèm app: thư mục và manifest theo bản app hiện tại (cập nhật app xin thêm quyền → chờ duyệt lại).
+    for (const e of this.entries) {
+      if (e.source.type !== 'catalog' || !this.deps.catalogDir) continue
+      e.dir = join(this.deps.catalogDir, e.source.slug)
+      try {
+        const { manifest, name, version } = parsePluginManifest(JSON.parse((await readText(join(e.dir, 'package.json'))) ?? ''))
+        if (manifest.id === e.manifest.id) Object.assign(e, { manifest, name, version, config: normalizePluginConfig(manifest.instanceConfigSchema, e.config).config })
+      } catch {
+        // App bỏ plugin này khỏi danh mục: giữ bản ghi, worker sẽ báo lỗi không thấy file.
+      }
+    }
+  }
+
+  // ---- danh mục kèm app, tạo plugin mới ----
+
+  /** Plugin kèm app (mỗi thư mục con của catalogDir có package.json với stagPlugin hợp lệ). */
+  async catalog(): Promise<PluginCatalogEntry[]> {
+    const root = this.deps.catalogDir
+    if (!root) return []
+    const dirs = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
+    const out: PluginCatalogEntry[] = []
+    for (const d of dirs) {
+      if (!d.isDirectory() || !/^[a-z0-9-]+$/.test(d.name)) continue
+      try {
+        const { manifest, name, version } = parsePluginManifest(JSON.parse((await readText(join(root, d.name, 'package.json'))) ?? ''))
+        out.push({ slug: d.name, name, version, manifest, installed: this.entries.some((e) => e.manifest.id === manifest.id) })
+      } catch {
+        // bỏ qua thư mục hỏng
+      }
+    }
+    return out.sort((a, b) => a.manifest.displayName.localeCompare(b.manifest.displayName))
+  }
+
+  /** Tạo plugin mới từ mẫu trong `<parentDir>/stag-plugin-<tên>` rồi cài tại chỗ (chờ duyệt quyền như mọi plugin). */
+  async scaffold(req: PluginScaffoldRequest): Promise<InstalledPlugin> {
+    const name = req.name.trim()
+    const id = req.id.trim()
+    if (!name || name.length > 60 || /[\r\n]/.test(name)) throw new Error('Tên plugin: 1–60 ký tự, một dòng.')
+    if (!PLUGIN_ID_RE.test(id) || RESERVED_PLUGIN_IDS.includes(id)) throw new Error('Mã plugin chỉ gồm a-z, 0-9, ".", "_", "-" (2–64 ký tự), vd. "my.bao-cao".')
+    if (this.entries.some((e) => e.manifest.id === id)) throw new Error(`Đã có plugin mã "${id}".`)
+    if (!this.deps.sdkFile) throw new Error('Không thấy SDK plugin kèm app.')
+    const parent = resolve(req.parentDir.trim())
+    if (!(await fs.stat(parent).catch(() => null))?.isDirectory()) throw new Error(`Không thấy thư mục "${req.parentDir}".`)
+    const dir = join(parent, pluginFolderFor(id))
+    if ((await fs.readdir(dir).catch(() => [])).length) throw new Error(`Thư mục "${dir}" đã có file. Chọn chỗ khác hoặc đổi mã.`)
+    for (const [rel, text] of Object.entries(scaffoldFiles({ ...req, name, id }))) {
+      await fs.mkdir(join(dir, rel, '..'), { recursive: true })
+      await fs.writeFile(join(dir, rel), text, 'utf8')
+    }
+    await fs.copyFile(this.deps.sdkFile, join(dir, 'stag-plugin-sdk.mjs'))
+    return this.install({ type: 'local', path: dir })
   }
 
   private async save(): Promise<void> {
@@ -338,6 +399,11 @@ export class PluginHost {
       const version = (req.version ?? '').trim() || 'latest'
       dir = await npmInstall(join(this.root, 'npm'), 'stag-plugins', name, version)
       source = { type: 'npm', name, version }
+    } else if (req.type === 'catalog') {
+      if (!this.deps.catalogDir || !/^[a-z0-9-]+$/.test(req.slug) || !(await this.catalog()).some((c) => c.slug === req.slug))
+        throw new Error(`Không có plugin "${req.slug}" trong danh mục kèm app.`)
+      dir = join(this.deps.catalogDir, req.slug)
+      source = { type: 'catalog', slug: req.slug }
     } else {
       dir = resolve(req.path.trim())
       const st = await fs.stat(dir).catch(() => null)
@@ -380,7 +446,7 @@ export class PluginHost {
     if (old) await this.stop(old.manifest.id)
     this.entries = old ? this.entries.map((e) => (e === old ? entry : e)) : [...this.entries, entry]
     await this.save()
-    this.log(manifest.id, 'info', `${old ? 'Cài lại' : 'Cài'} ${name}@${version} từ ${source.type === 'npm' ? 'npm' : source.path}`)
+    this.log(manifest.id, 'info', `${old ? 'Cài lại' : 'Cài'} ${name}@${version} từ ${source.type === 'npm' ? 'npm' : source.type === 'catalog' ? 'danh mục kèm app' : source.path}`)
     if (this.runnable(entry)) await this.start(manifest.id)
     this.changed()
     return this.info(entry)
@@ -414,7 +480,8 @@ export class PluginHost {
   /** Đọc lại gói (thư mục cục bộ) / cài lại cùng phiên bản (npm). */
   reload(id: string): Promise<InstalledPlugin> {
     const e = this.get(id)
-    return this.install(e.source.type === 'npm' ? { type: 'npm', name: e.source.name, version: e.source.version } : { type: 'local', path: e.source.path })
+    const s = e.source
+    return this.install(s.type === 'npm' ? { type: 'npm', name: s.name, version: s.version } : s.type === 'catalog' ? { type: 'catalog', slug: s.slug } : { type: 'local', path: s.path })
   }
 
   /** Lưu cấu hình: kiểm theo schema, rồi hỏi worker (validateConfig) nếu đang chạy; xong báo configChanged. */
@@ -1086,5 +1153,6 @@ function stateKey(p: Record<string, unknown>): string {
 function sameSource(a: Entry['source'], b: Entry['source']): boolean {
   if (a.type === 'npm' && b.type === 'npm') return a.name === b.name
   if (a.type === 'local' && b.type === 'local') return resolve(a.path).toLowerCase() === resolve(b.path).toLowerCase()
+  if (a.type === 'catalog' && b.type === 'catalog') return a.slug === b.slug
   return false
 }

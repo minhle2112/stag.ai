@@ -1,0 +1,54 @@
+{
+  "name": "stag-plugin-task-log",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plugin của stag.ai: cuối ngày ghi các việc agent đã xong vào vault của workspace.",
+  "license": "MIT",
+  "type": "module",
+  "stagPlugin": {
+    "id": "stag.task-log",
+    "apiVersion": 1,
+    "displayName": "Nhật ký việc",
+    "description": "Cuối mỗi ngày làm việc ghi các việc agent đã xong (và việc còn mở) vào vault của từng workspace, một note mỗi ngày, để bạn và agent xem lại. Note do plugin tạo lại mỗi lần ghi.",
+    "author": "stag.ai",
+    "categories": ["vault", "productivity"],
+    "capabilities": ["agents.read", "board.read", "vault.write", "jobs.schedule", "ui.sidebar.register"],
+    "entrypoints": {
+      "worker": "./worker.mjs"
+    },
+    "instanceConfigSchema": {
+      "type": "object",
+      "properties": {
+        "folder": {
+          "type": "string",
+          "title": "Thư mục trong vault",
+          "description": "Note ghi vào <thư mục>/YYYY-MM-DD.md trong vault của workspace.",
+          "default": "Task log"
+        },
+        "includeOpen": {
+          "type": "boolean",
+          "title": "Ghi cả việc còn mở",
+          "default": true
+        }
+      }
+    },
+    "jobs": [
+      {
+        "key": "daily",
+        "displayName": "Ghi nhật ký cuối ngày",
+        "description": "18:00 thứ 2–6: ghi việc xong hôm nay của mọi workspace có việc xong.",
+        "schedule": "0 18 * * 1-5"
+      }
+    ],
+    "ui": {
+      "slots": [
+        {
+          "type": "sidebar",
+          "id": "today",
+          "displayName": "Ghi nhật ký hôm nay",
+          "action": "writeToday"
+        }
+      ]
+    }
+  }
+}

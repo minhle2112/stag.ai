@@ -1,5 +1,6 @@
-// SDK worker cho plugin stag.ai (alpha). Không phụ thuộc gói nào: chép file này vào plugin của bạn
-// (hoặc import đường dẫn tương đối như các plugin ví dụ). Tên hàm theo SDK plugin của Paperclip:
+// SDK worker cho plugin stag.ai (alpha). Không phụ thuộc gói nào: mỗi plugin giữ một bản của file này cạnh worker
+// (Cài đặt → Plugin → "Tạo plugin" tự chép vào). Bản gốc: resources/plugin-sdk/stag-plugin-sdk.mjs; bản trong plugin
+// kèm app và trong skill stag-plugin-author phải giống hệt (test kiểm). Tên hàm theo SDK plugin của Paperclip:
 //
 //   import { definePlugin, runWorker } from './stag-plugin-sdk.mjs'
 //   const plugin = definePlugin({

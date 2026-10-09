@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import { basename, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { NoteWriteResult, VaultCandidate, VaultNode } from '@shared/types'
 import { exists, isDir, readText, samePath } from './fsutil'
 
@@ -121,6 +121,14 @@ export async function writeNote(vaultPath: string, rel: string, text: string, ba
   }
   await fs.writeFile(full, text, 'utf8')
   return { status: 'saved' }
+}
+
+/** Ghi đè / tạo note, tạo luôn thư mục cha (plugin ghi vault qua ctx.vault.write). Chặn đường dẫn ra ngoài vault. */
+export async function putNote(vaultPath: string, rel: string, text: string): Promise<void> {
+  const full = notePath(vaultPath, rel)
+  if (!rel.toLowerCase().endsWith('.md')) throw new Error('Chỉ ghi được note .md')
+  await fs.mkdir(dirname(full), { recursive: true })
+  await fs.writeFile(full, text, 'utf8')
 }
 
 /**

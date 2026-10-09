@@ -525,7 +525,7 @@ export interface InstalledPlugin {
   /** Tên gói npm + phiên bản. */
   name: string
   version: string
-  source: { type: 'npm'; name: string; version: string } | { type: 'local'; path: string }
+  source: { type: 'npm'; name: string; version: string } | { type: 'local'; path: string } | { type: 'catalog'; slug: string }
   dir: string
   installedAt: string
   /** Quyền người dùng đã duyệt (khác manifest.capabilities → chờ duyệt). */
@@ -541,4 +541,41 @@ export interface InstalledPlugin {
   deliveries: PluginWebhookDelivery[]
 }
 
-export type PluginInstallRequest = { type: 'npm'; name: string; version?: string } | { type: 'local'; path: string }
+export type PluginInstallRequest = { type: 'npm'; name: string; version?: string } | { type: 'local'; path: string } | { type: 'catalog'; slug: string }
+
+/** Plugin kèm app (resources/plugin-catalog/<slug>), mục "Có sẵn" ở Cài đặt → Plugin. */
+export interface PluginCatalogEntry {
+  slug: string
+  name: string
+  version: string
+  manifest: PluginManifest
+  installed: boolean
+}
+
+/** Tạo plugin mới từ mẫu (nút "Tạo plugin"): thư mục `<parentDir>/stag-plugin-<tên>` rồi cài tại chỗ. */
+export interface PluginScaffoldRequest {
+  parentDir: string
+  name: string
+  id: string
+  /** basic: worker + tool + nút ở thanh bên; page: thêm tab trang riêng. */
+  template: 'basic' | 'page'
+}
+
+/** Gợi ý mã plugin từ tên (bỏ dấu tiếng Việt): "Báo cáo tuần" → "my.bao-cao-tuan". */
+export function pluginIdFrom(name: string): string {
+  const slug = name
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+  return slug ? `my.${slug}` : ''
+}
+
+/** Thư mục của plugin mới: `stag-plugin-<phần sau dấu chấm cuối của mã>`. */
+export function pluginFolderFor(id: string): string {
+  return `stag-plugin-${id.split('.').pop()!.replace(/[^a-z0-9-]/g, '-')}`
+}

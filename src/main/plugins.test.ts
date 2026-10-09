@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { normalizeSettings } from '@shared/settings'
 import type { PluginEvent } from '@shared/plugins'
 import { forkWorker, PluginHost, PluginWebhookServer, type PluginHostApi } from './plugins'
+// @ts-expect-error plugin kèm app viết bằng JS thuần
+import { dayOf, renderLog } from '../../resources/plugin-catalog/stag-plugin-task-log/worker.mjs'
 
-const HELLO = resolve('examples/stag-plugin-hello')
+const HELLO = resolve('resources/plugin-catalog/stag-plugin-hello')
 /** Plugin chỉ có nút mở địa chỉ (không có worker). */
 async function linkPlugin(dir: string): Promise<string> {
   await fs.mkdir(dir, { recursive: true })
@@ -36,6 +38,8 @@ let tmp: string
 let host: PluginHost
 let notes: string[]
 let sent: Array<[string, string]>
+let boardTasks: unknown[] = []
+let vaultWrites: Array<[string, string, string]> = []
 
 const api: PluginHostApi = {
   agents: () => ({
@@ -48,9 +52,11 @@ const api: PluginHostApi = {
   sendToAgent: async (agentId, text) => {
     sent.push([agentId, text])
   },
-  board: async () => [],
+  board: async () => boardTasks,
   vaultRead: async () => null,
-  vaultWrite: async () => {},
+  vaultWrite: async (ws, path, content) => {
+    vaultWrites.push([ws, path, content])
+  },
   notify: (title, body) => notes.push(`${title}|${body}`)
 }
 
@@ -66,6 +72,8 @@ beforeEach(async () => {
   tmp = await fs.mkdtemp(join(tmpdir(), 'stag-plugins-'))
   notes = []
   sent = []
+  boardTasks = []
+  vaultWrites = []
   host = new PluginHost(join(tmp, 'plugins'), { spawn: forkWorker, api })
   await host.applySettings(normalizeSettings({ version: 2 }))
 })
@@ -141,7 +149,7 @@ describe('PluginHost', () => {
   it('quyền thiếu: lời gọi bị từ chối; worker chết thì tự khởi động lại; cập nhật xin thêm quyền → chờ duyệt lại', async () => {
     const dir = join(tmp, 'evil')
     await fs.mkdir(dir, { recursive: true })
-    const sdk = resolve('examples/stag-plugin-sdk/index.mjs').replace(/\\/g, '/')
+    const sdk = resolve('resources/plugin-sdk/stag-plugin-sdk.mjs').replace(/\\/g, '/')
     await fs.writeFile(
       join(dir, 'w.mjs'),
       `import { definePlugin, runWorker } from 'file:///${sdk}'
@@ -285,5 +293,88 @@ describe('PluginHost: trang, việc theo lịch, webhook', () => {
     } finally {
       server.stop()
     }
+  })
+})
+
+describe('PluginHost: plugin kèm app, tạo plugin từ mẫu', () => {
+  const CATALOG = resolve('resources/plugin-catalog')
+  const SDK = resolve('resources/plugin-sdk/stag-plugin-sdk.mjs')
+  const withCatalog = (): PluginHost => new PluginHost(join(tmp, 'plugins'), { spawn: forkWorker, api, catalogDir: CATALOG, sdkFile: SDK })
+
+  it('mọi bản SDK (plugin kèm app, skill stag-plugin-author) giống hệt bản gốc', async () => {
+    const sdk = await fs.readFile(SDK, 'utf8')
+    const copies = [
+      ...(await fs.readdir(CATALOG)).map((d) => join(CATALOG, d, 'stag-plugin-sdk.mjs')),
+      resolve('resources/skill-catalog/stag-plugin-author/stag-plugin-sdk.mjs')
+    ]
+    expect(copies.length).toBeGreaterThanOrEqual(3)
+    for (const f of copies) expect(await fs.readFile(f, 'utf8'), f).toBe(sdk)
+  })
+
+  it('danh mục: liệt kê, cài, Nhật ký việc ghi việc xong hôm nay vào vault', async () => {
+    host = withCatalog()
+    await host.applySettings(normalizeSettings({ version: 2 }))
+    const cat = await host.catalog()
+    expect(cat.map((c) => [c.slug, c.manifest.id, c.installed])).toEqual([
+      ['stag-plugin-hello', 'stag.hello', false],
+      ['stag-plugin-task-log', 'stag.task-log', false]
+    ])
+    const p = await host.install({ type: 'catalog', slug: 'stag-plugin-task-log' })
+    expect(p.source).toEqual({ type: 'catalog', slug: 'stag-plugin-task-log' })
+    expect(p.status.state).toBe('approval_pending')
+    expect((await host.catalog()).find((c) => c.slug === 'stag-plugin-task-log')?.installed).toBe(true)
+    await expect(host.install({ type: 'catalog', slug: '../x' })).rejects.toThrow(/Không có plugin/)
+    await host.approve('stag.task-log')
+
+    const ctx = { workspaceId: 'w1', workspaceName: 'Proj' }
+    expect(await host.runSlot('stag.task-log', 'today', ctx)).toEqual({ message: 'Hôm nay chưa có việc nào xong, chưa ghi gì.' })
+    const now = new Date().toISOString()
+    boardTasks = [
+      { id: 't1', agentName: 'Lead', title: 'Fix login', scope: 'src/auth', status: 'done', createdAt: now, doneAt: now, summary: 'Token refresh fixed' },
+      { id: 't2', agentName: 'Coder', title: 'Old', scope: '', status: 'done', createdAt: '2020-01-01T00:00:00Z', doneAt: '2020-01-01T10:00:00Z' },
+      { id: 't3', agentName: 'Coder', title: 'Docs', scope: 'docs', status: 'open', createdAt: now }
+    ]
+    const day = dayOf(new Date())
+    expect(await host.runSlot('stag.task-log', 'today', ctx)).toEqual({ message: `Đã ghi Task log/${day}.md trong vault.` })
+    expect(vaultWrites.length).toBe(1)
+    expect(vaultWrites[0][0]).toBe('w1')
+    expect(vaultWrites[0][2]).toContain('## Done (1)\n- **Lead**: Fix login (scope: src/auth) — Token refresh fixed')
+    expect(vaultWrites[0][2]).toContain('## Still open (1)\n- **Coder**: Docs (scope: docs)')
+
+    // Việc theo lịch: mọi workspace (agents.list), cùng nội dung.
+    await host.runJob('stag.task-log', 'daily')
+    expect(vaultWrites.map((w) => w[1])).toEqual([`Task log/${day}.md`, `Task log/${day}.md`])
+    await host.setConfig('stag.task-log', { folder: '/Nhật ký/', includeOpen: false })
+    await host.runJob('stag.task-log', 'daily')
+    expect(vaultWrites[2][1]).toBe(`Nhật ký/${day}.md`)
+    expect(vaultWrites[2][2]).not.toContain('Still open')
+    expect(renderLog(day, [], true)).toBeNull()
+  })
+
+  it('tạo plugin từ mẫu: file, SDK, cài tại chỗ, chạy được; trùng mã / thư mục có file thì báo lỗi', async () => {
+    host = withCatalog()
+    await host.applySettings(normalizeSettings({ version: 2 }))
+    const parent = join(tmp, 'mine')
+    await fs.mkdir(parent)
+    const p = await host.scaffold({ parentDir: parent, name: 'Báo cáo "tuần"', id: 'my.bao-cao', template: 'page' })
+    const dir = join(parent, 'stag-plugin-bao-cao')
+    expect(p.source).toEqual({ type: 'local', path: dir })
+    expect((await fs.readdir(dir)).sort()).toEqual(['README.md', 'package.json', 'stag-plugin-sdk.mjs', 'ui', 'worker.mjs'])
+    expect(await fs.readFile(join(dir, 'stag-plugin-sdk.mjs'), 'utf8')).toBe(await fs.readFile(SDK, 'utf8'))
+    expect(p.manifest.ui.slots.map((s) => s.type)).toEqual(['sidebar', 'page'])
+    await host.approve('my.bao-cao')
+    expect(await host.callTool('my.bao-cao', 'hello', { name: 'An' }, {})).toEqual({ text: 'Xin chào, An!', isError: false })
+    expect(await host.runSlot('my.bao-cao', 'click', {})).toEqual({ message: 'Đã bấm 1 lần.' })
+    expect(await host.bridge('my.bao-cao', 'data.get', { key: 'info' }, { workspaceName: 'Proj' })).toEqual({ clicks: 1, workspace: 'Proj' })
+    expect((await host.uiFile('my.bao-cao', 'index.html'))?.path).toBe(join(dir, 'ui', 'index.html'))
+    expect(host.list()[0].logs.some((l) => l.message === 'Báo cáo "tuần" đã sẵn sàng')).toBe(true)
+
+    const b = await host.scaffold({ parentDir: parent, name: 'Gọn', id: 'my.gon', template: 'basic' })
+    expect(b.manifest.entrypoints).toEqual({ worker: './worker.mjs' })
+    await expect(host.scaffold({ parentDir: parent, name: 'X', id: 'my.gon', template: 'basic' })).rejects.toThrow(/Đã có plugin/)
+    await fs.mkdir(join(parent, 'stag-plugin-z'))
+    await fs.writeFile(join(parent, 'stag-plugin-z', 'a.txt'), 'x')
+    await expect(host.scaffold({ parentDir: parent, name: 'Z', id: 'my.z', template: 'basic' })).rejects.toThrow(/đã có file/)
+    await expect(host.scaffold({ parentDir: parent, name: 'Z', id: 'Bad Id', template: 'basic' })).rejects.toThrow(/Mã plugin/)
   })
 })

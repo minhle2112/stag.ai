@@ -151,6 +151,8 @@ export const IPC = {
   pluginsSlot: 'plugins:slot',
   pluginsChanged: 'plugins:changed',
   pluginsBridge: 'plugins:bridge',
+  pluginsCatalog: 'plugins:catalog',
+  pluginsScaffold: 'plugins:scaffold',
   pluginsRunJob: 'plugins:runJob',
   pluginsRotateWebhook: 'plugins:rotateWebhook',
   pluginsStream: 'plugins:stream',

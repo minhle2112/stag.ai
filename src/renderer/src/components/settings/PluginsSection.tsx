@@ -3,9 +3,13 @@ import {
   describeCron,
   PLUGIN_CAPABILITIES,
   PLUGIN_EVENTS,
+  PLUGIN_ID_RE,
+  pluginFolderFor,
+  pluginIdFrom,
   pluginToolName,
   RISKY_CAPABILITIES,
   type InstalledPlugin,
+  type PluginCatalogEntry,
   type PluginCapability,
   type PluginConfigField,
   type PluginState
@@ -63,6 +67,7 @@ export function PluginsSection(): React.JSX.Element {
   const items = usePlugins((s) => s.items)
   const [open, setOpen] = useState<string | null>(focus?.plugin ?? null)
   const [installing, setInstalling] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [level, setLevel] = useState<LevelKey>(() => agentLevel(focus?.agentId))
   const lv = useLevel(level)
 
@@ -77,7 +82,16 @@ export function PluginsSection(): React.JSX.Element {
       {plugin ? (
         <PluginDetail key={plugin.manifest.id} p={plugin} lv={lv} onBack={() => setOpen(null)} />
       ) : (
-        <PluginList items={items} level={level} setLevel={setLevel} lv={lv} onOpen={setOpen} onInstall={() => setInstalling(true)} />
+        <PluginList items={items} level={level} setLevel={setLevel} lv={lv} onOpen={setOpen} onInstall={() => setInstalling(true)} onCreate={() => setCreating(true)} />
+      )}
+      {creating && (
+        <CreatePluginDialog
+          onClose={() => setCreating(false)}
+          onCreated={(p) => {
+            setCreating(false)
+            setOpen(p.manifest.id)
+          }}
+        />
       )}
       {installing && (
         <InstallPluginDialog
@@ -99,6 +113,7 @@ function PluginList(p: {
   lv: Level
   onOpen: (id: string) => void
   onInstall: () => void
+  onCreate: () => void
 }): React.JSX.Element {
   const loaded = usePlugins((s) => s.loaded)
   return (
@@ -107,6 +122,7 @@ function PluginList(p: {
         <h1 className="text-[18px] font-semibold tracking-tight">Plugin</h1>
         <span className="rounded-full border border-amber-400/40 px-2 py-px text-[10.5px] text-amber-300">Alpha</span>
         <div className="flex-1" />
+        <SmallButton onClick={p.onCreate}>Tạo plugin</SmallButton>
         <button type="button" onClick={p.onInstall} className="flex items-center gap-1.5 rounded-md bg-fg px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90">
           <span className="text-[15px] leading-none">+</span> Cài plugin
         </button>
@@ -129,8 +145,8 @@ function PluginList(p: {
           <PuzzleIcon className="mb-3 h-7 w-7 text-muted" />
           <div className="text-[13px] font-medium">Chưa cài plugin nào</div>
           <div className="mt-1 max-w-md text-[12px] leading-relaxed text-muted">
-            Bấm "Cài plugin" và chọn một gói npm hoặc một thư mục có <code>stagPlugin</code> trong package.json. Plugin mẫu trong mã nguồn:{' '}
-            <code>examples/stag-plugin-hello</code>.
+            Cài một plugin có sẵn bên dưới, bấm "Cài plugin" để chọn một gói npm / một thư mục có <code>stagPlugin</code> trong package.json, hoặc "Tạo plugin"
+            để bắt đầu từ mẫu.
           </div>
         </div>
       ) : (
@@ -154,7 +170,7 @@ function PluginList(p: {
                 <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted">
                   {[
                     x.manifest.id,
-                    x.source.type === 'npm' ? `npm ${x.source.name}` : 'thư mục',
+                    x.source.type === 'npm' ? `npm ${x.source.name}` : x.source.type === 'catalog' ? 'kèm app' : 'thư mục',
                     x.manifest.tools.length ? `${x.manifest.tools.length} tool` : '',
                     x.manifest.ui.slots.length ? `${x.manifest.ui.slots.length} nút / trang` : '',
                     x.manifest.events.length ? `${x.manifest.events.length} sự kiện` : '',
@@ -171,6 +187,60 @@ function PluginList(p: {
           ))}
         </div>
       )}
+      <AvailablePlugins onInstalled={p.onOpen} />
+    </>
+  )
+}
+
+/** Mục "Có sẵn": plugin kèm app chưa cài (như "Available" của Paperclip). */
+function AvailablePlugins({ onInstalled }: { onInstalled: (id: string) => void }): React.JSX.Element | null {
+  const items = usePlugins((s) => s.items)
+  const [catalog, setCatalog] = useState<PluginCatalogEntry[] | null>(null)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    window.stag.plugins
+      .catalog()
+      .then(setCatalog)
+      .catch(() => setCatalog([]))
+  }, [items.length])
+  const list = (catalog ?? []).filter((c) => !items.some((x) => x.manifest.id === c.manifest.id))
+  if (!list.length) return null
+  return (
+    <>
+      <div className="mb-2 mt-6 flex items-center gap-2 text-[13px] font-semibold">
+        <PuzzleIcon className="h-4 w-4 text-muted" /> Có sẵn
+        <span className="text-[11.5px] font-normal text-muted">kèm app</span>
+      </div>
+      <ErrorBar error={error} />
+      <div className="divide-y divide-line rounded-lg border border-line bg-panel">
+        {list.map((c) => (
+          <div key={c.slug} className="flex items-center gap-3 px-4 py-3">
+            <SkillAvatar name={c.manifest.displayName} size={32} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate font-medium">{c.manifest.displayName}</span>
+                <Badge>v{c.version}</Badge>
+              </div>
+              <div className="mt-0.5 line-clamp-2 text-[12px] leading-relaxed text-muted">{c.manifest.description}</div>
+            </div>
+            <SmallButton
+              disabled={!!busy}
+              onClick={() => {
+                setBusy(c.slug)
+                setError('')
+                window.stag.plugins
+                  .install({ type: 'catalog', slug: c.slug })
+                  .then((p) => onInstalled(p.manifest.id))
+                  .catch((e) => setError(errText(e)))
+                  .finally(() => setBusy(''))
+              }}
+            >
+              {busy === c.slug ? 'Đang cài…' : 'Cài'}
+            </SmallButton>
+          </div>
+        ))}
+      </div>
     </>
   )
 }
@@ -248,7 +318,7 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
             </SmallButton>
           )}
           <SmallButton onClick={() => act('reload', () => window.stag.plugins.reload(m.id))} disabled={!!busy}>
-            {busy === 'reload' ? 'Đang đọc…' : p.source.type === 'npm' ? 'Cài lại' : 'Đọc lại gói'}
+            {busy === 'reload' ? 'Đang đọc…' : p.source.type === 'local' ? 'Đọc lại gói' : 'Cài lại'}
           </SmallButton>
           <button
             type="button"
@@ -660,7 +730,7 @@ function AboutTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
         {row('Mã plugin', <code>{m.id}</code>)}
         {row('Tác giả', m.author || '—')}
         {row('Gói', `${p.name || '—'}@${p.version}`)}
-        {row('Nguồn', p.source.type === 'npm' ? `npm · ${p.source.name}@${p.source.version}` : `thư mục · ${p.source.path}`)}
+        {row('Nguồn', p.source.type === 'npm' ? `npm · ${p.source.name}@${p.source.version}` : p.source.type === 'catalog' ? `kèm app · ${p.source.slug}` : `thư mục · ${p.source.path}`)}
         {row('Thư mục', <span className="font-mono text-[11.5px]">{p.dir}</span>)}
         {row('Worker', m.entrypoints.worker ? <code>{m.entrypoints.worker}</code> : 'không có')}
         {m.entrypoints.ui && row('Giao diện', <code>{m.entrypoints.ui}</code>)}
@@ -679,6 +749,109 @@ function AboutTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
         )}
       </Block>
     </div>
+  )
+}
+
+// ---- tạo plugin mới từ mẫu ----
+
+function CreatePluginDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (p: InstalledPlugin) => void }): React.JSX.Element {
+  const [name, setName] = useState('')
+  const [id, setId] = useState('')
+  const [idTouched, setIdTouched] = useState(false)
+  const [parentDir, setParentDir] = useState('')
+  const [template, setTemplate] = useState<'basic' | 'page'>('page')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const realId = idTouched ? id.trim() : pluginIdFrom(name)
+  const idOk = PLUGIN_ID_RE.test(realId)
+  const ready = name.trim() !== '' && idOk && parentDir.trim() !== ''
+  const input = 'w-full rounded-md border border-line bg-bg px-2.5 py-1.5 text-[12.5px] outline-none focus:border-accent'
+  const sep = parentDir.includes('/') && !parentDir.includes('\\') ? '/' : '\\'
+
+  async function create(): Promise<void> {
+    setBusy(true)
+    setError('')
+    try {
+      onCreated(await window.stag.plugins.scaffold({ parentDir: parentDir.trim(), name: name.trim(), id: realId, template }))
+    } catch (e) {
+      setError(errText(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      title="Tạo plugin"
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Huỷ</Button>
+          <Button primary disabled={!ready || busy} onClick={() => void create()}>
+            {busy ? 'Đang tạo…' : 'Tạo và cài'}
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-[12.5px] leading-relaxed text-muted">
+        Tạo thư mục plugin từ mẫu (manifest, worker, SDK{template === 'page' ? ', trang riêng' : ''}) rồi cài tại chỗ. Sửa file xong bấm "Đọc lại gói". Muốn agent viết
+        tiếp: bật skill <code>stag-plugin-author</code> (Cài đặt → Skill → Khám phá) cho agent đó.
+      </p>
+      <ErrorBar error={error} />
+      <label className="mb-1 block text-[12.5px] font-medium" htmlFor="new-plugin-name">
+        Tên
+      </label>
+      <input id="new-plugin-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Báo cáo tuần" className={`${input} mb-3`} />
+      <label className="mb-1 block text-[12.5px] font-medium" htmlFor="new-plugin-id">
+        Mã plugin
+      </label>
+      <input
+        id="new-plugin-id"
+        value={realId}
+        onChange={(e) => {
+          setIdTouched(true)
+          setId(e.target.value)
+        }}
+        spellCheck={false}
+        placeholder="my.bao-cao-tuan"
+        className={`${input} mb-1 font-mono`}
+      />
+      <p className={`mb-3 text-[11.5px] ${realId && !idOk ? 'text-red-300' : 'text-muted'}`}>a-z, 0-9, ".", "_", "-"; không đổi được sau khi cài (dữ liệu riêng của plugin gắn với mã).</p>
+      <div className="mb-1 text-[12.5px] font-medium">Thư mục chứa</div>
+      <div className="mb-1 flex gap-2">
+        <input value={parentDir} onChange={(e) => setParentDir(e.target.value)} spellCheck={false} placeholder="C:\Users\…\plugins" className={`${input} font-mono`} />
+        <SmallButton
+          onClick={() =>
+            void window.stag.pickFolder('Chọn thư mục chứa plugin mới', parentDir || undefined).then((d) => {
+              if (d) setParentDir(d)
+            })
+          }
+        >
+          Chọn…
+        </SmallButton>
+      </div>
+      <p className="mb-3 truncate font-mono text-[11.5px] text-muted">
+        {parentDir.trim() && idOk ? `${parentDir.trim().replace(/[\\/]+$/, '')}${sep}${pluginFolderFor(realId)}` : ' '}
+      </p>
+      <div className="mb-1 text-[12.5px] font-medium">Mẫu</div>
+      <div className="flex gap-2">
+        {(
+          [
+            ['page', 'Có trang', 'Tool cho agent, nút ở thanh bên, tab trang riêng'],
+            ['basic', 'Cơ bản', 'Tool cho agent, nút ở thanh bên']
+          ] as const
+        ).map(([k, label, desc]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setTemplate(k)}
+            aria-pressed={template === k}
+            className={`flex-1 rounded-md border px-3 py-2 text-left ${template === k ? 'border-fg/60 bg-panel-2' : 'border-line hover:border-muted'}`}
+          >
+            <div className="text-[12.5px] font-medium">{label}</div>
+            <div className="text-[11.5px] text-muted">{desc}</div>
+          </button>
+        ))}
+      </div>
+    </Modal>
   )
 }
 

@@ -1,4 +1,4 @@
-import type { InstalledPlugin, PluginInstallRequest, PluginJobRun } from '@shared/plugins'
+import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJobRun, PluginScaffoldRequest } from '@shared/plugins'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type {
@@ -296,6 +296,10 @@ const api = {
     /** Lời gọi từ trang của plugin (iframe); ngữ cảnh workspace / agent do app điền. */
     bridge: (id: string, method: string, params: Record<string, unknown>, workspaceId?: string, agentId?: string): Promise<unknown> =>
       ipcRenderer.invoke(IPC.pluginsBridge, id, method, params, workspaceId, agentId),
+    /** Plugin kèm app (mục "Có sẵn"). */
+    catalog: (): Promise<PluginCatalogEntry[]> => ipcRenderer.invoke(IPC.pluginsCatalog),
+    /** Tạo plugin mới từ mẫu rồi cài tại chỗ. */
+    scaffold: (req: PluginScaffoldRequest): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsScaffold, req),
     runJob: (id: string, key: string): Promise<PluginJobRun> => ipcRenderer.invoke(IPC.pluginsRunJob, id, key),
     rotateWebhook: (id: string): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsRotateWebhook, id),
     /** Worker đẩy dữ liệu cho trang của nó (ctx.streams.emit). */

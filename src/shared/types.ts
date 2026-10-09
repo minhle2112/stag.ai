@@ -851,6 +851,8 @@ export interface SkillCatalogEntry {
   tags: string[]
   files: number
   bytes: number
+  /** "stag.ai" = skill của chính app; không có = lấy từ danh mục của Paperclip. */
+  source?: string
 }
 
 export interface SkillsList {

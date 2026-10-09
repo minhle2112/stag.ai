@@ -1,5 +1,5 @@
 // Worker của plugin mẫu Hello (xem package.json → stagPlugin).
-import { definePlugin, runWorker } from '../stag-plugin-sdk/index.mjs'
+import { definePlugin, runWorker } from './stag-plugin-sdk.mjs'
 
 const plugin = definePlugin({
   async setup(ctx) {

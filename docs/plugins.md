@@ -2,7 +2,9 @@
 
 Plugin mở rộng chính app stag.ai, theo kiểu plugin của Paperclip: thêm nút ở thanh bên / thanh trên cùng / menu ⋯ của agent, thêm trang riêng (tab cạnh Kanban / Agents / Artifacts, tab trong Cài đặt → Plugin), thêm tool cho agent, nghe sự kiện của app, chạy việc theo lịch, nhận webhook. Quản lý ở Cài đặt → Plugin.
 
+- **Có sẵn**: plugin kèm app (`resources/plugin-catalog`), bấm "Cài". Hiện có **Hello** (mẫu đủ mọi tính năng) và **Nhật ký việc** (18:00 thứ 2–6 ghi việc agent đã xong hôm nay vào `Task log/YYYY-MM-DD.md` trong vault của từng workspace; nút "Ghi nhật ký hôm nay" ở thanh bên). Cập nhật app có bản mới thì plugin kèm app tự đọc bản mới (xin thêm quyền thì chờ duyệt lại).
 - **Cài**: từ một thư mục (dùng tại chỗ, sửa xong bấm "Đọc lại gói") hoặc gói npm (`npm install --ignore-scripts` vào `userData/plugins/npm`).
+- **Tạo plugin**: tên, mã (gợi ý từ tên), thư mục chứa, mẫu "Có trang" (tool + nút ở thanh bên + tab trang riêng) hoặc "Cơ bản". App tạo `<thư mục>/stag-plugin-<tên>` (package.json, worker.mjs, stag-plugin-sdk.mjs, README.md, ui/) rồi cài tại chỗ, chờ duyệt quyền. Muốn agent viết tiếp: cài skill **stag-plugin-author** (Cài đặt → Skill → Khám phá, mục "Danh mục · stag.ai") và bật cho agent đó.
 - **Duyệt quyền**: plugin chỉ chạy sau khi bạn bấm "Duyệt và chạy". Bản mới xin thêm quyền → dừng, chờ duyệt lại ("Chờ duyệt quyền mới").
 - **Bật / tắt** theo cấp app → workspace → agent. Tắt ở cấp app = dừng worker; tắt ở workspace / agent = ẩn nút, tool, sự kiện ở đó.
 - Trang mỗi plugin: **Cấu hình** (form tự sinh từ `instanceConfigSchema`), trang cài đặt riêng của plugin (nếu có), **Trạng thái** (worker, PID, thời gian chạy, số lần khởi động lại, sức khoẻ, tool, nút / trang, việc theo lịch + "Chạy ngay", địa chỉ webhook + "Đổi mã", sự kiện, 200 dòng nhật ký), **Giới thiệu** (gói, nguồn, thư mục, quyền).
@@ -41,7 +43,7 @@ Plugin chạy chương trình trên máy bạn với quyền của bạn. Quyề
 }
 ```
 
-Mẫu đầy đủ: `examples/stag-plugin-hello` (tool, nút gọi worker, nút mở địa chỉ, tab trang riêng, trang cài đặt riêng, sự kiện, dữ liệu riêng, việc theo lịch, webhook).
+Mẫu đầy đủ: `resources/plugin-catalog/stag-plugin-hello` (tool, nút gọi worker, nút mở địa chỉ, tab trang riêng, trang cài đặt riêng, sự kiện, dữ liệu riêng, việc theo lịch, webhook). Mẫu thật sự có ích: `resources/plugin-catalog/stag-plugin-task-log`.
 
 | Khoá | Ghi chú |
 | --- | --- |
@@ -77,7 +79,7 @@ Mẫu đầy đủ: `examples/stag-plugin-hello` (tool, nút gọi worker, nút 
 
 ## Worker
 
-Chạy trong Electron `utilityProcess` (tiến trình Node riêng). Nói JSON-RPC 2.0 qua kênh tin nhắn của tiến trình. SDK không phụ thuộc gì: `examples/stag-plugin-sdk/index.mjs` (chép vào plugin của bạn), tên hàm theo SDK của Paperclip:
+Chạy trong Electron `utilityProcess` (tiến trình Node riêng). Nói JSON-RPC 2.0 qua kênh tin nhắn của tiến trình. SDK không phụ thuộc gì: `resources/plugin-sdk/stag-plugin-sdk.mjs`, mỗi plugin giữ một bản cạnh worker ("Tạo plugin" tự chép; bản trong plugin kèm app và trong skill stag-plugin-author phải giống hệt bản gốc — test kiểm). Tên hàm theo SDK của Paperclip:
 
 ```js
 import { definePlugin, runWorker } from './stag-plugin-sdk.mjs'
