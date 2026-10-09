@@ -203,6 +203,9 @@ describe('giọng nói (V1)', () => {
     const v = normalizeVoice({ enabled: false, hotkey: 'alt+x', unloadMinutes: 999, micId: 7, preview: 'no' })
     expect(v).toMatchObject({ enabled: false, hotkey: 'ctrl+space', unloadMinutes: 120, micId: '', preview: true })
     expect(normalizeVoice({ unloadMinutes: -3 }).unloadMinutes).toBe(0)
+    // V3: máy nhận dạng, mặc định trên máy.
+    expect(normalizeVoice({ engine: 'soniox' }).engine).toBe('soniox')
+    expect(normalizeVoice({ engine: 'whisper' }).engine).toBe('local')
   })
 
   it('từ gợi ý: bỏ dấu phẩy (Qwen3 nhận CSV), trùng, mục rỗng', () => {

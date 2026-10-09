@@ -31,6 +31,21 @@ export const VOICE_MODEL: VoiceModel = {
   files: ['conv_frontend.onnx', 'encoder.int8.onnx', 'decoder.int8.onnx', 'tokenizer/vocab.json', 'tokenizer/merges.txt', 'tokenizer/tokenizer_config.json']
 }
 
+// ---------- máy đám mây (V3) ----------
+
+/** Tên bí mật giữ API key Soniox (kho bí mật mã hoá bằng safeStorage, Cài đặt → Secrets cũng thấy). */
+export const SONIOX_SECRET = 'SONIOX_API_KEY'
+/** Giá Soniox real-time (soniox.com/pricing, xem 2026-10-09): tính theo độ dài luồng, tức thời gian giữ phím. */
+export const SONIOX_USD_PER_HOUR = 0.12
+/** Soniox nhận ngữ cảnh tới ~8000 token: gửi nhiều từ gợi ý hơn máy trên máy (Qwen3 chỉ ~60). */
+export const CLOUD_TERMS_MAX = 150
+
+/** Máy đám mây: đã có key chưa, đã dùng bao nhiêu giây tháng này. */
+export interface VoiceCloudInfo {
+  hasKey: boolean
+  monthSeconds: number
+}
+
 /** Trạng thái model trên đĩa + bộ nhận dạng trong RAM (main → renderer). */
 export interface VoiceStatus {
   model: 'missing' | 'downloading' | 'verifying' | 'extracting' | 'ready' | 'error'

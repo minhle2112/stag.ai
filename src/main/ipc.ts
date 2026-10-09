@@ -33,6 +33,8 @@ import { VaultIndexer, VaultWatchers } from './vaultIndex'
 import type { WorkspaceStore } from './workspace'
 import type { VoiceService } from './voice'
 import type { VocabCache } from './voiceVocab'
+import type { CloudUsage, VoiceCloud } from './voiceCloud'
+import type { VoiceCloudInfo } from '@shared/voice'
 
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
@@ -353,7 +355,37 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
 }
 
 /** Gõ bằng giọng nói (V1): model + nhận dạng. Âm thanh chỉ đi renderer → main → tiến trình nhận dạng, không ghi ra đĩa. */
-export function registerVoiceIpc(voice: VoiceService, vocab: VocabCache, workspaces: WorkspaceStore): void {
+export function registerVoiceIpc(voice: VoiceService, vocab: VocabCache, workspaces: WorkspaceStore, cloud: VoiceCloud, usage: CloudUsage): void {
+  const sessionId = (v: unknown): string => {
+    if (typeof v !== 'string' || !/^[\w-]{1,64}$/.test(v)) throw new Error('Mã lượt nói không hợp lệ.')
+    return v
+  }
+  ipcMain.handle(IPC.voiceCloudInfo, (): VoiceCloudInfo => ({ hasKey: cloud.hasKey(), monthSeconds: Math.round(usage.month()) }))
+  ipcMain.handle(IPC.voiceCloudStart, (e, id: unknown, terms: unknown) => {
+    const words = Array.isArray(terms) ? terms.filter((x): x is string => typeof x === 'string' && x.length <= 80).slice(0, 300) : []
+    const sid = sessionId(id)
+    const sender = e.sender
+    cloud.start(
+      sid,
+      words,
+      (final, partial) => {
+        if (!sender.isDestroyed()) sender.send(IPC.voiceCloudText, sid, final, partial)
+      },
+      (error) => {
+        if (!sender.isDestroyed()) sender.send(IPC.voiceCloudText, sid, '', '', error)
+      }
+    )
+  })
+  ipcMain.on(IPC.voiceCloudAudio, (_e, id: unknown, samples: unknown) => {
+    // Renderer gửi từng khúc ~0,1–0,5 s; chặn khúc lớn bất thường.
+    if (typeof id === 'string' && samples instanceof Float32Array && samples.length <= 30 * 16000) cloud.audio(id, samples)
+  })
+  ipcMain.handle(IPC.voiceCloudEnd, (_e, id: unknown) => cloud.end(sessionId(id)))
+  ipcMain.on(IPC.voiceCloudCancel, (_e, id: unknown) => {
+    if (typeof id === 'string') cloud.cancel(id)
+  })
+  ipcMain.handle(IPC.voiceCloudTest, () => cloud.test())
+
   ipcMain.handle(IPC.voiceStatus, () => voice.get())
   ipcMain.handle(IPC.voiceDownload, () => {
     void voice.download()

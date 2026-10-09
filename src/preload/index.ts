@@ -1,5 +1,5 @@
 import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJobRun, PluginScaffoldRequest } from '@shared/plugins'
-import type { VoiceResult, VoiceStatus } from '@shared/voice'
+import type { VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type {
@@ -351,6 +351,19 @@ const api = {
     transcribe: (samples: Float32Array, hotwords: string[]): Promise<VoiceResult> => ipcRenderer.invoke(IPC.voiceTranscribe, samples, hotwords),
     /** Từ vựng của workspace, quan trọng nhất trước ([] nếu không đọc được). */
     vocab: (workspaceId: string): Promise<string[]> => ipcRenderer.invoke(IPC.voiceVocab, workspaceId),
+    /** Máy đám mây Soniox: key nằm ở main (kho bí mật), renderer chỉ biết có hay không. */
+    cloudInfo: (): Promise<VoiceCloudInfo> => ipcRenderer.invoke(IPC.voiceCloudInfo),
+    cloudStart: (id: string, terms: string[]): Promise<void> => ipcRenderer.invoke(IPC.voiceCloudStart, id, terms),
+    cloudAudio: (id: string, samples: Float32Array): void => ipcRenderer.send(IPC.voiceCloudAudio, id, samples),
+    cloudEnd: (id: string): Promise<string> => ipcRenderer.invoke(IPC.voiceCloudEnd, id),
+    cloudCancel: (id: string): void => ipcRenderer.send(IPC.voiceCloudCancel, id),
+    cloudTest: (): Promise<void> => ipcRenderer.invoke(IPC.voiceCloudTest),
+    /** Chữ hiện dần của lượt nói; `error` = đám mây lỗi giữa chừng (mất mạng, key sai…). */
+    onCloudText(cb: (id: string, final: string, partial: string, error?: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, id: string, final: string, partial: string, error?: string): void => cb(id, final, partial, error)
+      ipcRenderer.on(IPC.voiceCloudText, fn)
+      return () => ipcRenderer.removeListener(IPC.voiceCloudText, fn)
+    },
     onChanged(cb: (s: VoiceStatus) => void): () => void {
       const fn = (_e: IpcRendererEvent, s: VoiceStatus): void => cb(s)
       ipcRenderer.on(IPC.voiceChanged, fn)

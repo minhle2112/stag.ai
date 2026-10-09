@@ -114,7 +114,7 @@ function MicIcon(): React.JSX.Element {
 /** Khung giọng nói ở đáy ô agent: đang nghe / đang nhận dạng / xem trước để sửa / lỗi. */
 export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element | null {
   const mine = useVoiceFor(agentId)
-  const { phase, level, text, error, needsModel, status, setText } = useVoice()
+  const { phase, level, text, error, needsModel, status, setText, live, livePartial, notice } = useVoice()
   const hotkey = useSettings((s) => s.value.app.voice.hotkey)
   const box = useRef<HTMLTextAreaElement>(null)
 
@@ -153,6 +153,13 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
           {status.engine === 'loading' ? 'Đang nạp model (lần đầu sau một lúc không dùng)…' : 'Đang nhận dạng…'}
         </div>
       )}
+      {(phase === 'listening' || phase === 'processing') && (live || livePartial) && (
+        // Máy đám mây: chữ hiện dần trong lúc nói (chữ mờ = máy còn đang đoán).
+        <p className="mt-1.5 max-h-24 overflow-y-auto text-[13px] leading-relaxed" aria-live="polite">
+          {live} <span className="text-muted">{livePartial}</span>
+        </p>
+      )}
+      {phase === 'preview' && notice && <p className="mb-1.5 text-[12px] text-amber-300">{notice}</p>}
       {phase === 'preview' && (
         <div className="flex flex-col gap-2">
           <textarea

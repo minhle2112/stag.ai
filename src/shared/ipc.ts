@@ -174,7 +174,20 @@ export const IPC = {
   voiceUnload: 'voice:unload',
   voiceTranscribe: 'voice:transcribe',
   /** Từ vựng của workspace (tên file, hàm, class, thư viện) để gợi ý cho máy nhận dạng. */
-  voiceVocab: 'voice:vocab'
+  voiceVocab: 'voice:vocab',
+  /** Máy đám mây Soniox (V3): có key chưa + số giây đã dùng tháng này. */
+  voiceCloudInfo: 'voice:cloud-info',
+  /** Mở một lượt nói lên Soniox (id do renderer đặt, kèm từ gợi ý). */
+  voiceCloudStart: 'voice:cloud-start',
+  /** renderer → main (không chờ): một khúc âm thanh 16 kHz mono của lượt nói. */
+  voiceCloudAudio: 'voice:cloud-audio',
+  /** Hết âm thanh → chữ cuối cùng. */
+  voiceCloudEnd: 'voice:cloud-end',
+  voiceCloudCancel: 'voice:cloud-cancel',
+  /** main → renderer: chữ đã chốt + chữ đang đoán của một lượt nói. */
+  voiceCloudText: 'voice:cloud-text',
+  /** Thử API key (gửi nửa giây im lặng). */
+  voiceCloudTest: 'voice:cloud-test'
 } as const
 
 export interface AppInfo {

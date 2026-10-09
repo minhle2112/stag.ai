@@ -295,9 +295,12 @@ export interface BrowserSettings {
 
 /** Gõ bằng giọng nói (Settings → Giọng nói, chỉ ở cấp app). Xem shared/voice.ts. */
 export type VoiceHotkey = 'ctrl+space' | 'ctrl+shift+space' | 'ctrl+alt+space' | 'f9'
+/** Máy nhận dạng: trên máy (Qwen3-ASR, miễn phí, offline) hoặc đám mây (Soniox, cần API key, chữ hiện dần khi nói). */
+export type VoiceEngine = 'local' | 'soniox'
 export interface VoiceSettings {
   /** Bật phím tắt + nút micro trên ô agent. */
   enabled: boolean
+  engine: VoiceEngine
   /** Giữ tổ hợp này để nói, thả ra để dừng. */
   hotkey: VoiceHotkey
   /** deviceId của micro ('' = micro mặc định của Windows). */
@@ -527,7 +530,7 @@ export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPerc
 export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true, exempt: [] }
 export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
 export const VOICE_UNLOAD_MAX = 120
-export const DEFAULT_VOICE: VoiceSettings = { enabled: true, hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true }
+export const DEFAULT_VOICE: VoiceSettings = { enabled: true, engine: 'local', hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true }
 export const DEFAULT_GENERAL: GeneralSettings = {
   zoom: 100,
   openAtLogin: false,

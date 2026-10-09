@@ -33,6 +33,7 @@ import {
   type SettingsOverridesPatch,
   type ShellId,
   type TerminalAdapterSettings,
+  type VoiceEngine,
   type VoiceHotkey,
   type VoiceReplacement,
   type VoiceSettings,
@@ -57,6 +58,7 @@ export const SCOPE_MODES: readonly ScopeMode[] = ['ask', 'block', 'warn', 'off']
 const SEARCH_ENGINES: readonly SearchEngine[] = ['google', 'duckduckgo', 'bing']
 const EXTERNAL_POLICIES: readonly ExternalPagePolicy[] = ['ask', 'allow', 'deny']
 const VOICE_HOTKEY_IDS: readonly VoiceHotkey[] = ['ctrl+space', 'ctrl+shift+space', 'ctrl+alt+space', 'f9']
+const VOICE_ENGINES: readonly VoiceEngine[] = ['local', 'soniox']
 
 /** Danh sách chuỗi gọn: bỏ trống / trùng, cắt độ dài, tối đa `max` mục. */
 function strList(v: unknown, max: number, len: number, ok: (x: string) => boolean = () => true): string[] {
@@ -113,6 +115,7 @@ export function normalizeVoice(raw: unknown): VoiceSettings {
   const d = DEFAULT_VOICE
   return {
     enabled: bool(r.enabled, d.enabled),
+    engine: oneOf(r.engine, VOICE_ENGINES, d.engine),
     hotkey: oneOf(r.hotkey, VOICE_HOTKEY_IDS, d.hotkey),
     micId: typeof r.micId === 'string' ? r.micId.slice(0, 300) : d.micId,
     preview: bool(r.preview, d.preview),

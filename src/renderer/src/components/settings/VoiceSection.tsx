@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { formatMb, VOICE_HOTKEYS, VOICE_MODEL, type VoiceHotkey } from '@shared/voice'
+import { formatMb, SONIOX_SECRET, SONIOX_USD_PER_HOUR, VOICE_HOTKEYS, VOICE_MODEL, type VoiceCloudInfo, type VoiceHotkey } from '@shared/voice'
 import { formatReplacements, parseReplacements } from '@shared/voiceVocab'
-import type { VoiceReplacement, VoiceSettings } from '@shared/types'
+import type { VoiceEngine, VoiceReplacement, VoiceSettings } from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { useVoice } from '../../store/voice'
 import { useWorkspaces } from '../../store/workspaces'
@@ -28,11 +28,33 @@ export function VoiceSection(): React.JSX.Element {
     <>
       <SectionTitle
         title="Giọng nói"
-        desc={`Giữ ${VOICE_HOTKEYS[v.hotkey]} trong một ô agent để nói tiếng Việt (lẫn từ tiếng Anh), thả ra để chuyển thành chữ. Nhận dạng chạy hoàn toàn trên máy bạn, âm thanh không gửi đi đâu và không lưu lại.`}
+        desc={`Giữ ${VOICE_HOTKEYS[v.hotkey]} trong một ô agent để nói tiếng Việt (lẫn từ tiếng Anh), thả ra để chuyển thành chữ. ${v.engine === 'soniox' ? 'Đang dùng máy đám mây Soniox: âm thanh được gửi tới Soniox để nhận dạng, app không lưu lại.' : 'Nhận dạng chạy hoàn toàn trên máy bạn, âm thanh không gửi đi đâu và không lưu lại.'}`}
       />
       <ErrorBar error={error} />
 
-      <ModelGroup />
+      <Group title="Máy nhận dạng">
+        <Row
+          label="Dùng máy nào"
+          desc={
+            v.engine === 'soniox'
+              ? 'Soniox: chữ hiện dần ngay khi bạn nói, thường chính xác hơn với từ tiếng Anh. Âm thanh và danh sách từ gợi ý (tên file, tên hàm) được gửi tới Soniox; chữ trong terminal thì không.'
+              : 'Qwen3-ASR chạy hoàn toàn trên máy bạn: miễn phí, không cần mạng, âm thanh không gửi đi đâu.'
+          }
+        >
+          <Select
+            label="Máy nhận dạng"
+            value={v.engine}
+            onChange={(engine: VoiceEngine) => set({ engine })}
+            options={[
+              { value: 'local', label: 'Trên máy (Qwen3-ASR)' },
+              { value: 'soniox', label: 'Đám mây (Soniox)' }
+            ]}
+          />
+        </Row>
+        {v.engine === 'soniox' && <CloudRows />}
+      </Group>
+
+      <ModelGroup cloud={v.engine === 'soniox'} />
 
       <Group title="Cách dùng">
         <Row label="Bật gõ bằng giọng nói" desc="Phím tắt và nút micro trên thanh của ô agent.">
@@ -73,7 +95,81 @@ export function VoiceSection(): React.JSX.Element {
   )
 }
 
-function ModelGroup(): React.JSX.Element {
+/** API key Soniox (lưu trong kho bí mật, app không hiện lại key) + kiểm tra + chi phí tháng này. */
+function CloudRows(): React.JSX.Element {
+  const [info, setInfo] = useState<VoiceCloudInfo | null>(null)
+  const [key, setKey] = useState('')
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const refresh = (): void => void window.stag.voice.cloudInfo().then(setInfo, () => {})
+  useEffect(refresh, [])
+  const act = async (fn: () => Promise<unknown>, ok: string): Promise<void> => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await fn()
+      setMsg({ ok: true, text: ok })
+    } catch (e) {
+      setMsg({ ok: false, text: String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '') })
+    } finally {
+      setBusy(false)
+      refresh()
+    }
+  }
+  const save = (): Promise<void> =>
+    act(async () => {
+      await window.stag.secrets.set(SONIOX_SECRET, key.trim())
+      setKey('')
+      await window.stag.voice.cloudTest()
+    }, 'Đã lưu và thử key: dùng được.')
+  const minutes = (info?.monthSeconds ?? 0) / 60
+  const input = 'w-56 rounded-md border border-line bg-bg px-2 py-1 font-mono text-[12px] outline-none focus:border-accent'
+  return (
+    <>
+      <Row
+        label="API key Soniox"
+        desc={
+          msg ? (
+            <span className={msg.ok ? 'text-emerald-300' : 'text-red-300'}>{msg.text}</span>
+          ) : info?.hasKey ? (
+            `Đã lưu (mã hoá trong bí mật ${SONIOX_SECRET}, app không hiện lại). Dán key mới để thay.`
+          ) : (
+            'Tạo key tại console.soniox.com → API keys rồi dán vào đây. Key được mã hoá bằng tài khoản Windows của bạn.'
+          )
+        }
+      >
+        <input
+          type="password"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && key.trim() && !busy && void save()}
+          placeholder={info?.hasKey ? '•••••••• (đã lưu)' : 'Dán API key'}
+          aria-label="API key Soniox"
+          className={input}
+        />
+        <SmallButton onClick={() => void save()} disabled={!key.trim() || busy}>
+          Lưu
+        </SmallButton>
+        {info?.hasKey && (
+          <>
+            <SmallButton onClick={() => void act(() => window.stag.voice.cloudTest(), 'Key dùng được.')} disabled={busy}>
+              {busy ? 'Đang thử…' : 'Kiểm tra'}
+            </SmallButton>
+            <SmallButton onClick={() => void act(() => window.stag.secrets.remove(SONIOX_SECRET), 'Đã xoá key.')} disabled={busy}>
+              Xoá key
+            </SmallButton>
+          </>
+        )}
+      </Row>
+      <Row
+        label="Chi phí"
+        desc={`Soniox tính khoảng ${SONIOX_USD_PER_HOUR} USD mỗi giờ âm thanh (thời gian bạn giữ phím). Tháng này: ${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)} phút ≈ ${((minutes / 60) * SONIOX_USD_PER_HOUR).toFixed(2)} USD (app tự đếm, hoá đơn thật xem ở console.soniox.com).`}
+      />
+    </>
+  )
+}
+
+function ModelGroup({ cloud }: { cloud: boolean }): React.JSX.Element {
   const status = useVoice((s) => s.status)
   const pct = status.total ? Math.min(100, Math.round(((status.received ?? 0) * 100) / status.total)) : 0
   let desc: React.ReactNode
@@ -109,7 +205,7 @@ function ModelGroup(): React.JSX.Element {
       action = <SmallButton onClick={() => void window.stag.voice.download()}>Tải model</SmallButton>
   }
   return (
-    <Group title="Model nhận dạng">
+    <Group title={cloud ? "Model trên máy (dự phòng, không bắt buộc)" : "Model nhận dạng"}>
       <Row label={VOICE_MODEL.label} desc={desc}>
         {action}
       </Row>

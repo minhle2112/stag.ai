@@ -28,6 +28,8 @@ import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
 import { WorkspaceStore } from './workspace'
 import { VocabCache } from './voiceVocab'
+import { CloudUsage, VoiceCloud } from './voiceCloud'
+import { SONIOX_SECRET } from '@shared/voice'
 import { samePath } from './fsutil'
 import type { GeneralSettings } from '@shared/types'
 
@@ -219,6 +221,16 @@ const voice = new VoiceService({
   settings: () => settings.get().app.voice,
   onStatus: (s) => send(IPC.voiceChanged, s)
 })
+/**
+ * Máy đám mây Soniox (V3): key trong kho bí mật. STAG_SONIOX_URL (chỉ địa chỉ máy này) để thử với máy chủ giả,
+ * không cho trỏ ra máy khác để key không bị gửi nhầm chỗ.
+ */
+const cloudUsage = new CloudUsage(join(app.getPath('userData'), 'voice', 'cloud-usage.json'))
+const voiceCloud = new VoiceCloud({
+  key: () => secrets.get(SONIOX_SECRET),
+  url: /^wss?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(process.env.STAG_SONIOX_URL ?? '') ? process.env.STAG_SONIOX_URL : undefined,
+  onUsage: (s) => void cloudUsage.add(s)
+})
 const pluginEvent = (type: PluginEvent['type'], a: { id: string; name: string; workspaceId: string }, data: Record<string, unknown> = {}): PluginEvent => ({
   type,
   at: new Date().toISOString(),
@@ -383,6 +395,7 @@ app.whenReady().then(async () => {
   await secrets.load()
   await skills.cleanAllSessions()
   await voice.load()
+  await cloudUsage.load()
   await agents.load()
   await hub.start()
   protocol.handle('stag-file', (req) => {
@@ -438,7 +451,7 @@ app.whenReady().then(async () => {
       }))
   })
   registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins)
-  registerVoiceIpc(voice, new VocabCache(), workspaces)
+  registerVoiceIpc(voice, new VocabCache(), workspaces, voiceCloud, cloudUsage)
   createWindow()
   applyGeneral(settings.general())
   app.on('activate', () => {
@@ -464,6 +477,7 @@ app.on('before-quit', () => {
   webhooks.stop()
   void plugins.shutdown()
   voice.shutdown()
+  voiceCloud.shutdown()
   agents.shutdown()
   hub.stop()
 })
