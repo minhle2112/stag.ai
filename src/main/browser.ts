@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { BrowserWindow, nativeImage, session as electronSession, WebContentsView, type Session, type WebContents } from 'electron'
-import type { Agent, BrowserPermissionAsk, BrowserState, BrowserTab, BrowserTabOwner, ViewRect } from '@shared/types'
+import { promises as fs } from 'node:fs'
+import { join } from 'node:path'
+import { app, BrowserWindow, nativeImage, session as electronSession, WebContentsView, type Session, type WebContents } from 'electron'
+import { browserPartition, originDecision, toUrl } from '@shared/browser'
+import { DEFAULT_BROWSER, type Agent, type BrowserPermissionAsk, type BrowserSettings, type BrowserState, type BrowserTab, type BrowserTabOwner, type ViewRect } from '@shared/types'
 import snapshotSrc from './inject/snapshot.js?raw'
 
 interface ConsoleEntry {
@@ -23,7 +26,6 @@ interface WsBrowser {
   active: string | null
   /** Origin ngoài localhost người dùng đã cho agent mở (tới khi tắt app). */
   allowed: Set<string>
-  session: Session
 }
 
 interface PendingAsk {
@@ -36,6 +38,8 @@ export interface BrowserEvents {
   /** Agent vừa mở trang: giao diện mở pane và chuyển tới tab đó. */
   reveal(workspaceId: string, tabId: string): void
   ask(ask: BrowserPermissionAsk): void
+  /** Câu hỏi đã xong mà không do người dùng bấm (hết giờ, Cài đặt đổi, xoá workspace): giao diện bỏ hộp thoại. */
+  askClosed(askId: string): void
 }
 
 const CONSOLE_MAX = 300
@@ -62,25 +66,14 @@ export const BROWSER_KEYS = Object.keys(KEYS) as [string, ...string[]]
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-/** localhost, 127.x, ::1, *.localhost — agent dùng tự do. */
-export function isLocalUrl(url: URL): boolean {
-  const h = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
-  return h === 'localhost' || h.endsWith('.localhost') || h === '::1' || /^127\./.test(h)
-}
-
-/** Chuỗi gõ vào thanh địa chỉ → URL. Không giống địa chỉ thì tìm bằng Google. */
-export function toUrl(input: string): string {
-  const s = input.trim()
-  if (!s) return 'about:blank'
-  if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^localhost:\d/i.test(s)) return s
-  if (/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(s)) return `http://${s}`
-  if (/^[^\s/]+\.[a-z]{2,}(:\d+)?(\/\S*)?$/i.test(s)) return `https://${s}`
-  return `https://www.google.com/search?q=${encodeURIComponent(s)}`
-}
+/** Thư mục chứa partition `persist:` của Electron trong userData. */
+const PARTITIONS_DIR = 'Partitions'
+const PARTITION_PREFIX = 'stag-browser-'
 
 /**
- * Browser trong app: mỗi workspace một bộ tab (WebContentsView) với session riêng không lưu xuống đĩa
- * (cookie mất khi tắt app). Người dùng dùng qua pane; agent dùng qua tool MCP browser_*, mỗi agent một tab.
+ * Browser trong app: mỗi workspace một bộ tab (WebContentsView) với session riêng. Mặc định session chỉ trong bộ nhớ
+ * (cookie mất khi tắt app); bật "Giữ cookie" (Cài đặt → Trình duyệt) thì tab mở sau đó dùng partition `persist:`.
+ * Người dùng dùng qua pane; agent dùng qua tool MCP browser_*, mỗi agent một tab.
  */
 export class BrowserService {
   private byWs = new Map<string, WsBrowser>()
@@ -90,8 +83,61 @@ export class BrowserService {
   /** Thu phóng giao diện app (Settings → Chung): vị trí renderer gửi là px CSS, view cần px cửa sổ. */
   private zoom = 1
   private asks = new Map<string, PendingAsk>()
+  /** Cài đặt → Trình duyệt (cấp app). */
+  private config: BrowserSettings = DEFAULT_BROWSER
+  /** Partition đã gắn xử lý quyền / tải file (mỗi partition một lần). */
+  private wired = new Set<string>()
 
   constructor(private events: BrowserEvents) {}
+
+  /**
+   * Cài đặt đổi. Áp ngay: trang tab mới, máy tìm kiếm, chính sách trang ngoài (câu hỏi đang chờ được trả lời theo
+   * chính sách mới / origin vừa thêm vào danh sách luôn cho). Giữ cookie: tab mở sau khi đổi.
+   */
+  setSettings(next: BrowserSettings): void {
+    this.config = next
+    for (const [id, p] of [...this.asks]) {
+      const d = originDecision(p.ask.url, next)
+      if (d === 'open') this.answer(id, true, true)
+      else if (d === 'deny') this.answer(id, false, true)
+    }
+  }
+
+  /** Session của workspace theo cài đặt "Giữ cookie" hiện tại; gắn xử lý quyền / tải file lần đầu dùng. */
+  private sessionFor(wsId: string): Session {
+    const name = browserPartition(wsId, this.config.keepCookies)
+    const ses = electronSession.fromPartition(name)
+    if (this.wired.has(name)) return ses
+    this.wired.add(name)
+    ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
+    ses.on('will-download', (event, _item, wc) => {
+      // Agent không tự tải file về máy. Người dùng tải bình thường (có hộp thoại lưu).
+      const tab = this.findByContents(wc)
+      if (tab && tab.owner.kind === 'agent') {
+        event.preventDefault()
+        this.log(tab, 'warning', '[stag] Blocked a download: agents may not download files.')
+      }
+    })
+    return ses
+  }
+
+  /**
+   * Xoá cookie, bộ nhớ trang (localStorage, IndexedDB…) và cache của trình duyệt một workspace (`wsId`) hoặc mọi
+   * workspace (kể cả dữ liệu đã lưu của workspace đã xoá). Cả session lưu xuống đĩa lẫn session trong bộ nhớ.
+   */
+  async clearData(wsId?: string): Promise<void> {
+    // Partition `persist:` còn trên đĩa (workspace đang mở hay đã xoá) + partition đã dùng trong lần chạy này.
+    // Không gọi fromPartition cho partition chưa từng có: nó sẽ tạo thư mục trống.
+    const dir = join(app.getPath('userData'), PARTITIONS_DIR)
+    const onDisk = (await fs.readdir(dir).catch(() => [] as string[])).filter((n) => n.startsWith(PARTITION_PREFIX))
+    const names = new Set<string>([...this.wired, ...onDisk.map((n) => `persist:${n}`)])
+    for (const name of names) {
+      if (wsId && name !== browserPartition(wsId, true) && name !== browserPartition(wsId, false)) continue
+      const ses = electronSession.fromPartition(name)
+      await ses.clearStorageData()
+      await ses.clearCache()
+    }
+  }
 
   attachWindow(win: BrowserWindow): void {
     this.win = win
@@ -105,18 +151,7 @@ export class BrowserService {
   private ws(wsId: string): WsBrowser {
     let b = this.byWs.get(wsId)
     if (!b) {
-      // Không có tiền tố "persist:" → session chỉ trong bộ nhớ.
-      const ses = electronSession.fromPartition(`stag-browser-${wsId}`)
-      ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
-      ses.on('will-download', (event, _item, wc) => {
-        // Agent không tự tải file về máy. Người dùng tải bình thường (có hộp thoại lưu).
-        const tab = this.findByContents(wc)
-        if (tab && tab.owner.kind === 'agent') {
-          event.preventDefault()
-          this.log(tab, 'warning', '[stag] Blocked a download: agents may not download files.')
-        }
-      })
-      b = { tabs: [], active: null, allowed: new Set(), session: ses }
+      b = { tabs: [], active: null, allowed: new Set() }
       this.byWs.set(wsId, b)
     }
     return b
@@ -152,7 +187,8 @@ export class BrowserService {
     const b = this.ws(wsId)
     const view = new WebContentsView({
       webPreferences: {
-        session: b.session,
+        // Theo "Giữ cookie" lúc mở tab: đổi cài đặt chỉ áp cho tab mở sau đó.
+        session: this.sessionFor(wsId),
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -173,6 +209,12 @@ export class BrowserService {
     return tab
   }
 
+  /** Người dùng mở tab mới: chữ gõ ở thanh địa chỉ (tìm bằng máy tìm kiếm đã chọn), hoặc trang tab mới trong Cài đặt. */
+  openUserTab(wsId: string, input?: string): void {
+    const url = input?.trim() ? toUrl(input, this.config.searchEngine) : this.config.homePage || undefined
+    this.newTab(wsId, { kind: 'user' }, url)
+  }
+
   private wire(tab: Tab): void {
     const wc = tab.view.webContents
     const changed = (): void => this.emit(tab.wsId)
@@ -186,7 +228,8 @@ export class BrowserService {
 
     wc.on('console-message', (e) => {
       // Cảnh báo bảo mật của chính Electron về trang (thiếu CSP…), không phải lỗi của trang.
-      if (e.message.startsWith('Electron Security Warning')) return
+      // (Có thể kèm `%c` định dạng màu ở đầu.)
+      if (/^(%c)?Electron Security Warning/.test(e.message)) return
       this.log(tab, e.level, e.message + (e.sourceId ? `  (${e.sourceId}:${e.lineNumber})` : ''))
     })
     wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
@@ -195,13 +238,20 @@ export class BrowserService {
     wc.on('render-process-gone', (_e, d) => this.log(tab, 'error', `[stag] Page crashed: ${d.reason}`))
     wc.on('did-navigate', (_e, url) => this.log(tab, 'info', `[stag] Opened ${url}`))
 
-    // Agent bấm link / bị chuyển hướng sang origin chưa được phép → chặn, bảo agent xin quyền.
+    // Agent bấm link / bị chuyển hướng sang origin chưa được phép → chặn, bảo agent xin quyền
+    // (hoặc báo Cài đặt chặn hẳn trang ngoài).
     const guard = (e: Electron.Event, url: string, isMainFrame = true): void => {
       if (tab.owner.kind !== 'agent' || !isMainFrame) return
-      if (!this.agentMayOpen(tab.wsId, url)) {
-        e.preventDefault()
-        this.log(tab, 'warning', `[stag] Blocked navigation to ${url}: not allowed yet. Call browser_navigate with this URL to ask the user for permission.`)
-      }
+      const d = this.decide(tab.wsId, url)
+      if (d === 'open') return
+      e.preventDefault()
+      this.log(
+        tab,
+        'warning',
+        d === 'deny'
+          ? `[stag] Blocked navigation to ${url}: the user's stag.ai settings block agents from opening pages outside localhost.`
+          : `[stag] Blocked navigation to ${url}: not allowed yet. Call browser_navigate with this URL to ask the user for permission.`
+      )
     }
     wc.on('will-navigate', (e) => guard(e, e.url))
     wc.on('will-redirect', (e) => guard(e, e.url, e.isMainFrame))
@@ -209,8 +259,8 @@ export class BrowserService {
     // Popup / target=_blank: tab người dùng → tab mới; tab agent → mở luôn trong tab của agent.
     wc.setWindowOpenHandler(({ url }) => {
       if (tab.owner.kind === 'agent') {
-        if (this.agentMayOpen(tab.wsId, url)) wc.loadURL(url).catch(() => {})
-        else this.log(tab, 'warning', `[stag] Blocked opening a window for ${url}: not allowed yet.`)
+        if (this.decide(tab.wsId, url) === 'open') wc.loadURL(url).catch(() => {})
+        else this.log(tab, 'warning', `[stag] Blocked opening a window for ${url}: not allowed.`)
       } else {
         this.newTab(tab.wsId, { kind: 'user' }, url)
       }
@@ -267,7 +317,7 @@ export class BrowserService {
   }
 
   navigate(wsId: string, tabId: string, input: string): void {
-    this.tab(wsId, tabId).view.webContents.loadURL(toUrl(input)).catch(() => {})
+    this.tab(wsId, tabId).view.webContents.loadURL(toUrl(input, this.config.searchEngine)).catch(() => {})
   }
 
   back(wsId: string, tabId: string): void {
@@ -324,34 +374,29 @@ export class BrowserService {
     if (!b) return
     for (const t of b.tabs) this.destroy(t)
     this.byWs.delete(wsId)
-    for (const [id, p] of this.asks) if (p.ask.workspaceId === wsId) this.answer(id, false)
+    for (const [id, p] of this.asks) if (p.ask.workspaceId === wsId) this.answer(id, false, true)
   }
 
   // ---- quyền ----
 
-  private agentMayOpen(wsId: string, raw: string): boolean {
-    let url: URL
-    try {
-      url = new URL(raw)
-    } catch {
-      return false
-    }
-    if (url.protocol === 'about:') return true
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
-    return isLocalUrl(url) || this.ws(wsId).allowed.has(url.origin)
+  /** Agent mở `raw` được không (xem originDecision): localhost, origin luôn cho, chính sách trang ngoài, origin đã cho lần này. */
+  private decide(wsId: string, raw: string): ReturnType<typeof originDecision> {
+    return originDecision(raw, this.config, (origin) => !!this.byWs.get(wsId)?.allowed.has(origin))
   }
 
-  answer(askId: string, allow: boolean): void {
+  /** `auto` = app tự trả lời (hết giờ, Cài đặt đổi…), không phải người dùng bấm: báo giao diện bỏ hộp thoại. */
+  answer(askId: string, allow: boolean, auto = false): void {
     const p = this.asks.get(askId)
     if (!p) return
     this.asks.delete(askId)
+    if (auto) this.events.askClosed(askId)
     p.resolve(allow)
   }
 
   private askUser(wsId: string, agent: Agent, url: URL): Promise<boolean> {
     const ask: BrowserPermissionAsk = { id: randomUUID(), workspaceId: wsId, agentName: agent.name, origin: url.origin, url: url.href }
     return new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => this.answer(ask.id, false), ASK_TIMEOUT)
+      const timer = setTimeout(() => this.answer(ask.id, false, true), ASK_TIMEOUT)
       this.asks.set(ask.id, {
         ask,
         resolve: (allow) => {
@@ -380,14 +425,19 @@ export class BrowserService {
   async agentNavigate(agent: Agent, raw: string): Promise<string> {
     let url: URL
     try {
-      url = new URL(toUrl(raw))
+      url = new URL(toUrl(raw, this.config.searchEngine))
     } catch {
       throw new Error(`Invalid URL: ${raw}`)
     }
     if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.href !== 'about:blank')
       throw new Error('Only http/https pages can be opened.')
     const wsId = agent.workspaceId
-    if (!this.agentMayOpen(wsId, url.href)) {
+    const d = this.decide(wsId, url.href)
+    if (d === 'deny')
+      throw new Error(
+        `The user's stag.ai settings block agents from opening pages outside localhost (${url.origin}). Do not retry unless the user changes this setting.`
+      )
+    if (d !== 'open') {
       const allow = await this.askUser(wsId, agent, url)
       if (!allow) throw new Error(`The user did not allow opening ${url.origin}. Do not retry this page unless the user says so.`)
       this.ws(wsId).allowed.add(url.origin)
@@ -511,6 +561,13 @@ export class BrowserService {
   shutdown(): void {
     for (const id of [...this.asks.keys()]) this.answer(id, false)
     for (const wsId of [...this.byWs.keys()]) this.closeWorkspace(wsId)
+    // Giữ cookie: ghi nốt dữ liệu trang / cookie còn trong bộ nhớ xuống đĩa.
+    for (const name of this.wired) {
+      if (!name.startsWith('persist:')) continue
+      const ses = electronSession.fromPartition(name)
+      ses.flushStorageData()
+      void ses.cookies.flushStore()
+    }
   }
 
   /** Agent đổi tên: nhãn trên tab browser của nó đổi theo. */

@@ -29,6 +29,7 @@ import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, p
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
 import { createStagMcp, type ExtraTool } from './mcp'
+import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
 import type { VaultActivityLog } from './vaultActivity'
@@ -645,6 +646,8 @@ export class AgentService {
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
       handoff: (summary) => this.completeHandoff(agent.id, summary),
       extraTools: this.pluginHooks.tools?.(agent, ws) ?? [],
+      // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi; phiên mở sau đó không thấy tool.
+      browserTools: browserToolsOn(this.settings.get(), ws.id, agent.id),
       syncSessionFile: async () => {
         const cur = this.running.get(agent.id)
         if (!cur?.sessionFile) return

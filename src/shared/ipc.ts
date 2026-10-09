@@ -157,7 +157,11 @@ export const IPC = {
   pluginsRotateWebhook: 'plugins:rotateWebhook',
   pluginsStream: 'plugins:stream',
   /** main → renderer: người dùng bấm thông báo của agent → mở agent đó (kèm workspaceId, agentId). */
-  revealAgent: 'agent:reveal'
+  revealAgent: 'agent:reveal',
+  /** main → renderer: câu hỏi mở trang ngoài đã xong mà người dùng không bấm (hết giờ, Cài đặt đổi…), kèm askId. */
+  browserAskClosed: 'browser:ask-closed',
+  /** Xoá cookie / dữ liệu trang của trình duyệt một workspace (hoặc mọi workspace). */
+  browserClearData: 'browser:clear-data'
 } as const
 
 export interface AppInfo {

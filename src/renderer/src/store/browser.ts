@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { BrowserPermissionAsk, BrowserState } from '@shared/types'
+import { useSettings } from './settings'
 import { useUi } from './ui'
 import { useWorkspaces } from './workspaces'
 
@@ -35,6 +36,8 @@ interface BrowserStore {
   resizing: boolean
   load: (wsId: string) => Promise<void>
   answer: (askId: string, allow: boolean) => Promise<void>
+  /** "Luôn cho trang này": thêm origin vào Cài đặt → Trình duyệt → Trang luôn cho phép, rồi cho phép. */
+  allowAlways: (ask: BrowserPermissionAsk) => Promise<void>
   /** `save` = ghi lại cho lần mở sau (chỉ khi thả chuột, không ghi mỗi khung hình). */
   setWidth: (ratio: number, save?: boolean) => void
   resetWidth: () => void
@@ -48,6 +51,8 @@ export const useBrowser = create<BrowserStore>((set, get) => {
     if (useWorkspaces.getState().activeId === wsId) useUi.getState().setBrowserOpen(true)
   })
   window.stag.browser.onAsk((ask) => set((s) => ({ asks: [...s.asks, ask] })))
+  // App tự trả lời (hết giờ, Cài đặt đổi, xoá workspace) → bỏ hộp thoại.
+  window.stag.browser.onAskClosed((id) => set((s) => ({ asks: s.asks.filter((a) => a.id !== id) })))
 
   return {
     byWs: {},
@@ -63,6 +68,17 @@ export const useBrowser = create<BrowserStore>((set, get) => {
     async answer(askId, allow) {
       set({ asks: get().asks.filter((a) => a.id !== askId) })
       await window.stag.browser.answer(askId, allow)
+    },
+
+    async allowAlways(ask) {
+      set({ asks: get().asks.filter((a) => a.id !== ask.id) })
+      // Lưu Cài đặt trước: main trả lời luôn mọi câu hỏi đang chờ cho cùng origin (cả câu hỏi này).
+      const cur = useSettings.getState().value.app.browser.allowedOrigins
+      try {
+        if (!cur.includes(ask.origin)) await useSettings.getState().save({ browser: { allowedOrigins: [...cur, ask.origin] } })
+      } finally {
+        await window.stag.browser.answer(ask.id, true)
+      }
     },
 
     setWidth(ratio, save = false) {

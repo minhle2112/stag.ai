@@ -20,7 +20,7 @@ import type { ExternalAdapterStore } from './externalAdapters'
 import { artifactPath, type ArtifactLog } from './artifacts'
 import { artifactThumb } from './artifactThumb'
 import type { Board } from './board'
-import { toUrl, type BrowserService } from './browser'
+import type { BrowserService } from './browser'
 import { openInObsidian } from './obsidian'
 import type { Notifier } from './notifier'
 import type { PtyManager } from './pty'
@@ -93,7 +93,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.browserState, (_e, workspaceId: string) => browser.state(workspaceId))
   ipcMain.handle(IPC.browserNewTab, (_e, workspaceId: string, url?: string) => {
     ws(workspaceId)
-    browser.newTab(workspaceId, { kind: 'user' }, url ? toUrl(url) : undefined)
+    browser.openUserTab(workspaceId, url)
   })
   ipcMain.handle(IPC.browserCloseTab, (_e, workspaceId: string, tabId: string) => browser.closeTab(workspaceId, tabId))
   ipcMain.handle(IPC.browserActivate, (_e, workspaceId: string, tabId: string) => browser.activate(workspaceId, tabId))
@@ -347,4 +347,5 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     })
     return r.canceled ? null : r.filePaths[0]
   })
+  ipcMain.handle(IPC.browserClearData, (_e, workspaceId?: string) => browser.clearData(typeof workspaceId === 'string' && workspaceId ? ws(workspaceId).id : undefined))
 }

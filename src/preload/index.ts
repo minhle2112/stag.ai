@@ -165,7 +165,15 @@ const api = {
       return () => ipcRenderer.removeListener(IPC.browserAsk, fn)
     },
     /** Mở / đóng DevTools của tab (cửa sổ riêng). */
-    toggleDevTools: (workspaceId: string, tabId: string): Promise<void> => ipcRenderer.invoke(IPC.browserDevTools, workspaceId, tabId)
+    toggleDevTools: (workspaceId: string, tabId: string): Promise<void> => ipcRenderer.invoke(IPC.browserDevTools, workspaceId, tabId),
+    /** Câu hỏi mở trang ngoài đã xong mà bạn không bấm (hết giờ, Cài đặt đổi…). */
+    onAskClosed(cb: (askId: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, askId: string): void => cb(askId)
+      ipcRenderer.on(IPC.browserAskClosed, fn)
+      return () => ipcRenderer.removeListener(IPC.browserAskClosed, fn)
+    },
+    /** Xoá cookie và dữ liệu trang của workspace `workspaceId` (bỏ trống = mọi workspace). */
+    clearData: (workspaceId?: string): Promise<void> => ipcRenderer.invoke(IPC.browserClearData, workspaceId)
   },
   workspace: {
     list: (): Promise<Workspace[]> => ipcRenderer.invoke(IPC.wsList),
