@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from './types'
-import { entriesOverlap, entryHas, lockHolder, overlapsOf, parseScope, projectRel, scopeLocks, sharedPrefixes } from './scope'
+import { entriesOverlap, entryHas, lockHolder, overlapsOf, parseScope, projectRel, scopeLocks, unlocked, covers } from './scope'
 
 const ROOT = 'C:\\Users\\a\\Proj'
 
@@ -96,7 +96,7 @@ describe('entriesOverlap', () => {
 
 describe('khoá', () => {
   const vault = `${ROOT}\\Proj memory`
-  const shared = sharedPrefixes(ROOT, vault)
+  const shared = unlocked(ROOT, vault)
 
   it('việc đang mở giữ phạm vi đã khai + file đã sửa; việc xong thì nhả', () => {
     const locks = scopeLocks(
@@ -124,5 +124,45 @@ describe('khoá', () => {
     expect(o.map((x) => x.other.id)).toEqual(['2'])
     expect(o[0].labels).toEqual(['src/auth'])
     expect(overlapsOf(tasks[2], locks, ROOT, shared)).toEqual([])
+  })
+})
+
+describe('mẫu miễn khoá (Cài đặt → Khoá phạm vi)', () => {
+  const vault = `${ROOT}\\Proj memory`
+  const free = unlocked(ROOT, vault, ['docs/**', '**/*.lock', 'README.md', '.', '*'])
+  const e = (s: string) => parseScope(s, ROOT)[0]
+
+  it('unlocked: thư mục có sẵn + vault + mẫu; bỏ mẫu "cả dự án"', () => {
+    expect(free.map((x) => x.label)).toEqual(['.sessions', '.stag', '.git', 'proj memory', 'docs/**', '**/*.lock', 'README.md'])
+  })
+
+  it('lockHolder bỏ qua file khớp mẫu miễn khoá, không phân biệt hoa thường', () => {
+    const locks = scopeLocks([task('1', 'a', '.')], ROOT)
+    expect(lockHolder(locks, 'b', 'docs/a/b.md', free)).toBeUndefined()
+    expect(lockHolder(locks, 'b', 'src/deep/yarn.lock', free)).toBeUndefined()
+    expect(lockHolder(locks, 'b', projectRel('Readme.MD', ROOT)!, free)).toBeUndefined()
+    expect(lockHolder(locks, 'b', 'src/a.ts', free)?.lock.task.id).toBe('1')
+    expect(lockHolder(locks, 'b', 'docsx/a.md', free)).toBeDefined()
+  })
+
+  it('covers: mẫu phủ hết một mục phạm vi', () => {
+    const [docsAll, lock] = [e('docs/**'), e('**/*.lock')]
+    expect(covers(docsAll, e('docs/'))).toBe(true)
+    expect(covers(docsAll, e('docs/api/x.md'))).toBe(true)
+    expect(covers(docsAll, e('docs/**/*.md'))).toBe(true)
+    expect(covers(docsAll, e('src/'))).toBe(false)
+    expect(covers(lock, e('package.lock'))).toBe(true)
+    expect(covers(lock, e('src/'))).toBe(false)
+    expect(covers(e('docs/*x'), e('docs/'))).toBe(false)
+    expect(covers(e('*.md'), e('*.md'))).toBe(true)
+    expect(covers(e('docs'), e('docs/**/*.md'))).toBe(true)
+  })
+
+  it('overlapsOf bỏ qua phạm vi nằm hẳn trong chỗ miễn khoá', () => {
+    const tasks = [task('1', 'a', 'docs/, src/a.ts'), task('2', 'b', 'docs/guide, src/')]
+    const locks = scopeLocks(tasks, ROOT)
+    expect(overlapsOf(tasks[0], locks, ROOT, unlocked(ROOT, vault))[0].labels).toEqual(['docs/', 'src/a.ts'])
+    expect(overlapsOf(tasks[0], locks, ROOT, free)[0].labels).toEqual(['src/a.ts'])
+    expect(overlapsOf(tasks[0], scopeLocks([tasks[0], task('3', 'c', 'docs/x')], ROOT), ROOT, free)).toEqual([])
   })
 })

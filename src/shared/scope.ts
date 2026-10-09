@@ -15,8 +15,8 @@ export interface ScopeEntry {
 
 const WILDCARD = /[*?[{]/
 
-/** Thư mục chung không bao giờ khoá: dữ liệu của app và git. Vault được thêm riêng (xem `sharedPrefixes`). */
-const ALWAYS_SHARED = ['.sessions', '.stag', '.git']
+/** Thư mục chung không bao giờ khoá: dữ liệu của app và git. Vault được thêm riêng (xem `unlocked`). */
+export const ALWAYS_SHARED: readonly string[] = ['.sessions', '.stag', '.git']
 
 const norm = (p: string): string => p.replace(/\\/g, '/')
 const isAbs = (p: string): boolean => /^[a-z]:\//i.test(p) || p.startsWith('/')
@@ -178,15 +178,35 @@ export function scopeLocks(tasks: Task[], root: string): ScopeLock[] {
     }))
 }
 
-/** Thư mục chung (không khoá) tính theo dự án: dữ liệu app, git và vault nếu vault nằm trong dự án. */
-export function sharedPrefixes(root: string, vaultPath?: string): string[] {
+/**
+ * Chỗ không bao giờ khoá trong dự án: dữ liệu app, git, vault nếu vault nằm trong dự án, cộng các mẫu miễn khoá
+ * trong Cài đặt → Khoá phạm vi (`exempt`, cú pháp như phạm vi việc). Mẫu "cả dự án" bị bỏ (muốn vậy thì tắt khoá).
+ */
+export function unlocked(root: string, vaultPath?: string, exempt: readonly string[] = []): ScopeEntry[] {
   const vault = vaultPath ? projectRel(vaultPath, root) : null
-  return vault ? [...ALWAYS_SHARED, vault] : ALWAYS_SHARED
+  const fixed = vault ? [...ALWAYS_SHARED, vault] : ALWAYS_SHARED
+  return [
+    ...fixed.map((key) => ({ key, label: key })),
+    ...exempt.flatMap((p) => parseScope(p, root)).filter((e) => e.key !== '' || e.glob)
+  ]
 }
 
-/** Việc của agent khác đang giữ file `rel`, hoặc undefined. Thư mục chung không bao giờ bị khoá. */
-export function lockHolder(locks: ScopeLock[], agentId: string, rel: string, shared: string[]): { lock: ScopeLock; entry: ScopeEntry } | undefined {
-  if (rel === '' || shared.some((s) => contains(s, rel))) return undefined
+/** Tên ảo để thử một mẫu glob có phủ mọi thứ bên trong một thư mục không (không file thật nào có tên này). */
+const ANY_INSIDE = '\0/\0'
+
+/** Mục không khoá `s` phủ hết mục phạm vi `e` (phạm vi đó coi như không khoá gì). */
+export function covers(s: ScopeEntry, e: ScopeEntry): boolean {
+  if (!s.glob) return contains(s.key, e.key)
+  if (e.glob && s.glob.source === e.glob.source) return true
+  return (!e.glob && s.glob.test(e.key)) || s.glob.test(e.key ? `${e.key}/${ANY_INSIDE}` : ANY_INSIDE)
+}
+
+/** File `rel` nằm trong chỗ không khoá. */
+export const isUnlocked = (rel: string, free: ScopeEntry[]): boolean => free.some((s) => entryHas(s, rel))
+
+/** Việc của agent khác đang giữ file `rel`, hoặc undefined. Chỗ không khoá (`free`, xem `unlocked`) thì không bao giờ. */
+export function lockHolder(locks: ScopeLock[], agentId: string, rel: string, free: ScopeEntry[]): { lock: ScopeLock; entry: ScopeEntry } | undefined {
+  if (rel === '' || isUnlocked(rel, free)) return undefined
   for (const lock of locks) {
     if (lock.task.agentId === agentId) continue
     const entry = lock.entries.find((e) => entryHas(e, rel))
@@ -202,14 +222,14 @@ export interface ScopeOverlap {
   labels: string[]
 }
 
-/** Việc `task` đè phạm vi với các việc đang mở nào của agent khác. Phạm vi trùng vault / thư mục chung thì bỏ qua. */
-export function overlapsOf(task: Task, locks: ScopeLock[], root: string, shared: string[]): ScopeOverlap[] {
+/** Việc `task` đè phạm vi với các việc đang mở nào của agent khác. Phạm vi nằm hẳn trong chỗ không khoá (vault, thư mục chung, mẫu miễn khoá) thì bỏ qua. */
+export function overlapsOf(task: Task, locks: ScopeLock[], root: string, free: ScopeEntry[]): ScopeOverlap[] {
   const mine = locks.find((l) => l.task.id === task.id)?.entries ?? scopeLocks([{ ...task, status: 'open' }], root)[0].entries
-  const own = mine.filter((e) => !shared.some((s) => contains(s, e.key)))
+  const own = mine.filter((e) => !free.some((s) => covers(s, e)))
   const out: ScopeOverlap[] = []
   for (const lock of locks) {
     if (lock.task.agentId === task.agentId) continue
-    const labels = own.filter((e) => lock.entries.some((o) => !shared.some((s) => contains(s, o.key)) && entriesOverlap(e, o))).map((e) => e.label)
+    const labels = own.filter((e) => lock.entries.some((o) => !free.some((s) => covers(s, o)) && entriesOverlap(e, o))).map((e) => e.label)
     if (labels.length) out.push({ other: lock.task, labels: [...new Set(labels)] })
   }
   return out

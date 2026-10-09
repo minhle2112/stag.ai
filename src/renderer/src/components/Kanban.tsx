@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { overlapsOf, scopeLocks, sharedPrefixes, type ScopeOverlap } from '@shared/scope'
+import { overlapsOf, scopeLocks, unlocked, type ScopeOverlap } from '@shared/scope'
+import { resolveScope } from '@shared/settings'
 import { agentKind, type Agent, type AgentStatus, type Task, type Workspace } from '@shared/types'
 import { openAgent, useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
+import { useSettings } from '../store/settings'
 import { ago, localDay, statusView } from '../status'
 import { ContextBadge } from './ContextBadge'
 
@@ -23,6 +25,16 @@ interface AgentCardData {
   starting: boolean
   /** Phạm vi việc này đè lên việc đang mở của agent khác (khoá phạm vi, xem shared/scope.ts). */
   overlaps: ScopeOverlap[]
+  /** Câu cuối chú thích ⚠ theo chế độ khoá phạm vi. */
+  overlapNote: string
+}
+
+/** Câu cuối trong chú thích dấu ⚠: app làm gì khi agent sửa vào phạm vi của agent kia (Cài đặt → Khoá phạm vi, cấp workspace). */
+const OVERLAP_NOTE = {
+  ask: 'Agent sửa file trong phạm vi của agent kia thì app hỏi bạn trước.',
+  block: 'Agent sửa file trong phạm vi của agent kia sẽ bị chặn.',
+  warn: 'App không chặn khi agent sửa file trong phạm vi của agent kia (chỉ cảnh báo).',
+  off: ''
 }
 
 /** Thẻ của agent nằm ở cột nào; null = không chạy và không có việc dở → không lên bảng. */
@@ -38,6 +50,7 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
   const agentsState = useAgents((s) => s.byWs[wsId])
   const loadBoard = useBoard((s) => s.load)
   const loadAgents = useAgents((s) => s.load)
+  const settings = useSettings((s) => s.value)
   const [showOld, setShowOld] = useState(false)
   const [now, setNow] = useState(Date.now())
 
@@ -56,7 +69,9 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
 
   const open = board.tasks.filter((t) => t.status === 'open')
   const locks = scopeLocks(board.tasks, workspace.path)
-  const shared = sharedPrefixes(workspace.path, workspace.vaultPath)
+  // Khoá phạm vi tắt ở cấp workspace → không hiện ⚠ trùng phạm vi (cấp agent không tính: thẻ nói về cả hai bên).
+  const scopeCfg = resolveScope(settings, wsId, null)
+  const free = unlocked(workspace.path, workspace.vaultPath, scopeCfg.exempt)
   const cards: Record<ColumnId, AgentCardData[]> = { asking: [], doing: [], waiting: [], done: [] }
   const idle: Agent[] = []
   // Terminal thường không nhận việc, không có trạng thái: không lên kanban.
@@ -66,7 +81,8 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
     const c: AgentCardData = {
       agent,
       task,
-      overlaps: task ? overlapsOf(task, locks, workspace.path, shared) : [],
+      overlaps: task && scopeCfg.mode !== 'off' ? overlapsOf(task, locks, workspace.path, free) : [],
+      overlapNote: OVERLAP_NOTE[scopeCfg.mode],
       status: board.statuses.find((s) => s.agentId === agent.id),
       running: !!agentsState.running[agent.id],
       starting: !!agentsState.starting[agent.id]
@@ -152,7 +168,7 @@ function Empty({ text }: { text: string }): React.JSX.Element | null {
 }
 
 function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCardData; now: number; onClick: () => void }): React.JSX.Element {
-  const { agent, task, status, running, starting, overlaps } = data
+  const { agent, task, status, running, starting, overlaps, overlapNote } = data
   const view = statusView(running, starting, status)
   const stopped = !running && !starting
   const [menu, setMenu] = useState(false)
@@ -197,7 +213,7 @@ function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCard
             <div
               key={o.other.id}
               className="mt-1 rounded bg-amber-400/10 px-1.5 py-0.5 text-[11px] text-amber-300"
-              title={`Việc "${o.other.title}" của ${o.other.agentName} (phạm vi: ${o.other.scope}). Agent sửa file trong phạm vi của agent kia thì app hỏi bạn trước.`}
+              title={`Việc "${o.other.title}" của ${o.other.agentName} (phạm vi: ${o.other.scope}). ${overlapNote}`}
             >
               ⚠ Trùng phạm vi với {o.other.agentName}: <span className="font-mono">{o.labels.join(', ')}</span>
             </div>

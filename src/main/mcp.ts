@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import * as z from 'zod'
-import type { Agent, Task, Workspace } from '@shared/types'
-import { overlapsOf, scopeLocks, sharedPrefixes } from '@shared/scope'
+import { DEFAULT_SCOPE, type Agent, type ScopeLockSettings, type Task, type Workspace } from '@shared/types'
+import { overlapsOf, scopeLocks, unlocked } from '@shared/scope'
 import type { Board } from './board'
 import { BROWSER_KEYS, type BrowserService } from './browser'
 
@@ -11,6 +11,8 @@ export interface McpContext {
   /** Phiên đang chạy của agent (undefined nếu gọi tới khi phiên đã đóng). */
   sessionId?: string
   board: Board
+  /** Cài đặt khoá phạm vi thực tế của agent (đọc lại mỗi lần gọi; vắng = mặc định). */
+  scope?: () => ScopeLockSettings
   browser: BrowserService
   /** Mọi agent trong workspace và phiên của họ có đang chạy không (cho task_list). */
   teammates(): Array<{ agent: Agent; running: boolean }>
@@ -54,14 +56,23 @@ function describe(t: Task): string {
   return `"${t.title}" — scope: ${t.scope || '(not set)'}`
 }
 
-/** Cảnh báo khi phạm vi vừa khai đè lên việc đang mở của agent khác (xem shared/scope.ts). */
-async function overlapWarning(board: Board, ws: Workspace, task: Task): Promise<string> {
+/**
+ * Cảnh báo khi phạm vi vừa khai đè lên việc đang mở của agent khác (xem shared/scope.ts). Khoá phạm vi tắt → không
+ * cảnh báo; câu cuối nói app sẽ làm gì khi agent sửa vào phạm vi của agent khác (hỏi / chặn / không chặn).
+ */
+export async function overlapWarning(board: Board, ws: Workspace, task: Task, cfg: ScopeLockSettings = DEFAULT_SCOPE): Promise<string> {
+  if (cfg.mode === 'off') return ''
   const { tasks } = await board.snapshot(ws)
-  const shared = sharedPrefixes(ws.path, ws.vaultPath)
-  const overlaps = overlapsOf(task, scopeLocks(tasks, ws.path), ws.path, shared)
+  const overlaps = overlapsOf(task, scopeLocks(tasks, ws.path), ws.path, unlocked(ws.path, ws.vaultPath, cfg.exempt))
   if (!overlaps.length) return ''
   const lines = overlaps.map((o) => `- ${o.other.agentName}: "${o.other.title}" (scope: ${o.other.scope}) — overlaps on ${o.labels.join(', ')}`)
-  return `\n\nWARNING — your scope overlaps with other agents' open tasks:\n${lines.join('\n')}\nTell the user now and agree on who edits what (narrow your scope with task_update if possible). Before you edit a file in another agent's scope, stag.ai asks the user for permission.`
+  const guard =
+    cfg.mode === 'block'
+      ? "stag.ai blocks your edits to files in another agent's scope."
+      : cfg.mode === 'warn'
+        ? "stag.ai will not stop you from editing files in another agent's scope, so agree first."
+        : "Before you edit a file in another agent's scope, stag.ai asks the user for permission."
+  return `\n\nWARNING — your scope overlaps with other agents' open tasks:\n${lines.join('\n')}\nTell the user now and agree on who edits what (narrow your scope with task_update if possible). ${guard}`
 }
 
 /** Máy chủ MCP "stag" cho một agent: các tool để agent tự đưa việc của mình lên kanban. */
@@ -84,7 +95,7 @@ export function createStagMcp(ctx: McpContext): McpServer {
       try {
         const task = await board.startTask(ws, agent, ctx.sessionId ?? '', title, scope)
         await ctx.syncSessionFile()
-        return ok(`Task started: ${describe(task)}. When done, update the vault, then call task_done.${await overlapWarning(board, ws, task)}`)
+        return ok(`Task started: ${describe(task)}. When done, update the vault, then call task_done.${await overlapWarning(board, ws, task, ctx.scope?.())}`)
       } catch (e) {
         return fail(e)
       }
@@ -105,7 +116,7 @@ export function createStagMcp(ctx: McpContext): McpServer {
       try {
         const task = await board.updateTask(ws, agent.id, { title, scope })
         await ctx.syncSessionFile()
-        return ok(`Updated: ${describe(task)}${scope ? await overlapWarning(board, ws, task) : ''}`)
+        return ok(`Updated: ${describe(task)}${scope ? await overlapWarning(board, ws, task, ctx.scope?.()) : ''}`)
       } catch (e) {
         return fail(e)
       }

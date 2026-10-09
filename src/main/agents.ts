@@ -42,6 +42,7 @@ import { normalizeLayout } from './agentLayout'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { effectiveConnectors, toolPolicy } from '@shared/connectors'
 import { effectiveSkills } from '@shared/skills'
+import { resolveScope } from '@shared/settings'
 
 /** Bản bàn giao agent viết (tool session_handoff), chờ phiên sau đọc. */
 interface Handoff {
@@ -108,7 +109,8 @@ export class AgentService {
     private approvals: ApprovalQueue,
     private skills: SkillLibrary
   ) {
-    this.guard = new ScopeGuard(board)
+    // Đọc cài đặt khoá phạm vi mỗi lần gọi tool: đổi trong Settings là có tác dụng ngay, không cần mở lại phiên.
+    this.guard = new ScopeGuard(board, (ws, a) => resolveScope(this.settings.get(), ws.id, a.id))
   }
 
   /** Plugin (Cài đặt → Plugin): báo phiên mở / đóng, thêm tool vào máy chủ MCP stag. */
@@ -637,6 +639,7 @@ export class AgentService {
       workspace: ws,
       sessionId: run?.sessionId,
       board: this.board,
+      scope: () => resolveScope(this.settings.get(), ws.id, agent.id),
       browser: this.browser,
       teammates: () =>
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),

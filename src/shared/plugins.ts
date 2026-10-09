@@ -68,7 +68,8 @@ export interface PluginEvent {
    * - vault.note.changed: path (tương đối so với vault), by ('agent' | 'user'); by 'user' thì không có agentId
    * - handoff.done: percent (% context lúc bàn giao, số nguyên; null nếu chưa biết), fromSessionId, summary (bản bàn giao)
    * - scope.conflict: path, paths, ownerAgentId, ownerAgentName, taskTitle, entry, command?, decision
-   *   ('ask' = Claude Code hỏi trong terminal, 'allowed' / 'denied' = bạn trả lời trong app với Codex)
+   *   ('ask' = Claude Code hỏi trong terminal, 'allowed' / 'denied' = bạn trả lời trong app với Codex,
+   *   'blocked' = chặn luôn, 'warned' = cho sửa, chỉ cảnh báo — theo Cài đặt → Khoá phạm vi)
    */
   data: Record<string, unknown>
 }
