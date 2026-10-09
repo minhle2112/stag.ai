@@ -7,6 +7,7 @@ import { CreateAgentDialog } from './components/CreateAgentDialog'
 import { Kanban } from './components/Kanban'
 import { ScopeAskDialog } from './components/ScopeAskDialog'
 import { ApprovalToast } from './components/ApprovalToast'
+import { PluginToast, ToolbarPluginButtons } from './components/PluginSlots'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
@@ -90,6 +91,7 @@ export function App(): React.JSX.Element {
           ))}
           <div className="flex-1" />
           {active && <span className="mr-2 truncate text-[12px] text-muted">{active.path}</span>}
+          <ToolbarPluginButtons />
           <button
             onClick={() => setTab(tab === 'vault' ? 'agents' : 'vault')}
             title="Vault Obsidian của workspace (bộ nhớ của agent)"
@@ -135,6 +137,7 @@ export function App(): React.JSX.Element {
       <BrowserAskDialog />
       <ScopeAskDialog />
       <ApprovalToast />
+      <PluginToast />
       <NewAgentDialog />
       {settingsOpen && <SettingsPage />}
     </div>

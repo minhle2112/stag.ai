@@ -11,6 +11,8 @@ import type { OAuthService } from './oauth'
 import type { ApprovalQueue } from './approvals'
 import { connectFromCatalog } from './connect'
 import { readSkillDir, scanSkills, type SkillLibrary } from './skills'
+import type { PluginHost } from './plugins'
+import type { PluginInstallRequest } from '@shared/plugins'
 import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
@@ -33,7 +35,7 @@ import type { WorkspaceStore } from './workspace'
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary, plugins: PluginHost): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -295,6 +297,37 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     const dir = typeof target === 'string' && /^skill\.md$/i.test(basename(target)) ? dirname(target) : (await skills.read(String(target))).dir
     const err = await shell.openPath(dir)
     if (err) throw new Error(err)
+  })
+  // ---- Plugin ----
+  const pluginId = (id: unknown): string => {
+    if (typeof id !== 'string' || !id) throw new Error('id plugin không hợp lệ')
+    return id
+  }
+  ipcMain.handle(IPC.pluginsList, () => plugins.list())
+  ipcMain.handle(IPC.pluginsInstall, (_e, req: PluginInstallRequest) => {
+    if (req?.type === 'npm' && typeof req.name === 'string') return plugins.install({ type: 'npm', name: req.name, version: typeof req.version === 'string' ? req.version : undefined })
+    if (req?.type === 'local' && typeof req.path === 'string') return plugins.install({ type: 'local', path: req.path })
+    throw new Error('Yêu cầu cài không hợp lệ')
+  })
+  ipcMain.handle(IPC.pluginsApprove, (_e, id: string) => plugins.approve(pluginId(id)))
+  ipcMain.handle(IPC.pluginsRemove, async (_e, id: string) => {
+    await plugins.remove(pluginId(id))
+    return plugins.list()
+  })
+  ipcMain.handle(IPC.pluginsReload, (_e, id: string) => plugins.reload(pluginId(id)))
+  ipcMain.handle(IPC.pluginsRestart, (_e, id: string) => plugins.restart(pluginId(id)))
+  ipcMain.handle(IPC.pluginsConfig, (_e, id: string, config: Record<string, unknown>) => plugins.setConfig(pluginId(id), config && typeof config === 'object' ? config : {}))
+  ipcMain.handle(IPC.pluginsHealth, (_e, id: string) => plugins.health(pluginId(id)))
+  ipcMain.handle(IPC.pluginsSlot, (_e, id: string, slotId: string, workspaceId?: string, agentId?: string) => {
+    const ws = workspaceId ? workspaces.get(workspaceId) : undefined
+    const agent = agentId ? agents.pluginView().find((x) => x.agent.id === agentId)?.agent : undefined
+    return plugins.runSlot(pluginId(id), String(slotId), {
+      workspaceId: ws?.id,
+      workspaceName: ws?.name,
+      workspacePath: ws?.path,
+      agentId: agent?.id,
+      agentName: agent?.name
+    })
   })
   ipcMain.handle(IPC.pickFile, async (e, title: string, defaultPath?: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)!

@@ -28,7 +28,7 @@ import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
-import { createStagMcp } from './mcp'
+import { createStagMcp, type ExtraTool } from './mcp'
 import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
 import type { VaultActivityLog } from './vaultActivity'
@@ -108,6 +108,28 @@ export class AgentService {
     private skills: SkillLibrary
   ) {
     this.guard = new ScopeGuard(board)
+  }
+
+  /** Plugin (Cài đặt → Plugin): báo phiên mở / đóng, thêm tool vào máy chủ MCP stag. */
+  private pluginHooks: {
+    onSession?: (type: 'agent.session.started' | 'agent.session.stopped', agent: Agent) => void
+    tools?: (agent: Agent, ws: Workspace) => ExtraTool[]
+  } = {}
+
+  attachPlugins(hooks: AgentService['pluginHooks']): void {
+    this.pluginHooks = hooks
+  }
+
+  /** Mọi agent + phiên đang chạy (cho plugin có quyền agents.read). */
+  pluginView(): Array<{ agent: Agent; running: boolean; activity: string | null }> {
+    return this.data.agents.map((a) => ({ agent: a, running: this.running.has(a.id), activity: this.board.statusOf(a.id)?.activity ?? null }))
+  }
+
+  /** Gõ chữ vào terminal của agent đang chạy (plugin có quyền agent.sessions.send). */
+  typeInto(agentId: string, text: string): void {
+    const run = this.running.get(agentId)
+    if (!run) throw new Error('Agent này không có phiên đang chạy.')
+    this.ptys.write(run.ptyId, text, false)
   }
 
   /** Gắn máy chủ trạng thái (hook + MCP) sau khi nó đã chạy. */
@@ -341,6 +363,7 @@ export class AgentService {
     // Bản bàn giao đã chép vào file phiên mới: dùng một lần.
     if (handoff) delete this.data.handoffs![agent.id]
     await this.save()
+    this.pluginHooks.onSession?.('agent.session.started', agent)
     return publicRun(run)
   }
 
@@ -384,6 +407,7 @@ export class AgentService {
     const agent = this.data.agents.find((a) => a.id === agentId)
     if (!agent || agentKind(agent) === 'terminal') return
     this.board.setActivity(agent, 'stopped')
+    this.pluginHooks.onSession?.('agent.session.stopped', agent)
     // Đóng vì đã bàn giao: nhờ giao diện mở phiên mới trong cùng ô (sau khi nó nhận sự kiện thoát
     // của terminal cũ, PtyManager gửi sự kiện đó ngay sau khi gọi hàm này).
     if (this.board.statusOf(agentId)?.handoff === 'restarting' && this.data.handoffs?.[agentId]) {
@@ -607,6 +631,7 @@ export class AgentService {
       teammates: () =>
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
       handoff: (summary) => this.completeHandoff(agent.id, summary),
+      extraTools: this.pluginHooks.tools?.(agent, ws) ?? [],
       syncSessionFile: async () => {
         const cur = this.running.get(agent.id)
         if (!cur?.sessionFile) return

@@ -1,5 +1,6 @@
 import { connectorOn } from '@shared/connectors'
 import { skillOn } from '@shared/skills'
+import { pluginOn } from '@shared/settings'
 import { agentKind, type Settings } from '@shared/types'
 import { useAgents } from '../../store/agents'
 import { useSettings } from '../../store/settings'
@@ -14,7 +15,7 @@ import { Group, Row, Select, Switch, useSaveError } from './controls'
 /** 'app' | `ws:<id>` | `agent:<wsId>:<agentId>` */
 export type LevelKey = string
 /** Mục cài đặt giữ map bật / tắt (SettingsOverrides.connectors / .skills). */
-export type ToggleField = 'connectors' | 'skills'
+export type ToggleField = 'connectors' | 'skills' | 'plugins'
 
 export interface Level {
   lvl: 'app' | 'ws' | 'agent'
@@ -45,7 +46,7 @@ export function useAgentLevel(): (agentId?: string) => LevelKey {
 }
 
 export function isOn(field: ToggleField, s: Settings, k: string, workspaceId?: string, agentId?: string): boolean {
-  return field === 'connectors' ? connectorOn(s, k, workspaceId, agentId) : skillOn(s, k, workspaceId, agentId)
+  return field === 'connectors' ? connectorOn(s, k, workspaceId, agentId) : field === 'skills' ? skillOn(s, k, workspaceId, agentId) : pluginOn(s, k, workspaceId, agentId)
 }
 
 export function LevelPicker({ level, setLevel, field }: { level: LevelKey; setLevel: (l: LevelKey) => void; field: ToggleField }): React.JSX.Element {
@@ -53,7 +54,7 @@ export function LevelPicker({ level, setLevel, field }: { level: LevelKey; setLe
   const workspaces = useWorkspaces((s) => s.items)
   const byWs = useAgents((s) => s.byWs)
   const cur = useLevel(level)
-  const has = (o?: { connectors?: Record<string, boolean>; skills?: Record<string, boolean> }): string => (o?.[field] ? ' •' : '')
+  const has = (o?: { connectors?: Record<string, boolean>; skills?: Record<string, boolean>; plugins?: Record<string, boolean> }): string => (o?.[field] ? ' •' : '')
   const options = [
     { value: 'app', label: 'Mặc định cho mọi agent' },
     ...workspaces.flatMap((w) => [
@@ -69,7 +70,7 @@ export function LevelPicker({ level, setLevel, field }: { level: LevelKey; setLe
         label="Cấp"
         desc="Workspace ghi đè mặc định của app; agent ghi đè workspace của nó. Dấu • = có bật / tắt riêng. Phiên đang chạy giữ nguyên, phiên mở sau mới nhận thay đổi."
       >
-        <Select label={`Cấp áp dụng ${field === 'connectors' ? 'connector' : 'skill'}`} value={cur.lvl === 'app' ? 'app' : level} onChange={setLevel} options={options} />
+        <Select label={`Cấp áp dụng ${field === 'connectors' ? 'connector' : field === 'skills' ? 'skill' : 'plugin'}`} value={cur.lvl === 'app' ? 'app' : level} onChange={setLevel} options={options} />
       </Row>
     </Group>
   )

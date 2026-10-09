@@ -7,6 +7,7 @@ import { AdaptersSection } from './AdaptersSection'
 import { ConnectorsSection } from './ConnectorsSection'
 import { SecretsSection } from './SecretsSection'
 import { SkillsSection } from './SkillsSection'
+import { PluginsSection } from './PluginsSection'
 import { GeneralSection } from './GeneralSection'
 import { HandoffSection } from './HandoffSection'
 
@@ -24,7 +25,7 @@ const NAV: NavItem[][] = [
     { id: 'adapters', label: 'Adapter' },
     { id: 'connectors', label: 'Connector' },
     { id: 'skills', label: 'Skill' },
-    { id: 'plugins', label: 'Plugin', soon: 'S4' },
+    { id: 'plugins', label: 'Plugin' },
     { id: 'secrets', label: 'Secrets' }
   ],
   [
@@ -41,15 +42,6 @@ const NAV: NavItem[][] = [
 
 /** Mô tả các mục chưa làm (theo kế hoạch Settings đã chốt 2026-10-09). */
 const SOON: Partial<Record<SettingsSection, { title: string; points: string[] }>> = {
-  plugins: {
-    title: 'Plugin',
-    points: [
-      'Phần mở rộng cho chính app stag.ai, kiểu plugin của Paperclip.',
-      'Thêm tab, nút ở thanh bên, mục trong menu agent, loại ô mới; thêm tool cho agent; nghe sự kiện của app.',
-      'Cài từ npm hoặc thư mục; xem quyền trước khi cài; mỗi plugin chạy trong tiến trình riêng.',
-      'Trang mỗi plugin: Cấu hình, Trạng thái, Giới thiệu.'
-    ]
-  },
   scope: {
     title: 'Khoá phạm vi',
     points: ['Khi agent sửa vào vùng của agent khác: hỏi bạn / chặn / chỉ cảnh báo.', 'Hiện tại app luôn hỏi bạn.']
@@ -115,7 +107,7 @@ export function SettingsPage(): React.JSX.Element {
       </nav>
 
       <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className={`mx-auto ${section === 'connectors' || section === 'skills' ? 'max-w-5xl' : 'max-w-3xl'} select-text px-8 py-8`}>
+        <div className={`mx-auto ${section === 'connectors' || section === 'skills' || section === 'plugins' ? 'max-w-5xl' : 'max-w-3xl'} select-text px-8 py-8`}>
           <Section id={section} />
         </div>
       </main>
@@ -133,6 +125,8 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
       return <ConnectorsSection />
     case 'skills':
       return <SkillsSection />
+    case 'plugins':
+      return <PluginsSection />
     case 'secrets':
       return <SecretsSection />
     case 'handoff':

@@ -1,0 +1,104 @@
+{
+  "name": "stag-plugin-hello",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plugin mẫu của stag.ai: tool đếm chữ cho agent, nút chào ở thanh bên, ghi nhật ký việc xong.",
+  "license": "MIT",
+  "type": "module",
+  "stagPlugin": {
+    "id": "stag.hello",
+    "apiVersion": 1,
+    "displayName": "Hello",
+    "description": "Plugin mẫu: tool word_count cho agent, nút \"Chào\" ở thanh bên, nút mở trang tài liệu ở thanh trên cùng, đếm việc agent làm xong.",
+    "author": "stag.ai",
+    "categories": [
+      "example"
+    ],
+    "capabilities": [
+      "agent.tools.register",
+      "ui.sidebar.register",
+      "ui.action.register",
+      "events.subscribe",
+      "agents.read",
+      "plugin.state.read",
+      "plugin.state.write",
+      "ui.notify"
+    ],
+    "entrypoints": {
+      "worker": "./worker.mjs"
+    },
+    "instanceConfigSchema": {
+      "type": "object",
+      "properties": {
+        "greeting": {
+          "type": "string",
+          "title": "Lời chào",
+          "description": "Câu nút \"Chào\" hiện ra.",
+          "default": "Xin chào"
+        },
+        "maxWords": {
+          "type": "integer",
+          "title": "Giới hạn từ",
+          "description": "word_count báo vượt khi quá số này.",
+          "default": 500,
+          "minimum": 1
+        },
+        "docsUrl": {
+          "type": "string",
+          "title": "Trang tài liệu",
+          "description": "Nút \"Tài liệu\" mở địa chỉ này (kèm tên workspace) trong trình duyệt của app.",
+          "default": "https://example.com",
+          "format": "url"
+        }
+      }
+    },
+    "tools": [
+      {
+        "name": "word_count",
+        "displayName": "Đếm từ",
+        "description": "Count the words in a piece of text and say whether it is over the user's limit.",
+        "parametersSchema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "The text to count"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    ],
+    "events": [
+      "task.done",
+      "agent.session.started"
+    ],
+    "ui": {
+      "slots": [
+        {
+          "type": "sidebar",
+          "id": "hello",
+          "displayName": "Chào",
+          "action": "hello"
+        },
+        {
+          "type": "agentMenu",
+          "id": "stats",
+          "displayName": "Thống kê (Hello)",
+          "action": "stats"
+        },
+        {
+          "type": "globalToolbarButton",
+          "id": "docs",
+          "displayName": "Tài liệu",
+          "open": {
+            "url": "{config.docsUrl}/?workspace={workspace.name}",
+            "target": "browser"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -18,6 +18,28 @@ export interface McpContext {
   syncSessionFile(): Promise<void>
   /** Lưu bản bàn giao rồi đóng phiên; app mở phiên mới đọc bản bàn giao đó. */
   handoff(summary: string): Promise<void>
+  /** Tool của plugin (Cài đặt → Plugin) bật cho agent này; tên đã có tiền tố plugin. */
+  extraTools?: ExtraTool[]
+}
+
+export interface ExtraTool {
+  name: string
+  title: string
+  description: string
+  /** JSON Schema object của tham số. */
+  inputSchema: Record<string, unknown>
+  call(params: unknown): Promise<{ text: string; isError: boolean }>
+}
+
+/** JSON Schema của plugin → zod cho MCP SDK; không đổi được thì nhận mọi object (plugin tự kiểm). */
+function schemaOf(json: Record<string, unknown>): z.ZodType {
+  try {
+    const s = z.fromJSONSchema(json as Parameters<typeof z.fromJSONSchema>[0])
+    if (s instanceof z.ZodObject) return s
+  } catch {
+    // bỏ qua
+  }
+  return z.object({}).passthrough()
 }
 
 type ToolResult = {
@@ -163,6 +185,13 @@ export function createStagMcp(ctx: McpContext): McpServer {
   )
 
   registerBrowserTools(server, ctx)
+  for (const t of ctx.extraTools ?? []) {
+    server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: schemaOf(t.inputSchema) }, async (params: unknown) => {
+      const r = await t.call(params)
+      return { content: [{ type: 'text' as const, text: r.text }], ...(r.isError ? { isError: true } : {}) }
+    })
+  }
+
   return server
 }
 

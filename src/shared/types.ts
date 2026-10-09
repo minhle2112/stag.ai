@@ -385,6 +385,12 @@ export interface AppSettings {
   adapters: AdaptersSettings
   connectors: ConnectorsSettings
   skills: SkillsSettings
+  plugins: PluginsSettings
+}
+
+export interface PluginsSettings {
+  /** Bật / tắt plugin (khoá = id plugin) ở cấp app; vắng = bật. Tắt ở app = dừng worker. */
+  toggles: Record<string, boolean>
 }
 
 export interface SkillsSettings {
@@ -404,6 +410,8 @@ export interface SettingsOverrides {
   connectors?: Record<string, boolean>
   /** Bật / tắt skill (khoá như SkillsSettings.toggles). */
   skills?: Record<string, boolean>
+  /** Bật / tắt plugin (khoá = id plugin): ẩn slot, tool, sự kiện của nó ở cấp này. */
+  plugins?: Record<string, boolean>
 }
 
 /** Sửa ghi đè: khoá có mặt thay cả mục đó, `null` = bỏ mục đó (theo cấp trên). Khoá vắng mặt giữ nguyên. */
@@ -430,6 +438,8 @@ export interface AppSettingsPatch {
   connectors?: { inherited?: Record<string, boolean> }
   /** Thay cả map bật / tắt skill ở cấp app. */
   skills?: { toggles: Record<string, boolean> }
+  /** Thay cả map bật / tắt plugin ở cấp app. */
+  plugins?: { toggles: Record<string, boolean> }
 }
 
 export type OverrideLevel = 'workspace' | 'agent'
@@ -455,7 +465,7 @@ export const DEFAULT_ADAPTERS: AdaptersSettings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 2,
-  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} } },
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} } },
   workspaces: {},
   agents: {}
 }

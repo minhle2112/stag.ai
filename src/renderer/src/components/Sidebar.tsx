@@ -9,6 +9,9 @@ import { statusView } from '../status'
 import { CreateReport, CreateWorkspaceDialog } from './CreateWorkspaceDialog'
 import { ContextBadge, handoffNow } from './ContextBadge'
 import { RenameAgentDialog } from './RenameAgentDialog'
+import { SidebarPluginLinks } from './PluginSlots'
+import { runSlot, slotsOf, usePlugins } from '../store/plugins'
+import { useSettings } from '../store/settings'
 
 export function Sidebar(): React.JSX.Element {
   const { items, setActive, add, remove } = useWorkspaces()
@@ -58,6 +61,7 @@ export function Sidebar(): React.JSX.Element {
         </button>
       </div>
 
+      <SidebarPluginLinks />
       <button
         onClick={() => openSettings()}
         className="m-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg"
@@ -220,6 +224,8 @@ function AgentRow({
   const selected = wsActive && onAgentsTab && state.focused === agent.id
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const pluginItems = usePlugins((s) => s.items)
+  const settingsValue = useSettings((s) => s.value)
   const [dragging, setDragging] = useState(false)
 
   const running = !!state.running[agent.id]
@@ -335,6 +341,10 @@ function AgentRow({
               : !terminal && item('Model & effort…', () => openSettings('adapters', { adapter: agentKind(agent) as 'claude' | 'codex', agentId: agent.id }))}
             {!terminal && item('Connector (MCP)…', () => openSettings('connectors', { agentId: agent.id }))}
             {!terminal && item('Skill…', () => openSettings('skills', { agentId: agent.id }))}
+            {!terminal &&
+              slotsOf(pluginItems, settingsValue, 'agentMenu', ws.id, agent.id).map(({ plugin, slot }) => (
+                <span key={`${plugin.manifest.id}:${slot.id}`}>{item(slot.displayName, () => void runSlot(plugin, slot, ws.id, agent.id))}</span>
+              ))}
             <div className="my-0.5 border-t border-line" />
             {item(terminal ? 'Xoá terminal…' : 'Xoá agent…', removeAgent, true)}
           </div>

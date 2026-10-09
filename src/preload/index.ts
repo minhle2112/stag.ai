@@ -1,3 +1,4 @@
+import type { InstalledPlugin, PluginInstallRequest } from '@shared/plugins'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type {
@@ -273,6 +274,25 @@ const api = {
     scan: (runtime: CliAdapterId, workspaceId?: string): Promise<SkillScan> => ipcRenderer.invoke(IPC.skillsScan, runtime, workspaceId),
     /** Tên skill trong thư viện, hoặc đường dẫn SKILL.md của skill có sẵn. */
     reveal: (target: string): Promise<void> => ipcRenderer.invoke(IPC.skillsReveal, target)
+  },
+  /** Plugin của stag.ai (alpha). */
+  plugins: {
+    list: (): Promise<InstalledPlugin[]> => ipcRenderer.invoke(IPC.pluginsList),
+    install: (req: PluginInstallRequest): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsInstall, req),
+    approve: (id: string): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsApprove, id),
+    remove: (id: string): Promise<InstalledPlugin[]> => ipcRenderer.invoke(IPC.pluginsRemove, id),
+    reload: (id: string): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsReload, id),
+    restart: (id: string): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsRestart, id),
+    setConfig: (id: string, config: Record<string, unknown>): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsConfig, id, config),
+    health: (id: string): Promise<InstalledPlugin> => ipcRenderer.invoke(IPC.pluginsHealth, id),
+    /** Bấm một slot: trả URL để mở hoặc lời nhắn để hiện. */
+    runSlot: (id: string, slotId: string, workspaceId?: string, agentId?: string): Promise<{ openUrl?: string; target?: 'browser' | 'external'; message?: string }> =>
+      ipcRenderer.invoke(IPC.pluginsSlot, id, slotId, workspaceId, agentId),
+    onChanged(cb: (list: InstalledPlugin[]) => void): () => void {
+      const fn = (_e: IpcRendererEvent, list: InstalledPlugin[]): void => cb(list)
+      ipcRenderer.on(IPC.pluginsChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.pluginsChanged, fn)
+    }
   },
   /** Lần gọi tool connector đang chờ duyệt. */
   approvals: {

@@ -28,6 +28,7 @@ export interface HookPayload {
 export type BoardEvent =
   | { kind: 'waiting'; workspaceId: string; agentId: string; agentName: string; reason: 'turn' | 'question' | 'permission' }
   | { kind: 'taskDone'; workspaceId: string; agentId: string; agentName: string; title: string }
+  | { kind: 'taskStarted'; workspaceId: string; agentId: string; agentName: string; title: string; scope: string }
 
 /** Số file tối đa ghi vào một việc (vùng khoá); quá thì bỏ các file cũ nhất. */
 const MAX_TASK_FILES = 300
@@ -263,6 +264,7 @@ export class Board {
     }
     ;(await this.tasks(ws)).push(task)
     await this.save(ws)
+    this.events({ kind: 'taskStarted', workspaceId: ws.id, agentId: agent.id, agentName: agent.name, title: task.title, scope: task.scope })
     return task
   }
 

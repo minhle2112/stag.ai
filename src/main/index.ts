@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, Menu, nativeImage, protocol, safeStorage, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, protocol, safeStorage, shell, Tray, utilityProcess } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AdapterService } from './adapters'
 import { AgentService } from './agents'
@@ -15,6 +15,11 @@ import { SecretStore } from './secrets'
 import { OAuthService } from './oauth'
 import { ApprovalQueue } from './approvals'
 import { SkillLibrary } from './skills'
+import { PluginHost, type SpawnWorker } from './plugins'
+import { independentSessionEnv } from './adapters'
+import { readNote, writeNote } from './vault'
+import { agentKind } from '@shared/types'
+import type { PluginEvent } from '@shared/plugins'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
 import { WorkspaceStore } from './workspace'
@@ -35,7 +40,21 @@ const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
 const board = new Board(
   (workspaceId) => send(IPC.boardChanged, workspaceId),
-  (e) => notifier.onBoardEvent(e)
+  (e) => {
+    notifier.onBoardEvent(e)
+    plugins.emit(
+      e.kind === 'waiting'
+        ? { type: 'agent.waiting', at: new Date().toISOString(), workspaceId: e.workspaceId, agentId: e.agentId, agentName: e.agentName, data: { reason: e.reason } }
+        : {
+            type: e.kind === 'taskDone' ? 'task.done' : 'task.started',
+            at: new Date().toISOString(),
+            workspaceId: e.workspaceId,
+            agentId: e.agentId,
+            agentName: e.agentName,
+            data: e.kind === 'taskStarted' ? { title: e.title, scope: e.scope } : { title: e.title }
+          }
+    )
+  }
 )
 const send = (channel: string, ...args: unknown[]): void => {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...args)
@@ -48,6 +67,7 @@ const browser = new BrowserService({
 const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), (s) => {
   send(IPC.settingsChanged, s)
   applyGeneral(s.app.general)
+  void plugins.applySettings(s)
 })
 const notifier = new Notifier(
   () => settings.general(),
@@ -78,6 +98,73 @@ const skills = new SkillLibrary(
   app.isPackaged ? join(process.resourcesPath, 'skill-catalog') : join(app.getAppPath(), 'resources', 'skill-catalog'),
   join(app.getPath('userData'), 'skill-sessions')
 )
+/** Worker plugin chạy trong utilityProcess của Electron (tiến trình Node riêng, không có quyền của tiến trình chính). */
+const spawnUtility: SpawnWorker = (script, o) => {
+  const c = utilityProcess.fork(script, [], { cwd: o.cwd, env: o.env, serviceName: `stag.ai plugin: ${o.name}`, stdio: 'pipe' })
+  let alive = true
+  c.on('exit', () => (alive = false))
+  return {
+    get pid() {
+      return c.pid
+    },
+    send: (m) => {
+      if (alive) c.postMessage(m)
+    },
+    onMessage: (fn) => c.on('message', fn),
+    onExit: (fn) => c.on('exit', (code) => fn(code)),
+    onOutput: (fn) => {
+      c.stdout?.on('data', (d) => fn(String(d), false))
+      c.stderr?.on('data', (d) => fn(String(d), true))
+    },
+    kill: () => {
+      if (alive) c.kill()
+    }
+  }
+}
+const plugins = new PluginHost(join(app.getPath('userData'), 'plugins'), {
+  spawn: spawnUtility,
+  env: independentSessionEnv(process.env),
+  onChange: (list) => send(IPC.pluginsChanged, list),
+  api: {
+    agents: () => ({
+      workspaces: workspaces.list().map((w) => ({ id: w.id, name: w.name, path: w.path })),
+      agents: agents.pluginView().map(({ agent: a, running, activity }) => ({
+        id: a.id,
+        name: a.name,
+        role: a.role,
+        kind: agentKind(a),
+        workspaceId: a.workspaceId,
+        running,
+        activity
+      }))
+    }),
+    sendToAgent: async (agentId, text) => agents.typeInto(agentId, text),
+    board: async (workspaceId) => {
+      const ws = workspaces.get(workspaceId)
+      if (!ws) throw new Error('Không có workspace này.')
+      return (await board.snapshot(ws)).tasks
+    },
+    vaultRead: async (workspaceId, rel) => {
+      const ws = workspaces.get(workspaceId)
+      if (!ws) throw new Error('Không có workspace này.')
+      return readNote(ws.vaultPath, rel).catch(() => null)
+    },
+    vaultWrite: async (workspaceId, rel, content) => {
+      const ws = workspaces.get(workspaceId)
+      if (!ws) throw new Error('Không có workspace này.')
+      await writeNote(ws.vaultPath, rel, content, null)
+    },
+    notify: (title, body) => new Notification({ title, body }).show()
+  }
+})
+const pluginEvent = (type: PluginEvent['type'], a: { id: string; name: string; workspaceId: string }, data: Record<string, unknown> = {}): PluginEvent => ({
+  type,
+  at: new Date().toISOString(),
+  workspaceId: a.workspaceId,
+  agentId: a.id,
+  agentName: a.name,
+  data
+})
 const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals, skills)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
@@ -235,7 +322,21 @@ app.whenReady().then(async () => {
     return serveArtifact(ws, decodeURIComponent(url.pathname.replace(/^\/+/, '')), req.headers.get('range'))
   })
   agents.attachHub(hub)
-  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills)
+  await plugins.load()
+  await plugins.applySettings(settings.get())
+  agents.attachPlugins({
+    onSession: (type, a) => plugins.emit(pluginEvent(type, a, { kind: agentKind(a) })),
+    tools: (a, ws) =>
+      plugins.toolsFor(ws.id, a.id).map((t) => ({
+        name: t.mcpName,
+        title: t.tool.displayName,
+        description: t.tool.description,
+        inputSchema: t.tool.parametersSchema,
+        call: (params) =>
+          plugins.callTool(t.pluginId, t.tool.name, params, { workspaceId: ws.id, workspaceName: ws.name, workspacePath: ws.path, agentId: a.id, agentName: a.name })
+      }))
+  })
+  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins)
   createWindow()
   applyGeneral(settings.general())
   app.on('activate', () => {
@@ -258,6 +359,7 @@ app.on('before-quit', () => {
   tray = null
   void artifacts.flush()
   browser.shutdown()
+  void plugins.stopAll()
   agents.shutdown()
   hub.stop()
 })

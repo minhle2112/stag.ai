@@ -136,6 +136,20 @@ export const IPC = {
   skillsCopy: 'skills:copy',
   skillsScan: 'skills:scan',
   skillsReveal: 'skills:reveal',
+  /**
+   * Plugin (alpha): danh sách, cài (npm / thư mục), duyệt quyền, gỡ, đọc lại / cài lại, khởi động lại worker,
+   * lưu cấu hình, kiểm sức khoẻ, bấm một slot (mở URL / gọi worker); main báo khi danh sách / trạng thái đổi.
+   */
+  pluginsList: 'plugins:list',
+  pluginsInstall: 'plugins:install',
+  pluginsApprove: 'plugins:approve',
+  pluginsRemove: 'plugins:remove',
+  pluginsReload: 'plugins:reload',
+  pluginsRestart: 'plugins:restart',
+  pluginsConfig: 'plugins:config',
+  pluginsHealth: 'plugins:health',
+  pluginsSlot: 'plugins:slot',
+  pluginsChanged: 'plugins:changed',
   /** main → renderer: người dùng bấm thông báo của agent → mở agent đó (kèm workspaceId, agentId). */
   revealAgent: 'agent:reveal'
 } as const

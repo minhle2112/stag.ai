@@ -38,6 +38,8 @@ export interface SettingsFocus {
   review?: boolean
   /** Tên skill trong thư viện (mở trang chi tiết của nó). */
   skill?: string
+  /** id plugin (mở trang của nó). */
+  plugin?: string
 }
 
 interface UiState {

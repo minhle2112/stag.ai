@@ -1,4 +1,5 @@
 import { normalizeSkills, normalizeSkillToggles } from './skills'
+import { PLUGIN_ID_RE } from './plugins'
 import {
   DEFAULT_ADAPTERS,
   DEFAULT_GENERAL,
@@ -129,6 +130,8 @@ export function normalizeOverrides(raw: unknown): SettingsOverrides | null {
   if (Object.keys(connectors).length) out.connectors = connectors
   const skills = normalizeSkillToggles(obj(raw).skills)
   if (Object.keys(skills).length) out.skills = skills
+  const plugins = normalizePluginToggles(obj(raw).plugins)
+  if (Object.keys(plugins).length) out.plugins = plugins
   return Object.keys(out).length ? out : null
 }
 
@@ -160,7 +163,7 @@ export function normalizeSettings(raw: unknown): Settings {
   if (r.version !== 2) {
     return {
       version: 2,
-      app: { general: normalizeGeneral({}), handoff: normalizeHandoff(r), adapters: normalizeAdapters({}), connectors: normalizeConnectors({}), skills: normalizeSkills({}) },
+      app: { general: normalizeGeneral({}), handoff: normalizeHandoff(r), adapters: normalizeAdapters({}), connectors: normalizeConnectors({}), skills: normalizeSkills({}), plugins: { toggles: {} } },
       workspaces: {},
       agents: {}
     }
@@ -173,7 +176,8 @@ export function normalizeSettings(raw: unknown): Settings {
       handoff: normalizeHandoff(app.handoff),
       adapters: normalizeAdapters(app.adapters, obj(app.general).terminalShell),
       connectors: normalizeConnectors(app.connectors),
-      skills: normalizeSkills(app.skills)
+      skills: normalizeSkills(app.skills),
+      plugins: { toggles: normalizePluginToggles(obj(app.plugins).toggles) }
     },
     workspaces: normalizeMap(r.workspaces),
     agents: normalizeMap(r.agents)
@@ -193,8 +197,25 @@ export function patchApp(app: AppSettings, patch: AppSettingsPatch): AppSettings
     connectors: patch.connectors?.inherited
       ? { items: app.connectors.items, inherited: normalizeToggles(patch.connectors.inherited, true) }
       : app.connectors,
-    skills: patch.skills ? { toggles: normalizeSkillToggles(patch.skills.toggles) } : app.skills
+    skills: patch.skills ? { toggles: normalizeSkillToggles(patch.skills.toggles) } : app.skills,
+    plugins: patch.plugins ? { toggles: normalizePluginToggles(patch.plugins.toggles) } : app.plugins
   }
+}
+
+/** Bật / tắt plugin: khoá = id plugin. */
+export function normalizePluginToggles(raw: unknown): Record<string, boolean> {
+  const out: Record<string, boolean> = {}
+  for (const [k, v] of Object.entries(obj(raw))) if (typeof v === 'boolean' && PLUGIN_ID_RE.test(k)) out[k] = v
+  return out
+}
+
+/** Plugin có bật cho cấp này không: agent → workspace → app; vắng = bật. */
+export function pluginOn(s: Settings, id: string, workspaceId?: string | null, agentId?: string | null): boolean {
+  const a = agentId ? s.agents[agentId]?.plugins?.[id] : undefined
+  if (a !== undefined) return a
+  const w = workspaceId ? s.workspaces[workspaceId]?.plugins?.[id] : undefined
+  if (w !== undefined) return w
+  return s.app.plugins.toggles[id] ?? true
 }
 
 /** Cài đặt bàn giao thực tế của một agent: app → workspace → agent (cấp sau thắng). */

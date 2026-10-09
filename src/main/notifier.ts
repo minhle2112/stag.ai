@@ -14,7 +14,7 @@ export function notificationFor(e: BoardEvent, g: GeneralSettings, workspaceName
     if (!g.notifyWaiting) return null
     return { title: `${e.agentName} ${WAIT_TEXT[e.reason]}`, body: workspaceName }
   }
-  if (!g.notifyTaskDone) return null
+  if (e.kind === 'taskStarted' || !g.notifyTaskDone) return null
   return { title: `${e.agentName} đã xong việc`, body: `${e.title} · ${workspaceName}` }
 }
 

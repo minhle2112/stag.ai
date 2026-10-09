@@ -185,6 +185,37 @@ function run(command: string, args: string[] | string, opts: { env: NodeJS.Proce
   })
 }
 
+/**
+ * `npm install --ignore-scripts` một gói vào thư mục `prefix` (có package.json riêng), trả thư mục của gói.
+ * Dùng chung cho adapter ngoài và plugin. Tên / phiên bản kiểm bằng NPM_NAME_RE / NPM_VERSION_RE (chạy qua cmd.exe).
+ */
+export async function npmInstall(prefix: string, label: string, name: string, version: string): Promise<string> {
+  if (!NPM_NAME_RE.test(name)) throw new Error(`"${name}" không phải tên gói npm hợp lệ.`)
+  if (!NPM_VERSION_RE.test(version)) throw new Error(`Phiên bản "${version}" không hợp lệ.`)
+  await fs.mkdir(prefix, { recursive: true })
+  if (!(await exists(join(prefix, 'package.json')))) await fs.writeFile(join(prefix, 'package.json'), JSON.stringify({ name: label, private: true }, null, 2), 'utf8')
+  // npm trên Windows là npm.cmd → chạy qua cmd.exe; tên / phiên bản đã kiểm bằng regex (không có ký tự đặc biệt của cmd).
+  const r = await run(process.env.ComSpec || 'cmd.exe', `/d /s /c "npm install --ignore-scripts --no-audit --no-fund --save ${name}@${version}"`, {
+    env: independentSessionEnv(process.env),
+    cwd: prefix,
+    timeout: 180_000
+  })
+  if (!r.ok) {
+    const msg = (r.err || r.out).split(/\r?\n/).filter((l) => /ERR!|error/i.test(l)).slice(0, 4).join('\n') || (r.err || r.out).trim().slice(-400)
+    throw new Error(`npm install ${name}@${version} lỗi:\n${msg || 'không rõ (npm có trong PATH không?)'}`)
+  }
+  return join(prefix, 'node_modules', ...name.split('/'))
+}
+
+export async function npmUninstall(prefix: string, name: string): Promise<void> {
+  if (!NPM_NAME_RE.test(name)) return
+  await run(process.env.ComSpec || 'cmd.exe', `/d /s /c "npm uninstall --ignore-scripts --no-audit --no-fund ${name}"`, {
+    env: independentSessionEnv(process.env),
+    cwd: prefix,
+    timeout: 120_000
+  })
+}
+
 interface RegistryFile {
   adapters: InstalledAdapter[]
 }
@@ -237,22 +268,7 @@ export class ExternalAdapterStore {
     if (req.type === 'npm') {
       const name = req.name.trim()
       const version = (req.version ?? '').trim() || 'latest'
-      if (!NPM_NAME_RE.test(name)) throw new Error(`"${name}" không phải tên gói npm hợp lệ.`)
-      if (!NPM_VERSION_RE.test(version)) throw new Error(`Phiên bản "${version}" không hợp lệ.`)
-      await fs.mkdir(this.npmPrefix, { recursive: true })
-      if (!(await exists(join(this.npmPrefix, 'package.json'))))
-        await fs.writeFile(join(this.npmPrefix, 'package.json'), JSON.stringify({ name: 'stag-adapters', private: true }, null, 2), 'utf8')
-      // npm trên Windows là npm.cmd → chạy qua cmd.exe; tên / phiên bản đã kiểm bằng regex (không có ký tự đặc biệt của cmd).
-      const r = await run(
-        process.env.ComSpec || 'cmd.exe',
-        `/d /s /c "npm install --ignore-scripts --no-audit --no-fund --save ${name}@${version}"`,
-        { env: independentSessionEnv(process.env), cwd: this.npmPrefix, timeout: 180_000 }
-      )
-      if (!r.ok) {
-        const msg = (r.err || r.out).split(/\r?\n/).filter((l) => /ERR!|error/i.test(l)).slice(0, 4).join('\n') || (r.err || r.out).trim().slice(-400)
-        throw new Error(`npm install ${name}@${version} lỗi:\n${msg || 'không rõ (npm có trong PATH không?)'}`)
-      }
-      dir = join(this.npmPrefix, 'node_modules', ...name.split('/'))
+      dir = await npmInstall(this.npmPrefix, 'stag-adapters', name, version)
       source = { type: 'npm', name, version }
     } else {
       dir = resolve(req.path.trim())
@@ -294,13 +310,7 @@ export class ExternalAdapterStore {
     if (!a) return
     if (a.source.type === 'npm') {
       const name = a.source.name
-      await (this.busy = this.busy.then(() =>
-        run(process.env.ComSpec || 'cmd.exe', `/d /s /c "npm uninstall --ignore-scripts --no-audit --no-fund ${name}"`, {
-          env: independentSessionEnv(process.env),
-          cwd: this.npmPrefix,
-          timeout: 120_000
-        })
-      ))
+      await (this.busy = this.busy.then(() => npmUninstall(this.npmPrefix, name)))
     }
     this.items = this.items.filter((x) => x !== a)
     await this.save()
