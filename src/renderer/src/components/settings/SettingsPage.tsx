@@ -12,6 +12,7 @@ import { GeneralSection } from './GeneralSection'
 import { HandoffSection } from './HandoffSection'
 import { ScopeSection } from './ScopeSection'
 import { BrowserSection } from './BrowserSection'
+import { VoiceSection } from './VoiceSection'
 
 interface NavItem {
   id: SettingsSection
@@ -34,7 +35,8 @@ const NAV: NavItem[][] = [
     { id: 'handoff', label: 'Agent & bàn giao' },
     { id: 'scope', label: 'Khoá phạm vi' },
     { id: 'vault', label: 'Vault & mẫu' },
-    { id: 'browser', label: 'Trình duyệt' }
+    { id: 'browser', label: 'Trình duyệt' },
+    { id: 'voice', label: 'Giọng nói' }
   ],
   [
     { id: 'data', label: 'Dữ liệu' },
@@ -129,6 +131,8 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
       return <ScopeSection />
     case 'browser':
       return <BrowserSection />
+    case 'voice':
+      return <VoiceSection />
     case 'vault':
       return <VaultSection />
     case 'data':

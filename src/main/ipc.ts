@@ -31,6 +31,7 @@ import { createNote, findRegisteredId, readNote, vaultTree, writeNote } from './
 import type { VaultActivityLog } from './vaultActivity'
 import { VaultIndexer, VaultWatchers } from './vaultIndex'
 import type { WorkspaceStore } from './workspace'
+import type { VoiceService } from './voice'
 
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
@@ -348,4 +349,23 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     return r.canceled ? null : r.filePaths[0]
   })
   ipcMain.handle(IPC.browserClearData, (_e, workspaceId?: string) => browser.clearData(typeof workspaceId === 'string' && workspaceId ? ws(workspaceId).id : undefined))
+}
+
+/** Gõ bằng giọng nói (V1): model + nhận dạng. Âm thanh chỉ đi renderer → main → tiến trình nhận dạng, không ghi ra đĩa. */
+export function registerVoiceIpc(voice: VoiceService): void {
+  ipcMain.handle(IPC.voiceStatus, () => voice.get())
+  ipcMain.handle(IPC.voiceDownload, () => {
+    void voice.download()
+  })
+  ipcMain.handle(IPC.voiceCancel, () => voice.cancelDownload())
+  ipcMain.handle(IPC.voiceRemove, () => voice.removeModel())
+  ipcMain.handle(IPC.voicePrewarm, () => voice.prewarm())
+  ipcMain.handle(IPC.voiceUnload, () => voice.unload())
+  ipcMain.handle(IPC.voiceTranscribe, (_e, samples: unknown, hotwords: unknown) => {
+    if (!(samples instanceof Float32Array) || samples.length === 0) throw new Error('Không có âm thanh.')
+    // Renderer đã cắt đoạn ≤ 12 s; chặn đoạn quá dài (model chỉ chứa ~20 s).
+    if (samples.length > 30 * 16000) throw new Error('Đoạn âm thanh quá dài.')
+    const words = Array.isArray(hotwords) ? hotwords.filter((x): x is string => typeof x === 'string') : []
+    return voice.transcribe(samples, words)
+  })
 }

@@ -12,7 +12,7 @@ files:
   - out/**
   - package.json
   # react, xterm, zustand đã được vite gộp vào out/renderer → không cần bản trong node_modules.
-  # main chỉ require node-pty, @modelcontextprotocol/sdk, zod (+ phụ thuộc của chúng).
+  # main chỉ require node-pty, @modelcontextprotocol/sdk, zod, sherpa-onnx-node (+ phụ thuộc của chúng).
   - '!node_modules/{react,react-dom,scheduler,zustand,@xterm}/**'
   # node-pty: chỉ giữ lib/ + prebuild win32-x64, bỏ mã C++, file debug (.pdb ~40 MB), test, nền tảng khác.
   - '!node_modules/node-pty/{src,deps,third_party,scripts,build,typings,binding.gyp}'
@@ -42,6 +42,9 @@ asar: true
 # Module native (.node, winpty-agent.exe) không nạp/chạy được từ trong asar.
 asarUnpack:
   - node_modules/node-pty/**
+  # Nhận dạng giọng nói: sherpa-onnx.node + onnxruntime.dll (nạp trong tiến trình voiceWorker).
+  - node_modules/sherpa-onnx-node/**
+  - node_modules/sherpa-onnx-win-x64/**
 
 # Không build lại module native: node-pty 1.1 có sẵn prebuild N-API (prebuilds/win32-x64) chạy được
 # trong Electron mà không cần biên dịch, còn máy không có Visual Studio Build Tools để node-gyp chạy.

@@ -13,6 +13,7 @@ import { PluginStatusBar } from './components/PluginStatusBar'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
+import { VoiceHotkeys } from './components/VoicePanel'
 import { openAgent, useAgents } from './store/agents'
 import { useBoard } from './store/board'
 import { pageTab, slotsOf, usePlugins } from './store/plugins'
@@ -171,6 +172,7 @@ export function App(): React.JSX.Element {
       <ApprovalToast />
       <PluginToast />
       <NewAgentDialog />
+      <VoiceHotkeys />
       {settingsOpen && <SettingsPage />}
     </div>
   )

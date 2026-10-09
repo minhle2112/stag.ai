@@ -7,7 +7,13 @@ const shared = { '@shared': resolve('src/shared') }
 
 export default defineConfig({
   main: {
-    resolve: { alias: shared }
+    resolve: { alias: shared },
+    build: {
+      rollupOptions: {
+        // voiceWorker: tiến trình nhận dạng giọng nói (utilityProcess), file riêng out/main/voiceWorker.js.
+        input: { index: resolve('src/main/index.ts'), voiceWorker: resolve('src/main/voiceWorker.ts') }
+      }
+    }
   },
   preload: {
     resolve: { alias: shared }

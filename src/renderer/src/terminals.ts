@@ -158,6 +158,20 @@ export function bindPty(agentId: string, ptyId: string): void {
   if (e.opened) sendSize(e, true)
 }
 
+/**
+ * Dán chữ vào terminal của agent như người dùng dán (gõ bằng giọng nói): xterm tự bọc bracketed paste nếu chương trình
+ * bật (Claude Code, Codex) nên xuống dòng không gửi tin giữa chừng. Không nhấn Enter. false = ô không có phiên đang chạy.
+ */
+export function pasteIntoTerminal(agentId: string, text: string): boolean {
+  const e = entries.get(agentId)
+  if (!e?.ptyId) return false
+  // Chương trình không bật bracketed paste (vd. Windows PowerShell 5.1): xuống dòng khi dán = Enter, dòng đầu chạy luôn.
+  // Gộp thành một dòng để không bao giờ tự gửi.
+  e.term.paste(e.term.modes.bracketedPasteMode ? text : text.replace(/\s*\r?\n\s*/g, ' '))
+  e.term.focus()
+  return true
+}
+
 export function focusTerminal(agentId: string): void {
   entries.get(agentId)?.term.focus()
 }

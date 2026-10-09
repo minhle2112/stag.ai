@@ -11,6 +11,7 @@ import { useUi } from '../store/ui'
 import { statusView } from '../status'
 import { attachTerminal, fitTerminal, focusTerminal } from '../terminals'
 import { ContextBadge } from './ContextBadge'
+import { MicButton, VoicePanel } from './VoicePanel'
 import { Button } from './Modal'
 import { PluginFrame } from './PluginFrame'
 import { RenameAgentDialog } from './RenameAgentDialog'
@@ -276,6 +277,7 @@ function AgentCell({
         {status?.handoff && status.handoff !== 'failed' && <span className="truncate text-[12px] text-sky-300">{view.label}</span>}
         <div className="flex-1" />
         {running && <ContextBadge status={status} className="mr-1" />}
+        {running && <MicButton wsId={ws.id} agentId={agent.id} />}
         <IconBtn title="Thêm agent bên phải" onClick={() => onSplit({ agentId: agent.id, dir: 'row' })}>
           ◫
         </IconBtn>
@@ -298,6 +300,7 @@ function AgentCell({
 
       <div className="relative min-h-0 flex-1 bg-bg pt-1 pl-2" onClick={() => focusTerminal(agent.id)}>
         <div ref={hostRef} className="h-full w-full overflow-hidden" />
+        <VoicePanel agentId={agent.id} />
         {!running && !starting && !pendingAuto && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg/80">
             {error ? (

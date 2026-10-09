@@ -1,4 +1,5 @@
 import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJobRun, PluginScaffoldRequest } from '@shared/plugins'
+import type { VoiceResult, VoiceStatus } from '@shared/voice'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type {
@@ -336,6 +337,22 @@ const api = {
       const fn = (_e: IpcRendererEvent, list: SecretsList): void => cb(list)
       ipcRenderer.on(IPC.secretsChanged, fn)
       return () => ipcRenderer.removeListener(IPC.secretsChanged, fn)
+    }
+  },
+  voice: {
+    status: (): Promise<VoiceStatus> => ipcRenderer.invoke(IPC.voiceStatus),
+    /** Tải model (chạy nền, tiến độ qua onChanged). */
+    download: (): Promise<void> => ipcRenderer.invoke(IPC.voiceDownload),
+    cancel: (): Promise<void> => ipcRenderer.invoke(IPC.voiceCancel),
+    remove: (): Promise<void> => ipcRenderer.invoke(IPC.voiceRemove),
+    prewarm: (): Promise<void> => ipcRenderer.invoke(IPC.voicePrewarm),
+    unload: (): Promise<void> => ipcRenderer.invoke(IPC.voiceUnload),
+    /** Một đoạn âm thanh 16 kHz mono (≤ ~12 s) + từ gợi ý. */
+    transcribe: (samples: Float32Array, hotwords: string[]): Promise<VoiceResult> => ipcRenderer.invoke(IPC.voiceTranscribe, samples, hotwords),
+    onChanged(cb: (s: VoiceStatus) => void): () => void {
+      const fn = (_e: IpcRendererEvent, s: VoiceStatus): void => cb(s)
+      ipcRenderer.on(IPC.voiceChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.voiceChanged, fn)
     }
   },
   /** Chọn một file .exe; null = huỷ. */

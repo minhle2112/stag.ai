@@ -161,7 +161,18 @@ export const IPC = {
   /** main → renderer: câu hỏi mở trang ngoài đã xong mà người dùng không bấm (hết giờ, Cài đặt đổi…), kèm askId. */
   browserAskClosed: 'browser:ask-closed',
   /** Xoá cookie / dữ liệu trang của trình duyệt một workspace (hoặc mọi workspace). */
-  browserClearData: 'browser:clear-data'
+  browserClearData: 'browser:clear-data',
+  /** Gõ bằng giọng nói: trạng thái model / tiến trình nhận dạng (get + sự kiện main → renderer). */
+  voiceStatus: 'voice:status',
+  voiceChanged: 'voice:changed',
+  voiceDownload: 'voice:download',
+  voiceCancel: 'voice:cancel',
+  voiceRemove: 'voice:remove',
+  /** Người dùng bắt đầu nói: bật tiến trình nhận dạng + nạp model trong lúc đang nói. */
+  voicePrewarm: 'voice:prewarm',
+  /** Tắt tiến trình nhận dạng ngay (trả RAM). */
+  voiceUnload: 'voice:unload',
+  voiceTranscribe: 'voice:transcribe'
 } as const
 
 export interface AppInfo {

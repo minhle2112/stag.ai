@@ -9,7 +9,8 @@ import { ArtifactLog, serveArtifact } from './artifacts'
 import { Board } from './board'
 import { BrowserService } from './browser'
 import { StatusHub } from './hub'
-import { registerIpc } from './ipc'
+import { registerIpc, registerVoiceIpc } from './ipc'
+import { VoiceService } from './voice'
 import { Notifier } from './notifier'
 import { PtyManager } from './pty'
 import { SecretStore } from './secrets'
@@ -32,6 +33,12 @@ import type { GeneralSettings } from '@shared/types'
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
 // Phải đặt trước khi tạo các service vì chúng đọc đường dẫn userData lúc khởi tạo.
 if (process.env.STAG_USER_DATA) app.setPath('userData', process.env.STAG_USER_DATA)
+// Thử gõ bằng giọng nói không cần nói: Chromium lấy âm thanh micro từ file WAV (lặp lại), không hỏi quyền.
+if (process.env.STAG_FAKE_MIC) {
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream')
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
+  app.commandLine.appendSwitch('use-file-for-fake-audio-capture', process.env.STAG_FAKE_MIC)
+}
 
 // Một bản chạy cho mỗi thư mục dữ liệu (khoá theo userData nên phải sau setPath): mở stag.ai lần nữa (vd. lúc
 // đang nằm dưới khay) thì hiện cửa sổ đang có, không chạy bản thứ hai ghi chồng lên workspaces.json / agents.json.
@@ -78,6 +85,8 @@ const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'
   applyGeneral(s.app.general)
   browser.setSettings(s.app.browser)
   void plugins.applySettings(s)
+  // Đổi "giải phóng sau N phút": hẹn lại giờ tắt tiến trình nhận dạng.
+  voice.touch()
 })
 const notifier = new Notifier(
   () => settings.general(),
@@ -132,7 +141,9 @@ const skills = new SkillLibrary(
 )
 /** Worker plugin chạy trong utilityProcess của Electron (tiến trình Node riêng, không có quyền của tiến trình chính). */
 const spawnUtility: SpawnWorker = (script, o) => {
-  const c = utilityProcess.fork(script, [], { cwd: o.cwd, env: o.env, serviceName: `stag.ai plugin: ${o.name}`, stdio: 'pipe' })
+  // Tên hiện trong Task Manager: "stag.ai plugin: <tên>"; tiến trình của chính app đặt tên đầy đủ (vd. "stag.ai giọng nói").
+  const serviceName = o.name.startsWith('stag.ai ') ? o.name : `stag.ai plugin: ${o.name}`
+  const c = utilityProcess.fork(script, [], { cwd: o.cwd, env: o.env, serviceName, stdio: 'pipe' })
   let alive = true
   c.on('exit', () => (alive = false))
   return {
@@ -198,6 +209,15 @@ const plugins = new PluginHost(join(app.getPath('userData'), 'plugins'), {
   }
 })
 const webhooks = new PluginWebhookServer(plugins)
+/** Gõ bằng giọng nói: model ở userData/voice, nhận dạng trong utilityProcess riêng (chỉ chạy khi đang dùng). */
+const voice = new VoiceService({
+  dir: join(app.getPath('userData'), 'voice'),
+  spawn: (script, o) => spawnUtility(script, { ...o, name: 'stag.ai giọng nói' }),
+  workerScript: join(__dirname, 'voiceWorker.js'),
+  env: process.env,
+  settings: () => settings.get().app.voice,
+  onStatus: (s) => send(IPC.voiceChanged, s)
+})
 const pluginEvent = (type: PluginEvent['type'], a: { id: string; name: string; workspaceId: string }, data: Record<string, unknown> = {}): PluginEvent => ({
   type,
   at: new Date().toISOString(),
@@ -361,6 +381,7 @@ app.whenReady().then(async () => {
   await external.load()
   await secrets.load()
   await skills.cleanAllSessions()
+  await voice.load()
   await agents.load()
   await hub.start()
   protocol.handle('stag-file', (req) => {
@@ -416,6 +437,7 @@ app.whenReady().then(async () => {
       }))
   })
   registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins)
+  registerVoiceIpc(voice)
   createWindow()
   applyGeneral(settings.general())
   app.on('activate', () => {
@@ -440,6 +462,7 @@ app.on('before-quit', () => {
   browser.shutdown()
   webhooks.stop()
   void plugins.shutdown()
+  voice.shutdown()
   agents.shutdown()
   hub.stop()
 })

@@ -24,6 +24,7 @@ export type SettingsSection =
   | 'scope'
   | 'vault'
   | 'browser'
+  | 'voice'
   | 'data'
   | 'about'
 

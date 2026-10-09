@@ -6,6 +6,7 @@ import {
   DEFAULT_GENERAL,
   DEFAULT_HANDOFF,
   DEFAULT_SCOPE,
+  DEFAULT_VOICE,
   HANDOFF_MAX,
   HANDOFF_MIN,
   TERMINAL_FONT_MAX,
@@ -31,7 +32,10 @@ import {
   type SettingsOverrides,
   type SettingsOverridesPatch,
   type ShellId,
-  type TerminalAdapterSettings
+  type TerminalAdapterSettings,
+  type VoiceHotkey,
+  type VoiceSettings,
+  VOICE_UNLOAD_MAX
 } from './types'
 import { normalizeConnectors, normalizeToggles } from './connectors'
 
@@ -51,6 +55,7 @@ const PERMISSIONS: readonly PermissionMode[] = ['default', 'acceptEdits', 'auto'
 export const SCOPE_MODES: readonly ScopeMode[] = ['ask', 'block', 'warn', 'off']
 const SEARCH_ENGINES: readonly SearchEngine[] = ['google', 'duckduckgo', 'bing']
 const EXTERNAL_POLICIES: readonly ExternalPagePolicy[] = ['ask', 'allow', 'deny']
+const VOICE_HOTKEY_IDS: readonly VoiceHotkey[] = ['ctrl+space', 'ctrl+shift+space', 'ctrl+alt+space', 'f9']
 
 /** Danh sách chuỗi gọn: bỏ trống / trùng, cắt độ dài, tối đa `max` mục. */
 function strList(v: unknown, max: number, len: number, ok: (x: string) => boolean = () => true): string[] {
@@ -100,6 +105,23 @@ export function normalizeBrowser(raw: unknown): BrowserSettings {
     externalPages: oneOf(r.externalPages, EXTERNAL_POLICIES, DEFAULT_BROWSER.externalPages),
     allowedOrigins: strList(r.allowedOrigins, 200, 300).map((o) => normalizeOrigin(o)).filter((o, i, a): o is string => !!o && a.indexOf(o) === i),
     keepCookies: bool(r.keepCookies, DEFAULT_BROWSER.keepCookies)
+  }
+}
+export function normalizeVoice(raw: unknown): VoiceSettings {
+  const r = obj(raw)
+  const d = DEFAULT_VOICE
+  return {
+    enabled: bool(r.enabled, d.enabled),
+    hotkey: oneOf(r.hotkey, VOICE_HOTKEY_IDS, d.hotkey),
+    micId: typeof r.micId === 'string' ? r.micId.slice(0, 300) : d.micId,
+    preview: bool(r.preview, d.preview),
+    unloadMinutes: int(r.unloadMinutes, d.unloadMinutes, 0, VOICE_UNLOAD_MAX),
+    // Qwen3 nhận gợi ý dạng CSV: bỏ dấu phẩy trong từng mục.
+    hotwords: strList(
+      (Array.isArray(r.hotwords) ? r.hotwords : []).map((x) => (typeof x === 'string' ? x.replace(/,/g, ' ').replace(/\s+/g, ' ') : x)),
+      200,
+      60
+    )
   }
 }
 export const CLI_ADAPTERS: readonly CliAdapterId[] = ['claude', 'codex']
@@ -241,7 +263,8 @@ export function normalizeSettings(raw: unknown): Settings {
         skills: normalizeSkills({}),
         plugins: { toggles: {} },
         scope: normalizeScope({}),
-        browser: normalizeBrowser({})
+        browser: normalizeBrowser({}),
+        voice: normalizeVoice({})
       },
       workspaces: {},
       agents: {}
@@ -258,7 +281,8 @@ export function normalizeSettings(raw: unknown): Settings {
       skills: normalizeSkills(app.skills),
       plugins: { toggles: normalizePluginToggles(obj(app.plugins).toggles) },
       scope: normalizeScope(app.scope),
-      browser: normalizeBrowser(app.browser)
+      browser: normalizeBrowser(app.browser),
+      voice: normalizeVoice(app.voice)
     },
     workspaces: normalizeMap(r.workspaces),
     agents: normalizeMap(r.agents)
@@ -281,7 +305,8 @@ export function patchApp(app: AppSettings, patch: AppSettingsPatch): AppSettings
     skills: patch.skills ? { toggles: normalizeSkillToggles(patch.skills.toggles) } : app.skills,
     plugins: patch.plugins ? { toggles: normalizePluginToggles(patch.plugins.toggles) } : app.plugins,
     scope: normalizeScope({ ...app.scope, ...patch.scope }),
-    browser: normalizeBrowser({ ...app.browser, ...patch.browser })
+    browser: normalizeBrowser({ ...app.browser, ...patch.browser }),
+    voice: normalizeVoice({ ...app.voice, ...patch.voice })
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { browserToolsOn, normalizeBrowser, normalizeOrigin, normalizeScope, resolveScope, normalizeGeneral, normalizeHandoff, normalizeOverrides, normalizeSettings, parseEnv, patchApp, patchOverrides, resolveHandoff, resolveModel, splitArgs } from './settings'
-import { DEFAULT_ADAPTERS, DEFAULT_GENERAL, DEFAULT_SETTINGS, type Settings } from './types'
+import { browserToolsOn, normalizeBrowser, normalizeOrigin, normalizeScope, resolveScope, normalizeGeneral, normalizeHandoff, normalizeOverrides, normalizeSettings, normalizeVoice, parseEnv, patchApp, patchOverrides, resolveHandoff, resolveModel, splitArgs } from './settings'
+import { DEFAULT_ADAPTERS, DEFAULT_GENERAL, DEFAULT_SETTINGS, DEFAULT_VOICE, type Settings } from './types'
 
 describe('normalizeHandoff', () => {
   it('thiếu / sai kiểu → mặc định; % kẹp trong khoảng và làm tròn', () => {
@@ -194,5 +194,24 @@ describe('khoá phạm vi + trình duyệt (S5)', () => {
     expect(browserToolsOn(s, 'w1', 'a1')).toBe(true)
     expect(browserToolsOn(s, 'w2', null)).toBe(true)
     expect(normalizeOverrides({ scope: { mode: 'zzz' }, browser: { agentTools: 'x' } })).toBeNull()
+  })
+})
+
+describe('giọng nói (V1)', () => {
+  it('mặc định, kẹp số phút, bỏ phím tắt lạ', () => {
+    expect(normalizeVoice(undefined)).toEqual(DEFAULT_VOICE)
+    const v = normalizeVoice({ enabled: false, hotkey: 'alt+x', unloadMinutes: 999, micId: 7, preview: 'no' })
+    expect(v).toMatchObject({ enabled: false, hotkey: 'ctrl+space', unloadMinutes: 120, micId: '', preview: true })
+    expect(normalizeVoice({ unloadMinutes: -3 }).unloadMinutes).toBe(0)
+  })
+
+  it('từ gợi ý: bỏ dấu phẩy (Qwen3 nhận CSV), trùng, mục rỗng', () => {
+    expect(normalizeVoice({ hotwords: ['handleClick', 'a, b', '', 'handleClick', 5] }).hotwords).toEqual(['handleClick', 'a b'])
+  })
+
+  it('settings.json cũ không có voice → mặc định; patchApp chỉ đổi trường có mặt', () => {
+    expect(normalizeSettings({ version: 2, app: {} }).app.voice).toEqual(DEFAULT_VOICE)
+    const app = patchApp(DEFAULT_SETTINGS.app, { voice: { hotkey: 'f9' } })
+    expect(app.voice).toEqual({ ...DEFAULT_VOICE, hotkey: 'f9' })
   })
 })

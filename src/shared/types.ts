@@ -293,6 +293,23 @@ export interface BrowserSettings {
   keepCookies: boolean
 }
 
+/** Gõ bằng giọng nói (Settings → Giọng nói, chỉ ở cấp app). Xem shared/voice.ts. */
+export type VoiceHotkey = 'ctrl+space' | 'ctrl+shift+space' | 'ctrl+alt+space' | 'f9'
+export interface VoiceSettings {
+  /** Bật phím tắt + nút micro trên ô agent. */
+  enabled: boolean
+  /** Giữ tổ hợp này để nói, thả ra để dừng. */
+  hotkey: VoiceHotkey
+  /** deviceId của micro ('' = micro mặc định của Windows). */
+  micId: string
+  /** Hiện khung xem trước để sửa rồi mới chèn (tắt = chèn thẳng vào ô, vẫn không tự nhấn Enter). */
+  preview: boolean
+  /** Không dùng bao nhiêu phút thì tắt tiến trình nhận dạng để trả RAM (0 = giữ tới khi tắt app). */
+  unloadMinutes: number
+  /** Từ gợi ý thêm (tên riêng, thuật ngữ tiếng Anh hay dùng), giúp nhận đúng chính tả. */
+  hotwords: string[]
+}
+
 export interface HandoffSettings {
   /** Tự bàn giao sang phiên mới khi context đạt `handoffPercent`. */
   autoHandoff: boolean
@@ -428,6 +445,7 @@ export interface AppSettings {
   plugins: PluginsSettings
   scope: ScopeLockSettings
   browser: BrowserSettings
+  voice: VoiceSettings
 }
 
 export interface PluginsSettings {
@@ -488,6 +506,7 @@ export interface AppSettingsPatch {
   plugins?: { toggles: Record<string, boolean> }
   scope?: Partial<ScopeLockSettings>
   browser?: Partial<BrowserSettings>
+  voice?: Partial<VoiceSettings>
 }
 
 export type OverrideLevel = 'workspace' | 'agent'
@@ -495,6 +514,8 @@ export type OverrideLevel = 'workspace' | 'agent'
 export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPercent: 80 }
 export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true, exempt: [] }
 export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
+export const VOICE_UNLOAD_MAX = 120
+export const DEFAULT_VOICE: VoiceSettings = { enabled: true, hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [] }
 export const DEFAULT_GENERAL: GeneralSettings = {
   zoom: 100,
   openAtLogin: false,
@@ -515,7 +536,7 @@ export const DEFAULT_ADAPTERS: AdaptersSettings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 2,
-  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, browser: DEFAULT_BROWSER },
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, browser: DEFAULT_BROWSER, voice: DEFAULT_VOICE },
   workspaces: {},
   agents: {}
 }
