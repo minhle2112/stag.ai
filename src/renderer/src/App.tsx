@@ -9,6 +9,7 @@ import { ScopeAskDialog } from './components/ScopeAskDialog'
 import { ApprovalToast } from './components/ApprovalToast'
 import { PluginToast, ToolbarPluginButtons } from './components/PluginSlots'
 import { PluginFrame } from './components/PluginFrame'
+import { PluginStatusBar } from './components/PluginStatusBar'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { VaultView } from './components/VaultView'
@@ -162,6 +163,8 @@ export function App(): React.JSX.Element {
           </section>
           {browserOpen && active && <BrowserDock workspace={active} />}
         </div>
+        {/* Thanh trạng thái (slot statusBarItem của plugin); không có mục nào thì không hiện. */}
+        <PluginStatusBar />
       </main>
       <BrowserAskDialog />
       <ScopeAskDialog />
