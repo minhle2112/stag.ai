@@ -270,6 +270,7 @@ function AddressBar({ wsId, tab }: { wsId: string; tab: BrowserTab | undefined }
 export function BrowserAskDialog(): React.JSX.Element | null {
   const ask = useBrowser((s) => s.asks[0])
   const answer = useBrowser((s) => s.answer)
+  const allowAlways = useBrowser((s) => s.allowAlways)
   if (!ask) return null
   return (
     <Modal
@@ -277,6 +278,8 @@ export function BrowserAskDialog(): React.JSX.Element | null {
       footer={
         <>
           <Button onClick={() => answer(ask.id, false)}>Từ chối</Button>
+          {/* Lưu Cài đặt hỏng thì vẫn cho phép lần này (allowAlways luôn trả lời). */}
+          <Button onClick={() => void allowAlways(ask).catch(() => {})}>Luôn cho trang này</Button>
           <Button primary onClick={() => answer(ask.id, true)}>
             Cho phép
           </Button>
@@ -288,7 +291,8 @@ export function BrowserAskDialog(): React.JSX.Element | null {
       </p>
       <p className="mt-2 break-all rounded-md bg-panel-2 px-3 py-2 font-mono text-[12px]">{ask.url}</p>
       <p className="mt-3 text-[12px] text-muted">
-        Cho phép thì agent dùng được mọi trang thuộc <span className="font-mono">{ask.origin}</span> tới khi tắt app. Agent đang chờ bạn trả lời (tự từ chối sau 2 phút).
+        Cho phép thì agent dùng được mọi trang thuộc <span className="font-mono">{ask.origin}</span> tới khi tắt app. "Luôn cho trang này" lưu origin vào
+        Cài đặt → Trình duyệt (mọi agent, cả sau khi mở lại app). Agent đang chờ bạn trả lời (tự từ chối sau 2 phút).
       </p>
     </Modal>
   )

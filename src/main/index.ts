@@ -70,11 +70,13 @@ const send = (channel: string, ...args: unknown[]): void => {
 const browser = new BrowserService({
   changed: (workspaceId, state) => send(IPC.browserChanged, workspaceId, state),
   reveal: (workspaceId, tabId) => send(IPC.browserReveal, workspaceId, tabId),
-  ask: (ask) => send(IPC.browserAsk, ask)
+  ask: (ask) => send(IPC.browserAsk, ask),
+  askClosed: (askId) => send(IPC.browserAskClosed, askId)
 })
 const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), (s) => {
   send(IPC.settingsChanged, s)
   applyGeneral(s.app.general)
+  browser.setSettings(s.app.browser)
   void plugins.applySettings(s)
 })
 const notifier = new Notifier(
@@ -355,6 +357,7 @@ app.whenReady().then(async () => {
   if (!primary) return
   await workspaces.load()
   await settings.load()
+  browser.setSettings(settings.get().app.browser)
   await external.load()
   await secrets.load()
   await skills.cleanAllSessions()

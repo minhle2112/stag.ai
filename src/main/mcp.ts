@@ -1,5 +1,6 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer, type RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js'
 import * as z from 'zod'
+import { BROWSER_TOOLS_OFF } from '@shared/browser'
 import type { Agent, Task, Workspace } from '@shared/types'
 import { overlapsOf, scopeLocks, sharedPrefixes } from '@shared/scope'
 import type { Board } from './board'
@@ -20,6 +21,8 @@ export interface McpContext {
   handoff(summary: string): Promise<void>
   /** Tool của plugin (Cài đặt → Plugin) bật cho agent này; tên đã có tiền tố plugin. */
   extraTools?: ExtraTool[]
+  /** false = Cài đặt → Trình duyệt tắt "Cho agent dùng trình duyệt" cho agent này: ẩn tool browser_*, gọi thì báo lỗi. */
+  browserTools?: boolean
 }
 
 export interface ExtraTool {
@@ -184,7 +187,8 @@ export function createStagMcp(ctx: McpContext): McpServer {
     }
   )
 
-  registerBrowserTools(server, ctx)
+  const browserTools = registerBrowserTools(server, ctx)
+  if (ctx.browserTools === false) hideFromList(server, browserTools)
   for (const t of ctx.extraTools ?? []) {
     server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: schemaOf(t.inputSchema) }, async (params: unknown) => {
       const r = await t.call(params)
@@ -195,12 +199,36 @@ export function createStagMcp(ctx: McpContext): McpServer {
   return server
 }
 
+/**
+ * Ẩn tool khỏi tools/list nhưng vẫn gọi được: máy chủ tạo mới cho mỗi yêu cầu, nên phiên mở lúc đã tắt không thấy tool,
+ * còn phiên đã thấy tool từ trước (CLI giữ danh sách cả phiên) gọi tới thì nhận lỗi rõ ràng thay vì "not found".
+ * SDK không có cách công khai để ẩn mà vẫn gọi được → bọc handler tools/list có sẵn; SDK đổi cấu trúc thì bỏ qua
+ * (tool vẫn hiện nhưng gọi báo lỗi).
+ */
+function hideFromList(server: McpServer, tools: RegisteredTool[]): void {
+  type Handler = (req: unknown, extra: unknown) => Promise<unknown>
+  const handlers = (server.server as unknown as { _requestHandlers?: Map<string, Handler> })._requestHandlers
+  const list = handlers?.get('tools/list')
+  if (!handlers || !list) return
+  handlers.set('tools/list', async (req, extra) => {
+    // Handler của SDK lọc theo `enabled` ngay khi gọi (đồng bộ), nên chỉ tắt trong lúc đó.
+    for (const t of tools) t.enabled = false
+    try {
+      return await list(req, extra)
+    } finally {
+      for (const t of tools) t.enabled = true
+    }
+  })
+}
+
 /** Tool browser_*: agent dùng tab của mình trong browser của workspace (người dùng thấy trực tiếp). */
-function registerBrowserTools(server: McpServer, ctx: McpContext): void {
+function registerBrowserTools(server: McpServer, ctx: McpContext): RegisteredTool[] {
   const { agent, browser } = ctx
+  const off = ctx.browserTools === false
   const run =
     <A>(fn: (args: A) => Promise<string> | string) =>
     async (args: A): Promise<ToolResult> => {
+      if (off) return fail(BROWSER_TOOLS_OFF)
       try {
         return ok(await fn(args))
       } catch (e) {
@@ -208,7 +236,8 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): void {
       }
     }
 
-  server.registerTool(
+  const tools: RegisteredTool[] = []
+  tools.push(server.registerTool(
     'browser_navigate',
     {
       title: 'Open page',
@@ -217,9 +246,9 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): void {
       inputSchema: { url: z.string().min(1).describe('URL, e.g. http://localhost:5173 or https://example.com') }
     },
     run(({ url }: { url: string }) => browser.agentNavigate(agent, url))
-  )
+  ))
 
-  server.registerTool(
+  tools.push(server.registerTool(
     'browser_snapshot',
     {
       title: 'Read page',
@@ -229,9 +258,9 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): void {
       annotations: { readOnlyHint: true }
     },
     run(() => browser.agentSnapshot(agent))
-  )
+  ))
 
-  server.registerTool(
+  tools.push(server.registerTool(
     'browser_click',
     {
       title: 'Click',
@@ -239,9 +268,9 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): void {
       inputSchema: { ref: z.number().int().positive().describe('[ref] number from browser_snapshot') }
     },
     run(({ ref }: { ref: number }) => browser.agentClick(agent, ref))
-  )
+  ))
 
-  server.registerTool(
+  tools.push(server.registerTool(
     'browser_type',
     {
       title: 'Type',
@@ -253,9 +282,9 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): void {
       }
     },
     run(({ ref, text, submit }: { ref: number; text: string; submit?: boolean }) => browser.agentType(agent, ref, text, !!submit))
-  )
+  ))
 
-  server.registerTool(
+  tools.push(server.registerTool(
     'browser_press',
     {
       title: 'Press key',
@@ -263,9 +292,9 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): void {
       inputSchema: { key: z.enum(BROWSER_KEYS).describe('Key name') }
     },
     run(({ key }: { key: string }) => browser.agentPress(agent, key))
-  )
+  ))
 
-  server.registerTool(
+  tools.push(server.registerTool(
     'browser_screenshot',
     {
       title: 'Screenshot',
@@ -274,15 +303,16 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): void {
       annotations: { readOnlyHint: true }
     },
     async (): Promise<ToolResult> => {
+      if (off) return fail(BROWSER_TOOLS_OFF)
       try {
         return { content: [{ type: 'image', data: await browser.agentScreenshot(agent), mimeType: 'image/png' }] }
       } catch (e) {
         return fail(e)
       }
     }
-  )
+  ))
 
-  server.registerTool(
+  tools.push(server.registerTool(
     'browser_console',
     {
       title: 'Console',
@@ -292,5 +322,6 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): void {
       annotations: { readOnlyHint: true }
     },
     run(({ only_errors }: { only_errors?: boolean }) => browser.agentConsole(agent, !!only_errors))
-  )
+  ))
+  return tools
 }
