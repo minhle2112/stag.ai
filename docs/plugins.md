@@ -89,7 +89,7 @@ Mẫu đầy đủ: `resources/plugin-catalog/stag-plugin-hello` (tool, nút g�
 | `artifact.written` | Agent tạo / sửa file trong dự án (không gồm vault, thư mục ẩn, node_modules; mỗi file tối đa 1 sự kiện / 5 giây) | `path` (tương đối, "/"), `kind`: `write` \| `edit` |
 | `vault.note.changed` | Agent ghi note, hoặc bạn lưu / tạo note trong app (plugin tự ghi thì không báo; mỗi note tối đa 1 sự kiện / 5 giây) | `path` (trong vault), `by`: `agent` \| `user` (`user` thì không có `agentId`) |
 | `handoff.done` | Agent gọi `session_handoff`, app đóng phiên cũ và mở phiên mới | `percent` (% context, có thể null), `fromSessionId`, `summary` |
-| `scope.conflict` | Agent định sửa file thuộc việc đang mở của agent khác | `path`, `paths`, `ownerAgentId`, `ownerAgentName`, `taskTitle`, `entry`, `command?`, `decision`: `ask` (Claude Code hỏi trong terminal) \| `allowed` \| `denied` (bạn trả lời trong app, Codex) |
+| `scope.conflict` | Agent định sửa file thuộc việc đang mở của agent khác | `path`, `paths`, `ownerAgentId`, `ownerAgentName`, `taskTitle`, `entry`, `command?`, `decision`: `ask` (Claude Code hỏi trong terminal) \| `allowed` \| `denied` (bạn trả lời trong app, Codex) \| `blocked` (Khoá phạm vi đặt "Chặn luôn") \| `warned` (đặt "Chỉ cảnh báo", cho sửa) |
 
 Mọi sự kiện có `type`, `at`, `workspaceId`, và `agentId` / `agentName` khi biết. Plugin chỉ nhận sự kiện đã khai trong `events` và của workspace đang bật plugin.
 
