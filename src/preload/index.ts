@@ -2,7 +2,7 @@ import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJ
 import type { VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
-import type { AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
+import type { AgentApiEvent, AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
 import type {
   Agent,
   AgentRun,
@@ -120,6 +120,12 @@ const api = {
       const fn = (_e: IpcRendererEvent, list: AgentRequest[]): void => cb(list)
       ipcRenderer.on(IPC.agentRequests, fn)
       return () => ipcRenderer.removeListener(IPC.agentRequests, fn)
+    },
+    /** Agent API đổi / mở / xoá agent (do agent khác làm thay bạn). */
+    onApiEvent(cb: (e: AgentApiEvent) => void): () => void {
+      const fn = (_e: IpcRendererEvent, ev: AgentApiEvent): void => cb(ev)
+      ipcRenderer.on(IPC.agentApiEvent, fn)
+      return () => ipcRenderer.removeListener(IPC.agentApiEvent, fn)
     }
   },
   settings: {

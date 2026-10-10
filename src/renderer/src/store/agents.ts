@@ -88,6 +88,43 @@ export const useAgents = create<AgentsState>((set, get) => {
     patch(wsId, (cur) => ({ agents, layout, autoStart: { ...cur.autoStart, [agent.id]: true } }))
     window.stag.agent.saveLayout(wsId, layout)
   })
+  // Agent khác làm thay người dùng (Agent API): đổi thông tin, mở ô + phiên, hoặc đã xoá agent ở main.
+  window.stag.agent.onApiEvent(async (e) => {
+    if (e.type === 'updated') {
+      const wsId = e.agent.workspaceId
+      // Workspace chưa tải: lần tải sau lấy bản mới từ main.
+      if (get().byWs[wsId]) patch(wsId, (cur) => ({ agents: cur.agents.map((a) => (a.id === e.agent.id ? e.agent : a)) }))
+      return
+    }
+    if (!get().byWs[e.workspaceId]) await get().load(e.workspaceId)
+    const w = get().byWs[e.workspaceId]
+    if (!w) return
+    if (e.type === 'open') {
+      const layout = leaves(w.layout).includes(e.agentId) ? w.layout : insertLeaf(w.layout, e.nearAgentId, e.agentId, 'row')
+      const fresh = !w.running[e.agentId] && !w.starting[e.agentId]
+      patch(e.workspaceId, (cur) => ({ layout, ...(fresh ? { autoStart: { ...cur.autoStart, [e.agentId]: true } } : {}) }))
+      if (layout !== w.layout) window.stag.agent.saveLayout(e.workspaceId, layout)
+      return
+    }
+    // removed: như remove() nhưng main đã xoá xong.
+    disposeTerminal(e.agentId)
+    const layout = removeLeaf(w.layout, e.agentId)
+    const without = <T,>(rec: Record<string, T>): Record<string, T> => {
+      const next = { ...rec }
+      delete next[e.agentId]
+      return next
+    }
+    patch(e.workspaceId, (cur) => ({
+      agents: cur.agents.filter((a) => a.id !== e.agentId),
+      layout,
+      running: without(cur.running),
+      starting: without(cur.starting),
+      autoStart: without(cur.autoStart),
+      errors: without(cur.errors),
+      focused: cur.focused === e.agentId ? firstCell(layout) : cur.focused
+    }))
+    window.stag.agent.saveLayout(e.workspaceId, layout)
+  })
   onAgentExit((agentId) => {
     for (const [wsId, w] of Object.entries(get().byWs)) {
       if (w.running[agentId]) {

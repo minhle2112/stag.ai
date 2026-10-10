@@ -78,7 +78,15 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     create: vi.fn(async (input: AgentCreateInput) => {
       if (input.name === 'Lead') throw new Error('An agent named "Lead" already exists')
       return `Created agent "${input.name}"`
-    })
+    }),
+    update: vi.fn(async (i: { name: string }) => `update ${i.name}`),
+    open: vi.fn(async (i: { name: string }) => `open ${i.name}`),
+    stop: vi.fn(async (i: { name: string }) => `stop ${i.name}`),
+    send: vi.fn(async (i: { name: string; text: string }) => {
+      if (i.name === 'Shell') throw new Error('plain terminal')
+      return `send ${i.name}: ${i.text}`
+    }),
+    remove: vi.fn(async (i: { name: string }) => `remove ${i.name}`)
   }
 
   async function client(withTeam: boolean): Promise<Client> {
@@ -126,6 +134,29 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     const dup = await c.callTool({ name: 'agent_create', arguments: { name: 'Lead', kind: 'claude' } })
     expect(dup.isError).toBe(true)
     expect(text(dup)).toContain('already exists')
+  })
+
+    it('agent_update / open / stop / send / delete: chuyển tham số, lỗi thành isError', async () => {
+    const c = await client(true)
+    const calls: Array<[string, Record<string, unknown>, string]> = [
+      ['agent_update', { name: 'Tester', model: 'default', permission_mode: 'plan' }, 'update Tester'],
+      ['agent_open', { name: 'Tester', task: 'chạy test' }, 'open Tester'],
+      ['agent_stop', { name: 'Tester' }, 'stop Tester'],
+      ['agent_send', { name: 'Tester', text: 'xong chưa?' }, 'send Tester: xong chưa?'],
+      ['agent_delete', { name: 'Tester' }, 'remove Tester']
+    ]
+    for (const [name, args, want] of calls) {
+      const r = await c.callTool({ name, arguments: args })
+      expect(r.isError).toBeFalsy()
+      expect(text(r)).toBe(want)
+    }
+    expect(team.update).toHaveBeenCalledWith({ name: 'Tester', model: 'default', permission_mode: 'plan' })
+    expect(team.open).toHaveBeenCalledWith({ name: 'Tester', task: 'chạy test' })
+    const bad = await c.callTool({ name: 'agent_send', arguments: { name: 'Shell', text: 'ls' } })
+    expect(bad.isError).toBe(true)
+    // Thiếu tham số bắt buộc → MCP SDK báo lỗi, không gọi tới app.
+    const missing = await c.callTool({ name: 'agent_send', arguments: { name: 'Tester' } })
+    expect(missing.isError).toBe(true)
   })
 
     it('không có team API → lỗi rõ ràng', async () => {

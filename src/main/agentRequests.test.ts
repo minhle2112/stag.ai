@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AgentRequest } from '@shared/agentApi'
+import type { AgentRequestInput } from '@shared/agentApi'
 import { AgentRequestQueue } from './agentRequests'
 
-const req = (from = 'a1'): Omit<AgentRequest, 'id' | 'until'> => ({
+const req = (from = 'a1'): AgentRequestInput => ({
   workspaceId: 'w1',
   fromAgentId: from,
   fromName: 'Lead',

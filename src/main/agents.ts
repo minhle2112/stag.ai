@@ -3,7 +3,23 @@ import { promises as fs, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, shell, type WebContents } from 'electron'
 import { IPC } from '@shared/ipc'
-import { checkCreateInput, firstTaskOpening, isCliKind, type AgentCreateDraft, type AgentCreatedEvent, type AgentCreateInput } from '@shared/agentApi'
+import {
+  agentMessage,
+  checkCreateInput,
+  firstTaskOpening,
+  isCliKind,
+  MESSAGE_MAX,
+  parsePermission,
+  ROLE_MAX,
+  TASK_MAX,
+  type AgentApiEvent,
+  type AgentCreateDraft,
+  type AgentCreatedEvent,
+  type AgentCreateInput,
+  type AgentRequestInput,
+  type AgentTargetInfo,
+  type AgentUpdateInput
+} from '@shared/agentApi'
 import {
   type Agent,
   type AgentRun,
@@ -11,6 +27,7 @@ import {
   agentKind,
   type CreateAgentRequest,
   type LayoutNode,
+  type PermissionMode,
   type StartAgentRequest,
   type Task,
   type Workspace
@@ -29,7 +46,8 @@ import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
-import { AgentRequestQueue } from './agentRequests'
+import { AgentMail, mailReady } from './agentMail'
+import { AgentRequestQueue, type AgentRequestAnswer } from './agentRequests'
 import { createStagMcp, type AdapterInfo, type AgentInfo, type ExtraTool } from './mcp'
 import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
@@ -45,7 +63,7 @@ import { normalizeLayout } from './agentLayout'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { effectiveConnectors, toolPolicy } from '@shared/connectors'
 import { effectiveSkills } from '@shared/skills'
-import { resolveModel, resolveScope } from '@shared/settings'
+import { MODEL_RE, resolveModel, resolveScope } from '@shared/settings'
 
 /** Bản bàn giao agent viết (tool session_handoff), chờ phiên sau đọc. */
 interface Handoff {
@@ -101,7 +119,9 @@ export class AgentService {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(IPC.agentRequests, list)
   })
   /** Việc đầu tiên agent khác giao cho agent mới tạo (agent_create): thành lời mở của phiên mới đầu tiên. */
-  private firstTasks = new Map<string, { from: string; task: string }>()
+  private firstTasks = new Map<string, { from: string; task: string; created: boolean }>()
+  /** Tin nhắn giữa agent (agent_send) chờ gõ vào terminal của agent nhận. */
+  private mail = new AgentMail()
   private handoffTimer: NodeJS.Timeout | null = null
   private guard: ScopeGuard
 
@@ -153,7 +173,10 @@ export class AgentService {
   attachHub(hub: StatusHub): void {
     this.hub = hub
     if (!this.handoffTimer) {
-      this.handoffTimer = setInterval(() => this.checkHandoffs(), 1500)
+      this.handoffTimer = setInterval(() => {
+        this.checkHandoffs()
+        this.deliverMail()
+      }, 1500)
       this.handoffTimer.unref?.()
     }
   }
@@ -262,7 +285,7 @@ export class AgentService {
       AGENT_NOTE: agentNote,
       RECALL: structured ? `read ${join(ws.vaultPath, '_INDEX.md')}` : 'find and read the related notes in the vault',
       OPENING: first
-        ? firstTaskOpening(first.from, first.task)
+        ? firstTaskOpening(first.from, first.task, first.created)
         : handoff
           ? `This session continues from your previous session, which handed off because its context was getting full. Read the Handoff section of your session file${open ? ` — your task "${open.title}" (scope: ${open.scope}) is still open, do not call task_start again` : ''}. Tell the user in one sentence that you are continuing from the handoff, then continue the work right away without waiting for an answer.`
           : open
@@ -670,7 +693,16 @@ export class AgentService {
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
       handoff: (summary) => this.completeHandoff(agent.id, summary),
       extraTools: this.pluginHooks.tools?.(agent, ws) ?? [],
-      team: { agents: () => this.teamInfo(ws), adapters: () => this.adapterInfo(ws), create: (input) => this.apiCreate(agent, ws, input) },
+      team: {
+        agents: () => this.teamInfo(ws),
+        adapters: () => this.adapterInfo(ws),
+        create: (input) => this.apiCreate(agent, ws, input),
+        update: (input) => this.apiUpdate(agent, ws, input),
+        open: (input) => this.apiOpen(agent, ws, input),
+        stop: (input) => this.apiStop(agent, ws, input),
+        send: (input) => this.apiSend(agent, ws, input),
+        remove: (input) => this.apiDelete(agent, ws, input)
+      },
       // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi; phiên mở sau đó không thấy tool.
       browserTools: browserToolsOn(this.settings.get(), ws.id, agent.id),
       syncSessionFile: async () => {
@@ -696,13 +728,13 @@ export class AgentService {
       .map((a) => {
         const kind = agentKind(a)
         const ext = kind === 'external' ? this.external.get(a.adapterId ?? '') : undefined
-        const m = kind === 'claude' || kind === 'codex' ? resolveModel(s, kind, ws.id, a.id) : null
+        const m = isCliKind(kind) ? resolveModel(s, kind, ws.id, a.id) : null
         return {
           id: a.id,
           name: a.name,
           role: a.role,
           kind: kind === 'external' ? `external:${a.adapterId ?? ''}` : kind,
-          kindLabel: kind === 'claude' || kind === 'codex' ? ADAPTER_LABEL[kind] : kind === 'terminal' ? 'Terminal' : (ext?.manifest.label ?? a.adapterId ?? 'external'),
+          kindLabel: this.kindLabel(a),
           model: m ? m.model : ext ? ext.model : null,
           effort: m?.effort || null,
           permissionMode: a.permissionMode,
@@ -786,9 +818,7 @@ export class AgentService {
     }
     const draft: AgentCreateDraft = { ...d, kindLabel }
 
-    this.board.setActivity(caller, 'waiting', { reason: 'permission', tool: 'agent_create' })
-    const answer = await this.requests.ask({ workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'create', create: draft })
-    if (this.running.get(caller.id) === run) this.board.setActivity(caller, 'working', { tool: 'agent_create' })
+    const answer = await this.confirm(caller, 'agent_create', { workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'create', create: draft })
     if (answer === 'deny') return `The user declined creating agent "${draft.name}". Do not retry; ask the user what they want instead.`
     if (answer === 'timeout') return `Nobody confirmed creating agent "${draft.name}" in stag.ai in time. Tell the user to look at the confirm card, or try again when they are ready.`
 
@@ -804,7 +834,7 @@ export class AgentService {
       const one = { ...(draft.model ? { model: draft.model } : {}), ...(draft.effort ? { effort: draft.effort } : {}) }
       await this.settings.setOverrides('agent', agent.id, { models: { [draft.kind]: one } })
     }
-    if (draft.task) this.firstTasks.set(agent.id, { from: caller.name, task: draft.task })
+    if (draft.task) this.firstTasks.set(agent.id, { from: caller.name, task: draft.task, created: true })
     const event: AgentCreatedEvent = { agent, nearAgentId: caller.id, open: draft.open }
     if (!run.owner.isDestroyed()) run.owner.send(IPC.agentCreated, event)
 
@@ -815,6 +845,197 @@ export class AgentService {
       : ' Its cell is not open; the user (or agent_open later) can open it from the agent list.'
     const task = draft.task ? ' It will start with the task you gave it.' : ''
     return `Created agent "${agent.name}" (${what}).${opened}${task} Tell the user.`
+  }
+
+  // ---- Agent API A3: đổi / mở / dừng / nhắn / xoá agent khác (tool agent_update, agent_open, agent_stop, agent_send, agent_delete) ----
+
+  private kindLabel(a: Agent): string {
+    const kind = agentKind(a)
+    if (isCliKind(kind)) return ADAPTER_LABEL[kind]
+    if (kind === 'terminal') return 'Terminal'
+    return this.external.get(a.adapterId ?? '')?.manifest.label ?? a.adapterId ?? 'external'
+  }
+
+  /** Agent tên `name` trong workspace (không phân biệt hoa thường); không có thì lỗi kèm danh sách tên. */
+  private byName(ws: Workspace, name: string): Agent {
+    const all = this.data.agents.filter((a) => a.workspaceId === ws.id)
+    const a = all.find((x) => sameAgentName(x.name, name.trim()))
+    if (!a) throw new Error(`No agent named "${name}" in this workspace. Agents: ${all.map((x) => `"${x.name}"`).join(', ') || '(none)'}.`)
+    return a
+  }
+
+  private targetInfo(a: Agent): AgentTargetInfo {
+    return { id: a.id, name: a.name, kindLabel: this.kindLabel(a), running: this.running.has(a.id) }
+  }
+
+  /** Báo mọi cửa sổ thay đổi do Agent API (cập nhật danh sách / lưới). */
+  private apiEvent(e: AgentApiEvent): void {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(IPC.agentApiEvent, e)
+  }
+
+  /** Hỏi người dùng trong app; trong lúc chờ, agent đã xin hiện "chờ duyệt" (thông báo chờ như thường). */
+  private async confirm(caller: Agent, tool: string, req: AgentRequestInput): Promise<AgentRequestAnswer> {
+    const run = this.running.get(caller.id)
+    this.board.setActivity(caller, 'waiting', { reason: 'permission', tool })
+    const answer = await this.requests.ask(req)
+    if (run && this.running.get(caller.id) === run) this.board.setActivity(caller, 'working', { tool })
+    return answer
+  }
+
+  private static declined(answer: AgentRequestAnswer, what: string): string {
+    return answer === 'deny'
+      ? `The user declined: ${what}. Do not retry; ask the user what they want instead.`
+      : `Nobody confirmed in stag.ai in time: ${what}. Tell the user to look at the confirm card, or try again when they are ready.`
+  }
+
+  private async apiUpdate(caller: Agent, ws: Workspace, input: AgentUpdateInput): Promise<string> {
+    const target = this.byName(ws, input.name)
+    const kind = agentKind(target)
+    const role = input.role?.trim()
+    const model = input.model?.trim()
+    const effort = input.effort?.trim().toLowerCase()
+    const newName = input.new_name?.trim()
+    if (role !== undefined && role.length > ROLE_MAX) throw new Error(`role is too long (max ${ROLE_MAX} characters).`)
+    if (role !== undefined && kind === 'terminal') throw new Error('A terminal cell has no role.')
+    if ((model !== undefined || effort !== undefined) && !isCliKind(kind)) throw new Error(`model / effort only apply to Claude Code and Codex agents, not ${this.kindLabel(target)}.`)
+    // '' / "default" = bỏ ghi đè, theo mặc định workspace / app.
+    const clear = (v: string | undefined): boolean => v === '' || v === 'default'
+    if (model !== undefined && !clear(model) && !MODEL_RE.test(model)) throw new Error(`Invalid model id "${model}".`)
+    if (effort !== undefined && !clear(effort) && !/^[a-z]{1,20}$/.test(effort)) throw new Error(`Invalid effort "${effort}".`)
+    let perm: PermissionMode | undefined
+    if (input.permission_mode !== undefined) {
+      const p = parsePermission(input.permission_mode)
+      if (!p) throw new Error(`Invalid permission_mode "${input.permission_mode}". Use one of: default, acceptEdits, auto, plan.`)
+      if (!isCliKind(kind)) throw new Error('permission_mode only applies to Claude Code and Codex agents.')
+      if (p !== target.permissionMode) perm = p
+    }
+    if (newName !== undefined) {
+      const problem = agentNameProblem(newName)
+      if (problem) throw new Error(`Invalid name: ${problem}`)
+      if (this.data.agents.some((a) => a.id !== target.id && a.workspaceId === ws.id && sameAgentName(a.name, newName)))
+        throw new Error(`An agent named "${newName}" already exists in this workspace.`)
+    }
+    if (role === undefined && model === undefined && effort === undefined && perm === undefined && (newName === undefined || newName === target.name))
+      return `Nothing to change for "${target.name}".`
+
+    // Đổi quyền là việc nhạy cảm: hỏi người dùng (các thay đổi khác trong cùng lần gọi chờ theo).
+    if (perm) {
+      const answer = await this.confirm(caller, 'agent_update', {
+        workspaceId: ws.id,
+        fromAgentId: caller.id,
+        fromName: caller.name,
+        action: 'permission',
+        target: this.targetInfo(target),
+        from: target.permissionMode,
+        to: perm
+      })
+      if (answer !== 'allow') return AgentService.declined(answer, `changing the permission mode of "${target.name}" (nothing was changed)`)
+    }
+
+    const done: string[] = []
+    if (newName !== undefined && newName !== target.name) {
+      const old = target.name
+      await this.rename(target.id, newName)
+      done.push(`renamed "${old}" → "${newName}"`)
+    }
+    if (role !== undefined || perm) {
+      if (role !== undefined) target.role = role
+      if (perm) target.permissionMode = perm
+      await this.save()
+      if (role !== undefined) done.push(`role: ${role || '(none)'}`)
+      if (perm) done.push(`permission: ${perm}`)
+    }
+    if (isCliKind(kind) && (model !== undefined || effort !== undefined)) {
+      const cur = { ...this.settings.get().agents[target.id]?.models?.[kind] }
+      if (model !== undefined) {
+        if (clear(model)) delete cur.model
+        else cur.model = model
+      }
+      if (effort !== undefined) {
+        if (clear(effort)) delete cur.effort
+        else cur.effort = effort
+      }
+      const models = { ...this.settings.get().agents[target.id]?.models }
+      if (Object.keys(cur).length) models[kind] = cur
+      else delete models[kind]
+      await this.settings.setOverrides('agent', target.id, { models: Object.keys(models).length ? models : null })
+      const m = this.settings.modelFor(kind, target)
+      done.push(`model ${m.model || 'default (CLI config)'}${m.effort ? `, effort ${m.effort}` : ''}`)
+    }
+    this.apiEvent({ type: 'updated', agent: { ...target } })
+    const later = this.running.has(target.id) && (role !== undefined || perm || model !== undefined || effort !== undefined)
+    return `Updated "${target.name}": ${done.join('; ')}.${later ? ' Its running session keeps the old settings; they apply from its next session (agent_stop then agent_open, with the user’s OK).' : ''}`
+  }
+
+  private async apiOpen(caller: Agent, ws: Workspace, input: { name: string; task?: string }): Promise<string> {
+    const target = this.byName(ws, input.name)
+    if (target.id === caller.id) throw new Error('That is you.')
+    const task = input.task?.trim() ?? ''
+    if (task.length > TASK_MAX) throw new Error(`task is too long (max ${TASK_MAX} characters).`)
+    if (this.running.has(target.id)) {
+      if (task) throw new Error(`"${target.name}" is already running. Use agent_send to give it the task.`)
+      this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
+      return `"${target.name}" is already running; its cell is shown to the user.`
+    }
+    if (task && agentKind(target) === 'terminal') throw new Error('A terminal cell cannot receive a task.')
+    if (task) this.firstTasks.set(target.id, { from: caller.name, task, created: false })
+    this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
+    return `Opening "${target.name}" in a new session next to your cell${task ? ', starting with your task' : ''} (if the user is looking at another workspace, it starts when they open this one).`
+  }
+
+  private async apiStop(caller: Agent, ws: Workspace, input: { name: string }): Promise<string> {
+    const target = this.byName(ws, input.name)
+    if (target.id === caller.id) throw new Error('You cannot stop your own session. Finish your turn instead.')
+    if (!this.running.has(target.id)) return `"${target.name}" has no running session.`
+    const answer = await this.confirm(caller, 'agent_stop', { workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'stop', target: this.targetInfo(target) })
+    if (answer !== 'allow') return AgentService.declined(answer, `stopping "${target.name}"`)
+    this.stop(target.id)
+    return `Stopped the session of "${target.name}". Its open task (if any) stays open; agent_open starts a new session.`
+  }
+
+  private async apiSend(caller: Agent, ws: Workspace, input: { name: string; text: string }): Promise<string> {
+    const target = this.byName(ws, input.name)
+    if (target.id === caller.id) throw new Error('That is you.')
+    if (agentKind(target) === 'terminal') throw new Error(`"${target.name}" is a plain terminal, not an AI agent; agent_send cannot type into it.`)
+    if (!this.running.has(target.id)) throw new Error(`"${target.name}" has no running session. Use agent_open with a task instead.`)
+    const text = input.text.trim()
+    if (!text) throw new Error('text is empty.')
+    if (text.length > MESSAGE_MAX) throw new Error(`text is too long (max ${MESSAGE_MAX} characters).`)
+    this.mail.enqueue(target.id, { fromId: caller.id, fromName: caller.name, text, at: Date.now() })
+    this.deliverMail()
+    const left = this.mail.pending(target.id)
+    return left
+      ? `Queued for "${target.name}" (it is busy or the user is typing there): it will be typed into its session when it finishes its turn${left > 1 ? ` (${left} messages waiting)` : ''}. Do not resend.`
+      : `Delivered: typed into the session of "${target.name}". It will answer in its own cell; it can reply to you with agent_send.`
+  }
+
+  private async apiDelete(caller: Agent, ws: Workspace, input: { name: string }): Promise<string> {
+    const target = this.byName(ws, input.name)
+    if (target.id === caller.id) throw new Error('You cannot delete yourself.')
+    const answer = await this.confirm(caller, 'agent_delete', { workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'delete', target: this.targetInfo(target) })
+    if (answer !== 'allow') return AgentService.declined(answer, `deleting "${target.name}"`)
+    await this.remove(target.id)
+    await this.settings.forget('agent', [target.id])
+    this.apiEvent({ type: 'removed', workspaceId: ws.id, agentId: target.id })
+    return `Deleted agent "${target.name}" (its session was stopped, its memory note moved to the Recycle Bin, its unfinished task card dropped).`
+  }
+
+  /** Gõ tin nhắn đang chờ vào terminal của agent nhận nào đang rảnh (gọi định kỳ + ngay khi có tin mới). */
+  private deliverMail(): void {
+    const now = Date.now()
+    for (const id of this.mail.targets()) {
+      const run = this.running.get(id)
+      const agent = this.data.agents.find((a) => a.id === id)
+      if (!run || !agent) continue
+      const item = this.mail.next(id, mailReady(this.board.statusOf(id), this.ptys.lastInputAt(run.ptyId), now), now)
+      if (!item) continue
+      const msg = agentMessage(item.fromName, item.text)
+      // Claude Code / Codex bật bracketed paste: dán cả khối (nhiều dòng không bị gửi giữa chừng), Enter gửi riêng.
+      this.ptys.write(run.ptyId, isCliKind(agentKind(agent)) ? `\x1b[200~${msg}\x1b[201~` : msg.replace(/\s*\r?\n\s*/g, ' '), false)
+      setTimeout(() => {
+        if (this.running.get(id) === run) this.ptys.write(run.ptyId, '\r', false)
+      }, 400)
+    }
   }
 
   stop(agentId: string): void {
@@ -845,6 +1066,9 @@ export class AgentService {
     this.browser.closeAgentTabs(agentId)
     this.data.agents = this.data.agents.filter((a) => a.id !== agentId)
     if (this.data.handoffs) delete this.data.handoffs[agentId]
+    this.mail.forget(agentId)
+    this.firstTasks.delete(agentId)
+    this.requests.dropTarget(agentId)
     await this.save()
   }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentRequest } from '@shared/agentApi'
+import type { AgentRequest, AgentRequestInput } from '@shared/agentApi'
 
 export type AgentRequestAnswer = 'allow' | 'deny' | 'timeout'
 
@@ -19,8 +19,8 @@ export class AgentRequestQueue {
     return [...this.pending.values()].map((p) => p.req)
   }
 
-  ask(req: Omit<AgentRequest, 'id' | 'until'>, timeoutMs = AGENT_REQUEST_MS): Promise<AgentRequestAnswer> {
-    const full: AgentRequest = { ...req, id: randomUUID(), until: new Date(Date.now() + timeoutMs).toISOString() }
+  ask(req: AgentRequestInput, timeoutMs = AGENT_REQUEST_MS): Promise<AgentRequestAnswer> {
+    const full = { ...req, id: randomUUID(), until: new Date(Date.now() + timeoutMs).toISOString() } as AgentRequest
     return new Promise((resolve) => {
       const timer = setTimeout(() => finish('timeout'), timeoutMs)
       const finish = (a: AgentRequestAnswer): void => {
@@ -41,5 +41,10 @@ export class AgentRequestQueue {
   /** Phiên của agent đã xin đóng / agent bị xoá: bỏ các yêu cầu của nó. */
   cancelAgent(agentId: string): void {
     for (const p of [...this.pending.values()]) if (p.req.fromAgentId === agentId) p.done('deny')
+  }
+
+  /** Agent bị xoá: bỏ cả các yêu cầu nhắm vào nó (dừng / xoá / đổi quyền). */
+  dropTarget(agentId: string): void {
+    for (const p of [...this.pending.values()]) if ('target' in p.req && p.req.target.id === agentId) p.done('deny')
   }
 }

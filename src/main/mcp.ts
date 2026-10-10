@@ -3,7 +3,7 @@ import * as z from 'zod'
 import { BROWSER_TOOLS_OFF } from '@shared/browser'
 import { DEFAULT_SCOPE, type Agent, type ScopeLockSettings, type Task, type Workspace } from '@shared/types'
 import { overlapsOf, scopeLocks, unlocked } from '@shared/scope'
-import type { AgentCreateInput } from '@shared/agentApi'
+import type { AgentCreateInput, AgentUpdateInput } from '@shared/agentApi'
 import type { Board } from './board'
 import { BROWSER_KEYS, type BrowserService } from './browser'
 
@@ -68,6 +68,11 @@ export interface TeamApi {
   adapters(): Promise<AdapterInfo[]>
   /** Tạo agent sau khi người dùng xác nhận trong app; trả về câu trả lời cho agent. Lỗi kiểm tra thì ném ra. */
   create(input: AgentCreateInput): Promise<string>
+  update(input: AgentUpdateInput): Promise<string>
+  open(input: { name: string; task?: string }): Promise<string>
+  stop(input: { name: string }): Promise<string>
+  send(input: { name: string; text: string }): Promise<string>
+  remove(input: { name: string }): Promise<string>
 }
 
 export interface ExtraTool {
@@ -377,6 +382,88 @@ function registerTeamTools(server: McpServer, ctx: McpContext): void {
         return fail(e)
       }
     }
+  )
+
+  const call =
+    <A>(fn: (team: TeamApi, args: A) => Promise<string>) =>
+    async (args: A): Promise<ToolResult> => {
+      if (!ctx.team) return noApi()
+      try {
+        return ok(await fn(ctx.team, args))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  const nameArg = z.string().min(1).max(100).describe('Name of the agent in this workspace (see agent_list)')
+
+  server.registerTool(
+    'agent_update',
+    {
+      title: 'Change agent',
+      description:
+        'Change another agent (or yourself) when the user asks: rename, role, model, effort, permission mode. Only the fields you pass change. ' +
+        'A permission mode change asks the user in stag.ai first. A running session keeps its old model / permission / role until its next session.',
+      inputSchema: {
+        name: nameArg,
+        new_name: z.string().min(1).max(100).optional().describe('New name (its memory note is renamed too)'),
+        role: z.string().max(300).optional().describe('New role ("" = none)'),
+        model: z.string().max(100).optional().describe('Model id from adapter_models; "default" = back to the workspace default'),
+        effort: z.string().max(20).optional().describe('Effort (low, medium, high, xhigh, max…); "default" = back to the default'),
+        permission_mode: z.string().optional().describe('default | acceptEdits | auto | plan (asks the user)')
+      }
+    },
+    call((team, args: AgentUpdateInput) => team.update(args))
+  )
+
+  server.registerTool(
+    'agent_open',
+    {
+      title: 'Open agent',
+      description:
+        "Open another agent's cell next to yours and start a new session for it, when the user asks. `task` becomes the first instruction of that session. " +
+        'If it is already running, its cell is just shown (give it work with agent_send instead).',
+      inputSchema: {
+        name: nameArg,
+        task: z.string().max(4000).optional().describe('First task for its new session, in the conversation language, with enough context to start')
+      }
+    },
+    call((team, args: { name: string; task?: string }) => team.open(args))
+  )
+
+  server.registerTool(
+    'agent_stop',
+    {
+      title: 'Stop agent session',
+      description: "Stop another agent's running session when the user asks (stag.ai asks the user to confirm). Its open task stays open.",
+      inputSchema: { name: nameArg }
+    },
+    call((team, args: { name: string }) => team.stop(args))
+  )
+
+  server.registerTool(
+    'agent_send',
+    {
+      title: 'Message agent',
+      description:
+        "Send a message to another running agent: stag.ai types it into that agent's session (marked as coming from you, not from the user) as soon as it is idle and the user is not typing there. " +
+        'Use it when the user asks you to pass something on, or to coordinate with another agent; keep it short and self-contained. Do not poll or chat back and forth; there is a rate limit.',
+      inputSchema: {
+        name: nameArg,
+        text: z.string().min(1).max(4000).describe('The message, in the conversation language')
+      }
+    },
+    call((team, args: { name: string; text: string }) => team.send(args))
+  )
+
+  server.registerTool(
+    'agent_delete',
+    {
+      title: 'Delete agent',
+      description:
+        'Delete another agent when the user asks (stag.ai always asks the user to confirm): its session stops, its memory note goes to the Recycle Bin, its unfinished task card is dropped.',
+      inputSchema: { name: nameArg }
+    },
+    call((team, args: { name: string }) => team.remove(args))
   )
 }
 

@@ -66,6 +66,8 @@ export const IPC = {
   agentRequestList: 'agent:request-list',
   /** Người dùng xác nhận / từ chối một yêu cầu của agent (id, allow). */
   agentRequestAnswer: 'agent:request-answer',
+  /** main → renderer: Agent API đổi / mở / xoá agent (AgentApiEvent). */
+  agentApiEvent: 'agent:api-event',
   /** Người dùng trả lời câu hỏi khoá phạm vi (agent Codex sửa file trong vùng của agent khác). */
   scopeAnswer: 'scope:answer',
   /** Lưu note người dùng sửa trong app (kèm nội dung gốc để phát hiện sửa chồng). */
