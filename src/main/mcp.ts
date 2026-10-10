@@ -23,8 +23,48 @@ export interface McpContext {
   handoff(summary: string): Promise<void>
   /** Tool của plugin (Cài đặt → Plugin) bật cho agent này; tên đã có tiền tố plugin. */
   extraTools?: ExtraTool[]
+  /** Đọc agent / adapter của app (tool agent_list, adapter_models — Agent API A1). */
+  team?: TeamApi
   /** false = Cài đặt → Trình duyệt tắt "Cho agent dùng trình duyệt" cho agent này: ẩn tool browser_*, gọi thì báo lỗi. */
   browserTools?: boolean
+}
+
+/** Một agent / ô trong workspace, như người dùng thấy ở lưới Agents. */
+export interface AgentInfo {
+  id: string
+  name: string
+  role: string
+  /** 'claude' | 'codex' | 'terminal' | 'external:<id adapter>' */
+  kind: string
+  /** Tên hiển thị của loại (Claude Code, Codex, Terminal, tên adapter ngoài). */
+  kindLabel: string
+  /** '' = theo cấu hình của CLI; null = loại này không có model (terminal, adapter ngoài). */
+  model: string | null
+  effort: string | null
+  permissionMode: string
+  running: boolean
+  /** Trạng thái phiên (starting / working / waiting…), null = không biết. */
+  activity: string | null
+}
+
+/** Một loại agent tạo được (adapter có sẵn hoặc adapter ngoài đã cài). */
+export interface AdapterInfo {
+  /** Giá trị `kind` khi tạo agent. */
+  kind: string
+  label: string
+  /** CLI có trên máy và chạy được. */
+  available: boolean
+  /** Vì sao chưa dùng được / chi tiết (phiên bản, đăng nhập). */
+  detail: string
+  /** Model / mức suy nghĩ mặc định cho workspace này ('' = theo cấu hình CLI); null = không có model. */
+  defaultModel: string | null
+  defaultEffort: string | null
+  models: Array<{ id: string; label: string; efforts: string[] }>
+}
+
+export interface TeamApi {
+  agents(): AgentInfo[]
+  adapters(): Promise<AdapterInfo[]>
 }
 
 export interface ExtraTool {
@@ -198,6 +238,8 @@ export function createStagMcp(ctx: McpContext): McpServer {
     }
   )
 
+  registerTeamTools(server, ctx)
+
   const browserTools = registerBrowserTools(server, ctx)
   if (ctx.browserTools === false) hideFromList(server, browserTools)
   for (const t of ctx.extraTools ?? []) {
@@ -230,6 +272,76 @@ function hideFromList(server: McpServer, tools: RegisteredTool[]): void {
       for (const t of tools) t.enabled = true
     }
   })
+}
+
+const modelText = (model: string | null, effort: string | null): string =>
+  model === null ? 'no model' : `model ${model || 'default (CLI config)'}${effort ? `, effort ${effort}` : ''}`
+
+/** Một dòng mô tả agent cho agent_list. */
+export function describeAgent(a: AgentInfo, selfId: string): string {
+  const who = `${a.name}${a.id === selfId ? ' (you)' : ''}`
+  const role = a.role ? ` — role: ${a.role}` : ''
+  const kind = a.kind === 'terminal' ? 'plain terminal' : `${a.kindLabel} [kind: ${a.kind}], ${modelText(a.model, a.effort)}, permission: ${a.permissionMode}`
+  const session = a.running ? `session running${a.activity ? ` (${a.activity})` : ''}` : 'session stopped'
+  return `- ${who}${role} — ${kind} — ${session}`
+}
+
+/** Một khối mô tả loại agent cho adapter_models. */
+export function describeAdapter(a: AdapterInfo): string {
+  const head = `- kind "${a.kind}" — ${a.label}: ${a.available ? 'available' : 'NOT available'}${a.detail ? ` (${a.detail})` : ''}`
+  if (a.defaultModel === null) return `${head}. No model choice.`
+  const def = `Default here: ${modelText(a.defaultModel, a.defaultEffort)}.`
+  const models = a.models.length
+    ? `Known models: ${a.models.map((m) => `${m.id}${m.label && m.label !== m.id ? ` (${m.label})` : ''}${m.efforts.length ? ` [effort: ${m.efforts.join('|')}]` : ''}`).join('; ')}.`
+    : 'No model list known; any model id the CLI accepts works.'
+  return `${head}. ${def} ${models}`
+}
+
+/** Tool đọc agent / adapter của app (Agent API A1): agent biết trong workspace có ai, tạo được loại nào, model nào. */
+function registerTeamTools(server: McpServer, ctx: McpContext): void {
+  const { agent, workspace: ws } = ctx
+  const noApi = (): ToolResult => fail('This stag.ai build does not expose the team API.')
+
+  server.registerTool(
+    'agent_list',
+    {
+      title: 'Agents in workspace',
+      description:
+        'List every agent and terminal cell in this stag.ai workspace (including you): name, role, kind (Claude Code / Codex / terminal / external adapter), model + effort, permission mode, and whether its session is running. Use it when the user asks about the agents in the app.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true }
+    },
+    async () => {
+      if (!ctx.team) return noApi()
+      try {
+        const list = ctx.team.agents()
+        if (!list.length) return ok(`Workspace "${ws.name}" has no agents yet.`)
+        return ok(`Workspace "${ws.name}" — ${list.length} agent(s):\n${list.map((a) => describeAgent(a, agent.id)).join('\n')}`)
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.registerTool(
+    'adapter_models',
+    {
+      title: 'Agent kinds and models',
+      description:
+        'Which kinds of agents stag.ai can run on this machine (Claude Code, Codex, plain terminal, installed external adapters), whether each CLI is installed and logged in, the default model / effort for this workspace, and the known model ids with their effort levels. Call it before choosing a model for an agent instead of guessing model names.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true }
+    },
+    async () => {
+      if (!ctx.team) return noApi()
+      try {
+        const list = await ctx.team.adapters()
+        return ok(`Agent kinds in stag.ai:\n${list.map(describeAdapter).join('\n')}`)
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
 }
 
 /** Tool browser_*: agent dùng tab của mình trong browser của workspace (người dùng thấy trực tiếp). */

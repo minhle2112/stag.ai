@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { promises as fs, rmSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { connect, type AddressInfo } from 'node:net'
@@ -7,6 +6,7 @@ import { app } from 'electron'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { HookPayload } from './board'
+import { SessionTokens } from './sessionTokens'
 
 export interface HubHandlers {
   /** Trả về JSON trả lời hook (vd. quyết định PreToolUse), undefined = chỉ ghi nhận. */
@@ -26,11 +26,11 @@ const MAX_BODY = 4 * 1024 * 1024
  * Máy chủ HTTP nội bộ (chỉ 127.0.0.1) cho các phiên Claude Code của agent:
  * - POST /hook: hook HTTP của Claude Code báo agent đang làm / đang chờ.
  * - POST /mcp:  máy chủ MCP "stag" (Streamable HTTP, không giữ phiên) với các tool task_*.
- * Mỗi lần chạy app có một token ngẫu nhiên; agent nhận token qua biến môi trường STAG_TOKEN,
- * nên tiến trình khác trên máy không giả được trạng thái.
+ * Mỗi phiên agent có token riêng (cấp lúc mở, thu hồi lúc đóng, xem sessionTokens.ts) qua biến môi trường STAG_TOKEN:
+ * tiến trình khác trên máy không giả được trạng thái, và agent này không gọi tool dưới tên agent khác.
  */
 export class StatusHub {
-  private readonly token = randomBytes(24).toString('hex')
+  private readonly tokens = new SessionTokens()
   private server: Server | null = null
   private port = 0
   private settingsFile = ''
@@ -130,14 +130,20 @@ export class StatusHub {
     return { hookUrl: `${base}/hook`, mcpUrl: `${base}/mcp` }
   }
 
-  /** Biến môi trường thêm cho tiến trình agent. */
-  env(): Record<string, string> {
-    return { STAG_TOKEN: this.token }
+  /** Cấp token cho một phiên agent sắp mở; trả về biến môi trường thêm cho tiến trình đó. Đóng phiên → revoke. */
+  issueToken(agentId: string, sessionId: string): { token: string; env: Record<string, string> } {
+    const token = this.tokens.issue(agentId, sessionId)
+    return { token, env: { STAG_TOKEN: token } }
+  }
+
+  revokeToken(token: string | undefined): void {
+    this.tokens.revoke(token)
   }
 
   stop(): void {
     this.server?.close()
     this.server = null
+    this.tokens.clear()
     for (const f of [this.settingsFile, this.mcpFile, this.statusScript]) if (f) rmSync(f, { force: true })
   }
 
@@ -190,8 +196,10 @@ export class StatusHub {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (req.headers.authorization !== `Bearer ${this.token}`) return send(res, 401, { error: 'unauthorized' })
-    const agentId = String(req.headers['x-stag-agent'] ?? '')
+    // Người gọi = phiên của token; header X-Stag-Agent chỉ để kiểm tra khớp. Phiên đã đóng → token đã thu hồi.
+    const who = this.tokens.resolve(req.headers.authorization, String(req.headers['x-stag-agent'] ?? '') || undefined)
+    if (!who) return send(res, 401, { error: 'unauthorized' })
+    const agentId = who.agentId
     const path = (req.url ?? '').split('?')[0]
 
     if (path === '/hook') {

@@ -16,7 +16,7 @@ import {
 } from '@shared/types'
 import type { Board, HookPayload } from './board'
 import type { BrowserService } from './browser'
-import { independentSessionEnv, type AdapterService } from './adapters'
+import { ADAPTER_LABEL, independentSessionEnv, type AdapterService } from './adapters'
 import { codexArgs, findCodexRollout, parseCodexContext } from './codex'
 import { externalArgs, spawnSpec, type ExternalAdapterStore } from './externalAdapters'
 import { claudeServers, claudeSettingsExtra, codexConfiguredServers, codexConnectorArgs, connectorEnv, resolveCommands } from './connectors'
@@ -28,7 +28,7 @@ import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
-import { createStagMcp, type ExtraTool } from './mcp'
+import { createStagMcp, type AdapterInfo, type AgentInfo, type ExtraTool } from './mcp'
 import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
@@ -43,7 +43,7 @@ import { normalizeLayout } from './agentLayout'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { effectiveConnectors, toolPolicy } from '@shared/connectors'
 import { effectiveSkills } from '@shared/skills'
-import { resolveScope } from '@shared/settings'
+import { resolveModel, resolveScope } from '@shared/settings'
 
 /** Bản bàn giao agent viết (tool session_handoff), chờ phiên sau đọc. */
 interface Handoff {
@@ -72,6 +72,8 @@ interface Running extends AgentRun {
   transcript: TranscriptWatcher | null
   /** Codex: đã theo đúng file rollout chưa (đường dẫn chỉ biết sau hook SessionStart / lần ghi đầu). */
   rolloutKnown?: boolean
+  /** Token hub của phiên (thu hồi khi phiên đóng). */
+  token?: string
   /** Đang nhờ agent bàn giao: lúc gõ lời nhờ, và Claude Code đã nhận lời nhờ đó chưa (UserPromptSubmit). */
   handoffAsk?: { at: number; submitted: boolean }
 }
@@ -324,26 +326,33 @@ export class AgentService {
       if (ownStatusLine) statusEnv = { STAG_USER_STATUSLINE: ownStatusLine, STAG_USER_STATUSLINE_BASH: (await findGitBash()) ?? '' }
       transcriptFile = transcriptPath(ws.path, sessionId)
     }
-    const ptyId = this.ptys.spawn(
-      owner,
-      { command, args, cwd: ws.path, cols: req.cols, rows: req.rows },
-      {
-        env: {
-          // Đặt trước để không đè được biến của app.
-          ...userEnv,
-          // Bí mật của connector (xem connectors.ts): sau biến người dùng để không bị đè nhầm.
-          ...connEnv,
-          ...this.hub.env(),
-          STAG_AGENT_ID: agent.id,
-          STAG_AGENT_NAME: agent.name,
-          STAG_SESSION_ID: sessionId,
-          STAG_WORKSPACE: ws.path,
-          ...statusEnv
-        },
-        filterEnv: independentSessionEnv,
-        onExit: () => this.finish(agent.id, ptyId)
-      }
-    )
+    const hubToken = this.hub.issueToken(agent.id, sessionId)
+    let ptyId: string
+    try {
+      ptyId = this.ptys.spawn(
+        owner,
+        { command, args, cwd: ws.path, cols: req.cols, rows: req.rows },
+        {
+          env: {
+            // Đặt trước để không đè được biến của app.
+            ...userEnv,
+            // Bí mật của connector (xem connectors.ts): sau biến người dùng để không bị đè nhầm.
+            ...connEnv,
+            ...hubToken.env,
+            STAG_AGENT_ID: agent.id,
+            STAG_AGENT_NAME: agent.name,
+            STAG_SESSION_ID: sessionId,
+            STAG_WORKSPACE: ws.path,
+            ...statusEnv
+          },
+          filterEnv: independentSessionEnv,
+          onExit: () => this.finish(agent.id, ptyId)
+        }
+      )
+    } catch (e) {
+      this.hub.revokeToken(hubToken.token)
+      throw e
+    }
     // Chỉ đọc phần ghi từ lúc này: `--resume` giữ nguyên transcript cũ, trong đó có thể đã có dòng ngắt
     // của lần trước. (Mở chỉ tốn một lần stat, xong trước khi claude kịp khởi động.)
     const transcript =
@@ -363,6 +372,7 @@ export class AgentService {
       sessionFile,
       vars,
       transcript,
+      token: hubToken.token,
       rolloutKnown: kind === 'codex' ? !transcriptFile!.endsWith('.rollout-pending') : undefined
     }
     this.running.set(agent.id, run)
@@ -408,6 +418,7 @@ export class AgentService {
     const run = this.running.get(agentId)
     if (!run || run.ptyId !== ptyId) return
     this.running.delete(agentId)
+    this.hub?.revokeToken(run.token)
     this.guard.endSession(agentId)
     this.approvals.cancelAgent(agentId)
     run.transcript?.stop()
@@ -646,6 +657,7 @@ export class AgentService {
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
       handoff: (summary) => this.completeHandoff(agent.id, summary),
       extraTools: this.pluginHooks.tools?.(agent, ws) ?? [],
+      team: { agents: () => this.teamInfo(ws), adapters: () => this.adapterInfo(ws) },
       // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi; phiên mở sau đó không thấy tool.
       browserTools: browserToolsOn(this.settings.get(), ws.id, agent.id),
       syncSessionFile: async () => {
@@ -659,6 +671,77 @@ export class AgentService {
         await this.writeSessionFile(cur.sessionFile, cur.vars, task)
       }
     })
+  }
+
+  // ---- Agent API (tool agent_list / adapter_models trong máy chủ MCP stag) ----
+
+  /** Mọi agent / ô terminal của workspace, theo thứ tự trong danh sách bên trái. */
+  private teamInfo(ws: Workspace): AgentInfo[] {
+    const s = this.settings.get()
+    return this.data.agents
+      .filter((a) => a.workspaceId === ws.id)
+      .map((a) => {
+        const kind = agentKind(a)
+        const ext = kind === 'external' ? this.external.get(a.adapterId ?? '') : undefined
+        const m = kind === 'claude' || kind === 'codex' ? resolveModel(s, kind, ws.id, a.id) : null
+        return {
+          id: a.id,
+          name: a.name,
+          role: a.role,
+          kind: kind === 'external' ? `external:${a.adapterId ?? ''}` : kind,
+          kindLabel: kind === 'claude' || kind === 'codex' ? ADAPTER_LABEL[kind] : kind === 'terminal' ? 'Terminal' : (ext?.manifest.label ?? a.adapterId ?? 'external'),
+          model: m ? m.model : ext ? ext.model : null,
+          effort: m?.effort || null,
+          permissionMode: a.permissionMode,
+          running: this.running.has(a.id),
+          activity: kind === 'terminal' ? null : (this.board.statusOf(a.id)?.activity ?? null)
+        }
+      })
+  }
+
+  /** Loại agent tạo được trên máy này + model mặc định của workspace (kiểm tra CLI, không gọi model). */
+  private async adapterInfo(ws: Workspace): Promise<AdapterInfo[]> {
+    const s = this.settings.get()
+    const cli = await Promise.all(
+      (['claude', 'codex'] as const).map(async (id): Promise<AdapterInfo> => {
+        const st = await this.adapters.check(id)
+        const m = resolveModel(s, id, ws.id, null)
+        const login = st.login.state === 'in' ? 'logged in' : st.login.state === 'out' ? 'NOT logged in' : ''
+        return {
+          kind: id,
+          label: ADAPTER_LABEL[id],
+          available: !!st.path && !st.error,
+          detail: st.error ?? [st.version, login].filter(Boolean).join(', '),
+          defaultModel: m.model || st.configModel || '',
+          defaultEffort: m.effort || null,
+          models: st.models
+        }
+      })
+    )
+    const terminal: AdapterInfo = {
+      kind: 'terminal',
+      label: 'Terminal',
+      available: true,
+      detail: 'a plain shell in the project folder, no memory, not on the kanban',
+      defaultModel: null,
+      defaultEffort: null,
+      models: []
+    }
+    const ext = await Promise.all(
+      this.external.list().map(async (a): Promise<AdapterInfo> => {
+        const problem = !a.enabled ? 'turned off in Settings → Adapter' : await this.external.exe(a).then(() => '', (e: Error) => e.message)
+        return {
+          kind: `external:${a.manifest.id}`,
+          label: a.manifest.label,
+          available: !problem,
+          detail: problem || `external adapter ${a.version}`,
+          defaultModel: a.model,
+          defaultEffort: null,
+          models: []
+        }
+      })
+    )
+    return [...cli, terminal, ...ext]
   }
 
   stop(agentId: string): void {

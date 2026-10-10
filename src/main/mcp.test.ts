@@ -5,7 +5,7 @@ import { BROWSER_TOOLS_OFF } from '@shared/browser'
 import type { Agent, Workspace } from '@shared/types'
 import type { BrowserService } from './browser'
 import type { Board } from './board'
-import { createStagMcp } from './mcp'
+import { createStagMcp, type TeamApi } from './mcp'
 
 // browser.ts dùng Electron; test chỉ cần danh sách phím.
 vi.mock('./browser', () => ({ BROWSER_KEYS: ['Enter', 'Tab'] }))
@@ -59,5 +59,60 @@ describe('tool trình duyệt theo Cài đặt', () => {
       expect((r.content as Array<{ text: string }>)[0].text).toBe(BROWSER_TOOLS_OFF)
     }
     expect(navigate).not.toHaveBeenCalled()
+  })
+})
+
+describe('tool agent_list / adapter_models (Agent API A1)', () => {
+  const team: TeamApi = {
+    agents: () => [
+      { id: 'a1', name: 'Agent 1', role: 'Lead', kind: 'claude', kindLabel: 'Claude Code', model: 'opus', effort: 'high', permissionMode: 'default', running: true, activity: 'working' },
+      { id: 'a2', name: 'Tester', role: '', kind: 'codex', kindLabel: 'Codex', model: '', effort: null, permissionMode: 'acceptEdits', running: false, activity: null },
+      { id: 'a3', name: 'Shell', role: '', kind: 'terminal', kindLabel: 'Terminal', model: null, effort: null, permissionMode: 'default', running: true, activity: null }
+    ],
+    adapters: async () => [
+      { kind: 'claude', label: 'Claude Code', available: true, detail: '2.1.300, logged in', defaultModel: 'opus', defaultEffort: 'high', models: [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'] }] },
+      { kind: 'codex', label: 'Codex', available: false, detail: 'Không tìm thấy codex', defaultModel: '', defaultEffort: null, models: [] },
+      { kind: 'terminal', label: 'Terminal', available: true, detail: '', defaultModel: null, defaultEffort: null, models: [] }
+    ]
+  }
+
+  async function client(withTeam: boolean): Promise<Client> {
+    const server = createStagMcp({
+      agent,
+      workspace,
+      board: {} as Board,
+      browser: {} as BrowserService,
+      teammates: () => [],
+      syncSessionFile: async () => {},
+      handoff: async () => {},
+      ...(withTeam ? { team } : {})
+    })
+    const [a, b] = InMemoryTransport.createLinkedPair()
+    const c = new Client({ name: 'test', version: '0' })
+    await Promise.all([server.connect(a), c.connect(b)])
+    return c
+  }
+  const text = (r: Awaited<ReturnType<Client['callTool']>>): string => (r.content as Array<{ text: string }>)[0].text
+
+  it('agent_list: mọi agent, đánh dấu chính mình, model / quyền / phiên', async () => {
+    const c = await client(true)
+    expect(await names(c)).toEqual(expect.arrayContaining(['agent_list', 'adapter_models']))
+    const t = text(await c.callTool({ name: 'agent_list', arguments: {} }))
+    expect(t).toContain('3 agent(s)')
+    expect(t).toContain('- Agent 1 (you) — role: Lead — Claude Code [kind: claude], model opus, effort high, permission: default — session running (working)')
+    expect(t).toContain('- Tester — Codex [kind: codex], model default (CLI config), permission: acceptEdits — session stopped')
+    expect(t).toContain('- Shell — plain terminal — session running')
+  })
+
+  it('adapter_models: loại tạo được, có sẵn hay không, model + effort', async () => {
+    const t = text(await (await client(true)).callTool({ name: 'adapter_models', arguments: {} }))
+    expect(t).toContain('kind "claude" — Claude Code: available (2.1.300, logged in). Default here: model opus, effort high. Known models: opus (Opus) [effort: low|high].')
+    expect(t).toContain('kind "codex" — Codex: NOT available (Không tìm thấy codex)')
+    expect(t).toContain('kind "terminal" — Terminal: available. No model choice.')
+  })
+
+  it('không có team API → lỗi rõ ràng', async () => {
+    const r = await (await client(false)).callTool({ name: 'agent_list', arguments: {} })
+    expect(r.isError).toBe(true)
   })
 })
