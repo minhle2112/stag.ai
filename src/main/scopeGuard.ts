@@ -53,6 +53,31 @@ export function looksLikeWrite(cmd: string): boolean {
   )
 }
 
+/**
+ * Bỏ thân heredoc chỉ là dữ liệu (`cat > note.md <<'EOF' … EOF`, `tee`): chữ trong đó (vd. nội dung một note nhắc tới
+ * file đang bị khoá) không phải đường dẫn lệnh sẽ sửa. Heredoc đưa vào trình thông dịch (bash, node, python…) hoặc đi
+ * tiếp qua ống `|` thì giữ: đó là code.
+ */
+export function withoutDataHeredocs(cmd: string): string {
+  const lines = cmd.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    out.push(line)
+    const m = /<<(-?)\s*(['"]?)([A-Za-z_][\w-]*)\2/.exec(line)
+    if (!m) continue
+    const segment = line.slice(0, m.index).split(/&&|\|\||[;|]/).pop()!.trim()
+    const word = (segment.split(/\s+/)[0] ?? '').replace(/^.*[\\/]/, '')
+    if (!/^(?:cat|tee)(?:\.exe)?$/i.test(word) || line.slice(m.index + m[0].length).includes('|')) continue
+    const end = (l: string): string => (m[1] ? l.replace(/^\t+/, '') : l).replace(/\r$/, '')
+    let j = i + 1
+    while (j < lines.length && end(lines[j]) !== m[3]) j++
+    if (j < lines.length) out.push(lines[j])
+    i = j
+  }
+  return out.join('\n')
+}
+
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** Các chữ trong lệnh (tách theo khoảng trắng, dấu ngoặc, toán tử shell) đổi được thành đường dẫn trong dự án. */
@@ -248,7 +273,8 @@ export class ScopeGuard {
       const h = lockHolder(locks, agent.id, rel, free)
       if (h) hits.push({ grant: rel, label: displayRel(f, ws.path, cwd), task: h.lock.task, entry: h.entry.label })
     }
-    const cmd = cfg.guessShell ? shellCommand(p) : null
+    const raw = cfg.guessShell ? shellCommand(p) : null
+    const cmd = raw && withoutDataHeredocs(raw)
     if (cmd && looksLikeWrite(cmd)) hits.push(...shellHits(cmd, locks, free, ws.path, cwd))
     return hits
   }

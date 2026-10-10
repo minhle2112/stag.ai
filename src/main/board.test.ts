@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent, AgentStatus, Workspace } from '@shared/types'
-import { Board, type HookPayload } from './board'
+import { Board, quoteSpacedPaths, type HookPayload } from './board'
 
 // board.ts → workspace.ts có import `app` của Electron (không dùng tới trong các phép ở đây).
 vi.mock('electron', () => ({
@@ -352,5 +352,60 @@ describe('Board: sự kiện để báo người dùng (thông báo Windows)', (
     events.mockClear()
     await board.closeTask(ws, t2.id, 'done')
     expect(events).not.toHaveBeenCalled()
+  })
+})
+
+describe('Board.transferTask (agent_handoff)', () => {
+  it('việc của người gửi xong, thẻ mới cùng tên / phạm vi / file mở cho người nhận', async () => {
+    const events = vi.fn()
+    const board = new Board(() => {}, events)
+    const a = agent('a')
+    const b = agent('b')
+    await board.startTask(ws, a, 'sa', 'Sửa divide', 'src/math.js')
+    await board.touch(ws, 'a', ['src/util.js'])
+    events.mockClear()
+    const moved = await board.transferTask(ws, 'a', b, 'sb', ' Left: tests ', 'Cập nhật test')
+    expect(moved).toMatchObject({ agentId: 'b', agentName: 'Agent b', sessionId: 'sb', title: 'Cập nhật test', scope: 'src/math.js', files: ['src/util.js'], status: 'open' })
+    expect(await board.openTask(ws, 'a')).toBeUndefined()
+    const done = (await board.snapshot(ws)).tasks.find((t) => t.agentId === 'a')!
+    expect(done).toMatchObject({ status: 'done', summary: 'Handed off to Agent b:\nLeft: tests' })
+    expect(events).toHaveBeenCalledWith(expect.objectContaining({ kind: 'taskDone', agentId: 'a' }))
+    expect(events).toHaveBeenCalledWith(expect.objectContaining({ kind: 'taskStarted', agentId: 'b', title: 'Cập nhật test' }))
+    // Không đổi tên → giữ tên việc cũ.
+    const c = agent('c')
+    expect((await board.transferTask(ws, 'b', c, '', 'x'))?.title).toBe('Cập nhật test')
+  })
+
+  it('người gửi không có việc mở → undefined; người nhận còn việc → lỗi, không đổi gì', async () => {
+    const board = new Board(() => {})
+    const a = agent('a')
+    const b = agent('b')
+    expect(await board.transferTask(ws, 'a', b, '', 's')).toBeUndefined()
+    await board.startTask(ws, a, '', 'A', 'src/a')
+    await board.startTask(ws, b, '', 'B', 'src/b')
+    await expect(board.transferTask(ws, 'a', b, '', 's')).rejects.toThrow(/still has an open task "B"/)
+    expect((await board.openTask(ws, 'a'))?.title).toBe('A')
+  })
+})
+
+describe('quoteSpacedPaths: phạm vi có đường dẫn chứa khoảng trắng', () => {
+  it('bọc đường dẫn có thật (hoặc thư mục chứa nó có thật), chữ tự do giữ nguyên', async () => {
+    await fs.mkdir(join(root, 'Demo memory', '40 Log'), { recursive: true })
+    await fs.mkdir(join(root, 'src'), { recursive: true })
+    const q = (s: string) => quoteSpacedPaths(s, root)
+    expect(await q('Demo memory/40 Log/2026-10-10.md, src/a.ts')).toBe('`Demo memory/40 Log/2026-10-10.md`, src/a.ts')
+    expect(await q('Demo memory/40 Log/ (log)')).toBe('`Demo memory/40 Log/` (log)')
+    expect(await q('"Demo memory/**/*.md"')).toBe('`Demo memory/**/*.md`')
+    expect(await q('src/new file.ts')).toBe('`src/new file.ts`')
+    for (const s of ['src/a.ts tests/b.ts', 'sửa src/a.ts', 'a.ts b.ts', '`Demo memory/x.md`', 'src/{a,b}.ts', 'Nope dir/x.ts'])
+      expect(await q(s), s).toBe(s)
+  })
+
+  it('task_start / task_update lưu phạm vi đã bọc', async () => {
+    await fs.mkdir(join(root, 'Demo memory', '40 Log'), { recursive: true })
+    const board = new Board(() => {})
+    const t = await board.startTask(ws, agent('a'), '', 'Log', 'Demo memory/40 Log/x.md')
+    expect(t.scope).toBe('`Demo memory/40 Log/x.md`')
+    expect((await board.updateTask(ws, 'a', { scope: 'src, Demo memory/40 Log/' })).scope).toBe('src, `Demo memory/40 Log/`')
   })
 })

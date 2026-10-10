@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, HandoffState, ScopeAsk, Task, WaitReason, Workspace } from '@shared/types'
 import { readText } from './fsutil'
 import { ensureIgnored } from './workspace'
@@ -32,6 +32,31 @@ export type BoardEvent =
 
 /** Số file tối đa ghi vào một việc (vùng khoá); quá thì bỏ các file cũ nhất. */
 const MAX_TASK_FILES = 300
+
+/**
+ * Phạm vi agent khai có đường dẫn chứa khoảng trắng (vd. thư mục vault "Demo memory/40 Log/…") → bọc trong `…` để
+ * parseScope không tách nó thành các mẩu chữ (mẩu "memory/40" giả có thể trùng với phạm vi của agent khác). Chỉ bọc
+ * cụm mà đường dẫn (phần trước ký tự đại diện đầu tiên) hoặc thư mục chứa nó có thật trên đĩa; chữ tự do giữ nguyên.
+ */
+export async function quoteSpacedPaths(scope: string, root: string): Promise<string> {
+  const exists = (p: string): Promise<boolean> => fs.stat(resolve(root, p)).then(() => true, () => false)
+  const parts = scope.split(/([,;\n])/)
+  for (let i = 0; i < parts.length; i += 2) {
+    const piece = parts[i]
+    if (piece.includes('`')) continue
+    const m = /^(\s*)(["']?)(.*?)\2(\s*\([^)]*\))?(\s*)$/.exec(piece)
+    if (!m) continue
+    const core = m[3]
+    if (!/\s/.test(core)) continue
+    const wild = core.search(/[*?[{]/)
+    const fixed = wild < 0 ? core.replace(/[\\/]+$/, '') : core.slice(0, Math.max(0, core.slice(0, wild).search(/[\\/][^\\/]*$/)))
+    if (!fixed || !/\s/.test(fixed)) continue
+    const dir = fixed.replace(/[\\/][^\\/]*$/, '')
+    if (!((await exists(fixed)) || (dir !== fixed && (await exists(dir))))) continue
+    parts[i] = `${m[1]}\`${core}\`${m[4] ?? ''}${m[5]}`
+  }
+  return parts.join('')
+}
 
 /** Tool chờ người dùng trả lời ngay trong terminal. */
 const QUESTION_TOOLS = new Set(['AskUserQuestion'])
@@ -258,7 +283,7 @@ export class Board {
       agentName: agent.name,
       sessionId,
       title: title.trim(),
-      scope: scope.trim(),
+      scope: await quoteSpacedPaths(scope.trim(), ws.path),
       status: 'open',
       createdAt: new Date().toISOString()
     }
@@ -272,7 +297,7 @@ export class Board {
     const task = await this.openTask(ws, agentId)
     if (!task) throw new Error('You have no open task. Call task_start first.')
     if (change.title?.trim()) task.title = change.title.trim()
-    if (change.scope?.trim()) task.scope = change.scope.trim()
+    if (change.scope?.trim()) task.scope = await quoteSpacedPaths(change.scope.trim(), ws.path)
     await this.save(ws)
     return task
   }
@@ -340,6 +365,38 @@ export class Board {
     task.summary = summary.trim()
     await this.save(ws)
     this.events({ kind: 'taskDone', workspaceId: ws.id, agentId, agentName: task.agentName, title: task.title })
+    return task
+  }
+
+  /**
+   * Bàn giao (agent_handoff): việc đang mở của `fromId` xong (tóm tắt ghi "Handed off to …"), một thẻ mới cùng tên /
+   * phạm vi / file đã sửa mở cho `to` — vùng khoá đi theo việc. Không có việc mở → undefined, không đổi gì.
+   * `to` đang có việc mở → lỗi (không trộn hai việc).
+   */
+  async transferTask(ws: Workspace, fromId: string, to: Agent, toSessionId: string, summary: string, title?: string): Promise<Task | undefined> {
+    const from = await this.openTask(ws, fromId)
+    if (!from) return undefined
+    const busy = await this.openTask(ws, to.id)
+    if (busy) throw new Error(`"${to.name}" still has an open task "${busy.title}".`)
+    const now = new Date().toISOString()
+    from.status = 'done'
+    from.doneAt = now
+    from.summary = `Handed off to ${to.name}:\n${summary.trim()}`
+    const task: Task = {
+      id: randomUUID(),
+      agentId: to.id,
+      agentName: to.name,
+      sessionId: toSessionId,
+      title: title?.trim() || from.title,
+      scope: from.scope,
+      status: 'open',
+      createdAt: now,
+      ...(from.files?.length ? { files: [...from.files] } : {})
+    }
+    ;(await this.tasks(ws)).push(task)
+    await this.save(ws)
+    this.events({ kind: 'taskDone', workspaceId: ws.id, agentId: fromId, agentName: from.agentName, title: from.title })
+    this.events({ kind: 'taskStarted', workspaceId: ws.id, agentId: to.id, agentName: to.name, title: task.title, scope: task.scope })
     return task
   }
 

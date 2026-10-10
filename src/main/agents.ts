@@ -8,6 +8,9 @@ import {
   agentMessage,
   checkCreateInput,
   firstTaskOpening,
+  handoffBody,
+  handoffMessage,
+  handoffOpening,
   isCliKind,
   MESSAGE_MAX,
   parsePermission,
@@ -121,7 +124,7 @@ export class AgentService {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(IPC.agentRequests, list)
   })
   /** Việc đầu tiên agent khác giao cho agent mới tạo (agent_create): thành lời mở của phiên mới đầu tiên. */
-  private firstTasks = new Map<string, { from: string; task: string; created: boolean }>()
+  private firstTasks = new Map<string, { from: string; task: string; created: boolean; handoff?: boolean }>()
   /** Tin nhắn giữa agent (agent_send) chờ gõ vào terminal của agent nhận. */
   private mail = new AgentMail()
   private handoffTimer: NodeJS.Timeout | null = null
@@ -287,7 +290,9 @@ export class AgentService {
       AGENT_NOTE: agentNote,
       RECALL: structured ? `read ${join(ws.vaultPath, '_INDEX.md')}` : 'find and read the related notes in the vault',
       OPENING: first
-        ? firstTaskOpening(first.from, first.task, first.created)
+        ? first.handoff
+          ? handoffOpening(first.from, first.task)
+          : firstTaskOpening(first.from, first.task, first.created)
         : handoff
           ? `This session continues from your previous session, which handed off because its context was getting full. Read the Handoff section of your session file${open ? ` — your task "${open.title}" (scope: ${open.scope}) is still open, do not call task_start again` : ''}. Tell the user in one sentence that you are continuing from the handoff, then continue the work right away without waiting for an answer.`
           : open
@@ -704,6 +709,7 @@ export class AgentService {
         open: (input) => this.apiOpen(agent, ws, input),
         stop: (input) => this.apiStop(agent, ws, input),
         send: (input) => this.apiSend(agent, ws, input),
+        handoff: (input) => this.apiHandoff(agent, ws, input),
         remove: (input) => this.apiDelete(agent, ws, input)
       },
       // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi; phiên mở sau đó không thấy tool.
@@ -743,7 +749,8 @@ export class AgentService {
           effort: m?.effort || null,
           permissionMode: a.permissionMode,
           running: this.running.has(a.id),
-          activity: kind === 'terminal' ? null : (this.board.statusOf(a.id)?.activity ?? null)
+          activity: kind === 'terminal' ? null : (this.board.statusOf(a.id)?.activity ?? null),
+          context: this.contextOf(a.id)
         }
       })
   }
@@ -1017,6 +1024,60 @@ export class AgentService {
       : `Delivered: typed into the session of "${target.name}". It will answer in its own cell; it can reply to you with agent_send.`
   }
 
+  /** % context phiên đang chạy của agent đã dùng (làm tròn), null = không biết / không chạy. */
+  private contextOf(agentId: string): number | null {
+    if (!this.running.has(agentId)) return null
+    const pct = contextPercent(this.board.statusOf(agentId)?.context)
+    return pct == null ? null : Math.round(pct)
+  }
+
+  /**
+   * Tool agent_handoff: agent đang gọi giao việc của mình cho agent khác. Kiểm tra hết trước khi đổi gì; rồi chuyển thẻ
+   * việc (+ vùng khoá) sang agent nhận và đưa bản bàn giao: đang chạy → hàng chờ tin như agent_send, chưa chạy → mở
+   * phiên mới với bản bàn giao làm lời mở (như agent_open, cần quyền nhóm `manage`).
+   */
+  private async apiHandoff(caller: Agent, ws: Workspace, input: { name: string; summary: string; title?: string }): Promise<string> {
+    const target = this.byName(ws, input.name)
+    if (target.id === caller.id) throw new Error('That is you.')
+    if (agentKind(target) === 'terminal') throw new Error(`"${target.name}" is a plain terminal, not an AI agent; it cannot take over work.`)
+    const summary = input.summary.trim()
+    if (!summary) throw new Error('summary is empty.')
+    if (summary.length > TASK_MAX) throw new Error(`summary is too long (max ${TASK_MAX} characters).`)
+    const run = this.running.get(target.id)
+    const now = Date.now()
+    if (run) {
+      const problem = this.mail.check(target.id, caller.id, now)
+      if (problem) throw new Error(problem)
+    } else if (!resolveAgentApi(this.settings.get(), ws.id, caller.id).manage) {
+      throw new Error(`"${target.name}" is not running, and opening agents is turned off for you (Settings → Agent API). Tell the user to open it, then try again.`)
+    }
+    const busy = await this.board.openTask(ws, target.id)
+    if (busy)
+      throw new Error(
+        `"${target.name}" still has an open task "${busy.title}" (scope: ${busy.scope || 'not set'}). Nothing was handed off. Tell the user; ${target.name} can finish it with task_done first, or use agent_send for a small request.`
+      )
+
+    const card = await this.board.transferTask(ws, caller.id, target, run?.sessionId ?? '', summary, input.title)
+    const body = handoffBody(caller.name, summary, card)
+    if (run) {
+      if (card && run.sessionFile) await this.writeSessionFile(run.sessionFile, run.vars, card).catch(() => {})
+      this.mail.enqueue(target.id, { fromId: caller.id, fromName: caller.name, text: body, at: now, handoff: true })
+      this.deliverMail()
+    } else {
+      this.firstTasks.set(target.id, { from: caller.name, task: body, created: false, handoff: true })
+      this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
+    }
+    const moved = card
+      ? `Your task is closed and its card "${card.title}" (scope: ${card.scope || 'not set'}) now belongs to "${target.name}".`
+      : 'You had no open task, so no card moved.'
+    const how = run
+      ? this.mail.pending(target.id)
+        ? `Your handoff is queued and will be typed into the session of "${target.name}" when it is idle.`
+        : `Your handoff was typed into the session of "${target.name}".`
+      : `"${target.name}" was not running: a new session is opening next to your cell, starting from your handoff (if the user is looking at another workspace, it starts when they open this one).`
+    return `${moved} ${how} Stop working on this task now; tell the user in one sentence.`
+  }
+
   private async apiDelete(caller: Agent, ws: Workspace, input: { name: string }): Promise<string> {
     const target = this.byName(ws, input.name)
     if (target.id === caller.id) throw new Error('You cannot delete yourself.')
@@ -1037,7 +1098,7 @@ export class AgentService {
       if (!run || !agent) continue
       const item = this.mail.next(id, mailReady(this.board.statusOf(id), this.ptys.lastInputAt(run.ptyId), now), now)
       if (!item) continue
-      const msg = agentMessage(item.fromName, item.text)
+      const msg = item.handoff ? handoffMessage(item.fromName, item.text) : agentMessage(item.fromName, item.text)
       // Claude Code / Codex bật bracketed paste: dán cả khối (nhiều dòng không bị gửi giữa chừng), Enter gửi riêng.
       this.ptys.write(run.ptyId, isCliKind(agentKind(agent)) ? `\x1b[200~${msg}\x1b[201~` : msg.replace(/\s*\r?\n\s*/g, ' '), false)
       setTimeout(() => {

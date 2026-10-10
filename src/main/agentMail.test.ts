@@ -50,3 +50,14 @@ describe('AgentMail', () => {
     expect(m.pending('b')).toBe(0)
   })
 })
+
+describe('AgentMail.check', () => {
+  it('báo lỗi trước khi gửi mà không ghi nhận gì', () => {
+    const m = new AgentMail()
+    expect(m.check('b', 'a', T)).toBeNull()
+    for (let i = 0; i < MAIL_PER_MINUTE; i++) m.enqueue('c' + i, item('a'))
+    expect(m.check('b', 'a', T)).toMatch(/in the last minute/)
+    expect(m.check('b', 'a', T + 61_000)).toBeNull()
+    expect(m.pending('b')).toBe(0)
+  })
+})

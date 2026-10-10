@@ -16,7 +16,7 @@ const ITEMS: Array<{ key: keyof AgentApiSettings; label: string; desc: string }>
   {
     key: 'message',
     label: 'Cho agent nhắn agent khác',
-    desc: 'agent_send: app gõ tin vào ô của agent nhận khi nó rảnh và bạn không đang gõ ở đó; tin ghi rõ là từ agent, không phải từ bạn. Có giới hạn số tin để hai agent không nhắn qua lại mãi.'
+    desc: 'agent_send: app gõ tin vào ô của agent nhận khi nó rảnh và bạn không đang gõ ở đó; tin ghi rõ là từ agent, không phải từ bạn. Có giới hạn số tin để hai agent không nhắn qua lại mãi. Gồm cả agent_handoff: giao việc đang làm cho agent khác (thẻ việc + phạm vi chuyển sang agent nhận, bản bàn giao gõ vào ô của nó; agent nhận chưa chạy thì mở phiên mới, việc này cần thêm quyền quản lý agent).'
   },
   {
     key: 'confirmCreate',

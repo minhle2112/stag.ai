@@ -7,6 +7,8 @@ export interface MailItem {
   fromName: string
   text: string
   at: number
+  /** Bàn giao (agent_handoff): `text` là nội dung bàn giao, gõ theo mẫu handoffMessage thay cho agentMessage. */
+  handoff?: boolean
 }
 
 /** Mỗi agent nhận giữ tối đa chừng này tin chưa gõ. */
@@ -33,13 +35,20 @@ export class AgentMail {
   private sent = new Map<string, number[]>()
   private quietUntil = new Map<string, number>()
 
-  /** Thêm tin; vượt giới hạn thì ném lỗi (tiếng Anh, agent gửi đọc). Trả về số tin đang chờ của agent nhận. */
+  /** Lỗi nếu tin này vượt giới hạn (tiếng Anh, agent gửi đọc), null = gửi được. Không ghi nhận gì. */
+  check(targetId: string, fromId: string, at: number): string | null {
+    const recent = (this.sent.get(fromId) ?? []).filter((t) => at - t < 60_000)
+    if (recent.length >= MAIL_PER_MINUTE) return `You sent ${MAIL_PER_MINUTE} messages in the last minute. Wait, and avoid back-and-forth chatter between agents.`
+    if ((this.queues.get(targetId)?.length ?? 0) >= MAIL_QUEUE_MAX) return `That agent already has ${MAIL_QUEUE_MAX} undelivered messages. Wait until it has read them.`
+    return null
+  }
+
+  /** Thêm tin; vượt giới hạn thì ném lỗi (xem check). Trả về số tin đang chờ của agent nhận. */
   enqueue(targetId: string, item: MailItem): number {
+    const problem = this.check(targetId, item.fromId, item.at)
+    if (problem) throw new Error(problem)
     const recent = (this.sent.get(item.fromId) ?? []).filter((t) => item.at - t < 60_000)
-    if (recent.length >= MAIL_PER_MINUTE)
-      throw new Error(`You sent ${MAIL_PER_MINUTE} messages in the last minute. Wait, and avoid back-and-forth chatter between agents.`)
     const q = this.queues.get(targetId) ?? []
-    if (q.length >= MAIL_QUEUE_MAX) throw new Error(`That agent already has ${MAIL_QUEUE_MAX} undelivered messages. Wait until it has read them.`)
     this.sent.set(item.fromId, [...recent, item.at])
     q.push(item)
     this.queues.set(targetId, q)

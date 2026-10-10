@@ -66,7 +66,7 @@ describe('tool trình duyệt theo Cài đặt', () => {
 describe('tool agent_list / adapter_models (Agent API A1)', () => {
   const team: TeamApi = {
     agents: () => [
-      { id: 'a1', name: 'Agent 1', role: 'Lead', kind: 'claude', kindLabel: 'Claude Code', model: 'opus', effort: 'high', permissionMode: 'default', running: true, activity: 'working' },
+      { id: 'a1', name: 'Agent 1', role: 'Lead', kind: 'claude', kindLabel: 'Claude Code', model: 'opus', effort: 'high', permissionMode: 'default', running: true, activity: 'working', context: 42 },
       { id: 'a2', name: 'Tester', role: '', kind: 'codex', kindLabel: 'Codex', model: '', effort: null, permissionMode: 'acceptEdits', running: false, activity: null },
       { id: 'a3', name: 'Shell', role: '', kind: 'terminal', kindLabel: 'Terminal', model: null, effort: null, permissionMode: 'default', running: true, activity: null }
     ],
@@ -86,9 +86,14 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
       if (i.name === 'Shell') throw new Error('plain terminal')
       return `send ${i.name}: ${i.text}`
     }),
+    handoff: vi.fn(async (i: { name: string; summary: string }) => {
+      if (i.name === 'Busy') throw new Error('"Busy" still has an open task')
+      return `handoff ${i.name}`
+    }),
     remove: vi.fn(async (i: { name: string }) => `remove ${i.name}`)
   }
 
+  const sync = vi.fn(async () => {})
   async function client(withTeam: boolean, agentApi?: { manage: boolean; message: boolean }): Promise<Client> {
     const server = createStagMcp({
       agentApi,
@@ -97,7 +102,7 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
       board: {} as Board,
       browser: {} as BrowserService,
       teammates: () => [],
-      syncSessionFile: async () => {},
+      syncSessionFile: sync,
       handoff: async () => {},
       ...(withTeam ? { team } : {})
     })
@@ -113,7 +118,7 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     expect(await names(c)).toEqual(expect.arrayContaining(['agent_list', 'adapter_models']))
     const t = text(await c.callTool({ name: 'agent_list', arguments: {} }))
     expect(t).toContain('3 agent(s)')
-    expect(t).toContain('- Agent 1 (you) — role: Lead — Claude Code [kind: claude], model opus, effort high, permission: default — session running (working)')
+    expect(t).toContain('- Agent 1 (you) — role: Lead — Claude Code [kind: claude], model opus, effort high, permission: default — session running (working, context 42% full)')
     expect(t).toContain('- Tester — Codex [kind: codex], model default (CLI config), permission: acceptEdits — session stopped')
     expect(t).toContain('- Shell — plain terminal — session running')
   })
@@ -172,6 +177,22 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     expect(await names(m)).not.toContain('agent_send')
     const sent = await m.callTool({ name: 'agent_send', arguments: { name: 'Tester', text: 'hi' } })
     expect(text(sent)).toBe(AGENT_API_OFF.message)
+  })
+
+  it('agent_handoff: chuyển tham số, ghi lại file phiên; lỗi thì không; thuộc nhóm message', async () => {
+    const c = await client(true)
+    sync.mockClear()
+    const r = await c.callTool({ name: 'agent_handoff', arguments: { name: 'Tester', summary: 'Done: x. Left: y (src/a.ts:12).', title: 'Viết test' } })
+    expect(r.isError).toBeFalsy()
+    expect(text(r)).toBe('handoff Tester')
+    expect(team.handoff).toHaveBeenCalledWith({ name: 'Tester', summary: 'Done: x. Left: y (src/a.ts:12).', title: 'Viết test' })
+    expect(sync).toHaveBeenCalledTimes(1)
+    const busy = await c.callTool({ name: 'agent_handoff', arguments: { name: 'Busy', summary: 's' } })
+    expect(busy.isError).toBe(true)
+    expect(sync).toHaveBeenCalledTimes(1)
+    const off = await client(true, { manage: true, message: false })
+    expect(await names(off)).not.toContain('agent_handoff')
+    expect(text(await off.callTool({ name: 'agent_handoff', arguments: { name: 'Tester', summary: 's' } }))).toBe(AGENT_API_OFF.message)
   })
 
   it('không có team API → lỗi rõ ràng', async () => {

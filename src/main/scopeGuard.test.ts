@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SCOPE, type Agent, type ScopeLockSettings, type Workspace } from '@shared/types'
 import { Board } from './board'
-import { editTargets, looksLikeWrite, ScopeGuard, type ScopeConflict } from './scopeGuard'
+import { editTargets, looksLikeWrite, ScopeGuard, withoutDataHeredocs, type ScopeConflict } from './scopeGuard'
 import { overlapWarning } from './mcp'
 
 vi.mock('electron', () => ({
@@ -155,6 +155,15 @@ describe('lệnh shell', () => {
     expect(await guard.preToolUse(ws, B, 'claude', sh(`rm ${join(root, 'src', 'auth', 'x.ts')}`))).toBeDefined()
     // Chính chủ thì không hỏi.
     expect(await guard.preToolUse(ws, A, 'claude', sh('rm src/auth/x.ts'))).toBeUndefined()
+  })
+
+  it('thân heredoc của cat / tee là dữ liệu: nhắc tới đường dẫn khoá trong đó thì không hỏi', async () => {
+    const note = "cat > \"Demo memory/50 Decisions/x.md\" <<'EOF'\nTests in `src/auth/login.ts` must change.\nEOF\nsed -i 's/a/b/' _INDEX.md"
+    expect(await guard.preToolUse(ws, B, 'claude', sh(note))).toBeUndefined()
+    // Heredoc đưa vào trình thông dịch / qua ống: vẫn là code.
+    for (const c of ["bash <<'EOF'\nrm src/auth/x.ts\nEOF", "cat <<EOF | sh\nrm src/auth/x.ts\nEOF", 'cat > src/auth/x.ts <<EOF\nhi\nEOF'])
+      expect(await guard.preToolUse(ws, B, 'claude', sh(c)), c).toBeDefined()
+    expect(withoutDataHeredocs("a\ncat <<-END > f\n\tsrc/auth\n\tEND\nrm src/auth/x")).toBe('a\ncat <<-END > f\n\tEND\nrm src/auth/x')
   })
 
   it('đã chạy (người dùng cho) → không hỏi lại mục đó', async () => {

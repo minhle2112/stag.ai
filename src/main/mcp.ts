@@ -48,6 +48,8 @@ export interface AgentInfo {
   running: boolean
   /** Trạng thái phiên (starting / working / waiting…), null = không biết. */
   activity: string | null
+  /** Phần cửa sổ context phiên đang chạy đã dùng (0–100), null = không biết. */
+  context?: number | null
 }
 
 /** Một loại agent tạo được (adapter có sẵn hoặc adapter ngoài đã cài). */
@@ -74,6 +76,7 @@ export interface TeamApi {
   open(input: { name: string; task?: string }): Promise<string>
   stop(input: { name: string }): Promise<string>
   send(input: { name: string; text: string }): Promise<string>
+  handoff(input: { name: string; summary: string; title?: string }): Promise<string>
   remove(input: { name: string }): Promise<string>
 }
 
@@ -301,7 +304,8 @@ export function describeAgent(a: AgentInfo, selfId: string): string {
   const who = `${a.name}${a.id === selfId ? ' (you)' : ''}`
   const role = a.role ? ` — role: ${a.role}` : ''
   const kind = a.kind === 'terminal' ? 'plain terminal' : `${a.kindLabel} [kind: ${a.kind}], ${modelText(a.model, a.effort)}, permission: ${a.permissionMode}`
-  const session = a.running ? `session running${a.activity ? ` (${a.activity})` : ''}` : 'session stopped'
+  const state = [a.activity, a.context != null ? `context ${a.context}% full` : ''].filter(Boolean).join(', ')
+  const session = a.running ? `session running${state ? ` (${state})` : ''}` : 'session stopped'
   return `- ${who}${role} — ${kind} — ${session}`
 }
 
@@ -463,6 +467,33 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
       }
     },
     call('message', (team, args: { name: string; text: string }) => team.send(args))
+  ))
+
+  message.push(server.registerTool(
+    'agent_handoff',
+    {
+      title: 'Hand work over to agent',
+      description:
+        'Hand your current work over to another agent when the user asks (e.g. "give this to Tester to continue"). stag.ai closes your open task, moves its kanban card + scope (the locked files) to that agent, and gives it your summary: ' +
+        'typed into its session when it is idle if it is running, otherwise a new session is opened for it next to your cell, starting from the summary. Fails if that agent still has an open task of its own. ' +
+        'The summary is all the other agent gets (it cannot read your session), so make it self-contained but short. If its session has a long context (agent_list shows "context N% full") and the user agrees, agent_stop it first so it starts fresh. After this call, stop working on that task.',
+      inputSchema: {
+        name: nameArg,
+        summary: z
+          .string()
+          .min(1)
+          .max(4000)
+          .describe(
+            'Handoff for the other agent, in English, short and structured: goal; done; left (the exact next step); files as path:line pointers (no file contents); decisions / gotchas. Only agents read it.'
+          ),
+        title: z.string().max(120).optional().describe('New title for the moved task card (default: keep your task title)')
+      }
+    },
+    async (args: { name: string; summary: string; title?: string }) => {
+      const r = await call('message', (team, a: typeof args) => team.handoff(a))(args)
+      if (!r.isError) await ctx.syncSessionFile().catch(() => {})
+      return r
+    }
   ))
 
   manage.push(server.registerTool(
