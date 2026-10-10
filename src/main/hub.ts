@@ -70,7 +70,10 @@ export class StatusHub {
     return {
       type: 'http',
       url: `http://127.0.0.1:${this.port}/mcp`,
-      headers: { Authorization: 'Bearer ${STAG_TOKEN}', 'X-Stag-Agent': '${STAG_AGENT_ID}' }
+      headers: { Authorization: 'Bearer ${STAG_TOKEN}', 'X-Stag-Agent': '${STAG_AGENT_ID}' },
+      // Claude Code (2.1.29x) chỉ chờ một yêu cầu HTTP MCP 60 s khi không đặt `timeout` (ms); agent_create chờ người
+      // dùng xác nhận tới AGENT_REQUEST_MS (280 s, xem agentRequests.ts).
+      timeout: 330_000
     }
   }
 

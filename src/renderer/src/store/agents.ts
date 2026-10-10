@@ -75,6 +75,19 @@ export const useAgents = create<AgentsState>((set, get) => {
       void get().start(wsId, agentId, false)
     }
   })
+  // Agent khác vừa tạo agent này (Agent API, người dùng đã xác nhận): thêm vào danh sách, đặt ô cạnh ô của agent đã
+  // tạo nó và tự mở phiên (như tạo từ hộp thoại). Workspace chưa tải thì tải trước (snapshot đã có agent mới).
+  window.stag.agent.onCreated(async ({ agent, nearAgentId, open }) => {
+    const wsId = agent.workspaceId
+    if (!get().byWs[wsId]) await get().load(wsId)
+    const w = get().byWs[wsId]
+    if (!w) return
+    const agents = w.agents.some((a) => a.id === agent.id) ? w.agents : [...w.agents, agent]
+    if (!open || leaves(w.layout).includes(agent.id)) return patch(wsId, () => ({ agents }))
+    const layout = insertLeaf(w.layout, nearAgentId, agent.id, 'row')
+    patch(wsId, (cur) => ({ agents, layout, autoStart: { ...cur.autoStart, [agent.id]: true } }))
+    window.stag.agent.saveLayout(wsId, layout)
+  })
   onAgentExit((agentId) => {
     for (const [wsId, w] of Object.entries(get().byWs)) {
       if (w.running[agentId]) {

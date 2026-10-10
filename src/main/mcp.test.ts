@@ -5,6 +5,7 @@ import { BROWSER_TOOLS_OFF } from '@shared/browser'
 import type { Agent, Workspace } from '@shared/types'
 import type { BrowserService } from './browser'
 import type { Board } from './board'
+import type { AgentCreateInput } from '@shared/agentApi'
 import { createStagMcp, type TeamApi } from './mcp'
 
 // browser.ts dùng Electron; test chỉ cần danh sách phím.
@@ -73,7 +74,11 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
       { kind: 'claude', label: 'Claude Code', available: true, detail: '2.1.300, logged in', defaultModel: 'opus', defaultEffort: 'high', models: [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'] }] },
       { kind: 'codex', label: 'Codex', available: false, detail: 'Không tìm thấy codex', defaultModel: '', defaultEffort: null, models: [] },
       { kind: 'terminal', label: 'Terminal', available: true, detail: '', defaultModel: null, defaultEffort: null, models: [] }
-    ]
+    ],
+    create: vi.fn(async (input: AgentCreateInput) => {
+      if (input.name === 'Lead') throw new Error('An agent named "Lead" already exists')
+      return `Created agent "${input.name}"`
+    })
   }
 
   async function client(withTeam: boolean): Promise<Client> {
@@ -111,7 +116,19 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     expect(t).toContain('kind "terminal" — Terminal: available. No model choice.')
   })
 
-  it('không có team API → lỗi rõ ràng', async () => {
+  it('agent_create: chuyển nguyên tham số, lỗi kiểm tra thành isError', async () => {
+    const c = await client(true)
+    const input = { name: 'Tester', kind: 'codex', role: 'Viết test', model: 'gpt-5.6-terra', task: 'viết test cho src/x', open: true }
+    const r = await c.callTool({ name: 'agent_create', arguments: input })
+    expect(r.isError).toBeFalsy()
+    expect(text(r)).toBe('Created agent "Tester"')
+    expect(team.create).toHaveBeenCalledWith(input)
+    const dup = await c.callTool({ name: 'agent_create', arguments: { name: 'Lead', kind: 'claude' } })
+    expect(dup.isError).toBe(true)
+    expect(text(dup)).toContain('already exists')
+  })
+
+    it('không có team API → lỗi rõ ràng', async () => {
     const r = await (await client(false)).callTool({ name: 'agent_list', arguments: {} })
     expect(r.isError).toBe(true)
   })

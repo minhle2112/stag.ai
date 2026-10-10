@@ -59,6 +59,13 @@ export const IPC = {
   agentHandoff: 'agent:handoff',
   /** main → renderer: phiên cũ đã đóng sau khi bàn giao, mở phiên mới cho agent (kèm agentId). */
   agentRestart: 'agent:restart',
+  /** main → renderer: agent vừa được tạo qua Agent API (AgentCreatedEvent): thêm ô + mở phiên. */
+  agentCreated: 'agent:created',
+  /** main → renderer: danh sách yêu cầu của agent chờ người dùng xác nhận (AgentRequest[]). */
+  agentRequests: 'agent:requests',
+  agentRequestList: 'agent:request-list',
+  /** Người dùng xác nhận / từ chối một yêu cầu của agent (id, allow). */
+  agentRequestAnswer: 'agent:request-answer',
   /** Người dùng trả lời câu hỏi khoá phạm vi (agent Codex sửa file trong vùng của agent khác). */
   scopeAnswer: 'scope:answer',
   /** Lưu note người dùng sửa trong app (kèm nội dung gốc để phát hiện sửa chồng). */

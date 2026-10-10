@@ -91,7 +91,10 @@ export function codexArgs(o: CodexLaunch): string[] {
     '-c',
     'mcp_servers.stag.env_http_headers={"X-Stag-Agent"="STAG_AGENT_ID"}',
     '-c',
-    'mcp_servers.stag.default_tools_approval_mode="approve"'
+    'mcp_servers.stag.default_tools_approval_mode="approve"',
+    // Mặc định Codex chỉ chờ tool 60 s; agent_create chờ người dùng xác nhận trong app tới AGENT_REQUEST_MS (280 s).
+    '-c',
+    'mcp_servers.stag.tool_timeout_sec=330'
   )
   // Codex hạ thời hạn hook Interrupt xuống 3 giây (và hiện cảnh báo nếu đặt cao hơn).
   for (const ev of CODEX_HOOK_EVENTS) {

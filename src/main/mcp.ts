@@ -3,6 +3,7 @@ import * as z from 'zod'
 import { BROWSER_TOOLS_OFF } from '@shared/browser'
 import { DEFAULT_SCOPE, type Agent, type ScopeLockSettings, type Task, type Workspace } from '@shared/types'
 import { overlapsOf, scopeLocks, unlocked } from '@shared/scope'
+import type { AgentCreateInput } from '@shared/agentApi'
 import type { Board } from './board'
 import { BROWSER_KEYS, type BrowserService } from './browser'
 
@@ -65,6 +66,8 @@ export interface AdapterInfo {
 export interface TeamApi {
   agents(): AgentInfo[]
   adapters(): Promise<AdapterInfo[]>
+  /** Tạo agent sau khi người dùng xác nhận trong app; trả về câu trả lời cho agent. Lỗi kiểm tra thì ném ra. */
+  create(input: AgentCreateInput): Promise<string>
 }
 
 export interface ExtraTool {
@@ -337,6 +340,39 @@ function registerTeamTools(server: McpServer, ctx: McpContext): void {
       try {
         const list = await ctx.team.adapters()
         return ok(`Agent kinds in stag.ai:\n${list.map(describeAdapter).join('\n')}`)
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.registerTool(
+    'agent_create',
+    {
+      title: 'Create agent',
+      description:
+        'Create a new agent (or plain terminal cell) in this stag.ai workspace, only when the user asks you to (e.g. "create an agent named Tester using Codex model X to write tests"). ' +
+        'Call adapter_models first if the user names a model, and agent_list to avoid a name that already exists. ' +
+        'stag.ai shows the user a confirm card and this call waits for their answer (up to ~5 minutes). On approval the agent is created with its own vault memory note, its cell opens next to yours and its session starts; `task` becomes its first instruction.',
+      inputSchema: {
+        name: z.string().min(1).max(100).describe('Agent name (also its memory note file name), e.g. "Tester"'),
+        kind: z.string().min(1).describe('"claude" (Claude Code), "codex", "terminal" (plain shell, no AI) or "external:<adapter id>" — see adapter_models'),
+        role: z.string().max(300).optional().describe('Short role / responsibility in the conversation language, e.g. "Viết và chạy test cho backend"'),
+        model: z.string().max(100).optional().describe('Model id for claude / codex (from adapter_models). Omit = workspace default'),
+        effort: z.string().max(20).optional().describe('Reasoning effort for claude / codex, e.g. low, medium, high, xhigh, max. Omit = default'),
+        permission_mode: z.string().optional().describe('default | acceptEdits | auto | plan. Omit = the adapter default from Settings'),
+        task: z
+          .string()
+          .max(4000)
+          .optional()
+          .describe('First task for the new agent, in the conversation language, with enough context to start (files, goal, constraints). Omit = it greets the user and waits'),
+        open: z.boolean().optional().describe('Open its cell and start its session now (default true)')
+      }
+    },
+    async (input: AgentCreateInput) => {
+      if (!ctx.team) return noApi()
+      try {
+        return ok(await ctx.team.create(input))
       } catch (e) {
         return fail(e)
       }

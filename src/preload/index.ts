@@ -2,6 +2,7 @@ import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJ
 import type { VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
+import type { AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
 import type {
   Agent,
   AgentRun,
@@ -105,6 +106,20 @@ const api = {
       const fn = (_e: IpcRendererEvent, agentId: string): void => cb(agentId)
       ipcRenderer.on(IPC.agentRestart, fn)
       return () => ipcRenderer.removeListener(IPC.agentRestart, fn)
+    },
+    /** Agent khác vừa tạo agent này qua Agent API: thêm ô + mở phiên. */
+    onCreated(cb: (e: AgentCreatedEvent) => void): () => void {
+      const fn = (_e: IpcRendererEvent, ev: AgentCreatedEvent): void => cb(ev)
+      ipcRenderer.on(IPC.agentCreated, fn)
+      return () => ipcRenderer.removeListener(IPC.agentCreated, fn)
+    },
+    /** Yêu cầu của agent chờ bạn xác nhận (vd. tạo agent mới). */
+    requests: (): Promise<AgentRequest[]> => ipcRenderer.invoke(IPC.agentRequestList),
+    answerRequest: (id: string, allow: boolean): Promise<void> => ipcRenderer.invoke(IPC.agentRequestAnswer, id, allow),
+    onRequests(cb: (list: AgentRequest[]) => void): () => void {
+      const fn = (_e: IpcRendererEvent, list: AgentRequest[]): void => cb(list)
+      ipcRenderer.on(IPC.agentRequests, fn)
+      return () => ipcRenderer.removeListener(IPC.agentRequests, fn)
     }
   },
   settings: {

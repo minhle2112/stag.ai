@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { app, shell, type WebContents } from 'electron'
+import { app, BrowserWindow, shell, type WebContents } from 'electron'
 import { IPC } from '@shared/ipc'
+import { checkCreateInput, firstTaskOpening, isCliKind, type AgentCreateDraft, type AgentCreatedEvent, type AgentCreateInput } from '@shared/agentApi'
 import {
   type Agent,
   type AgentRun,
@@ -28,6 +29,7 @@ import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
+import { AgentRequestQueue } from './agentRequests'
 import { createStagMcp, type AdapterInfo, type AgentInfo, type ExtraTool } from './mcp'
 import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
@@ -94,6 +96,12 @@ export class AgentService {
   private running = new Map<string, Running>()
 
   private hub: StatusHub | null = null
+  /** Yêu cầu của agent chờ người dùng xác nhận (Agent API: agent_create…); renderer nhận qua IPC.agentRequests. */
+  readonly requests = new AgentRequestQueue((list) => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(IPC.agentRequests, list)
+  })
+  /** Việc đầu tiên agent khác giao cho agent mới tạo (agent_create): thành lời mở của phiên mới đầu tiên. */
+  private firstTasks = new Map<string, { from: string; task: string }>()
   private handoffTimer: NodeJS.Timeout | null = null
   private guard: ScopeGuard
 
@@ -227,6 +235,7 @@ export class AgentService {
     const open = await this.board.openTask(ws, agent.id)
     // Phiên trước đã bàn giao: phiên mới (không phải tiếp tục phiên cũ) làm tiếp từ bản bàn giao.
     const handoff = resume ? undefined : this.data.handoffs?.[agent.id]
+    const first = resume || handoff ? undefined : this.firstTasks.get(agent.id)
     // Claude Code: id phiên của app = id phiên Claude (đặt trước được). Codex tự sinh thread id (biết qua
     // hook SessionStart, lưu vào lastSessionId để resume), nên phiên của app luôn có id riêng.
     const sessionId = resume && kind === 'claude' ? agent.lastSessionId! : randomUUID()
@@ -252,11 +261,13 @@ export class AgentService {
       SESSION_FILE: sessionFile,
       AGENT_NOTE: agentNote,
       RECALL: structured ? `read ${join(ws.vaultPath, '_INDEX.md')}` : 'find and read the related notes in the vault',
-      OPENING: handoff
-        ? `This session continues from your previous session, which handed off because its context was getting full. Read the Handoff section of your session file${open ? ` — your task "${open.title}" (scope: ${open.scope}) is still open, do not call task_start again` : ''}. Tell the user in one sentence that you are continuing from the handoff, then continue the work right away without waiting for an answer.`
-        : open
-          ? `You have unfinished work: "${open.title}" (scope: ${open.scope}). Greet briefly, mention it and ask the user whether to continue. If continuing, no need to call task_start again; if not, call task_done with a summary of what was done, then ask what they want help with in this workspace.`
-          : 'Greet briefly and ask the user what they want you to help with in this workspace. Do nothing else until the user answers.',
+      OPENING: first
+        ? firstTaskOpening(first.from, first.task)
+        : handoff
+          ? `This session continues from your previous session, which handed off because its context was getting full. Read the Handoff section of your session file${open ? ` — your task "${open.title}" (scope: ${open.scope}) is still open, do not call task_start again` : ''}. Tell the user in one sentence that you are continuing from the handoff, then continue the work right away without waiting for an answer.`
+          : open
+            ? `You have unfinished work: "${open.title}" (scope: ${open.scope}). Greet briefly, mention it and ask the user whether to continue. If continuing, no need to call task_start again; if not, call task_done with a summary of what was done, then ask what they want help with in this workspace.`
+            : 'Greet briefly and ask the user what they want you to help with in this workspace. Do nothing else until the user answers.',
       PREVIOUS_HANDOFF: handoff ? `From session ${handoff.fromSessionId} (${handoff.at}):\n\n${handoff.summary}` : '',
       USER_LANGUAGE: userLanguage(),
       DATE: today(),
@@ -376,6 +387,7 @@ export class AgentService {
       rolloutKnown: kind === 'codex' ? !transcriptFile!.endsWith('.rollout-pending') : undefined
     }
     this.running.set(agent.id, run)
+    if (first) this.firstTasks.delete(agent.id)
     // Phiên mới: chờ hook đầu tiên (lời mở đầu). Tiếp tục phiên: Claude Code đứng chờ người dùng gõ.
     if (resume) this.board.setActivity(agent, 'waiting', { reason: 'turn' })
     else this.board.setActivity(agent, 'starting')
@@ -419,6 +431,7 @@ export class AgentService {
     if (!run || run.ptyId !== ptyId) return
     this.running.delete(agentId)
     this.hub?.revokeToken(run.token)
+    this.requests.cancelAgent(agentId)
     this.guard.endSession(agentId)
     this.approvals.cancelAgent(agentId)
     run.transcript?.stop()
@@ -657,7 +670,7 @@ export class AgentService {
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
       handoff: (summary) => this.completeHandoff(agent.id, summary),
       extraTools: this.pluginHooks.tools?.(agent, ws) ?? [],
-      team: { agents: () => this.teamInfo(ws), adapters: () => this.adapterInfo(ws) },
+      team: { agents: () => this.teamInfo(ws), adapters: () => this.adapterInfo(ws), create: (input) => this.apiCreate(agent, ws, input) },
       // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi; phiên mở sau đó không thấy tool.
       browserTools: browserToolsOn(this.settings.get(), ws.id, agent.id),
       syncSessionFile: async () => {
@@ -742,6 +755,66 @@ export class AgentService {
       })
     )
     return [...cli, terminal, ...ext]
+  }
+
+  /**
+   * Tool agent_create: agent xin tạo agent mới thay người dùng. Kiểm tra trước (để người dùng không duyệt một yêu cầu
+   * hỏng), hỏi người dùng trong app, tạo, đặt model / effort, rồi nhờ giao diện thêm ô cạnh ô của agent đã xin và mở phiên.
+   * Việc đầu tiên (nếu có) thành lời mở của phiên đầu tiên của agent mới. Trả về câu trả lời cho agent (tiếng Anh).
+   */
+  private async apiCreate(caller: Agent, ws: Workspace, input: AgentCreateInput): Promise<string> {
+    const run = this.running.get(caller.id)
+    if (!run) throw new Error('Your session is not running in stag.ai.')
+    const s = this.settings.get()
+    const checked = checkCreateInput(input, (k) => s.app.adapters[k].defaultPermission)
+    if ('error' in checked) throw new Error(checked.error)
+    const d = checked.draft
+    const nameProblem = agentNameProblem(d.name)
+    if (nameProblem) throw new Error(`Invalid name: ${nameProblem}`)
+    if (this.data.agents.some((a) => a.workspaceId === ws.id && sameAgentName(a.name, d.name)))
+      throw new Error(`An agent named "${d.name}" already exists in this workspace (see agent_list). Pick another name.`)
+    let kindLabel = d.kind === 'terminal' ? 'Terminal' : ''
+    if (isCliKind(d.kind)) {
+      kindLabel = ADAPTER_LABEL[d.kind]
+      await this.adapters.exe(d.kind).catch((e: Error) => {
+        throw new Error(`${kindLabel} is not available on this machine: ${e.message}`)
+      })
+    } else if (d.kind === 'external') {
+      const ext = this.external.get(d.adapterId ?? '')
+      if (!ext) throw new Error(`No external adapter "${d.adapterId}" is installed (see adapter_models).`)
+      kindLabel = ext.manifest.label
+    }
+    const draft: AgentCreateDraft = { ...d, kindLabel }
+
+    this.board.setActivity(caller, 'waiting', { reason: 'permission', tool: 'agent_create' })
+    const answer = await this.requests.ask({ workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'create', create: draft })
+    if (this.running.get(caller.id) === run) this.board.setActivity(caller, 'working', { tool: 'agent_create' })
+    if (answer === 'deny') return `The user declined creating agent "${draft.name}". Do not retry; ask the user what they want instead.`
+    if (answer === 'timeout') return `Nobody confirmed creating agent "${draft.name}" in stag.ai in time. Tell the user to look at the confirm card, or try again when they are ready.`
+
+    const agent = await this.create({
+      workspaceId: ws.id,
+      kind: draft.kind,
+      adapterId: draft.adapterId,
+      name: draft.name,
+      role: draft.role,
+      permissionMode: draft.permissionMode
+    })
+    if (isCliKind(draft.kind) && (draft.model || draft.effort)) {
+      const one = { ...(draft.model ? { model: draft.model } : {}), ...(draft.effort ? { effort: draft.effort } : {}) }
+      await this.settings.setOverrides('agent', agent.id, { models: { [draft.kind]: one } })
+    }
+    if (draft.task) this.firstTasks.set(agent.id, { from: caller.name, task: draft.task })
+    const event: AgentCreatedEvent = { agent, nearAgentId: caller.id, open: draft.open }
+    if (!run.owner.isDestroyed()) run.owner.send(IPC.agentCreated, event)
+
+    const m = isCliKind(draft.kind) ? this.settings.modelFor(draft.kind, agent) : null
+    const what = `${draft.kindLabel}${m ? `, model ${m.model || 'default (CLI config)'}${m.effort ? `, effort ${m.effort}` : ''}` : ''}, permission ${agent.permissionMode}`
+    const opened = draft.open
+      ? ' Its cell was added next to yours and its session starts now (if the user is looking at another workspace, it starts when they open this one).'
+      : ' Its cell is not open; the user (or agent_open later) can open it from the agent list.'
+    const task = draft.task ? ' It will start with the task you gave it.' : ''
+    return `Created agent "${agent.name}" (${what}).${opened}${task} Tell the user.`
   }
 
   stop(agentId: string): void {
