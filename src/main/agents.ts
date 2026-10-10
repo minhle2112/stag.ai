@@ -4,12 +4,14 @@ import { dirname, join } from 'node:path'
 import { app, BrowserWindow, shell, type WebContents } from 'electron'
 import { IPC } from '@shared/ipc'
 import {
+  agentApiRules,
   agentMessage,
   checkCreateInput,
   firstTaskOpening,
   isCliKind,
   MESSAGE_MAX,
   parsePermission,
+  permissionAbove,
   ROLE_MAX,
   TASK_MAX,
   type AgentApiEvent,
@@ -63,7 +65,7 @@ import { normalizeLayout } from './agentLayout'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { effectiveConnectors, toolPolicy } from '@shared/connectors'
 import { effectiveSkills } from '@shared/skills'
-import { MODEL_RE, resolveModel, resolveScope } from '@shared/settings'
+import { MODEL_RE, resolveAgentApi, resolveModel, resolveScope } from '@shared/settings'
 
 /** Bản bàn giao agent viết (tool session_handoff), chờ phiên sau đọc. */
 interface Handoff {
@@ -292,6 +294,7 @@ export class AgentService {
             ? `You have unfinished work: "${open.title}" (scope: ${open.scope}). Greet briefly, mention it and ask the user whether to continue. If continuing, no need to call task_start again; if not, call task_done with a summary of what was done, then ask what they want help with in this workspace.`
             : 'Greet briefly and ask the user what they want you to help with in this workspace. Do nothing else until the user answers.',
       PREVIOUS_HANDOFF: handoff ? `From session ${handoff.fromSessionId} (${handoff.at}):\n\n${handoff.summary}` : '',
+      AGENT_API: agentApiRules(resolveAgentApi(this.settings.get(), ws.id, agent.id)),
       USER_LANGUAGE: userLanguage(),
       DATE: today(),
       NOW: new Date().toISOString()
@@ -705,6 +708,7 @@ export class AgentService {
       },
       // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi; phiên mở sau đó không thấy tool.
       browserTools: browserToolsOn(this.settings.get(), ws.id, agent.id),
+      agentApi: resolveAgentApi(this.settings.get(), ws.id, agent.id),
       syncSessionFile: async () => {
         const cur = this.running.get(agent.id)
         if (!cur?.sessionFile) return
@@ -818,7 +822,11 @@ export class AgentService {
     }
     const draft: AgentCreateDraft = { ...d, kindLabel }
 
-    const answer = await this.confirm(caller, 'agent_create', { workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'create', create: draft })
+    // Cài đặt → Agent API tắt "hỏi trước khi tạo": vẫn hỏi nếu agent mới được quyền cao hơn agent đang xin.
+    const ask = resolveAgentApi(s, ws.id, caller.id).confirmCreate || (isCliKind(draft.kind) && permissionAbove(draft.permissionMode, caller.permissionMode))
+    const answer = ask
+      ? await this.confirm(caller, 'agent_create', { workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'create', create: draft })
+      : 'allow'
     if (answer === 'deny') return `The user declined creating agent "${draft.name}". Do not retry; ask the user what they want instead.`
     if (answer === 'timeout') return `Nobody confirmed creating agent "${draft.name}" in stag.ai in time. Tell the user to look at the confirm card, or try again when they are ready.`
 

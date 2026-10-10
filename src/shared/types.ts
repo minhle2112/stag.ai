@@ -450,6 +450,19 @@ export interface ConnectorsSettings {
   inherited: Record<string, boolean>
 }
 
+/**
+ * Agent điều khiển app thay bạn (Agent API: tool agent_* trong MCP stag). Ghi đè được theo workspace / agent.
+ * agent_list / adapter_models (chỉ đọc) luôn có.
+ */
+export interface AgentApiSettings {
+  /** Tạo / đổi / mở / dừng / xoá agent khác (agent_create, agent_update, agent_open, agent_stop, agent_delete). */
+  manage: boolean
+  /** Nhắn agent khác (agent_send). */
+  message: boolean
+  /** Hỏi bạn trước khi agent tạo agent mới. Tắt: vẫn hỏi nếu agent mới có quyền cao hơn agent tạo nó. */
+  confirmCreate: boolean
+}
+
 /** Cài đặt cấp app. */
 export interface AppSettings {
   general: GeneralSettings
@@ -459,6 +472,7 @@ export interface AppSettings {
   skills: SkillsSettings
   plugins: PluginsSettings
   scope: ScopeLockSettings
+  agentApi: AgentApiSettings
   browser: BrowserSettings
   voice: VoiceSettings
 }
@@ -489,6 +503,7 @@ export interface SettingsOverrides {
   plugins?: Record<string, boolean>
   /** Khoá phạm vi: workspace đổi được mode / guessShell và thêm exempt (cộng với app); agent chỉ đổi mode. */
   scope?: Partial<ScopeLockSettings>
+  agentApi?: Partial<AgentApiSettings>
   /** Trình duyệt: chỉ bật / tắt tool trình duyệt của agent. */
   browser?: { agentTools?: boolean }
 }
@@ -520,6 +535,7 @@ export interface AppSettingsPatch {
   /** Thay cả map bật / tắt plugin ở cấp app. */
   plugins?: { toggles: Record<string, boolean> }
   scope?: Partial<ScopeLockSettings>
+  agentApi?: Partial<AgentApiSettings>
   browser?: Partial<BrowserSettings>
   voice?: Partial<VoiceSettings>
 }
@@ -528,6 +544,7 @@ export type OverrideLevel = 'workspace' | 'agent'
 
 export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPercent: 80 }
 export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true, exempt: [] }
+export const DEFAULT_AGENT_API: AgentApiSettings = { manage: true, message: true, confirmCreate: true }
 export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
 export const VOICE_UNLOAD_MAX = 120
 export const DEFAULT_VOICE: VoiceSettings = { enabled: true, engine: 'local', hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true }
@@ -551,7 +568,7 @@ export const DEFAULT_ADAPTERS: AdaptersSettings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 2,
-  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, browser: DEFAULT_BROWSER, voice: DEFAULT_VOICE },
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, agentApi: DEFAULT_AGENT_API, browser: DEFAULT_BROWSER, voice: DEFAULT_VOICE },
   workspaces: {},
   agents: {}
 }

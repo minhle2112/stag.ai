@@ -24,6 +24,8 @@ export interface McpContext {
   handoff(summary: string): Promise<void>
   /** Tool của plugin (Cài đặt → Plugin) bật cho agent này; tên đã có tiền tố plugin. */
   extraTools?: ExtraTool[]
+  /** Cài đặt → Agent API thực tế của agent (đọc mỗi yêu cầu MCP); vắng = bật hết. */
+  agentApi?: { manage: boolean; message: boolean }
   /** Đọc agent / adapter của app (tool agent_list, adapter_models — Agent API A1). */
   team?: TeamApi
   /** false = Cài đặt → Trình duyệt tắt "Cho agent dùng trình duyệt" cho agent này: ẩn tool browser_*, gọi thì báo lỗi. */
@@ -99,6 +101,12 @@ type ToolResult = {
   content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>
   isError?: boolean
 }
+
+/** Lỗi khi gọi tool của nhóm đang tắt trong Cài đặt → Agent API. */
+export const AGENT_API_OFF = {
+  manage: 'Creating, changing, opening, stopping and deleting agents is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there.',
+  message: 'Messaging other agents is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there.'
+} as const
 
 const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
 const fail = (e: unknown): ToolResult => ({ content: [{ type: 'text', text: String((e as Error)?.message ?? e) }], isError: true })
@@ -246,7 +254,10 @@ export function createStagMcp(ctx: McpContext): McpServer {
     }
   )
 
-  registerTeamTools(server, ctx)
+  // Cài đặt → Agent API tắt nhóm nào: ẩn tool của nhóm đó, gọi thì báo lỗi (như tool trình duyệt).
+  const team = registerTeamTools(server, ctx)
+  if (ctx.agentApi?.manage === false) hideFromList(server, team.manage)
+  if (ctx.agentApi?.message === false) hideFromList(server, team.message)
 
   const browserTools = registerBrowserTools(server, ctx)
   if (ctx.browserTools === false) hideFromList(server, browserTools)
@@ -305,10 +316,26 @@ export function describeAdapter(a: AdapterInfo): string {
   return `${head}. ${def} ${models}`
 }
 
-/** Tool đọc agent / adapter của app (Agent API A1): agent biết trong workspace có ai, tạo được loại nào, model nào. */
-function registerTeamTools(server: McpServer, ctx: McpContext): void {
+/**
+ * Tool Agent API: đọc agent / adapter (luôn có), quản lý agent khác (nhóm `manage`), nhắn agent khác (nhóm `message`).
+ * Trả về tool của hai nhóm tắt được trong Cài đặt → Agent API.
+ */
+function registerTeamTools(server: McpServer, ctx: McpContext): { manage: RegisteredTool[]; message: RegisteredTool[] } {
   const { agent, workspace: ws } = ctx
   const noApi = (): ToolResult => fail('This stag.ai build does not expose the team API.')
+  const manage: RegisteredTool[] = []
+  const message: RegisteredTool[] = []
+  const call =
+    <A>(group: 'manage' | 'message', fn: (team: TeamApi, args: A) => Promise<string>) =>
+    async (args: A): Promise<ToolResult> => {
+      if (!ctx.team) return noApi()
+      if (ctx.agentApi?.[group] === false) return fail(AGENT_API_OFF[group])
+      try {
+        return ok(await fn(ctx.team, args))
+      } catch (e) {
+        return fail(e)
+      }
+    }
 
   server.registerTool(
     'agent_list',
@@ -351,7 +378,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): void {
     }
   )
 
-  server.registerTool(
+  manage.push(server.registerTool(
     'agent_create',
     {
       title: 'Create agent',
@@ -374,29 +401,12 @@ function registerTeamTools(server: McpServer, ctx: McpContext): void {
         open: z.boolean().optional().describe('Open its cell and start its session now (default true)')
       }
     },
-    async (input: AgentCreateInput) => {
-      if (!ctx.team) return noApi()
-      try {
-        return ok(await ctx.team.create(input))
-      } catch (e) {
-        return fail(e)
-      }
-    }
-  )
+    call('manage', (team, input: AgentCreateInput) => team.create(input))
+  ))
 
-  const call =
-    <A>(fn: (team: TeamApi, args: A) => Promise<string>) =>
-    async (args: A): Promise<ToolResult> => {
-      if (!ctx.team) return noApi()
-      try {
-        return ok(await fn(ctx.team, args))
-      } catch (e) {
-        return fail(e)
-      }
-    }
   const nameArg = z.string().min(1).max(100).describe('Name of the agent in this workspace (see agent_list)')
 
-  server.registerTool(
+  manage.push(server.registerTool(
     'agent_update',
     {
       title: 'Change agent',
@@ -412,10 +422,10 @@ function registerTeamTools(server: McpServer, ctx: McpContext): void {
         permission_mode: z.string().optional().describe('default | acceptEdits | auto | plan (asks the user)')
       }
     },
-    call((team, args: AgentUpdateInput) => team.update(args))
-  )
+    call('manage', (team, args: AgentUpdateInput) => team.update(args))
+  ))
 
-  server.registerTool(
+  manage.push(server.registerTool(
     'agent_open',
     {
       title: 'Open agent',
@@ -427,20 +437,20 @@ function registerTeamTools(server: McpServer, ctx: McpContext): void {
         task: z.string().max(4000).optional().describe('First task for its new session, in the conversation language, with enough context to start')
       }
     },
-    call((team, args: { name: string; task?: string }) => team.open(args))
-  )
+    call('manage', (team, args: { name: string; task?: string }) => team.open(args))
+  ))
 
-  server.registerTool(
+  manage.push(server.registerTool(
     'agent_stop',
     {
       title: 'Stop agent session',
       description: "Stop another agent's running session when the user asks (stag.ai asks the user to confirm). Its open task stays open.",
       inputSchema: { name: nameArg }
     },
-    call((team, args: { name: string }) => team.stop(args))
-  )
+    call('manage', (team, args: { name: string }) => team.stop(args))
+  ))
 
-  server.registerTool(
+  message.push(server.registerTool(
     'agent_send',
     {
       title: 'Message agent',
@@ -452,10 +462,10 @@ function registerTeamTools(server: McpServer, ctx: McpContext): void {
         text: z.string().min(1).max(4000).describe('The message, in the conversation language')
       }
     },
-    call((team, args: { name: string; text: string }) => team.send(args))
-  )
+    call('message', (team, args: { name: string; text: string }) => team.send(args))
+  ))
 
-  server.registerTool(
+  manage.push(server.registerTool(
     'agent_delete',
     {
       title: 'Delete agent',
@@ -463,8 +473,9 @@ function registerTeamTools(server: McpServer, ctx: McpContext): void {
         'Delete another agent when the user asks (stag.ai always asks the user to confirm): its session stops, its memory note goes to the Recycle Bin, its unfinished task card is dropped.',
       inputSchema: { name: nameArg }
     },
-    call((team, args: { name: string }) => team.remove(args))
-  )
+    call('manage', (team, args: { name: string }) => team.remove(args))
+  ))
+  return { manage, message }
 }
 
 /** Tool browser_*: agent dùng tab của mình trong browser của workspace (người dùng thấy trực tiếp). */

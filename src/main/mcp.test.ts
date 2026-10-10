@@ -6,7 +6,7 @@ import type { Agent, Workspace } from '@shared/types'
 import type { BrowserService } from './browser'
 import type { Board } from './board'
 import type { AgentCreateInput } from '@shared/agentApi'
-import { createStagMcp, type TeamApi } from './mcp'
+import { AGENT_API_OFF, createStagMcp, type TeamApi } from './mcp'
 
 // browser.ts dùng Electron; test chỉ cần danh sách phím.
 vi.mock('./browser', () => ({ BROWSER_KEYS: ['Enter', 'Tab'] }))
@@ -89,8 +89,9 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     remove: vi.fn(async (i: { name: string }) => `remove ${i.name}`)
   }
 
-  async function client(withTeam: boolean): Promise<Client> {
+  async function client(withTeam: boolean, agentApi?: { manage: boolean; message: boolean }): Promise<Client> {
     const server = createStagMcp({
+      agentApi,
       agent,
       workspace,
       board: {} as Board,
@@ -159,7 +160,21 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     expect(missing.isError).toBe(true)
   })
 
-    it('không có team API → lỗi rõ ràng', async () => {
+    it('Cài đặt → Agent API tắt nhóm: ẩn tool của nhóm, gọi thì báo lỗi, agent_list vẫn còn', async () => {
+    const c = await client(true, { manage: false, message: true })
+    const list = await names(c)
+    expect(list).toEqual(expect.arrayContaining(['agent_list', 'adapter_models', 'agent_send']))
+    expect(list.some((n) => ['agent_create', 'agent_update', 'agent_open', 'agent_stop', 'agent_delete'].includes(n))).toBe(false)
+    const r = await c.callTool({ name: 'agent_create', arguments: { name: 'X', kind: 'claude' } })
+    expect(r.isError).toBe(true)
+    expect(text(r)).toBe(AGENT_API_OFF.manage)
+    const m = await client(true, { manage: true, message: false })
+    expect(await names(m)).not.toContain('agent_send')
+    const sent = await m.callTool({ name: 'agent_send', arguments: { name: 'Tester', text: 'hi' } })
+    expect(text(sent)).toBe(AGENT_API_OFF.message)
+  })
+
+  it('không có team API → lỗi rõ ràng', async () => {
     const r = await (await client(false)).callTool({ name: 'agent_list', arguments: {} })
     expect(r.isError).toBe(true)
   })

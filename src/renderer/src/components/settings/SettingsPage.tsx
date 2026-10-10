@@ -11,6 +11,7 @@ import { PluginsSection } from './PluginsSection'
 import { GeneralSection } from './GeneralSection'
 import { HandoffSection } from './HandoffSection'
 import { ScopeSection } from './ScopeSection'
+import { AgentApiSection } from './AgentApiSection'
 import { BrowserSection } from './BrowserSection'
 import { VoiceSection } from './VoiceSection'
 
@@ -34,6 +35,7 @@ const NAV: NavItem[][] = [
   [
     { id: 'handoff', label: 'Agent & bàn giao' },
     { id: 'scope', label: 'Khoá phạm vi' },
+    { id: 'agentApi', label: 'Agent API' },
     { id: 'vault', label: 'Vault & mẫu' },
     { id: 'browser', label: 'Trình duyệt' },
     { id: 'voice', label: 'Giọng nói' }
@@ -129,6 +131,8 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
       return <HandoffSection />
     case 'scope':
       return <ScopeSection />
+    case 'agentApi':
+      return <AgentApiSection />
     case 'browser':
       return <BrowserSection />
     case 'voice':

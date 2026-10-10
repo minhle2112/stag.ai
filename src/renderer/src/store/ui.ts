@@ -22,6 +22,7 @@ export type SettingsSection =
   | 'secrets'
   | 'handoff'
   | 'scope'
+  | 'agentApi'
   | 'vault'
   | 'browser'
   | 'voice'

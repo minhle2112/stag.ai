@@ -86,10 +86,10 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     await settings.forget('agent', [agentId])
   })
   ipcMain.handle(IPC.agentLayout, (_e, workspaceId: string, layout: LayoutNode | null) => agents.saveLayout(workspaceId, layout))
-
-  const ws = (id: string): Workspace => {
   ipcMain.handle(IPC.agentRequestList, () => agents.requests.list())
   ipcMain.handle(IPC.agentRequestAnswer, (_e, id: string, allow: boolean) => agents.requests.answer(id, allow))
+
+  const ws = (id: string): Workspace => {
     const w = workspaces.get(id)
     if (!w) throw new Error('Workspace không tồn tại')
     return w

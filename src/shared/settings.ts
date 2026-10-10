@@ -2,6 +2,7 @@ import { normalizeSkills, normalizeSkillToggles } from './skills'
 import { PLUGIN_ID_RE } from './plugins'
 import {
   DEFAULT_ADAPTERS,
+  DEFAULT_AGENT_API,
   DEFAULT_BROWSER,
   DEFAULT_GENERAL,
   DEFAULT_HANDOFF,
@@ -14,6 +15,7 @@ import {
   ZOOM_MAX,
   ZOOM_MIN,
   type AdaptersSettings,
+  type AgentApiSettings,
   type AppSettings,
   type AppSettingsPatch,
   type BrowserSettings,
@@ -97,6 +99,20 @@ function normalizeHomePage(v: unknown): string {
   if (!t) return ''
   const url = /^https?:\/\//i.test(t) ? t : `https://${t}`
   return normalizeOrigin(url) ? url : ''
+}
+
+export function normalizeAgentApi(raw: unknown): AgentApiSettings {
+  const r = obj(raw)
+  const d = DEFAULT_AGENT_API
+  return { manage: bool(r.manage, d.manage), message: bool(r.message, d.message), confirmCreate: bool(r.confirmCreate, d.confirmCreate) }
+}
+
+/** Phần ghi đè Agent API hợp lệ (chỉ khoá boolean có mặt); rỗng → undefined. */
+function partialAgentApi(raw: unknown): Partial<AgentApiSettings> | undefined {
+  const r = obj(raw)
+  const out: Partial<AgentApiSettings> = {}
+  for (const k of ['manage', 'message', 'confirmCreate'] as const) if (typeof r[k] === 'boolean') out[k] = r[k] as boolean
+  return Object.keys(out).length ? out : undefined
 }
 
 export function normalizeBrowser(raw: unknown): BrowserSettings {
@@ -247,6 +263,8 @@ export function normalizeOverrides(raw: unknown): SettingsOverrides | null {
   const exempt = strList(sc.exempt, 100, 300)
   if (exempt.length) scope.exempt = exempt
   if (Object.keys(scope).length) out.scope = scope
+  const agentApi = partialAgentApi(obj(raw).agentApi)
+  if (agentApi) out.agentApi = agentApi
   const br = obj(obj(raw).browser)
   if (typeof br.agentTools === 'boolean') out.browser = { agentTools: br.agentTools }
   return Object.keys(out).length ? out : null
@@ -288,6 +306,7 @@ export function normalizeSettings(raw: unknown): Settings {
         skills: normalizeSkills({}),
         plugins: { toggles: {} },
         scope: normalizeScope({}),
+        agentApi: normalizeAgentApi({}),
         browser: normalizeBrowser({}),
         voice: normalizeVoice({})
       },
@@ -306,6 +325,7 @@ export function normalizeSettings(raw: unknown): Settings {
       skills: normalizeSkills(app.skills),
       plugins: { toggles: normalizePluginToggles(obj(app.plugins).toggles) },
       scope: normalizeScope(app.scope),
+      agentApi: normalizeAgentApi(app.agentApi),
       browser: normalizeBrowser(app.browser),
       voice: normalizeVoice(app.voice)
     },
@@ -330,6 +350,7 @@ export function patchApp(app: AppSettings, patch: AppSettingsPatch): AppSettings
     skills: patch.skills ? { toggles: normalizeSkillToggles(patch.skills.toggles) } : app.skills,
     plugins: patch.plugins ? { toggles: normalizePluginToggles(patch.plugins.toggles) } : app.plugins,
     scope: normalizeScope({ ...app.scope, ...patch.scope }),
+    agentApi: normalizeAgentApi({ ...app.agentApi, ...patch.agentApi }),
     browser: normalizeBrowser({ ...app.browser, ...patch.browser }),
     voice: normalizeVoice({ ...app.voice, ...patch.voice })
   }
@@ -371,6 +392,15 @@ export function resolveScope(s: Settings, workspaceId: string | null | undefined
     mode: a?.mode ?? w?.mode ?? s.app.scope.mode,
     guessShell: a?.guessShell ?? w?.guessShell ?? s.app.scope.guessShell,
     exempt: [...new Set([...s.app.scope.exempt, ...(w?.exempt ?? [])])]
+  }
+}
+
+/** Quyền Agent API thực tế của một agent: từng khoá agent → workspace → app. */
+export function resolveAgentApi(s: Settings, workspaceId: string | null | undefined, agentId: string | null | undefined): AgentApiSettings {
+  return {
+    ...s.app.agentApi,
+    ...(workspaceId ? s.workspaces[workspaceId]?.agentApi : undefined),
+    ...(agentId ? s.agents[agentId]?.agentApi : undefined)
   }
 }
 

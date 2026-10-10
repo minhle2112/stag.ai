@@ -27,6 +27,9 @@ BROWSER (MCP tools of "stag"; the user watches it live in the app's Browser pane
 - browser_console(only_errors?) reads JS errors and failed loads; browser_screenshot() when you need to see the UI.
 - localhost opens right away; pages on the Internet need the user's permission. If denied, do not retry.
 
+OTHER AGENTS (MCP tools of "stag"; you act on the stag.ai app for the user)
+{{AGENT_API}}
+
 WHEN A NEW SESSION STARTS
 1. Recall: {{RECALL}} and read your own memory. Nothing more yet.
 2. {{OPENING}}
