@@ -196,7 +196,19 @@ export const IPC = {
   /** main → renderer: chữ đã chốt + chữ đang đoán của một lượt nói. */
   voiceCloudText: 'voice:cloud-text',
   /** Thử API key (gửi nửa giây im lặng). */
-  voiceCloudTest: 'voice:cloud-test'
+  voiceCloudTest: 'voice:cloud-test',
+  /** V4: sửa bằng AI (có key chưa / sửa một câu / thử key). */
+  voiceAiInfo: 'voice:ai-info',
+  voiceAiFix: 'voice:ai-fix',
+  voiceAiTest: 'voice:ai-test',
+  /** main → renderer: phím tắt toàn hệ thống ('toggle') hoặc Esc toàn hệ thống ('cancel'). */
+  voiceGlobal: 'voice:global',
+  /** Lỗi đăng ký phím tắt toàn hệ thống (để Cài đặt báo). */
+  voiceGlobalInfo: 'voice:global-info',
+  /** renderer → main (không chờ): trạng thái lượt nói ngoài app cho ô nổi. */
+  voiceOverlay: 'voice:overlay',
+  /** Dán chữ vào ứng dụng đang mở (+ Enter nếu nói "gửi"). */
+  voiceType: 'voice:type'
 } as const
 
 export interface AppInfo {

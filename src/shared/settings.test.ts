@@ -167,6 +167,8 @@ describe('khoá phạm vi + trình duyệt (S5)', () => {
     expect(normalizeBrowser({ homePage: 'javascript:alert(1)' }).homePage).toBe('')
     expect(normalizeBrowser({ homePage: 'http://127.0.0.1:3000' }).homePage).toBe('http://127.0.0.1:3000')
     expect(normalizeOrigin('  ')).toBeNull()
+    expect(normalizeOrigin('https://bad host')).toBeNull()
+    expect(normalizeOrigin('[::1]:8080')).toBe('https://[::1]:8080')
   })
 
   it('đọc file cũ không có scope / browser → mặc định; patchApp sửa từng trường', () => {
@@ -206,6 +208,10 @@ describe('giọng nói (V1)', () => {
     // V3: máy nhận dạng, mặc định trên máy.
     expect(normalizeVoice({ engine: 'soniox' }).engine).toBe('soniox')
     expect(normalizeVoice({ engine: 'whisper' }).engine).toBe('local')
+    // V4: mọi thứ tắt sẵn, phím toàn hệ thống lạ → mặc định.
+    expect(normalizeVoice({})).toMatchObject({ aiFix: false, sendCommand: false, global: false, globalHotkey: 'ctrl+shift+space' })
+    expect(normalizeVoice({ aiFix: true, global: true, globalHotkey: 'f8' })).toMatchObject({ aiFix: true, global: true, globalHotkey: 'f8' })
+    expect(normalizeVoice({ globalHotkey: 'ctrl+alt+space' }).globalHotkey).toBe('ctrl+shift+space')
   })
 
   it('từ gợi ý: bỏ dấu phẩy (Qwen3 nhận CSV), trùng, mục rỗng', () => {

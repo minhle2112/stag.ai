@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { isHotkeyDown, isHotkeyUp, VOICE_HOTKEYS } from '@shared/voice'
 import { useSettings } from '../store/settings'
 import { useUi } from '../store/ui'
-import { beginVoice, cancelVoice, endVoice, insertVoice, useVoice, useVoiceFor, voiceTargetFor } from '../store/voice'
+import { beginVoice, cancelVoice, endVoice, insertVoice, undoAiFix, useVoice, useVoiceFor, voiceTargetFor } from '../store/voice'
 import { useWorkspaces } from '../store/workspaces'
 
 /**
@@ -114,7 +114,7 @@ function MicIcon(): React.JSX.Element {
 /** Khung giọng nói ở đáy ô agent: đang nghe / đang nhận dạng / xem trước để sửa / lỗi. */
 export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element | null {
   const mine = useVoiceFor(agentId)
-  const { phase, level, text, error, needsModel, status, setText, live, livePartial, notice } = useVoice()
+  const { phase, level, text, error, needsModel, status, setText, live, livePartial, notice, aiBusy, aiBefore } = useVoice()
   const hotkey = useSettings((s) => s.value.app.voice.hotkey)
   const box = useRef<HTMLTextAreaElement>(null)
 
@@ -181,6 +181,19 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
             className="w-full resize-none rounded-md border border-line bg-bg px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:border-accent"
           />
           <div className="flex items-center gap-2 text-[12px] text-muted">
+            {aiBusy ? (
+              <span className="flex items-center gap-1.5 text-accent">
+                <span className="h-2 w-2 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                Đang sửa bằng AI…
+              </span>
+            ) : aiBefore ? (
+              <span className="flex items-center gap-1.5 text-emerald-300">
+                Đã sửa bằng AI
+                <button onClick={undoAiFix} className="rounded px-1.5 py-0.5 text-muted underline hover:text-fg">
+                  Hoàn tác
+                </button>
+              </span>
+            ) : null}
             <span className="flex-1">Sửa nếu cần · giữ {key} để nói thêm · Shift+Enter xuống dòng · chèn xong vẫn chưa gửi</span>
             <button onClick={cancelVoice} className="rounded-md bg-panel-2 px-2.5 py-1 text-fg hover:bg-line">
               Bỏ (Esc)

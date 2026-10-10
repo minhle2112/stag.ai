@@ -34,7 +34,9 @@ import type { WorkspaceStore } from './workspace'
 import type { VoiceService } from './voice'
 import type { VocabCache } from './voiceVocab'
 import type { CloudUsage, VoiceCloud } from './voiceCloud'
-import type { VoiceCloudInfo } from '@shared/voice'
+import { aiFix } from './voiceFix'
+import { typeText, type GlobalVoice, type KeySender, type OverlayState, type VoiceOverlay } from './voiceSystem'
+import { AI_FIX_SECRET, type VoiceAiInfo, type VoiceCloudInfo } from '@shared/voice'
 
 const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
@@ -406,5 +408,51 @@ export function registerVoiceIpc(voice: VoiceService, vocab: VocabCache, workspa
   ipcMain.handle(IPC.voiceVocab, (_e, workspaceId: unknown) => {
     const ws = typeof workspaceId === 'string' ? workspaces.get(workspaceId) : undefined
     return ws?.path ? vocab.get(ws.path) : []
+  })
+}
+
+/** Gõ bằng giọng nói V4 (tuỳ chọn): sửa bằng AI, gõ vào ứng dụng khác (phím tắt toàn hệ thống, ô nổi, dán). */
+export function registerVoiceSystemIpc(d: {
+  secrets: SecretStore
+  aiUrl?: string
+  keys: KeySender
+  overlay: VoiceOverlay
+  global: GlobalVoice
+  background: (on: boolean) => void
+}): void {
+  const key = (): string => {
+    const k = d.secrets.get(AI_FIX_SECRET)
+    if (!k) throw new Error('Chưa có API key Anthropic (Cài đặt → Giọng nói → Sửa bằng AI).')
+    return k
+  }
+  const strings = (v: unknown, max: number): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length <= 80).slice(0, max) : [])
+  ipcMain.handle(IPC.voiceAiInfo, (): VoiceAiInfo => ({ hasKey: !!d.secrets.get(AI_FIX_SECRET) }))
+  ipcMain.handle(IPC.voiceAiFix, (_e, text: unknown, terms: unknown) => {
+    if (typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error('Không có chữ để sửa.')
+    return aiFix({ key: key(), text, terms: strings(terms, 300), url: d.aiUrl })
+  })
+  ipcMain.handle(IPC.voiceAiTest, async () => {
+    await aiFix({ key: key(), text: 'xin chào', terms: [], url: d.aiUrl })
+  })
+  ipcMain.handle(IPC.voiceGlobalInfo, () => ({ error: d.global.error }))
+  ipcMain.on(IPC.voiceOverlay, (_e, s: unknown) => {
+    const st = s && typeof s === 'object' ? (s as OverlayState) : { phase: 'idle' as const }
+    const active = st.phase !== 'idle' && st.phase !== 'error'
+    d.global.setActive(active)
+    d.background(st.phase !== 'idle')
+    // Bật sẵn bộ nhấn phím trong lúc người dùng nói (PowerShell khởi động ~1 s).
+    if (st.phase === 'opening') void d.keys.warm().catch(() => {})
+    void d.overlay.update({
+      phase: st.phase,
+      text: typeof st.text === 'string' ? st.text.slice(-400) : '',
+      partial: typeof st.partial === 'string' ? st.partial.slice(-200) : '',
+      level: typeof st.level === 'number' ? st.level : 0,
+      error: typeof st.error === 'string' ? st.error.slice(0, 300) : '',
+      hotkey: typeof st.hotkey === 'string' ? st.hotkey.slice(0, 40) : ''
+    })
+  })
+  ipcMain.handle(IPC.voiceType, (_e, text: unknown, send: unknown) => {
+    if (typeof text !== 'string' || text.length > 20000) throw new Error('Chữ không hợp lệ.')
+    return typeText(d.keys, text, send === true)
   })
 }

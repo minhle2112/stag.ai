@@ -1,5 +1,5 @@
 import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJobRun, PluginScaffoldRequest } from '@shared/plugins'
-import type { VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
+import type { VoiceAiInfo, VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type { AgentApiEvent, AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
@@ -379,6 +379,19 @@ const api = {
     cloudEnd: (id: string): Promise<string> => ipcRenderer.invoke(IPC.voiceCloudEnd, id),
     cloudCancel: (id: string): void => ipcRenderer.send(IPC.voiceCloudCancel, id),
     cloudTest: (): Promise<void> => ipcRenderer.invoke(IPC.voiceCloudTest),
+    /** V4: sửa bằng AI (key ở main). */
+    aiInfo: (): Promise<VoiceAiInfo> => ipcRenderer.invoke(IPC.voiceAiInfo),
+    aiFix: (text: string, terms: string[]): Promise<string> => ipcRenderer.invoke(IPC.voiceAiFix, text, terms),
+    aiTest: (): Promise<void> => ipcRenderer.invoke(IPC.voiceAiTest),
+    /** V4: gõ vào ứng dụng khác. */
+    globalInfo: (): Promise<{ error: string }> => ipcRenderer.invoke(IPC.voiceGlobalInfo),
+    onGlobal(cb: (action: 'toggle' | 'cancel') => void): () => void {
+      const fn = (_e: IpcRendererEvent, action: 'toggle' | 'cancel'): void => cb(action)
+      ipcRenderer.on(IPC.voiceGlobal, fn)
+      return () => ipcRenderer.removeListener(IPC.voiceGlobal, fn)
+    },
+    overlay: (s: { phase: string; text?: string; partial?: string; level?: number; error?: string; hotkey?: string }): void => ipcRenderer.send(IPC.voiceOverlay, s),
+    typeText: (text: string, send: boolean): Promise<void> => ipcRenderer.invoke(IPC.voiceType, text, send),
     /** Chữ hiện dần của lượt nói; `error` = đám mây lỗi giữa chừng (mất mạng, key sai…). */
     onCloudText(cb: (id: string, final: string, partial: string, error?: string) => void): () => void {
       const fn = (_e: IpcRendererEvent, id: string, final: string, partial: string, error?: string): void => cb(id, final, partial, error)

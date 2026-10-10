@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { formatMb, SONIOX_SECRET, SONIOX_USD_PER_HOUR, VOICE_HOTKEYS, VOICE_MODEL, type VoiceCloudInfo, type VoiceHotkey } from '@shared/voice'
+import { AI_FIX_MODEL, AI_FIX_SECRET, formatMb, SONIOX_SECRET, SONIOX_USD_PER_HOUR, VOICE_GLOBAL_HOTKEYS, VOICE_HOTKEYS, VOICE_MODEL, type VoiceAiInfo, type VoiceCloudInfo, type VoiceHotkey } from '@shared/voice'
 import { formatReplacements, parseReplacements } from '@shared/voiceVocab'
-import type { VoiceEngine, VoiceReplacement, VoiceSettings } from '@shared/types'
+import type { VoiceEngine, VoiceGlobalHotkey, VoiceReplacement, VoiceSettings } from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { useVoice } from '../../store/voice'
 import { useWorkspaces } from '../../store/workspaces'
@@ -74,6 +74,13 @@ export function VoiceSection(): React.JSX.Element {
         >
           <Switch label="Xem trước rồi mới chèn" checked={v.preview} onChange={(preview) => set({ preview })} />
         </Row>
+        <Row
+          label={'Nói "gửi" để gửi'}
+          desc={'Kết câu bằng "gửi" hoặc "gửi đi" → chèn rồi nhấn Enter luôn (bỏ qua khung xem trước). Chỉ nói "gửi" → nhấn Enter cho phần đã gõ sẵn. Tắt sẵn vì câu có chữ "gửi" ở cuối sẽ bị gửi đi.'}
+        >
+          <Switch label={'Nói "gửi" để gửi'} checked={v.sendCommand} onChange={(sendCommand) => set({ sendCommand })} />
+        </Row>
+        <GlobalRows v={v} set={set} />
       </Group>
 
       <MicGroup micId={v.micId} onChange={(micId) => set({ micId })} />
@@ -81,6 +88,8 @@ export function VoiceSection(): React.JSX.Element {
       <HotwordsGroup value={v.hotwords} onSave={(hotwords) => set({ hotwords })} auto={v.workspaceVocab} onAuto={(workspaceVocab) => set({ workspaceVocab })} />
 
       <FixGroup rules={v.replacements} onRules={(replacements) => set({ replacements })} commands={v.commands} onCommands={(commands) => set({ commands })} />
+
+      <AiGroup on={v.aiFix} onChange={(aiFix) => set({ aiFix })} />
 
       <Group title="Bộ nhớ (RAM)">
         <Row
@@ -95,14 +104,113 @@ export function VoiceSection(): React.JSX.Element {
   )
 }
 
-/** API key Soniox (lưu trong kho bí mật, app không hiện lại key) + kiểm tra + chi phí tháng này. */
+/** Soniox: API key + chi phí tháng này. */
 function CloudRows(): React.JSX.Element {
   const [info, setInfo] = useState<VoiceCloudInfo | null>(null)
+  const refresh = (): void => void window.stag.voice.cloudInfo().then(setInfo, () => {})
+  useEffect(refresh, [])
+  const minutes = (info?.monthSeconds ?? 0) / 60
+  return (
+    <>
+      <KeyRow
+        label="API key Soniox"
+        secret={SONIOX_SECRET}
+        hasKey={!!info?.hasKey}
+        help="Tạo key tại console.soniox.com → API keys rồi dán vào đây. Key được mã hoá bằng tài khoản Windows của bạn."
+        test={() => window.stag.voice.cloudTest()}
+        onChanged={refresh}
+      />
+      <Row
+        label="Chi phí"
+        desc={`Soniox tính khoảng ${SONIOX_USD_PER_HOUR} USD mỗi giờ âm thanh (thời gian bạn giữ phím). Tháng này: ${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)} phút ≈ ${((minutes / 60) * SONIOX_USD_PER_HOUR).toFixed(2)} USD (app tự đếm, hoá đơn thật xem ở console.soniox.com).`}
+      />
+    </>
+  )
+}
+
+/** Sửa bằng AI (V4, tuỳ chọn): bật / tắt + API key Anthropic. */
+function AiGroup({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): React.JSX.Element {
+  const [info, setInfo] = useState<VoiceAiInfo | null>(null)
+  const refresh = (): void => void window.stag.voice.aiInfo().then(setInfo, () => {})
+  useEffect(refresh, [])
+  return (
+    <Group title="Sửa bằng AI (tuỳ chọn)">
+      <Row
+        label="Nhờ AI sửa từ nghe sai"
+        desc={`Sau khi nhận dạng, gửi câu vừa nói và danh sách từ của dự án cho Claude (${AI_FIX_MODEL}) để sửa từ code bị nghe sai, vd. "hen đồ click" → handleClick. Không gửi âm thanh hay chữ trong terminal. Khung xem trước hiện chữ ngay, AI sửa xong thì thay (có Hoàn tác). Mỗi câu tốn khoảng một phần trăm cent.`}
+      >
+        <Switch label="Nhờ AI sửa từ nghe sai" checked={on} onChange={onChange} />
+      </Row>
+      {on && (
+        <KeyRow
+          label="API key Anthropic"
+          secret={AI_FIX_SECRET}
+          hasKey={!!info?.hasKey}
+          help={`Tạo key tại console.anthropic.com → API keys. Dùng chung bí mật ${AI_FIX_SECRET} với connector nếu đã có.`}
+          test={() => window.stag.voice.aiTest()}
+          onChanged={refresh}
+        />
+      )}
+    </Group>
+  )
+}
+
+/** Gõ vào ứng dụng khác (V4, tuỳ chọn): bật / tắt, phím tắt toàn hệ thống, báo nếu phím bị chiếm. */
+function GlobalRows({ v, set }: { v: VoiceSettings; set: (p: Partial<VoiceSettings>) => void }): React.JSX.Element {
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    // Main đăng ký phím khi cửa sổ mất focus; hỏi lại sau mỗi lần đổi để báo phím đang bị ứng dụng khác dùng.
+    const t = setTimeout(() => void window.stag.voice.globalInfo().then((i) => setErr(i.error), () => {}), 300)
+    return () => clearTimeout(t)
+  }, [v.global, v.globalHotkey])
+  return (
+    <>
+      <Row
+        label="Gõ vào ứng dụng khác"
+        desc={
+          err ? (
+            <span className="text-red-300">{err}</span>
+          ) : (
+            `Khi stag.ai không ở trên cùng: bấm ${VOICE_GLOBAL_HOTKEYS[v.globalHotkey].label} để nói, bấm lần nữa để dừng (Windows không báo nhả phím cho phím tắt toàn hệ thống), Esc để huỷ. Chữ được dán vào ô đang gõ của ứng dụng đó (clipboard được trả lại như cũ), không xem trước, không tự nhấn Enter. Không gõ được vào cửa sổ chạy quyền quản trị.`
+          )
+        }
+      >
+        <Switch label="Gõ vào ứng dụng khác" checked={v.global} onChange={(global) => set({ global })} />
+      </Row>
+      {v.global && (
+        <Row label="Phím tắt toàn hệ thống" desc="Trong stag.ai vẫn dùng phím giữ-để-nói ở trên.">
+          <Select
+            label="Phím tắt toàn hệ thống"
+            value={v.globalHotkey}
+            onChange={(globalHotkey: VoiceGlobalHotkey) => set({ globalHotkey })}
+            options={(Object.keys(VOICE_GLOBAL_HOTKEYS) as VoiceGlobalHotkey[]).map((k) => ({ value: k, label: VOICE_GLOBAL_HOTKEYS[k].label }))}
+          />
+        </Row>
+      )}
+    </>
+  )
+}
+
+/** Ô dán API key: lưu vào kho bí mật (app không hiện lại key), lưu xong thì thử luôn; Kiểm tra / Xoá key. */
+function KeyRow({
+  label,
+  secret,
+  hasKey,
+  help,
+  test,
+  onChanged
+}: {
+  label: string
+  secret: string
+  hasKey: boolean
+  help: string
+  test: () => Promise<void>
+  onChanged: () => void
+}): React.JSX.Element {
   const [key, setKey] = useState('')
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
-  const refresh = (): void => void window.stag.voice.cloudInfo().then(setInfo, () => {})
-  useEffect(refresh, [])
+  const refresh = onChanged
   const act = async (fn: () => Promise<unknown>, ok: string): Promise<void> => {
     setBusy(true)
     setMsg(null)
@@ -118,54 +226,47 @@ function CloudRows(): React.JSX.Element {
   }
   const save = (): Promise<void> =>
     act(async () => {
-      await window.stag.secrets.set(SONIOX_SECRET, key.trim())
+      await window.stag.secrets.set(secret, key.trim())
       setKey('')
-      await window.stag.voice.cloudTest()
+      await test()
     }, 'Đã lưu và thử key: dùng được.')
-  const minutes = (info?.monthSeconds ?? 0) / 60
   const input = 'w-56 rounded-md border border-line bg-bg px-2 py-1 font-mono text-[12px] outline-none focus:border-accent'
   return (
-    <>
-      <Row
-        label="API key Soniox"
-        desc={
-          msg ? (
-            <span className={msg.ok ? 'text-emerald-300' : 'text-red-300'}>{msg.text}</span>
-          ) : info?.hasKey ? (
-            `Đã lưu (mã hoá trong bí mật ${SONIOX_SECRET}, app không hiện lại). Dán key mới để thay.`
-          ) : (
-            'Tạo key tại console.soniox.com → API keys rồi dán vào đây. Key được mã hoá bằng tài khoản Windows của bạn.'
-          )
-        }
-      >
-        <input
-          type="password"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && key.trim() && !busy && void save()}
-          placeholder={info?.hasKey ? '•••••••• (đã lưu)' : 'Dán API key'}
-          aria-label="API key Soniox"
-          className={input}
-        />
-        <SmallButton onClick={() => void save()} disabled={!key.trim() || busy}>
-          Lưu
-        </SmallButton>
-        {info?.hasKey && (
-          <>
-            <SmallButton onClick={() => void act(() => window.stag.voice.cloudTest(), 'Key dùng được.')} disabled={busy}>
-              {busy ? 'Đang thử…' : 'Kiểm tra'}
-            </SmallButton>
-            <SmallButton onClick={() => void act(() => window.stag.secrets.remove(SONIOX_SECRET), 'Đã xoá key.')} disabled={busy}>
-              Xoá key
-            </SmallButton>
-          </>
-        )}
-      </Row>
-      <Row
-        label="Chi phí"
-        desc={`Soniox tính khoảng ${SONIOX_USD_PER_HOUR} USD mỗi giờ âm thanh (thời gian bạn giữ phím). Tháng này: ${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)} phút ≈ ${((minutes / 60) * SONIOX_USD_PER_HOUR).toFixed(2)} USD (app tự đếm, hoá đơn thật xem ở console.soniox.com).`}
+    <Row
+      label={label}
+      desc={
+        msg ? (
+          <span className={msg.ok ? 'text-emerald-300' : 'text-red-300'}>{msg.text}</span>
+        ) : hasKey ? (
+          `Đã lưu (mã hoá trong bí mật ${secret}, app không hiện lại). Dán key mới để thay.`
+        ) : (
+          help
+        )
+      }
+    >
+      <input
+        type="password"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && key.trim() && !busy && void save()}
+        placeholder={hasKey ? '•••••••• (đã lưu)' : 'Dán API key'}
+        aria-label={label}
+        className={input}
       />
-    </>
+      <SmallButton onClick={() => void save()} disabled={!key.trim() || busy}>
+        Lưu
+      </SmallButton>
+      {hasKey && (
+        <>
+          <SmallButton onClick={() => void act(() => test(), 'Key dùng được.')} disabled={busy}>
+            {busy ? 'Đang thử…' : 'Kiểm tra'}
+          </SmallButton>
+          <SmallButton onClick={() => void act(() => window.stag.secrets.remove(secret), 'Đã xoá key.')} disabled={busy}>
+            Xoá key
+          </SmallButton>
+        </>
+      )}
+    </Row>
   )
 }
 

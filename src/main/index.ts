@@ -9,7 +9,7 @@ import { ArtifactLog, serveArtifact } from './artifacts'
 import { Board } from './board'
 import { BrowserService } from './browser'
 import { StatusHub } from './hub'
-import { registerIpc, registerVoiceIpc } from './ipc'
+import { registerIpc, registerVoiceIpc, registerVoiceSystemIpc } from './ipc'
 import { VoiceService } from './voice'
 import { Notifier } from './notifier'
 import { PtyManager } from './pty'
@@ -29,6 +29,7 @@ import { VaultActivityLog } from './vaultActivity'
 import { WorkspaceStore } from './workspace'
 import { VocabCache } from './voiceVocab'
 import { CloudUsage, VoiceCloud } from './voiceCloud'
+import { GlobalVoice, KeySender, VoiceOverlay } from './voiceSystem'
 import { SONIOX_SECRET } from '@shared/voice'
 import { samePath } from './fsutil'
 import type { GeneralSettings } from '@shared/types'
@@ -90,6 +91,7 @@ const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'
   void plugins.applySettings(s)
   // Đổi "giải phóng sau N phút": hẹn lại giờ tắt tiến trình nhận dạng.
   voice.touch()
+  globalVoice.sync()
 })
 const notifier = new Notifier(
   () => settings.general(),
@@ -231,6 +233,19 @@ const voiceCloud = new VoiceCloud({
   url: /^wss?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(process.env.STAG_SONIOX_URL ?? '') ? process.env.STAG_SONIOX_URL : undefined,
   onUsage: (s) => void cloudUsage.add(s)
 })
+/** V4 (tuỳ chọn): gõ bằng giọng nói vào ứng dụng khác — phím tắt toàn hệ thống, ô nổi, dán bằng Ctrl+V giả. */
+const keySender = new KeySender()
+const overlay = new VoiceOverlay()
+const globalVoice = new GlobalVoice({
+  settings: () => settings.get().app.voice,
+  appFocused: () => BrowserWindow.getFocusedWindow() !== null,
+  onToggle: () => send(IPC.voiceGlobal, 'toggle'),
+  onCancel: () => send(IPC.voiceGlobal, 'cancel')
+})
+// Focus chuyển giữa các cửa sổ của app thì blur rồi focus: xét sau khi cả hai sự kiện xong.
+const syncGlobal = (): void => void setTimeout(() => globalVoice.sync(), 50)
+app.on('browser-window-focus', syncGlobal)
+app.on('browser-window-blur', syncGlobal)
 const pluginEvent = (type: PluginEvent['type'], a: { id: string; name: string; workspaceId: string }, data: Record<string, unknown> = {}): PluginEvent => ({
   type,
   at: new Date().toISOString(),
@@ -452,7 +467,19 @@ app.whenReady().then(async () => {
   })
   registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins)
   registerVoiceIpc(voice, new VocabCache(), workspaces, voiceCloud, cloudUsage)
+  registerVoiceSystemIpc({
+    secrets,
+    aiUrl: /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(process.env.STAG_ANTHROPIC_URL ?? '') ? process.env.STAG_ANTHROPIC_URL : undefined,
+    keys: keySender,
+    overlay,
+    global: globalVoice,
+    // Đang nói ngoài app: cửa sổ stag.ai nằm dưới / thu nhỏ nhưng vẫn phải thu âm và gửi đều đặn (Chromium hãm hẹn giờ của cửa sổ nền).
+    background: (on) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.setBackgroundThrottling(!on)
+    }
+  })
   createWindow()
+  globalVoice.sync()
   applyGeneral(settings.general())
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -478,6 +505,9 @@ app.on('before-quit', () => {
   void plugins.shutdown()
   voice.shutdown()
   voiceCloud.shutdown()
+  globalVoice.dispose()
+  keySender.dispose()
+  overlay.dispose()
   agents.shutdown()
   hub.stop()
 })

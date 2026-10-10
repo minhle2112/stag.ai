@@ -160,14 +160,18 @@ export function bindPty(agentId: string, ptyId: string): void {
 
 /**
  * Dán chữ vào terminal của agent như người dùng dán (gõ bằng giọng nói): xterm tự bọc bracketed paste nếu chương trình
- * bật (Claude Code, Codex) nên xuống dòng không gửi tin giữa chừng. Không nhấn Enter. false = ô không có phiên đang chạy.
+ * bật (Claude Code, Codex) nên xuống dòng không gửi tin giữa chừng. Chỉ nhấn Enter khi `submit` (người dùng nói "gửi").
+ * false = ô không có phiên đang chạy.
  */
-export function pasteIntoTerminal(agentId: string, text: string): boolean {
+export function pasteIntoTerminal(agentId: string, text: string, submit = false): boolean {
   const e = entries.get(agentId)
   if (!e?.ptyId) return false
+  const ptyId = e.ptyId
   // Chương trình không bật bracketed paste (vd. Windows PowerShell 5.1): xuống dòng khi dán = Enter, dòng đầu chạy luôn.
   // Gộp thành một dòng để không bao giờ tự gửi.
-  e.term.paste(e.term.modes.bracketedPasteMode ? text : text.replace(/\s*\r?\n\s*/g, ' '))
+  if (text) e.term.paste(e.term.modes.bracketedPasteMode ? text : text.replace(/\s*\r?\n\s*/g, ' '))
+  // Enter tách khỏi phần dán một chút để chương trình xử lý xong đoạn dán trước.
+  if (submit) setTimeout(() => window.stag.pty.write(ptyId, '\r'), text ? 80 : 0)
   e.term.focus()
   return true
 }

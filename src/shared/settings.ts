@@ -36,6 +36,7 @@ import {
   type ShellId,
   type TerminalAdapterSettings,
   type VoiceEngine,
+  type VoiceGlobalHotkey,
   type VoiceHotkey,
   type VoiceReplacement,
   type VoiceSettings,
@@ -61,6 +62,7 @@ const SEARCH_ENGINES: readonly SearchEngine[] = ['google', 'duckduckgo', 'bing']
 const EXTERNAL_POLICIES: readonly ExternalPagePolicy[] = ['ask', 'allow', 'deny']
 const VOICE_HOTKEY_IDS: readonly VoiceHotkey[] = ['ctrl+space', 'ctrl+shift+space', 'ctrl+alt+space', 'f9']
 const VOICE_ENGINES: readonly VoiceEngine[] = ['local', 'soniox']
+const VOICE_GLOBAL_HOTKEYS: readonly VoiceGlobalHotkey[] = ['ctrl+shift+space', 'ctrl+alt+v', 'f8']
 
 /** Danh sách chuỗi gọn: bỏ trống / trùng, cắt độ dài, tối đa `max` mục. */
 function strList(v: unknown, max: number, len: number, ok: (x: string) => boolean = () => true): string[] {
@@ -72,13 +74,16 @@ function strList(v: unknown, max: number, len: number, ok: (x: string) => boolea
   return out
 }
 
+const HOST_RE = /^([a-z0-9-]+\.)*[a-z0-9-]+$|^\[[0-9a-f:.]+\]$/i
+
 /** Origin http(s) chuẩn (`https://github.com`, `http://192.168.1.5:8080`), null nếu không phải. */
 export function normalizeOrigin(input: string): string | null {
   const t = input.trim()
   if (!t) return null
   try {
     const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : `https://${t}`)
-    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null
+    // Kiểm tên máy: trình phân tích URL của Chromium (renderer) nhận `bad host` (→ `bad%20host`), của Node (main) thì không.
+    return (u.protocol === 'http:' || u.protocol === 'https:') && HOST_RE.test(u.hostname) ? u.origin : null
   } catch {
     return null
   }
@@ -144,7 +149,11 @@ export function normalizeVoice(raw: unknown): VoiceSettings {
     ),
     workspaceVocab: bool(r.workspaceVocab, d.workspaceVocab),
     replacements: normalizeReplacements(r.replacements),
-    commands: bool(r.commands, d.commands)
+    commands: bool(r.commands, d.commands),
+    aiFix: bool(r.aiFix, d.aiFix),
+    sendCommand: bool(r.sendCommand, d.sendCommand),
+    global: bool(r.global, d.global),
+    globalHotkey: oneOf(r.globalHotkey, VOICE_GLOBAL_HOTKEYS, d.globalHotkey)
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendText, CHUNK_MAX_S, CHUNK_MIN_S, cleanHotwords, echoAt, findSplit, isHotkeyDown, isHotkeyUp, joinChunks, nextCut, trimSilence, VOICE_RATE } from './voice'
+import { appendText, CHUNK_MAX_S, CHUNK_MIN_S, cleanHotwords, splitSendCommand, echoAt, findSplit, isHotkeyDown, isHotkeyUp, joinChunks, nextCut, trimSilence, VOICE_RATE } from './voice'
 
 const key = (code: string, mods: Partial<{ ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }> = {}) => ({
   code,
@@ -108,6 +108,17 @@ describe('gợi ý từ', () => {
 
   it('joinChunks bỏ đoạn rỗng và khoảng trắng thừa', () => {
     expect(joinChunks([' một ', '', 'hai', '  '])).toBe('một hai')
+  })
+
+  it('splitSendCommand: "gửi" / "gửi đi" ở cuối (kể cả dấu câu máy thêm) → bỏ chữ, nhấn Enter; "gửi" ở giữa câu thì không', () => {
+    expect(splitSendCommand('Sửa hàm handleClick rồi gửi.')).toEqual({ text: 'Sửa hàm handleClick rồi', send: true })
+    expect(splitSendCommand('chạy test, gửi đi!')).toEqual({ text: 'chạy test', send: true })
+    expect(splitSendCommand('Gửi')).toEqual({ text: '', send: true })
+    expect(splitSendCommand('gửi email cho khách rồi báo tôi')).toEqual({ text: 'gửi email cho khách rồi báo tôi', send: false })
+    expect(splitSendCommand('người nhận')).toEqual({ text: 'người nhận', send: false })
+    expect(splitSendCommand('gui'.normalize('NFC'))).toEqual({ text: 'gui', send: false })
+    // Chữ NFD (dấu tổ hợp) vẫn nhận.
+    expect(splitSendCommand('xong rồi gửi'.normalize('NFD')).send).toBe(true)
   })
 
   it('appendText: nói thêm nối bằng dấu cách, hoặc đúng một lần xuống dòng nếu có lệnh "xuống dòng" ở chỗ nối', () => {

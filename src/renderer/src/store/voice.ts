@@ -1,10 +1,11 @@
 import { create } from 'zustand'
-import { appendText, CLOUD_TERMS_MAX, joinChunks, nextCut, trimSilence, type VoiceStatus } from '@shared/voice'
+import { appendText, CLOUD_TERMS_MAX, joinChunks, nextCut, splitSendCommand, trimSilence, VOICE_GLOBAL_HOTKEYS, type VoiceStatus } from '@shared/voice'
 import { contextTerms, GENERAL_TERMS, pickHotwords, postProcess } from '@shared/voiceVocab'
 import { MicCapture } from '../voice/capture'
 import { pasteIntoTerminal, terminalText } from '../terminals'
 import { useAgents } from './agents'
 import { useSettings } from './settings'
+import { useWorkspaces } from './workspaces'
 
 /**
  * Gõ bằng giọng nói — phía giao diện. Một lượt: giữ phím tắt (hoặc bấm nút micro) → thu âm → thả phím → ghép chữ →
@@ -16,8 +17,10 @@ import { useSettings } from './settings'
 export type VoicePhase = 'idle' | 'opening' | 'listening' | 'processing' | 'preview' | 'error'
 
 export interface VoiceTarget {
+  /** Workspace lấy từ vựng gợi ý ('' = không có). */
   wsId: string
-  agentId: string
+  /** Ô agent nhận chữ; null = gõ vào ứng dụng đang mở ngoài stag.ai (V4, phím tắt toàn hệ thống). */
+  agentId: string | null
 }
 
 interface VoiceState {
@@ -37,10 +40,14 @@ interface VoiceState {
   needsModel: boolean
   /** Thông báo kèm khung xem trước (vd. đám mây lỗi, đã dùng máy trên máy). */
   notice: string
+  /** V4: đang nhờ AI sửa chữ trong khung xem trước. */
+  aiBusy: boolean
+  /** Chữ trước khi AI sửa (để hoàn tác), '' = AI chưa sửa. */
+  aiBefore: string
   setText: (t: string) => void
 }
 
-const CLEAR = { error: '', needsModel: false, level: 0, live: '', livePartial: '', notice: '' }
+const CLEAR = { error: '', needsModel: false, level: 0, live: '', livePartial: '', notice: '', aiBusy: false, aiBefore: '' }
 
 export const useVoice = create<VoiceState>((set) => {
   window.stag.voice.status().then((status) => set({ status }))
@@ -109,9 +116,9 @@ async function vocabFor(target: VoiceTarget): Promise<Vocab> {
   const vs = useSettings.getState().value.app.voice
   const agents = (useAgents.getState().byWs[target.wsId]?.agents ?? []).map((a) => a.name)
   const auto = vs.workspaceVocab
-  const context = auto ? contextTerms(terminalText(target.agentId)) : []
+  const context = auto && target.agentId ? contextTerms(terminalText(target.agentId)) : []
   // Lần quét đầu của repo lớn có thể lâu: không bắt lượt nói chờ quá VOCAB_WAIT_MS (lần sau đã có sẵn).
-  const workspace = auto
+  const workspace = auto && target.wsId
     ? await Promise.race([
         window.stag.voice.vocab(target.wsId).catch(() => [] as string[]),
         new Promise<string[]>((r) => setTimeout(() => r([]), VOCAB_WAIT_MS))
@@ -262,15 +269,55 @@ export async function endVoice(): Promise<void> {
   if (session !== s) return
   session = null
   useVoice.setState({ live: '', livePartial: '' })
+  const vs = useSettings.getState().value.app.voice
+  // V4 (tuỳ chọn): câu kết bằng "gửi" → chèn rồi nhấn Enter, bỏ qua khung xem trước.
+  let send = false
+  if (vs.sendCommand) ({ text, send } = splitSendCommand(text))
   const prev = useVoice.getState().text
-  if (!text.trim()) {
+  if (!text.trim() && !send) {
     // Nói thêm mà không ra chữ: giữ khung xem trước như cũ.
     if (prev) return useVoice.setState({ phase: 'preview' })
     return fail(s.heard ? 'Không nhận ra câu nào. Thử nói rõ hơn hoặc gần micro hơn.' : 'Không nghe thấy gì. Kiểm tra micro trong Cài đặt → Giọng nói.')
   }
   const merged = appendText(prev, text)
-  if (useSettings.getState().value.app.voice.preview || useVoice.getState().notice) useVoice.setState({ phase: 'preview', text: merged })
-  else insertVoice(merged)
+  const glossary = (await s.vocab).cloud
+  const ai = vs.aiFix && !!text.trim()
+  // Chèn thẳng (gõ ngoài app, lệnh "gửi", tắt xem trước): AI sửa xong mới chèn.
+  if (send || s.target.agentId === null || (!vs.preview && !useVoice.getState().notice)) {
+    let out = merged
+    if (ai) {
+      useVoice.setState({ phase: 'processing', aiBusy: true })
+      out = await window.stag.voice.aiFix(merged, glossary).catch(() => merged)
+      if (useVoice.getState().target !== s.target) return
+      useVoice.setState({ aiBusy: false })
+    }
+    return insertVoice(out, send)
+  }
+  useVoice.setState({ phase: 'preview', text: merged })
+  if (ai) void fixPreview(s.target, merged, glossary)
+}
+
+/** Khung xem trước: hiện chữ ngay, AI sửa xong thì thay (nếu người dùng chưa tự sửa), có nút hoàn tác. */
+async function fixPreview(target: VoiceTarget, text: string, glossary: string[]): Promise<void> {
+  useVoice.setState({ aiBusy: true })
+  let fixed: string
+  try {
+    fixed = await window.stag.voice.aiFix(text, glossary)
+  } catch (e) {
+    const v = useVoice.getState()
+    if (v.target === target) useVoice.setState({ aiBusy: false, notice: `Không sửa được bằng AI: ${errText(e)}` })
+    return
+  }
+  const v = useVoice.getState()
+  if (v.target !== target || v.phase !== 'preview') return
+  if (v.text !== text || fixed === text) return useVoice.setState({ aiBusy: false })
+  useVoice.setState({ aiBusy: false, text: fixed, aiBefore: text })
+}
+
+/** Hoàn tác bản AI sửa. */
+export function undoAiFix(): void {
+  const v = useVoice.getState()
+  if (v.aiBefore) useVoice.setState({ text: v.aiBefore, aiBefore: '' })
 }
 
 /** Bỏ lượt đang nói / khung xem trước. */
@@ -283,17 +330,66 @@ export function cancelVoice(): void {
   useVoice.setState({ phase: 'idle', target: null, text: '', ...CLEAR })
 }
 
-/** Chèn chữ vào ô agent (như dán: chương trình đang bật bracketed paste thì không bị gửi giữa chừng). */
-export function insertVoice(text = useVoice.getState().text): void {
+/**
+ * Chèn chữ vào ô agent (như dán: chương trình đang bật bracketed paste thì không bị gửi giữa chừng) hoặc vào ứng dụng
+ * đang mở ngoài app. Chỉ nhấn Enter khi `send` (người dùng nói "gửi").
+ */
+export function insertVoice(text = useVoice.getState().text, send = false): void {
   const target = useVoice.getState().target
   const t = text.trim()
-  if (!target || !t) return cancelVoice()
-  if (!pasteIntoTerminal(target.agentId, t)) {
+  if (!target || (!t && !send)) return cancelVoice()
+  if (target.agentId === null) {
+    useVoice.setState({ phase: 'processing' })
+    window.stag.voice.typeText(t, send).then(
+      () => {
+        if (useVoice.getState().target === target) useVoice.setState({ phase: 'idle', target: null, text: '', ...CLEAR })
+      },
+      (e) => useVoice.setState({ phase: 'error', error: `Không gõ được vào ứng dụng đang mở: ${errText(e)}` })
+    )
+    return
+  }
+  if (!pasteIntoTerminal(target.agentId, t, send)) {
     useVoice.setState({ phase: 'error', error: 'Ô này không có phiên đang chạy nên chưa chèn được. Mở phiên rồi thử lại.', text: t })
     return
   }
   useVoice.setState({ phase: 'idle', target: null, text: '', ...CLEAR })
 }
+
+// ---------- V4: gõ vào ứng dụng khác (phím tắt toàn hệ thống) ----------
+
+window.stag.voice.onGlobal((action) => {
+  const v = useVoice.getState()
+  const outside = v.target !== null && v.target.agentId === null
+  if (action === 'cancel') return void (outside && cancelVoice())
+  if (outside && (v.phase === 'opening' || v.phase === 'listening')) return void endVoice()
+  if (session || v.phase === 'processing') return
+  // Khung xem trước / lỗi trong app còn mở: bỏ để nói ra ngoài.
+  if (v.phase !== 'idle') cancelVoice()
+  void beginVoice({ wsId: useWorkspaces.getState().activeId ?? '', agentId: null })
+})
+
+/** Ô nổi khi nói ra ngoài app: báo cho main mỗi khi trạng thái đổi (mức âm lượng thì tối đa 10 lần / giây). */
+let overlayAt = 0
+useVoice.subscribe((v, old) => {
+  const outside = v.target !== null && v.target.agentId === null
+  const was = old.target !== null && old.target.agentId === null
+  if (!outside) {
+    if (was) window.stag.voice.overlay({ phase: 'idle' })
+    return
+  }
+  const same = v.phase === old.phase && v.live === old.live && v.livePartial === old.livePartial && v.aiBusy === old.aiBusy && v.error === old.error
+  if (same && Date.now() - overlayAt < 100) return
+  overlayAt = Date.now()
+  const phase = v.phase === 'preview' ? 'processing' : v.phase === 'processing' && v.aiBusy ? 'fixing' : v.phase
+  const hotkey = VOICE_GLOBAL_HOTKEYS[useSettings.getState().value.app.voice.globalHotkey].label
+  window.stag.voice.overlay({ phase, text: v.live, partial: v.livePartial, level: v.level, error: v.error, hotkey })
+  // Lỗi khi nói ra ngoài: hiện trên ô nổi một lúc rồi tự đóng.
+  if (v.phase === 'error' && old.phase !== 'error')
+    setTimeout(() => {
+      const now = useVoice.getState()
+      if (now.phase === 'error' && now.target === v.target) cancelVoice()
+    }, 3500)
+})
 
 /** Ô đang nhận giọng nói (để ô hiện khung). */
 export function useVoiceFor(agentId: string): boolean {

@@ -1,6 +1,6 @@
 // Gõ bằng giọng nói (V1): model, trạng thái, phím tắt, cắt đoạn âm thanh, chống lặp danh sách gợi ý.
 // Dùng chung cho main (tải model, worker nhận dạng) và renderer (thu âm, phím tắt). Xem vault: Vietnamese voice input.
-import type { VoiceHotkey } from './types'
+import type { VoiceGlobalHotkey, VoiceHotkey } from './types'
 
 export type { VoiceHotkey }
 
@@ -39,6 +39,35 @@ export const SONIOX_SECRET = 'SONIOX_API_KEY'
 export const SONIOX_USD_PER_HOUR = 0.12
 /** Soniox nhận ngữ cảnh tới ~8000 token: gửi nhiều từ gợi ý hơn máy trên máy (Qwen3 chỉ ~60). */
 export const CLOUD_TERMS_MAX = 150
+
+// ---------- V4: sửa bằng AI, gõ toàn hệ thống, lệnh "gửi" ----------
+
+/** Bí mật giữ API key Anthropic cho phần sửa bằng AI (tuỳ chọn). */
+export const AI_FIX_SECRET = 'ANTHROPIC_API_KEY'
+/** Model nhanh, rẻ: chỉ sửa vài chữ. */
+export const AI_FIX_MODEL = 'claude-haiku-5-5'
+
+/** Phím tắt toàn hệ thống: nhãn + accelerator của Electron. */
+export const VOICE_GLOBAL_HOTKEYS: Record<VoiceGlobalHotkey, { label: string; accel: string }> = {
+  'ctrl+shift+space': { label: 'Ctrl + Shift + Space', accel: 'Control+Shift+Space' },
+  'ctrl+alt+v': { label: 'Ctrl + Alt + V', accel: 'Control+Alt+V' },
+  f8: { label: 'F8', accel: 'F8' }
+}
+
+/**
+ * Lệnh "gửi": câu kết bằng "gửi" / "gửi đi" (dấu câu máy thêm vào cũng được) → bỏ chữ đó, chèn rồi nhấn Enter.
+ * Chỉ nói "gửi" → text rỗng, chỉ nhấn Enter (gửi phần đã gõ sẵn).
+ */
+export function splitSendCommand(text: string): { text: string; send: boolean } {
+  const m = /(^|[\s,.;:!?…]+)(?<![\p{L}\p{N}_])gửi(\s+đi)?[\s.!?…]*$/iu.exec(text.normalize('NFC'))
+  if (!m) return { text, send: false }
+  return { text: text.normalize('NFC').slice(0, m.index).trimEnd(), send: true }
+}
+
+/** Sửa bằng AI: có key chưa. */
+export interface VoiceAiInfo {
+  hasKey: boolean
+}
 
 /** Máy đám mây: đã có key chưa, đã dùng bao nhiêu giây tháng này. */
 export interface VoiceCloudInfo {

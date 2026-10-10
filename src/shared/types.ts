@@ -317,7 +317,17 @@ export interface VoiceSettings {
   replacements: VoiceReplacement[]
   /** Lệnh nói: "xuống dòng" → xuống dòng thật. */
   commands: boolean
+  /** V4 (tuỳ chọn): nhờ AI (Claude Haiku, API key riêng) sửa từ nghe sai theo danh sách từ của dự án. */
+  aiFix: boolean
+  /** V4 (tuỳ chọn): kết câu bằng "gửi" / "gửi đi" → chèn rồi nhấn Enter. */
+  sendCommand: boolean
+  /** V4 (tuỳ chọn): phím tắt toàn hệ thống, gõ vào ứng dụng đang mở (ngoài stag.ai). */
+  global: boolean
+  globalHotkey: VoiceGlobalHotkey
 }
+
+/** Phím tắt toàn hệ thống (bấm để bắt đầu, bấm lần nữa để dừng: Windows không báo nhả phím cho phím tắt toàn hệ thống). */
+export type VoiceGlobalHotkey = 'ctrl+shift+space' | 'ctrl+alt+v' | 'f8'
 
 export interface VoiceReplacement {
   /** Cụm máy hay nghe ra (khớp trọn cụm, không phân biệt hoa thường). */
@@ -547,7 +557,7 @@ export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true,
 export const DEFAULT_AGENT_API: AgentApiSettings = { manage: true, message: true, confirmCreate: true }
 export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
 export const VOICE_UNLOAD_MAX = 120
-export const DEFAULT_VOICE: VoiceSettings = { enabled: true, engine: 'local', hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true }
+export const DEFAULT_VOICE: VoiceSettings = { enabled: true, engine: 'local', hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true, aiFix: false, sendCommand: false, global: false, globalHotkey: 'ctrl+shift+space' }
 export const DEFAULT_GENERAL: GeneralSettings = {
   zoom: 100,
   openAtLogin: false,
