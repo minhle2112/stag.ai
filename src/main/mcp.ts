@@ -768,17 +768,18 @@ function registerMemoryTools(server: McpServer, ctx: McpContext): { read: Regist
     {
       title: 'Query notes',
       description:
-        'List notes matching all given filters on their metadata, newest first: frontmatter type / tag / any field, folder, links to or from a note, modified since a date, contains text. ' +
+        'List notes matching all given filters on their metadata, newest first: frontmatter type / tag (frontmatter or #tag in the text) / any field, folder, links to or from a note, modified since a date, contains text. Template notes are skipped unless include_templates. ' +
         'E.g. type="decision", modified_since="2026-10-01"; or links_to="Kanban" for every note linking to it.',
       inputSchema: {
         type: z.string().max(60).optional().describe('frontmatter `type:` (index, feature, decision, log…)'),
-        tag: z.string().max(60).optional().describe('frontmatter tag'),
+        tag: z.string().max(60).optional().describe('Tag from frontmatter `tags:` or #tag in the text'),
         folder: z.string().max(200).optional(),
         links_to: z.string().max(300).optional().describe('Notes that link to this note'),
         linked_from: z.string().max(300).optional().describe('Notes this note links to'),
         modified_since: z.string().max(40).optional().describe('YYYY-MM-DD or ISO date'),
         field: z.string().max(200).optional().describe('"key" (has the field) or "key=value"'),
         text: z.string().max(200).optional().describe('Contains this text (name or content)'),
+        include_templates: z.boolean().optional().describe('Also list template notes (_Template.md, Templates/ folder); default false'),
         limit: z.number().int().min(1).max(100).optional().describe('Max notes (default 20)')
       },
       annotations: ro
@@ -801,7 +802,7 @@ function registerMemoryTools(server: McpServer, ctx: McpContext): { read: Regist
     'memory_tags',
     {
       title: 'Vault tags',
-      description: 'Every frontmatter tag used in the vault with its note count.',
+      description: 'Every tag used in the vault (frontmatter `tags:` and #tag in the text, template notes skipped) with its note count.',
       inputSchema: {},
       annotations: ro
     },

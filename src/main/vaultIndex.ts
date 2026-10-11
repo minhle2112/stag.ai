@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path'
 import type { WebContents } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { VaultIndex, VaultLink, VaultNoteInfo, VaultSearchHit } from '@shared/types'
-import { extractLinks, isAttachment, parseNoteMeta, resolveNote, splitFrontmatter, type NoteMeta, type ParsedLink } from '@shared/wikilink'
+import { extractLinks, extractTags, isAttachment, parseNoteMeta, resolveNote, splitFrontmatter, type NoteMeta, type ParsedLink } from '@shared/wikilink'
 
 /** Note lớn hơn mức này vẫn có trong cây/graph nhưng không đọc link và không tìm trong nội dung. */
 const MAX_NOTE_BYTES = 5 * 1024 * 1024
@@ -27,6 +27,13 @@ function vaultKey(vaultPath: string): string {
 /** Bỏ dấu tiếng Việt + chữ thường để tìm "ke hoach" ra "Kế hoạch". */
 export function fold(s: string): string {
   return s.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase()
+}
+
+/** Tag của note = tag trong frontmatter + `#tag` trong thân (như Obsidian), không trùng (không phân biệt hoa thường). */
+function withInlineTags(meta: NoteMeta, text: string): NoteMeta {
+  const have = new Set(meta.tags.map((t) => t.toLowerCase()))
+  const extra = extractTags(text).filter((t) => !have.has(t.toLowerCase()))
+  return extra.length ? { ...meta, tags: [...meta.tags, ...extra] } : meta
 }
 
 /** Mọi file .md trong vault (bỏ file/thư mục bắt đầu bằng `.`, như `.obsidian`, `.trash`). */
@@ -88,7 +95,7 @@ export class VaultIndexer {
             }
           }
           const { frontmatter } = splitFrontmatter(text)
-          next.set(f.rel, { mtime: f.mtime, size: f.size, meta: parseNoteMeta(frontmatter), links: extractLinks(text), text })
+          next.set(f.rel, { mtime: f.mtime, size: f.size, meta: withInlineTags(parseNoteMeta(frontmatter), text), links: extractLinks(text), text })
         })
       )
     }

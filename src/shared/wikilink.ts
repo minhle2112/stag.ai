@@ -79,6 +79,39 @@ export function parseNoteMeta(frontmatter: string | null): NoteMeta {
   return meta
 }
 
+/**
+ * Tag viết trong thân note (`#tag`, `#cha/con`) như Obsidian: đứng đầu dòng hoặc sau khoảng trắng / dấu câu mở,
+ * gồm chữ, số, `_ - /`, có ít nhất một ký tự không phải số (`#123` không phải tag). Bỏ frontmatter, khối code, `code`
+ * và heading (`# Tiêu đề` có khoảng trắng sau `#` nên không khớp). Trả về không trùng (không phân biệt hoa thường).
+ */
+export function extractTags(md: string): string[] {
+  const { body } = splitFrontmatter(md)
+  const out: string[] = []
+  const seen = new Set<string>()
+  let fence: string | null = null
+  for (const line of body.split(/\r?\n/)) {
+    const f = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
+    if (fence) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null
+      continue
+    }
+    if (f) {
+      fence = f[1]
+      continue
+    }
+    const text = line.replace(/(`+)[^`]*?\1/g, ' ')
+    for (const m of text.matchAll(/(^|[\s(,;!?"'“])#([\p{L}\p{N}_/-]+)/gu)) {
+      const tag = m[2].replace(/\/+$/, '')
+      if (!tag || /^[\d/_-]+$/.test(tag)) continue
+      const key = tag.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(tag)
+    }
+  }
+  return out
+}
+
 /** Tách phần trong `[[...]]` thành đích, heading, bí danh. `\|` (trong bảng) được coi là `|`. */
 export function splitWikilink(inner: string): { target: string; heading: string | null; alias: string | null } {
   const raw = inner.replace(/\\\|/g, '|')

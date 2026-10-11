@@ -36,7 +36,15 @@ export interface QueryFilter {
   field?: string
   /** Có chữ này trong tên hoặc nội dung (không phân biệt dấu). */
   text?: string
+  /** Gồm cả note mẫu (`_Template.md`, thư mục `Templates/`); mặc định bỏ qua. */
+  include_templates?: boolean
   limit?: number
+}
+
+/** Note mẫu (không phải bộ nhớ thật): tên bắt đầu bằng `_Template`, hoặc nằm trong thư mục `Templates` / `_Templates`. */
+export function isTemplate(rel: string): boolean {
+  const segs = rel.toLowerCase().split('/')
+  return segs[segs.length - 1].startsWith('_template') || segs.slice(0, -1).some((s) => s === 'templates' || s === '_templates')
 }
 
 /** Mã phiên bản nội dung note (để ghi không đè lên thay đổi của người khác). */
@@ -208,6 +216,7 @@ export class MemoryService {
     const rows: Array<{ rel: string; c: Cached }> = []
     for (const [rel, c] of cache) {
       if (folder && !rel.toLowerCase().startsWith(folder)) continue
+      if (!f.include_templates && isTemplate(rel)) continue
       if (f.type && (c.meta.type ?? '').toLowerCase() !== f.type.toLowerCase()) continue
       if (f.tag && !c.meta.tags.some((t) => t.toLowerCase() === f.tag!.replace(/^#/, '').toLowerCase())) continue
       if (since !== null && c.mtime < since) continue
@@ -247,8 +256,11 @@ export class MemoryService {
 
   async tags(vaultPath: string): Promise<MemoryResult> {
     const counts = new Map<string, number>()
-    for (const c of (await this.notes(vaultPath)).values()) for (const t of c.meta.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
-    if (!counts.size) return { text: 'No tags (frontmatter `tags:`) in the vault.', touched: [] }
+    for (const [rel, c] of await this.notes(vaultPath)) {
+      if (isTemplate(rel)) continue
+      for (const t of c.meta.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
+    }
+    if (!counts.size) return { text: 'No tags (frontmatter `tags:` or #tag in the text) in the vault.', touched: [] }
     return { text: [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t, n]) => `${t} (${n})`).join('\n'), touched: [] }
   }
 

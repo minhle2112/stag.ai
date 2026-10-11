@@ -28,7 +28,8 @@ beforeEach(async () => {
   await put('_INDEX.md', '---\ntype: index\n---\n# Index\n\n- [[Kanban]]\n- [[Workspace and Vault]]\n- [[Ghost note]]\n')
   await put('30 Features/Kanban.md', '---\ntype: feature\ntags: [ui, board]\nstatus: done\n---\n# Kanban\n\nBack to: [[_INDEX]]\n\n## Columns\nTodo, working, done.\n\n## Kế hoạch\nKéo thả thẻ.\n')
   await put('30 Features/Workspace and Vault.md', '---\ntype: feature\n---\n# Workspace and Vault\n\nSee [[Kanban#Columns|columns]] and [notes](./Kanban.md).\n')
-  await put('50 Decisions/2026-10-08 Drop tickets.md', '---\ntype: decision\ndate: 2026-10-08\n---\n# Drop tickets\n\nRelated: [[Kanban]]\n')
+  await put('50 Decisions/2026-10-08 Drop tickets.md', '---\ntype: decision\ndate: 2026-10-08\n---\n# Drop tickets\n\nRelated: [[Kanban]] #board #backend\n')
+  await put('50 Decisions/_Template.md', '---\ntype: decision\ntags: [tpl]\n---\n# Decision: <name>\n')
   await put('.obsidian/workspace.json', '{}')
 })
 
@@ -111,9 +112,10 @@ describe('tool memory_* đọc', () => {
     const o = await call(client, 'memory_outline', { note: '30 Features/Kanban.md' })
     expect(o.text).toContain('frontmatter: type, tags, status')
     expect(o.text).toContain('  ## Kế hoạch')
-    expect((await call(client, 'memory_list')).text).toBe('30 Features/ (2 notes)\n50 Decisions/ (1 notes)\n_INDEX.md')
+    expect((await call(client, 'memory_list')).text).toBe('30 Features/ (2 notes)\n50 Decisions/ (2 notes)\n_INDEX.md')
     expect((await call(client, 'memory_list', { folder: '30 Features/' })).text).toBe('Kanban.md\nWorkspace and Vault.md')
-    expect((await call(client, 'memory_tags')).text).toBe('board (1)\nui (1)')
+    // Tag trong frontmatter + #tag trong thân; note mẫu không tính.
+    expect((await call(client, 'memory_tags')).text).toBe('board (2)\nbackend (1)\nui (1)')
   })
 
   it('memory_search: không phân biệt dấu, lọc thư mục', async () => {
@@ -130,6 +132,8 @@ describe('tool memory_* đọc', () => {
       (await call(client, 'memory_query', args)).text.split('\n').map((l) => l.split(' · ')[0]).sort()
     expect(await names({ type: 'feature' })).toEqual(['30 Features/Kanban.md', '30 Features/Workspace and Vault.md'])
     expect(await names({ tag: '#UI' })).toEqual(['30 Features/Kanban.md'])
+    expect(await names({ tag: 'backend' })).toEqual(['50 Decisions/2026-10-08 Drop tickets.md'])
+    expect(await names({ type: 'decision', include_templates: true })).toEqual(['50 Decisions/2026-10-08 Drop tickets.md', '50 Decisions/_Template.md'])
     expect(await names({ field: 'status=done' })).toEqual(['30 Features/Kanban.md'])
     expect(await names({ field: 'date' })).toEqual(['50 Decisions/2026-10-08 Drop tickets.md'])
     expect(await names({ links_to: 'Kanban', type: 'decision' })).toEqual(['50 Decisions/2026-10-08 Drop tickets.md'])

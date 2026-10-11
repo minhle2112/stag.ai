@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractLinks, isAttachment, parseNoteMeta, resolveNote, splitFrontmatter, splitWikilink } from './wikilink'
+import { extractLinks, extractTags, isAttachment, parseNoteMeta, resolveNote, splitFrontmatter, splitWikilink } from './wikilink'
 
 describe('splitWikilink', () => {
   it('tách đích, heading, bí danh', () => {
@@ -136,5 +136,26 @@ describe('resolveNote', () => {
 
   it('đường dẫn viết bằng \\', () => {
     expect(resolveNote('30 Features\\Kanban', '_INDEX.md', notes)).toBe('30 Features/Kanban.md')
+  })
+})
+
+describe('extractTags', () => {
+  it('tag trong thân như Obsidian: lồng nhau, có dấu, không trùng; bỏ frontmatter, heading, code, link, số', () => {
+    const md = [
+      '---',
+      'tags: [fm]',
+      'note: "#notatag"',
+      '---',
+      '# Heading #intitle',
+      '## Not#tag',
+      'Text #ui and #UI, #project/stag, (#trong-ngoặc) #kế-hoạch #123 #2026-10',
+      'See [[Kanban#Columns]] and [x](a.md#anchor) and http://x.io/#frag',
+      '`#incode` ```',
+      '```',
+      '#infence',
+      '```',
+      '#last'
+    ].join('\n')
+    expect(extractTags(md)).toEqual(['intitle', 'ui', 'project/stag', 'trong-ngoặc', 'kế-hoạch', 'last'])
   })
 })
