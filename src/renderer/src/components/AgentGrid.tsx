@@ -141,13 +141,13 @@ function CellHeader({ className, tip, children }: { className: string; tip?: str
   )
 }
 
-/** Viền trong của ô (bo theo khung): hổ phách khi agent chờ bạn, xám sáng khi là ô đang chọn. */
-function CellBorder({ waiting, focused }: { waiting?: boolean; focused: boolean }): React.JSX.Element {
+/** Viền trong của ô (bo theo khung): màu nhấn chỉ khi là ô đang chọn. Trạng thái agent (chờ bạn…) chỉ thể hiện ở chấm trước tên. */
+function CellBorder({ focused }: { focused: boolean }): React.JSX.Element {
   const frame = useFrame()
   return (
     <div
       className={`pointer-events-none absolute inset-0 z-[3] border ${frame.maximized ? '' : 'rounded-[10px]'} ${
-        waiting ? 'border-wait/60' : focused ? 'border-line-3' : 'border-line-2'
+        focused ? 'border-accent/70' : 'border-line-2'
       }`}
     />
   )
@@ -208,7 +208,7 @@ function AgentCell({ ws, agent, state }: { ws: Workspace; agent: Agent; state: W
 
   return (
     <div className="group/cell @container/cell absolute inset-0 flex flex-col bg-panel" data-cell={agent.id} onMouseDown={() => focus(ws.id, agent.id)}>
-      <CellHeader className={view.waiting ? 'bg-gradient-to-r from-wait/15 via-wait/5 to-transparent' : focused ? 'bg-panel-3' : 'bg-panel'}>
+      <CellHeader className={focused ? 'bg-panel-3' : 'bg-panel'}>
         <span className={`sdot ${view.mark}`} data-tip={view.label} />
         <b
           className="min-w-0 truncate text-[13px] font-semibold whitespace-nowrap"
@@ -267,7 +267,7 @@ function AgentCell({ ws, agent, state }: { ws: Workspace; agent: Agent; state: W
         </div>
       )}
 
-      <CellBorder waiting={view.waiting} focused={focused} />
+      <CellBorder focused={focused} />
 
       {renaming && <RenameAgentDialog wsId={ws.id} agentId={agent.id} onClose={() => setRenaming(false)} />}
     </div>
