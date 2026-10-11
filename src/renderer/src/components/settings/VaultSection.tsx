@@ -1,6 +1,17 @@
 import { useState } from 'react'
 import { resolveMemory } from '@shared/settings'
-import { KEEP_WORK_DONE_MAX, KEEP_WORK_DONE_MIN, NOTE_BUDGET_MAX, NOTE_BUDGET_MIN, type MemorySettings, type MemoryToolsMode } from '@shared/types'
+import {
+  INDEX_BUDGET_MAX,
+  INDEX_BUDGET_MIN,
+  INDEX_KEEP_DAYS_MAX,
+  INDEX_KEEP_DAYS_MIN,
+  KEEP_WORK_DONE_MAX,
+  KEEP_WORK_DONE_MIN,
+  NOTE_BUDGET_MAX,
+  NOTE_BUDGET_MIN,
+  type MemorySettings,
+  type MemoryToolsMode
+} from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { LevelBar, useLevel, type LevelKey } from './levels'
 import { ErrorBar, Group, Note, Row, Select, SectionTitle, SmallButton, Stepper, Switch, useSaveError } from './controls'
@@ -121,6 +132,46 @@ export function VaultSection(): React.JSX.Element {
           />
         </Row>
       </Group>
+
+      {level.lvl !== 'agent' && (
+        <Group title="_INDEX.md của vault">
+          <Row
+            label="Dời mục đã xong cũ ra khỏi _INDEX"
+            desc={`_INDEX.md được mọi phiên agent đọc đầu tiên. Khi nó quá hạn mức, app chuyển các mục đã xong ("- [x]") cũ trong mục "Open items" sang _INDEX archive.md (trong 00 Meta/), nhóm theo ngày. Mục chưa xong ("- [ ]") luôn ở lại. Theo app → workspace.`}
+            override={override('indexArchive', onOff)}
+          >
+            <Switch label="Dời mục đã xong cũ ra khỏi _INDEX" checked={effective.indexArchive} onChange={(v) => setField('indexArchive', v)} />
+          </Row>
+          {effective.indexArchive && (
+            <>
+              <Row label="Hạn mức _INDEX" desc="Chỉ dời khi _INDEX.md lớn hơn chừng này." override={override('indexBudgetKb', (v) => `${v} KB`)}>
+                <Stepper
+                  label="Hạn mức _INDEX"
+                  value={effective.indexBudgetKb}
+                  min={INDEX_BUDGET_MIN}
+                  max={INDEX_BUDGET_MAX}
+                  suffix="KB"
+                  onChange={(v) => setField('indexBudgetKb', v)}
+                />
+              </Row>
+              <Row
+                label="Giữ mục đã xong (ngày)"
+                desc="Mục đã xong có ngày (YYYY-MM-DD) mới nhất ghi trong mục nằm trong chừng này ngày thì vẫn giữ trong _INDEX. Mục không ghi ngày nào coi là cũ."
+                override={override('indexKeepDays', (v) => `${v} ngày`)}
+              >
+                <Stepper
+                  label="Giữ mục đã xong (ngày)"
+                  value={effective.indexKeepDays}
+                  min={INDEX_KEEP_DAYS_MIN}
+                  max={INDEX_KEEP_DAYS_MAX}
+                  suffix="ngày"
+                  onChange={(v) => setField('indexKeepDays', v)}
+                />
+              </Row>
+            </>
+          )}
+        </Group>
+      )}
       <Note>
         Agent không tự ghi lại dòng &quot;xong việc&quot; nữa, chỉ ghi điều đáng nhớ (quyết định, lỗi gặp, bài học). Hạn mức note được kiểm khi phiên agent mở và sau
         mỗi việc xong. Đổi chế độ tool bộ nhớ có tác dụng từ phiên agent mở sau (phiên đang chạy gọi tool đã tắt thì nhận lỗi).

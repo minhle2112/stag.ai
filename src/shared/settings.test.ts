@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { browserToolsOn, normalizeBrowser, normalizeOrigin, normalizeScope, resolveScope, normalizeGeneral, normalizeHandoff, normalizeOverrides, normalizeSettings, normalizeVoice, parseEnv, patchApp, patchOverrides, resolveHandoff, resolveModel, splitArgs } from './settings'
+import { browserToolsOn, normalizeBrowser, normalizeOrigin, normalizeScope, resolveScope, normalizeGeneral, normalizeHandoff, normalizeMemory, normalizeOverrides, normalizeSettings, normalizeVoice, parseEnv, patchApp, patchOverrides, resolveHandoff, resolveModel, splitArgs } from './settings'
 import { DEFAULT_ADAPTERS, DEFAULT_GENERAL, DEFAULT_SETTINGS, DEFAULT_VOICE, type Settings } from './types'
 
 describe('normalizeHandoff', () => {
@@ -234,5 +234,13 @@ describe('giọng nói (V1)', () => {
     expect(normalizeSettings({ version: 2, app: {} }).app.voice).toEqual(DEFAULT_VOICE)
     const app = patchApp(DEFAULT_SETTINGS.app, { voice: { hotkey: 'f9' } })
     expect(app.voice).toEqual({ ...DEFAULT_VOICE, hotkey: 'f9' })
+  })
+})
+
+describe('normalizeMemory: dọn _INDEX', () => {
+  it('mặc định bật, 12 KB, 3 ngày; số kẹp trong khoảng; ghi đè workspace chỉ giữ khoá có mặt', () => {
+    expect(normalizeMemory(undefined)).toMatchObject({ indexArchive: true, indexBudgetKb: 12, indexKeepDays: 3 })
+    expect(normalizeMemory({ indexArchive: false, indexBudgetKb: 1, indexKeepDays: 500 })).toMatchObject({ indexArchive: false, indexBudgetKb: 4, indexKeepDays: 90 })
+    expect(normalizeOverrides({ memory: { indexKeepDays: 7 } })?.memory).toEqual({ indexKeepDays: 7 })
   })
 })

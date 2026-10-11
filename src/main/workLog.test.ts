@@ -10,6 +10,9 @@ import {
   memoryRules,
   MemoryKeeper,
   NoteWriter,
+  addToIndexArchive,
+  newIndexArchive,
+  splitIndexDone,
   splitWorkDone,
   touchUpdated,
   workDoneLine,
@@ -180,12 +183,133 @@ describe('MemoryKeeper (trên đĩa)', () => {
     expect(await read('60 Agents', 'Tester.md')).toBe(before)
   })
 
+  it('_INDEX quá hạn mức: dời mục đã xong cũ sang 00 Meta/_INDEX archive.md (ghi note cất trước); tắt / chưa quá thì thôi', async () => {
+    const old = Array.from({ length: 60 }, (_, i) => `- [x] Done item ${i} (2026-09-01): ${'x'.repeat(60)}`)
+    const index = `---\ntype: index\n---\n# INDEX\n\n## Open items\n\n${old.join('\n')}\n- [ ] Still open (2026-09-01)\n- [x] Fresh (2026-10-10)\n`
+    await fs.writeFile(vault('_INDEX.md'), index)
+    await fs.mkdir(vault('00 Meta'))
+    const k = new MemoryKeeper(() => cfg)
+    const now = new Date(2026, 9, 11, 12)
+    expect(await k.compactIndex(ws, { ...cfg, indexArchive: false }, now)).toBe(0)
+    expect(await k.compactIndex(ws, { ...cfg, indexBudgetKb: 64 }, now)).toBe(0)
+    expect(await read('_INDEX.md')).toBe(index)
+    // Chỗ của note cất là thư mục: ghi lỗi → _INDEX giữ nguyên.
+    await fs.mkdir(vault('00 Meta', '_INDEX archive.md'))
+    await expect(k.compactIndex(ws, { ...cfg, indexBudgetKb: 4 }, now)).rejects.toThrow()
+    expect(await read('_INDEX.md')).toBe(index)
+    await fs.rm(vault('00 Meta', '_INDEX archive.md'), { recursive: true })
+
+    expect(await k.compactIndex(ws, { ...cfg, indexBudgetKb: 4 }, now)).toBe(60)
+    const after = await read('_INDEX.md')
+    expect(after).toContain('Older done items: [[_INDEX archive]]')
+    expect(after).toContain('- [ ] Still open (2026-09-01)')
+    expect(after).toContain('- [x] Fresh (2026-10-10)')
+    expect(after).not.toContain('Done item 0 ')
+    const archive = await read('00 Meta', '_INDEX archive.md')
+    expect(archive).toContain('Back to: [[_INDEX]]')
+    expect(archive.match(/Done item \d+ /g)).toHaveLength(60)
+    expect(archive.match(/## 2026-09-01/g)).toHaveLength(1)
+  })
+
+  it('việc xong cũng dọn _INDEX (theo cài đặt cấp workspace)', async () => {
+    const old = Array.from({ length: 150 }, (_, i) => `- [x] Old ${i} (2026-01-01) ${'y'.repeat(80)}`)
+    await fs.writeFile(vault('_INDEX.md'), `# INDEX\n\n## Open items\n${old.join('\n')}\n`)
+    const seen: Array<string | null> = []
+    await new MemoryKeeper((_ws, agentId) => {
+      seen.push(agentId)
+      return cfg
+    }).taskClosed(ws, { task: task(), how: 'done' })
+    expect(seen).toContain(null)
+    expect(await read('_INDEX archive.md')).toContain('- [x] Old 149 ')
+    expect(await read('_INDEX.md')).not.toContain('- [x] Old 0 ')
+  })
+
   it('đổi tên agent: đổi tên note cất và liên kết hai chiều', async () => {
     await fs.writeFile(vault('60 Agents', 'Tester archive.md'), '# Tester archive\n\nBack to: [[Tester]]\n')
     await fs.writeFile(vault('60 Agents', 'QA.md'), 'Older items: [[Tester archive]]\n')
     await new MemoryKeeper(() => cfg).renameAgent(ws, 'Tester', 'QA')
     expect(await read('60 Agents', 'QA archive.md')).toBe('# QA archive\n\nBack to: [[QA]]\n')
     expect(await read('60 Agents', 'QA.md')).toBe('Older items: [[QA archive]]\n')
+  })
+})
+
+describe('splitIndexDone / addToIndexArchive', () => {
+  const INDEX = [
+    '---',
+    'type: index',
+    '---',
+    '# INDEX',
+    '',
+    '## Map',
+    '- [x] not in Open items (2020-01-01)',
+    '',
+    '## Open items',
+    '',
+    '- [x] Old done (2026-10-01): done',
+    '  - child line of old done',
+    '- [ ] Old open (2026-10-01): waiting',
+    '- [x] Recent done (2026-10-01): reopened 2026-10-10, done',
+    '- [x] No date at all',
+    '',
+    '- [X] Upper-case done (2026-09-30)',
+    'Some free text',
+    ''
+  ].join('\n')
+
+  it('dời mục [x] cũ (cả dòng con, mục không ngày), giữ [ ], mục mới, chữ khác và mục ngoài Open items', () => {
+    const r = splitIndexDone(INDEX, 3, '2026-10-11')
+    expect(r.moved).toEqual([
+      { date: '2026-10-01', text: '- [x] Old done (2026-10-01): done\n  - child line of old done' },
+      { date: null, text: '- [x] No date at all' },
+      { date: '2026-09-30', text: '- [X] Upper-case done (2026-09-30)' }
+    ])
+    expect(r.note).toBe(
+      [
+        '---',
+        'type: index',
+        '---',
+        '# INDEX',
+        '',
+        '## Map',
+        '- [x] not in Open items (2020-01-01)',
+        '',
+        '## Open items',
+        '',
+        'Older done items: [[_INDEX archive]]',
+        '',
+        '- [ ] Old open (2026-10-01): waiting',
+        '- [x] Recent done (2026-10-01): reopened 2026-10-10, done',
+        '',
+        'Some free text',
+        ''
+      ].join('\n')
+    )
+    // Lần sau: dòng trỏ đã có, không thêm lần nữa; không còn gì để dời thì giữ nguyên.
+    const again = splitIndexDone(r.note, 3, '2026-10-20')
+    expect(again.moved.map((m) => m.date)).toEqual(['2026-10-10'])
+    expect(again.note.match(/_INDEX archive/g)).toHaveLength(1)
+    expect(splitIndexDone(again.note, 3, '2026-10-20')).toEqual({ note: again.note, moved: [] })
+  })
+
+  it('giữ CRLF; không có mục Open items → giữ nguyên', () => {
+    const crlf = INDEX.replace(/\n/g, '\r\n')
+    expect(splitIndexDone(crlf, 3, '2026-10-11').note).not.toMatch(/[^\r]\n/)
+    expect(splitIndexDone('# x\n- [x] a\n', 0, '2026-10-11')).toEqual({ note: '# x\n- [x] a\n', moved: [] })
+  })
+
+  it('note cất: nhóm theo ngày (cũ trước, Undated đầu), không trùng', () => {
+    const items = [
+      { date: '2026-10-05', text: '- [x] B' },
+      { date: null, text: '- [x] U' },
+      { date: '2026-10-01', text: '- [x] A\n  - a child' }
+    ]
+    const a = addToIndexArchive(newIndexArchive('2026-10-11'), items, '2026-10-11')!
+    const order = ['## Undated', '- [x] U', '## 2026-10-01', '- [x] A', '  - a child', '## 2026-10-05', '- [x] B'].map((s) => a.indexOf(s))
+    expect(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1]))).toBe(true)
+    expect(addToIndexArchive(a, items, '2026-10-12')).toBeNull()
+    const b = addToIndexArchive(a, [{ date: '2026-10-01', text: '- [x] A2' }], '2026-10-12')!
+    expect(b.indexOf('- [x] A2')).toBeLessThan(b.indexOf('## 2026-10-05'))
+    expect(b).toContain('updated: 2026-10-12')
   })
 })
 

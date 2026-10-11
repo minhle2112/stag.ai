@@ -540,6 +540,12 @@ export interface MemorySettings {
   noteBudgetKb: number
   /** Số dòng "Work done" mới nhất giữ lại trong note khi cất (phần cũ hơn sang archive). */
   keepWorkDone: number
+  /** Dời mục đã xong (`- [x]`) cũ trong mục "Open items" của `_INDEX.md` sang `_INDEX archive` khi `_INDEX` quá hạn mức. Theo app → workspace. */
+  indexArchive: boolean
+  /** Hạn mức `_INDEX.md` (KB). */
+  indexBudgetKb: number
+  /** Mục đã xong có ngày mới nhất trong vòng chừng này ngày thì vẫn giữ trong `_INDEX`. */
+  indexKeepDays: number
   /** Tool memory_* trong MCP stag (agent đọc / tìm / sửa vault qua app): đầy đủ, chỉ đọc, hoặc tắt. */
   agentTools: MemoryToolsMode
 }
@@ -551,6 +557,10 @@ export const NOTE_BUDGET_MIN = 2
 export const NOTE_BUDGET_MAX = 64
 export const KEEP_WORK_DONE_MIN = 3
 export const KEEP_WORK_DONE_MAX = 100
+export const INDEX_BUDGET_MIN = 4
+export const INDEX_BUDGET_MAX = 128
+export const INDEX_KEEP_DAYS_MIN = 0
+export const INDEX_KEEP_DAYS_MAX = 90
 
 /** Cài đặt cấp app. */
 export interface AppSettings {
@@ -637,7 +647,16 @@ export type OverrideLevel = 'workspace' | 'agent'
 export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPercent: 80 }
 export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true, exempt: [] }
 export const DEFAULT_AGENT_API: AgentApiSettings = { manage: true, message: true, confirmCreate: true, read: true }
-export const DEFAULT_MEMORY: MemorySettings = { workLog: true, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 15, agentTools: 'full' }
+export const DEFAULT_MEMORY: MemorySettings = {
+  workLog: true,
+  agentWorkDone: true,
+  noteBudgetKb: 8,
+  keepWorkDone: 15,
+  indexArchive: true,
+  indexBudgetKb: 12,
+  indexKeepDays: 3,
+  agentTools: 'full'
+}
 export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
 export const VOICE_UNLOAD_MAX = 120
 export const DEFAULT_VOICE: VoiceSettings = { enabled: true, engine: 'local', hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true, aiFix: false, sendCommand: false, global: false, globalHotkey: 'ctrl+shift+space' }

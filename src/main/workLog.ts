@@ -193,6 +193,118 @@ export function newArchive(agent: string, date: string): string {
   ].join('\n')
 }
 
+// ---- `_INDEX.md`: dời mục đã xong cũ sang `_INDEX archive` ----
+
+export const INDEX_OPEN_SECTION = 'Open items'
+export const INDEX_ARCHIVE = '_INDEX archive'
+/** Nhóm trong note cất cho mục không có ngày nào. */
+export const UNDATED = 'Undated'
+
+/** Một mục đã dời: ngày mới nhất ghi trong mục (YYYY-MM-DD) hoặc null, và chữ của mục (cả dòng con). */
+export interface MovedIndexItem {
+  date: string | null
+  text: string
+}
+
+/** Lùi `days` ngày từ một ngày YYYY-MM-DD (theo lịch, không lệch múi giờ). */
+function daysBefore(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d - days))
+  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`
+}
+
+/**
+ * Dời mục đã xong (`- [x]` ở đầu dòng, kèm các dòng con thụt vào) trong mục `## Open items` của `_INDEX.md` khi mục
+ * cũ hơn `keepDays` ngày. Ngày của mục = ngày YYYY-MM-DD mới nhất viết trong mục (mục được sửa gần đây thì ở lại);
+ * không có ngày nào thì coi là cũ. Mục `- [ ]` và mọi dòng khác giữ nguyên. Thêm dòng trỏ tới note cất ở đầu mục.
+ */
+export function splitIndexDone(text: string, keepDays: number, today: string, archive = INDEX_ARCHIVE): { note: string; moved: MovedIndexItem[] } {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const all = text.split(/\r?\n/)
+  const sec = findSection(all, INDEX_OPEN_SECTION)
+  if (!sec) return { note: text, moved: [] }
+  const cutoff = daysBefore(today, keepDays)
+  // Khối: mục checklist (dòng đầu + dòng con thụt vào) hoặc một dòng khác.
+  const blocks: Array<{ lines: string[]; item: boolean }> = []
+  for (const l of all.slice(sec.start + 1, sec.end)) {
+    const last = blocks[blocks.length - 1]
+    if (/^[-*] \[[ xX]\]/.test(l)) blocks.push({ lines: [l], item: true })
+    else if (last?.item && l.trim() && /^\s/.test(l)) last.lines.push(l)
+    else blocks.push({ lines: [l], item: false })
+  }
+  const moved: MovedIndexItem[] = []
+  const kept: string[] = []
+  for (const b of blocks) {
+    if (b.item && /^[-*] \[[xX]\]/.test(b.lines[0])) {
+      const dates = b.lines.join(' ').match(/\b\d{4}-\d{2}-\d{2}\b/g) ?? []
+      const date = dates.length ? dates.reduce((a, c) => (c > a ? c : a)) : null
+      if (date === null || date < cutoff) {
+        moved.push({ date, text: b.lines.join(eol) })
+        continue
+      }
+    }
+    kept.push(...b.lines)
+  }
+  if (!moved.length) return { note: text, moved }
+  // Dòng trống liền nhau (chỗ mục vừa dời đi) gộp lại một.
+  const body = kept.filter((l, i) => l.trim() || i === 0 || kept[i - 1].trim())
+  if (!body.some((l) => l.includes(`[[${archive}]]`))) {
+    const pointer = `Older done items: [[${archive}]]`
+    if (body.length && !body[0].trim()) body.splice(1, 0, pointer, '')
+    else body.unshift(pointer, '')
+  }
+  const tail = all.slice(sec.end)
+  while (body.length && !body[body.length - 1].trim()) body.pop()
+  const out = [...all.slice(0, sec.start + 1), ...body, ...(tail.length ? [''] : []), ...tail]
+  if (!tail.length && all[all.length - 1] === '') out.push('')
+  return { note: out.join(eol), moved }
+}
+
+/** Note cất mới của `_INDEX.md`. */
+export function newIndexArchive(date: string): string {
+  return [
+    '---',
+    'type: archive',
+    `updated: ${date}`,
+    '---',
+    `# ${INDEX_ARCHIVE}`,
+    '',
+    'Back to: [[_INDEX]]',
+    '',
+    `Done items moved here by stag.ai from "${INDEX_OPEN_SECTION}" of [[_INDEX]] when it grew past its budget, grouped by the latest date written in the item (oldest group first).`,
+    ''
+  ].join('\n')
+}
+
+/**
+ * Thêm mục vào note cất theo nhóm ngày (`## YYYY-MM-DD`, cũ trước; `## Undated` đầu tiên); bỏ mục đã có (so cả chữ).
+ * Trả về null nếu không có gì mới.
+ */
+export function addToIndexArchive(text: string, items: MovedIndexItem[], today: string): string | null {
+  let out = text
+  let added = false
+  for (const it of items) {
+    if (out.includes(it.text)) continue
+    added = true
+    const group = it.date ?? UNDATED
+    const eol = out.includes('\r\n') ? '\r\n' : '\n'
+    const all = out.split(/\r?\n/)
+    if (findSection(all, group)) {
+      out = insertInSection(out, group, it.text.split(/\r?\n/))
+      continue
+    }
+    // Nhóm mới: chèn trước nhóm đầu tiên "lớn hơn" (Undated < mọi ngày), không có thì cuối file.
+    const rank = (g: string): string => (g === UNDATED ? '' : g)
+    const next = all.findIndex((l) => {
+      const m = HEADING_RE.exec(l)
+      return !!m && m[1].length === 2 && rank(m[2]) > rank(group)
+    })
+    if (next < 0) out = insertInSection(out, group, it.text.split(/\r?\n/))
+    else out = [...all.slice(0, next), `## ${group}`, ...it.text.split(/\r?\n/), '', ...all.slice(next)].join(eol)
+  }
+  return added ? touchUpdated(out, today) : null
+}
+
 /** Độ dài note tính bằng KB (UTF-8), một chữ số thập phân. */
 export const sizeKb = (text: string): number => Math.round((Buffer.byteLength(text, 'utf8') / 1024) * 10) / 10
 
@@ -281,7 +393,8 @@ async function stamp(file: string): Promise<{ key: string } | null> {
 export class MemoryKeeper {
   readonly writer = noteWriter
 
-  constructor(private cfg: (ws: Workspace, agentId: string) => MemorySettings) {}
+  /** `agentId` null = cài đặt của workspace (dùng cho `_INDEX.md`). */
+  constructor(private cfg: (ws: Workspace, agentId: string | null) => MemorySettings) {}
 
   private agentsDir(ws: Workspace): string {
     return join(ws.vaultPath, '60 Agents')
@@ -311,6 +424,52 @@ export class MemoryKeeper {
       )
     }
     await this.compact(ws, c.task.agentName, cfg)
+    await this.compactIndex(ws, this.cfg(ws, null)).catch((e) => console.error('[memory] _INDEX', e))
+  }
+
+  /** Note cất của `_INDEX.md`: trong `00 Meta/` nếu vault có thư mục đó, không thì cạnh `_INDEX.md`. */
+  async indexArchiveFile(ws: Workspace): Promise<string> {
+    const meta = join(ws.vaultPath, '00 Meta')
+    return join((await exists(meta)) ? meta : ws.vaultPath, `${INDEX_ARCHIVE}.md`)
+  }
+
+  /**
+   * `_INDEX.md` quá hạn mức → dời mục đã xong cũ hơn `indexKeepDays` ngày sang `_INDEX archive` (xem splitIndexDone).
+   * Ghi note cất TRƯỚC rồi mới thu gọn `_INDEX` (hỏng giữa chừng thì mục nằm hai nơi chứ không mất). Trả về số mục đã dời.
+   */
+  async compactIndex(ws: Workspace, cfg: MemorySettings, now = new Date()): Promise<number> {
+    if (!cfg.indexArchive) return 0
+    const file = join(ws.vaultPath, '_INDEX.md')
+    const today = localDate(now.toISOString())
+    const archiveFile = await this.indexArchiveFile(ws)
+    const saved = new Set<string>()
+    let count = 0
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const cur = await readText(file)
+      if (cur === null || sizeKb(cur) <= cfg.indexBudgetKb) return count
+      const plan = splitIndexDone(cur, cfg.indexKeepDays, today)
+      if (!plan.moved.length) return count
+      const fresh = plan.moved.filter((m) => !saved.has(m.text))
+      await this.writer.update(archiveFile, (text) => {
+        for (const m of fresh) saved.add(m.text)
+        return addToIndexArchive(text ?? newIndexArchive(today), fresh, today)
+      })
+      let retry = false
+      await this.writer.update(file, (text) => {
+        if (text === null || sizeKb(text) <= cfg.indexBudgetKb) return null
+        const r = splitIndexDone(text, cfg.indexKeepDays, today)
+        if (!r.moved.length) return null
+        // `_INDEX` đổi giữa lúc đọc và lúc ghi: còn mục chưa cất thì cất rồi thử lại.
+        if (r.moved.some((m) => !saved.has(m.text))) {
+          retry = true
+          return null
+        }
+        count = r.moved.length
+        return r.note
+      })
+      if (!retry) break
+    }
+    return count
   }
 
   /**

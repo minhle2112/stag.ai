@@ -44,8 +44,8 @@ describe('Cài đặt bộ nhớ (nhật ký việc, note agent)', () => {
       workspaces: { w1: { memory: { workLog: false } } },
       agents: { a1: { memory: { workLog: true, noteBudgetKb: 4 } } }
     })
-    expect(resolveMemory(s, 'w1', 'a1')).toEqual({ workLog: true, agentWorkDone: true, noteBudgetKb: 4, keepWorkDone: 20, agentTools: 'full' })
-    expect(resolveMemory(s, 'w1', 'a2')).toEqual({ workLog: false, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 20, agentTools: 'full' })
+    expect(resolveMemory(s, 'w1', 'a1')).toEqual({ ...DEFAULT_MEMORY, workLog: true, agentWorkDone: true, noteBudgetKb: 4, keepWorkDone: 20, agentTools: 'full' })
+    expect(resolveMemory(s, 'w1', 'a2')).toEqual({ ...DEFAULT_MEMORY, workLog: false, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 20, agentTools: 'full' })
     expect(patchApp(DEFAULT_SETTINGS.app, { memory: { agentWorkDone: false } }).memory).toEqual({ ...DEFAULT_MEMORY, agentWorkDone: false })
   })
 

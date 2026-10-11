@@ -410,6 +410,8 @@ export class AgentService {
     const structured = await exists(join(ws.vaultPath, '_INDEX.md'))
     // Note agent quá hạn mức: cất mục "Work done" cũ trước; vẫn quá thì luật phiên nhờ agent viết gọn.
     const memCfg = resolveMemory(this.settings.get(), ws.id, agent.id)
+    // `_INDEX.md` quá hạn mức: dời mục đã xong cũ sang `_INDEX archive` trước khi agent đọc nó (cài đặt cấp workspace).
+    await this.memory.compactIndex(ws, resolveMemory(this.settings.get(), ws.id, null)).catch((e) => console.error('[memory] _INDEX', e))
     const noteSize = await this.memory.compact(ws, agent.name, memCfg).catch((e) => {
       console.error('[memory]', e)
       return null
