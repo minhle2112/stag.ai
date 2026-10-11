@@ -24,7 +24,7 @@ export function MenuItem({ label, onClick, danger, hint }: { label: string; onCl
 
 /**
  * Menu thao tác của một agent (thanh bên và tiêu đề ô dùng chung): mở ô, phiên mới / tiếp tục, bàn giao, dừng, đóng ô,
- * đổi tên, Model & effort, Connector, Skill, mục menu của plugin, xoá. `before` = mục riêng của nơi gọi (vd. chia ô).
+ * đổi tên, Model & effort, Connector, Skill, mục menu của plugin, xoá. `before` = mục riêng của nơi gọi.
  * `hideBrowser`: menu có thể rơi lên pane trình duyệt (view gốc nằm trên HTML) → ẩn view đó khi menu mở.
  */
 export function AgentMenuPanel({
@@ -59,7 +59,7 @@ export function AgentMenuPanel({
 
   const running = !!state?.running[agent.id]
   const starting = !!state?.starting[agent.id]
-  const shown = leaves(state?.layout ?? null).includes(agent.id)
+  const shown = !!state && leaves(state.layout).includes(agent.id)
   const terminal = agentKind(agent) === 'terminal'
   const external = agentKind(agent) === 'external'
 

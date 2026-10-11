@@ -55,7 +55,6 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
   const loadBoard = useBoard((s) => s.load)
   const loadAgents = useAgents((s) => s.load)
   const settings = useSettings((s) => s.value)
-  const setNewAgent = useUi((s) => s.setNewAgent)
   const [showOld, setShowOld] = useState(false)
   const [onlyWaiting, setOnlyWaiting] = useState(false)
   const [now, setNow] = useState(Date.now())
@@ -131,15 +130,6 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
             }
           ]}
         />
-        <div className="flex-1" />
-        <button
-          onClick={() => setNewAgent({ wsId, agentId: agentsState.focused, dir: 'row' })}
-          className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-accent bg-accent px-2.5 text-[12px] font-semibold text-accent-on hover:brightness-110"
-          data-tip="Tạo agent mới"
-        >
-          <Icon name="plus" size="s" />
-          Agent
-        </button>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-4 gap-2.5 overflow-x-auto p-3">

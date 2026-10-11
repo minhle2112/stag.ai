@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { AdapterId, AgentKind, SplitDir } from '@shared/types'
+import type { Point } from '@shared/canvas'
+import type { AdapterId, AgentKind } from '@shared/types'
 
 /** Màn hình chính, chọn ở thanh icon bên trái. `plugin:<id>/<slot>` = trang riêng của plugin (slot page). */
 export type MainTab = 'kanban' | 'agents' | 'artifacts' | 'vault' | 'log' | `plugin:${string}`
@@ -38,12 +39,11 @@ function writePanes(p: PanePrefs): void {
   }
 }
 
-/** Hộp thoại tạo agent: ô mới đặt cạnh ô `agentId` theo hướng `dir`. */
+/** Hộp thoại tạo agent: ô mới đặt tại điểm `at` của canvas (chỗ chuột phải); không có → giữa vùng đang nhìn. */
 export interface NewAgentTarget {
   wsId: string
-  agentId: string | null
-  dir: SplitDir
-  /** Chọn sẵn loại ô trong hộp thoại (vd. 'terminal' từ menu của nút "+ Agent"). */
+  at?: Point
+  /** Chọn sẵn loại ô trong hộp thoại (vd. 'terminal' từ menu chuột phải "Terminal mới"). */
   kind?: AgentKind
 }
 
@@ -92,9 +92,9 @@ interface UiState {
   /** Bảng lệnh (Ctrl+K). */
   palette: boolean
   setPalette: (open: boolean) => void
-  /** Chế độ tập trung của lưới agent: mã ô đang phóng to theo workspace (null = hiện cả lưới). */
-  focusCell: Record<string, string | null>
-  setFocusCell: (wsId: string, key: string | null) => void
+  /** Ô đang phóng to toàn khung trên canvas, theo workspace (null = đang xem bản đồ). */
+  maxCell: Record<string, string | null>
+  setMaxCell: (wsId: string, key: string | null) => void
   /** Note vault cần mở khi màn Vault hiện ra (từ Nhật ký, bảng lệnh…); Vault đọc xong thì xoá. */
   vaultTarget: { wsId: string; rel: string } | null
   openInVault: (wsId: string, rel: string) => void
@@ -124,8 +124,8 @@ export const useUi = create<UiState>((set, get) => ({
   panes: readPanes(),
   palette: false,
   setPalette: (palette) => set({ palette }),
-  focusCell: {},
-  setFocusCell: (wsId, key) => set((s) => ({ focusCell: { ...s.focusCell, [wsId]: key } })),
+  maxCell: {},
+  setMaxCell: (wsId, key) => set((s) => ({ maxCell: { ...s.maxCell, [wsId]: key } })),
   vaultTarget: null,
   openInVault: (wsId, rel) => set({ tab: 'vault', settings: null, settingsFocus: null, vaultTarget: { wsId, rel } }),
   clearVaultTarget: () => set({ vaultTarget: null }),

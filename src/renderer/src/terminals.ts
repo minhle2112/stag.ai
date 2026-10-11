@@ -3,7 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { composerFor } from './store/chat'
 
 /**
- * Terminal của từng agent sống ngoài React: khi lưới chia lại ô, phần tử DOM của terminal
+ * Terminal của từng agent sống ngoài React: khi ô gắn lại (đóng / mở ô, đổi workspace), phần tử DOM của terminal
  * được chuyển sang ô mới chứ không tạo lại, nên không mất nội dung và không ngắt phiên.
  */
 interface Entry {
@@ -18,7 +18,7 @@ interface Entry {
   resizeTimer: ReturnType<typeof setTimeout> | null
 }
 
-/** Chờ người dùng ngừng kéo (pane browser, thanh chia ô) rồi mới báo kích thước cho tiến trình. */
+/** Chờ người dùng ngừng kéo (pane browser, cạnh ô trên canvas) rồi mới báo kích thước cho tiến trình. */
 const RESIZE_DEBOUNCE_MS = 80
 
 const entries = new Map<string, Entry>()
@@ -71,6 +71,50 @@ export function onAgentExit(fn: (agentId: string, ptyId: string) => void): () =>
 /** Cỡ chữ mọi terminal (Settings → Chung → Terminal). */
 let fontSize = 13
 
+/** Đang chạy hiệu ứng phóng to / thu về của canvas: ô đổi cỡ mỗi khung hình, chỉ canh terminal một lần lúc xong. */
+let fitSuspended = false
+
+export function suspendFit(on: boolean): void {
+  fitSuspended = on
+  if (!on) for (const agentId of entries.keys()) fitTerminal(agentId)
+}
+
+type Coords = { clientX: number; clientY: number }
+interface MouseServiceLike {
+  getCoords: (event: Coords, element: HTMLElement, ...rest: unknown[]) => unknown
+  getMouseReportCoords: (event: MouseEvent, element: HTMLElement) => unknown
+}
+
+/**
+ * Canvas thu nhỏ ô bằng CSS transform; xterm tính ô chữ dưới chuột bằng (clientX - mép trái) / bề rộng ô chữ chưa
+ * thu nhỏ → chọn chữ / bấm link lệch. Đổi toạ độ chuột về hệ chưa thu nhỏ trước khi xterm dùng (MouseService là phần
+ * nội bộ của xterm 6; không có thì bỏ qua, chỉ mất độ chính xác khi zoom ≠ 100%).
+ */
+function patchMouseForScale(term: Terminal): void {
+  const ms = (term as unknown as { _core?: { _mouseService?: MouseServiceLike } })._core?._mouseService
+  if (!ms || typeof ms.getCoords !== 'function' || typeof ms.getMouseReportCoords !== 'function') return
+  const unscale = <T extends Coords>(event: T, el: HTMLElement): T => {
+    const r = el.getBoundingClientRect()
+    const s = el.offsetWidth ? r.width / el.offsetWidth : 1
+    if (!s || Math.abs(s - 1) < 0.001) return event
+    const clientX = r.left + (event.clientX - r.left) / s
+    const clientY = r.top + (event.clientY - r.top) / s
+    return new Proxy(event, {
+      get: (t, k) => {
+        if (k === 'clientX') return clientX
+        if (k === 'clientY') return clientY
+        const v = Reflect.get(t, k)
+        // Hàm gốc của MouseEvent (preventDefault…) phải gọi trên chính sự kiện, không phải trên Proxy.
+        return typeof v === 'function' ? v.bind(t) : v
+      }
+    })
+  }
+  const getCoords = ms.getCoords.bind(ms)
+  const getReport = ms.getMouseReportCoords.bind(ms)
+  ms.getCoords = (event, element, ...rest) => getCoords(unscale(event, element), element, ...rest)
+  ms.getMouseReportCoords = (event, element) => getReport(unscale(event, element), element)
+}
+
 /** Đổi cỡ chữ: áp cho terminal đang có rồi canh lại kích thước (số cột/dòng đổi theo). */
 export function setTerminalFontSize(size: number): void {
   if (size === fontSize) return
@@ -110,6 +154,7 @@ export function attachTerminal(agentId: string, host: HTMLElement): () => void {
   if (!e.opened) {
     e.term.open(e.el)
     e.opened = true
+    patchMouseForScale(e.term)
   }
   fitTerminal(agentId)
   return () => {
@@ -123,7 +168,7 @@ export function attachTerminal(agentId: string, host: HTMLElement): () => void {
  */
 export function fitTerminal(agentId: string): void {
   const e = entries.get(agentId)
-  if (!e || !e.opened || !e.el.isConnected || e.el.clientWidth === 0 || e.el.clientHeight === 0) return
+  if (fitSuspended || !e || !e.opened || !e.el.isConnected || e.el.clientWidth === 0 || e.el.clientHeight === 0) return
   e.fit.fit()
   if (e.resizeTimer) clearTimeout(e.resizeTimer)
   e.resizeTimer = setTimeout(() => {

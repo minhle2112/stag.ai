@@ -14,7 +14,7 @@ import { readSkillDir, scanSkills, type SkillLibrary } from './skills'
 import type { PluginCallContext, PluginHost } from './plugins'
 import type { PluginInstallRequest, PluginScaffoldRequest } from '@shared/plugins'
 import type { ChatPermissionAnswer, ChatSendRequest } from '@shared/chat'
-import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, BroadcastRequest, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
+import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, BroadcastRequest, CreateAgentRequest, CreateWorkspaceRequest, CanvasLayout, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
 import type { ExternalAdapterStore } from './externalAdapters'
@@ -94,7 +94,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     await agents.remove(agentId)
     await settings.forget('agent', [agentId])
   })
-  ipcMain.handle(IPC.agentLayout, (_e, workspaceId: string, layout: LayoutNode | null) => agents.saveLayout(workspaceId, layout))
+  ipcMain.handle(IPC.agentLayout, (_e, workspaceId: string, layout: CanvasLayout) => agents.saveLayout(workspaceId, layout))
   ipcMain.handle(IPC.agentRequestList, () => agents.requests.list())
   ipcMain.handle(IPC.agentRequestAnswer, (_e, id: string, allow: boolean) => agents.requests.answer(id, allow))
 

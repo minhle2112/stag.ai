@@ -78,7 +78,7 @@ export function App(): React.JSX.Element {
           e.preventDefault()
           e.stopPropagation()
           ui.setTab('agents')
-          ui.setNewAgent({ wsId, agentId: useAgents.getState().byWs[wsId]?.focused ?? null, dir: 'row' })
+          ui.setNewAgent({ wsId })
         }
         return
       }
@@ -91,11 +91,11 @@ export function App(): React.JSX.Element {
       } else if (!e.shiftKey && VIEW_KEYS[e.key]) ui.setTab(VIEW_KEYS[e.key])
       else if (e.shiftKey && key === 'b') ui.toggleBrowser()
       else if (e.shiftKey && key === 'f') {
-        // Chế độ tập trung: phóng to ô đang chọn của workspace đang xem (bấm lần nữa để về lưới).
+        // Phóng to ô đang chọn của workspace đang xem ra toàn khung (bấm lần nữa để về bản đồ).
         const wsId = useWorkspaces.getState().activeId
         const sel = wsId ? useAgents.getState().byWs[wsId]?.focused : null
         if (!wsId || ui.settings || ui.tab !== 'agents') handled = false
-        else ui.setFocusCell(wsId, ui.focusCell[wsId] ? null : (sel ?? null))
+        else ui.setMaxCell(wsId, ui.maxCell[wsId] ? null : (sel ?? null))
       }
       else if (e.shiftKey && key === 'p') ui.setPalette(true)
       else if (!e.shiftKey && key === 'k' && !inTerminal) ui.setPalette(!ui.palette)
@@ -189,7 +189,7 @@ export function App(): React.JSX.Element {
   )
 }
 
-/** Hộp thoại tạo agent, mở từ lưới (◫ ⬓ + Agent) hoặc từ thanh bên. */
+/** Hộp thoại tạo agent, mở từ menu chuột phải của canvas, Ctrl+K hoặc Ctrl+Alt+N. */
 function NewAgentDialog(): React.JSX.Element | null {
   const target = useUi((s) => s.newAgent)
   const setNewAgent = useUi((s) => s.setNewAgent)
@@ -210,7 +210,7 @@ function NewAgentDialog(): React.JSX.Element | null {
       takenNames={(agents ?? []).map((a) => a.name)}
       onCancel={() => setNewAgent(null)}
       onSubmit={async (v) => {
-        await create({ workspaceId: target.wsId, ...v }, { agentId: target.agentId, dir: target.dir })
+        await create({ workspaceId: target.wsId, ...v }, target.at ? { at: target.at } : {})
         setNewAgent(null)
       }}
     />

@@ -81,8 +81,6 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
   const statuses = useBoard((s) => s.byWs[ws.id]?.statuses)
   const loadAgents = useAgents((s) => s.load)
   const loadBoard = useBoard((s) => s.load)
-  const setNewAgent = useUi((s) => s.setNewAgent)
-  const setTab = useUi((s) => s.setTab)
   const moveAgent = useAgents((s) => s.moveAgent)
   const [menu, setMenu] = useState(false)
   /** Chỗ sẽ chèn agent đang kéo: trước dòng thứ `dropAt` (= số dòng: cuối danh sách). */
@@ -96,12 +94,6 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
     if (!useAgents.getState().byWs[ws.id]) loadAgents(ws.id)
     if (!useBoard.getState().byWs[ws.id]) loadBoard(ws.id)
   }, [ws.id, loadAgents, loadBoard])
-
-  function newAgent(): void {
-    setActive(ws.id)
-    setTab('agents')
-    setNewAgent({ wsId: ws.id, agentId: state?.focused ?? null, dir: 'row' })
-  }
 
   return (
     <div className={`mt-px ${open ? 'pb-1' : ''}`}>
@@ -155,13 +147,6 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
             />
             <div className="absolute top-full right-0 z-20 mt-1 w-52 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 text-[13px] font-normal text-fg shadow-[0_14px_40px_rgba(0,0,0,.6)]">
               <MenuItem
-                label="Thêm agent"
-                onClick={() => {
-                  setMenu(false)
-                  newAgent()
-                }}
-              />
-              <MenuItem
                 label="Mở thư mục dự án"
                 onClick={() => {
                   setMenu(false)
@@ -211,9 +196,9 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
             />
           ))}
           {!state.agents.length && (
-            <button onClick={newAgent} className="mr-1.5 ml-3.5 block w-[calc(100%-1.25rem)] rounded-md px-2.5 py-1 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg">
-              + Tạo agent
-            </button>
+            <div className="mr-1.5 ml-3.5 px-2.5 py-1 text-[12px] text-dim">
+              Chưa có agent — chuột phải vào canvas để tạo
+            </div>
           )}
         </div>
       )}

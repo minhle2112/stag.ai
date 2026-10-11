@@ -179,20 +179,39 @@ export interface Agent {
 /** Giao diện của ô agent. */
 export type AgentCell = 'cli' | 'chat'
 
-export type SplitDir = 'row' | 'col'
+/** Hình chữ nhật trên canvas (toạ độ thế giới, px ở mức zoom 100%). */
+export interface CanvasRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
 
 /**
- * Lưới ô của tab Agents: cây chia đôi. 'row' = trái|phải, 'col' = trên/dưới.
- * Lá: ô agent (`leaf`) hoặc ô widget của plugin (`widget` = "<id plugin>/<id slot dashboardWidget>", mỗi widget
- * tối đa một ô trong một workspace).
+ * Nội dung một ô: ô agent (`leaf`) hoặc ô widget của plugin (`widget` = "<id plugin>/<id slot dashboardWidget>", mỗi
+ * widget tối đa một ô trong một workspace).
  */
-export type LayoutNode =
-  | { type: 'leaf'; agentId: string }
-  | { type: 'widget'; widget: string }
-  | { type: 'split'; dir: SplitDir; ratio: number; a: LayoutNode; b: LayoutNode }
+export type CanvasRef = { type: 'leaf'; agentId: string } | { type: 'widget'; widget: string }
 
-/** Ô lá của lưới (agent hoặc widget). */
-export type LayoutCell = Exclude<LayoutNode, { type: 'split' }>
+/** Ô trên canvas: nội dung + vị trí / kích thước + thứ tự chồng (`z` lớn nằm trên). */
+export type CanvasCell = CanvasRef & CanvasRect & { z: number }
+
+/** Camera của canvas: điểm thế giới (0,0) nằm ở (x, y) px của khung, phóng `zoom` lần. */
+export interface CanvasView {
+  x: number
+  y: number
+  zoom: number
+}
+
+/**
+ * Bố cục tab Agents: canvas tự do (thay cho lưới chia đôi cũ, xem shared/canvas.ts). `closed` = chỗ cuối cùng của
+ * các ô đã đóng (mã ô → hình), để mở lại đúng chỗ cũ. `view` = camera lần cuối (null = vừa khung khi mở).
+ */
+export interface CanvasLayout {
+  cells: CanvasCell[]
+  closed: Record<string, CanvasRect>
+  view: CanvasView | null
+}
 
 export interface AgentRun {
   agentId: string
@@ -206,7 +225,7 @@ export interface AgentRun {
 
 export interface AgentsSnapshot {
   agents: Agent[]
-  layout: LayoutNode | null
+  layout: CanvasLayout
   running: AgentRun[]
 }
 

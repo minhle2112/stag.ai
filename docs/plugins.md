@@ -150,8 +150,8 @@ Còn có `host.config.get()`, `host.state.get / set / delete`, `host.agents.list
 
 Slot `dashboardWidget` (quyền `ui.dashboardWidget.register`) giống slot `page`: có `path` là file `.html` trong `entrypoints.ui`, nhưng mở thành một ô trong lưới của tab Agents.
 
-- Người dùng bấm "+ Widget" cạnh "+ Agent" (nút chỉ hiện khi có widget của plugin đang chạy và bật cho workspace đó), chọn "tên plugin · tên slot"; ô mới chia đôi ô đang chọn. Mỗi widget chỉ mở một ô trong một workspace.
-- Ô kéo để đổi chỗ như ô agent, × chỉ đóng ô. Lưới (kể cả widget) được lưu, mở lại app vẫn còn.
+- Người dùng chuột phải lên nền canvas của tab Agent → Widget ▸ → "tên plugin · tên slot" (chỉ liệt kê widget của plugin đang chạy và bật cho workspace đó); ô mới nằm ngay chỗ bấm chuột phải. Mỗi widget chỉ mở một ô trong một workspace.
+- Ô kéo tiêu đề để di chuyển, kéo cạnh / góc để đổi cỡ, phóng to toàn khung như ô agent; × chỉ đóng ô (mở lại thì về đúng chỗ cũ). Canvas (kể cả widget) được lưu, mở lại app vẫn còn.
 - Trang widget chạy trong cùng khung cách ly, có cùng `host` như trang `page`; `host.ready` trả `slotType: 'dashboardWidget'` và workspace của lưới. Khung luôn lấp đầy ô (không tự cao theo nội dung), nên trang nên gọn và tự cuộn khi dài.
 - Muốn widget tự cập nhật: worker gọi `ctx.streams.emit('<kênh>', …)`, trang nghe `host.on('<kênh>', …)` — như widget mẫu của Hello (`ui/widget.html`, kênh `stats`).
 - Plugin bị gỡ, tắt hoặc ngừng chạy thì ô vẫn giữ chỗ, hiện lời nhắc kèm nút đóng ô.

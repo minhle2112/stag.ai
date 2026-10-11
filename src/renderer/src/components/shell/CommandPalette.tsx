@@ -109,7 +109,7 @@ function PaletteBody(): React.JSX.Element {
         run: go(() => {
           if (!active) return
           setTab('agents')
-          setNewAgent({ wsId: active.id, agentId: agentsByWs[active.id]?.focused ?? null, dir: 'row' })
+          setNewAgent({ wsId: active.id })
         })
       },
       {

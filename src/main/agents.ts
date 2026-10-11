@@ -35,7 +35,7 @@ import {
   type BroadcastRequest,
   type BroadcastResult,
   type CreateAgentRequest,
-  type LayoutNode,
+  type CanvasLayout,
   type PermissionMode,
   type StartAgentRequest,
   type Task,
@@ -74,6 +74,7 @@ import { readTemplate } from './templates'
 import { TranscriptWatcher, transcriptPath } from './transcript'
 import { ensureIgnored, type WorkspaceStore } from './workspace'
 import { normalizeLayout } from './agentLayout'
+import { emptyCanvas } from '@shared/canvas'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { effectiveConnectors, toolPolicy } from '@shared/connectors'
 import { effectiveSkills } from '@shared/skills'
@@ -89,7 +90,8 @@ interface Handoff {
 
 interface StoreFile {
   agents: Agent[]
-  layouts: Record<string, LayoutNode | null>
+  /** Bố cục canvas theo workspace (bản cũ có thể là cây chia đôi: normalizeLayout đổi sang canvas). */
+  layouts: Record<string, CanvasLayout>
   /** Theo agentId. Lưu file để app tắt giữa chừng thì phiên sau vẫn nhận được bản bàn giao. */
   handoffs?: Record<string, Handoff>
 }
@@ -208,7 +210,7 @@ export class AgentService {
   async load(): Promise<void> {
     const raw = await readText(this.file)
     if (raw) this.data = JSON.parse(raw) as StoreFile
-    // Lưới ô (agent + widget plugin): bỏ nút hỏng do sửa tay / bản cũ.
+    // Canvas ô (agent + widget plugin): bỏ ô hỏng do sửa tay, đổi lưới chia đôi cũ sang canvas.
     const layouts: StoreFile['layouts'] = {}
     for (const [wsId, l] of Object.entries(this.data.layouts ?? {})) layouts[wsId] = normalizeLayout(l)
     this.data.layouts = layouts
@@ -228,7 +230,7 @@ export class AgentService {
     const running = [...this.running.values()]
       .filter((r) => agents.some((a) => a.id === r.agentId))
       .map(publicRun)
-    return { agents, layout: this.data.layouts[workspaceId] ?? null, running }
+    return { agents, layout: this.data.layouts[workspaceId] ?? emptyCanvas(), running }
   }
 
   async create(req: CreateAgentRequest): Promise<Agent> {
@@ -1431,7 +1433,7 @@ export class AgentService {
     await this.save()
   }
 
-  async saveLayout(workspaceId: string, layout: LayoutNode | null): Promise<void> {
+  async saveLayout(workspaceId: string, layout: CanvasLayout): Promise<void> {
     this.data.layouts[workspaceId] = normalizeLayout(layout)
     await this.save()
   }

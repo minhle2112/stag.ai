@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useUi } from '../store/ui'
 import { Icon, type IconName } from './Icon'
 
@@ -22,7 +23,8 @@ export function Modal({ title, children, footer, onClose, width = 'w-[560px]', i
     return () => ui.modalClosed()
   }, [])
 
-  return (
+  // Gắn vào body: hộp thoại mở từ trong một ô canvas (vd. đổi tên) nằm dưới phần tử có transform, "fixed" sẽ bám theo ô.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(3,4,6,.66)]" onMouseDown={onClose}>
       <div
         className={`${width} flex max-h-[84vh] max-w-[94vw] flex-col overflow-hidden rounded-[10px] border bg-panel shadow-[0_24px_70px_rgba(0,0,0,.7)] ${
@@ -52,7 +54,8 @@ export function Modal({ title, children, footer, onClose, width = 'w-[560px]', i
         <div className="min-h-0 overflow-y-auto p-3.5 select-text">{children}</div>
         {footer && <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-bg px-3.5 py-2.5">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
