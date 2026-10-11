@@ -560,11 +560,87 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
   }
 }
 
-/** Tên ở thẻ xin quyền: "Cho phép chạy lệnh?" (chữ đầu thường). */
-export function askTitle(name: string): string {
-  if (name === 'AskUserQuestion') return 'Agent hỏi bạn'
-  if (name === 'ExitPlanMode') return 'Duyệt kế hoạch?'
+// ---------- giao diện "Hội thoại" ----------
+
+/** Tên ngắn cho một dòng bước / chip: "Bash", "task_done" (bỏ tiền tố mcp__server__). */
+export function stepName(name: string): string {
+  return parseMcpName(name)?.tool ?? name
+}
+
+/** Kết quả ngắn bên phải một dòng bước: "214 dòng", "4 kết quả", "✓" / "✗"; null = để biểu tượng trạng thái lo. */
+export function stepResult(name: string, state: string, output?: string): { text: string; tone: 'ok' | 'err' | 'dim' } | null {
+  if (state === 'running') return null
+  if (state === 'error' || state === 'denied') return { text: state === 'denied' ? '✗ bị từ chối' : '✗', tone: 'err' }
+  const out = (output ?? '').trim()
+  if (name === 'Read' && out) return { text: `${countLines(out)} dòng`, tone: 'dim' }
+  if (name === 'Grep' || name === 'Glob') {
+    if (!out || /^no (matches|files) found/i.test(out)) return { text: '0 kết quả', tone: 'dim' }
+    const head = /^Found (\d+) (files?|matches?|lines?)/i.exec(out)
+    return { text: `${head ? head[1] : countLines(out)} kết quả`, tone: 'dim' }
+  }
+  return { text: '✓', tone: 'ok' }
+}
+
+/** File một tool đã sửa / ghi: mỗi file một danh sách dòng diff. Tool không ghi file → []. */
+export function fileChanges(name: string, input: unknown): Array<{ path: string; rows: DiffRow[] }> {
+  const i = rec(input)
+  switch (name) {
+    case 'Edit':
+    case 'MultiEdit': {
+      const path = str(i.file_path)
+      if (!path) return []
+      const list = Array.isArray(i.edits) ? i.edits.map(rec) : [i]
+      let rows: DiffRow[] = []
+      list.forEach((e, k) => {
+        if (k > 0) rows.push({ t: '~', s: '' })
+        rows = rows.concat(lineDiff(str(e.old_string), str(e.new_string)))
+      })
+      return [{ path, rows }]
+    }
+    case 'Write': {
+      const path = str(i.file_path)
+      const content = str(i.content)
+      if (!path) return []
+      return [{ path, rows: content ? content.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n').map((s): DiffRow => ({ t: '+', s })) : [] }]
+    }
+    case 'NotebookEdit': {
+      const path = str(i.notebook_path)
+      return path ? [{ path, rows: countLines(str(i.new_source)) ? str(i.new_source).split(/\r?\n/).map((s): DiffRow => ({ t: '+', s })) : [] }] : []
+    }
+    case 'ApplyPatch':
+      return (Array.isArray(i.changes) ? i.changes.map(rec) : [])
+        .filter((c) => str(c.path))
+        .map((c) => ({ path: str(c.path), rows: patchRows(str(c.kind), str(c.diff)) }))
+  }
+  return []
+}
+
+/** Gộp thay đổi theo file (cùng đường dẫn, không phân biệt `\` / `/` và hoa thường), giữ thứ tự lần đầu gặp. */
+export function mergeFileChanges(changes: Array<{ path: string; rows: DiffRow[] }>): Array<{ path: string; rows: DiffRow[]; add: number; del: number }> {
+  const byKey = new Map<string, { path: string; rows: DiffRow[] }>()
+  for (const c of changes) {
+    const key = c.path.replace(/\\/g, '/').toLowerCase()
+    const cur = byKey.get(key)
+    if (!cur) byKey.set(key, { path: c.path, rows: c.rows.slice() })
+    else cur.rows = cur.rows.length && c.rows.length ? [...cur.rows, { t: '~', s: '' }, ...c.rows] : [...cur.rows, ...c.rows]
+  }
+  return [...byKey.values()].map((f) => ({ ...f, ...diffStats(f.rows) }))
+}
+
+/** Tiêu đề thẻ xin quyền: "Tester muốn chạy lệnh", "Tester muốn dùng stag · task_done". */
+export function askHeadline(agent: string, name: string): string {
+  if (name === 'AskUserQuestion') return `${agent} hỏi bạn`
+  if (name === 'ExitPlanMode') return `${agent} muốn bạn duyệt kế hoạch`
   const meta = LABEL[name]
-  if (meta) return `Cho phép ${meta.label.charAt(0).toLowerCase()}${meta.label.slice(1)}?`
-  return `Cho phép ${toolDisplayName(name)}?`
+  if (meta) return `${agent} muốn ${meta.label.charAt(0).toLowerCase()}${meta.label.slice(1)}`
+  return `${agent} muốn dùng ${toolDisplayName(name)}`
+}
+
+/** Nhãn nút "Luôn cho phép": Bash kèm lệnh (rút gọn), còn lại theo tên tool. */
+export function rememberLabel(name: string, input: unknown): string {
+  if (name === 'Bash') {
+    const cmd = firstLine(str(rec(input).command))
+    if (cmd) return `Luôn cho phép “${clip(cmd, 32)}”`
+  }
+  return 'Luôn cho phép trong phiên'
 }

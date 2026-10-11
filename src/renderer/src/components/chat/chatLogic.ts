@@ -93,26 +93,159 @@ export function firstPendingAsk(items: ChatItem[]): AskItem | undefined {
   return undefined
 }
 
-/** Ba loại nhóm khi vẽ một tin assistant: chữ, suy nghĩ, và dãy tool liền nhau (xếp sát). */
-export type BlockGroup =
-  | { type: 'text'; text: string; index: number }
-  | { type: 'thinking'; text: string; index: number }
-  | { type: 'tools'; blocks: ToolBlock[]; index: number }
+// ---------- dòng hiển thị (giao diện "Hội thoại") ----------
 
-export function groupBlocks(blocks: ChatBlock[]): BlockGroup[] {
-  const out: BlockGroup[] = []
-  blocks.forEach((b, index) => {
-    if (b.type === 'tool') {
-      const last = out[out.length - 1]
-      if (last?.type === 'tools') last.blocks.push(b)
-      else out.push({ type: 'tools', blocks: [b], index })
-    } else if (b.type === 'text') {
-      out.push({ type: 'text', text: b.text, index })
-    } else {
-      out.push({ type: 'thinking', text: b.text, index })
+type TurnItemT = Extract<ChatItem, { kind: 'turn' }>
+
+/** Một mục trong khối "Đã làm N bước": tool, suy nghĩ, hoặc thẻ xin quyền đã trả lời. */
+export type StepEntry =
+  | { type: 'tool'; key: string; block: ToolBlock }
+  | { type: 'thinking'; key: string; text: string; active: boolean }
+  | { type: 'ask'; key: string; item: AskItem }
+
+/**
+ * Dòng của danh sách hội thoại sau khi gom: tool + suy nghĩ liên tiếp trong một lượt (kể cả qua nhiều tin assistant
+ * và thẻ xin quyền đã trả lời) thành một khối `steps`; cuối lượt là thẻ file đã sửa (`files`) và dòng `meta`.
+ */
+export type ViewRow =
+  | { type: 'user'; key: string; item: Extract<ChatItem, { kind: 'user' }> }
+  | { type: 'notice'; key: string; item: Extract<ChatItem, { kind: 'notice' }> }
+  | { type: 'ask'; key: string; item: AskItem }
+  | { type: 'text'; key: string; text: string; caret: boolean }
+  /** Tin assistant đang stream mà chưa có khối nào. */
+  | { type: 'answering'; key: string }
+  | { type: 'steps'; key: string; entries: StepEntry[] }
+  /** Tool sửa / ghi file đã chạy xong trong lượt (thứ tự gọi). */
+  | { type: 'files'; key: string; tools: ToolBlock[] }
+  /** Cuối lượt: số liệu (null = lượt chưa có mục `turn`, vd. phiên dừng giữa chừng) + chữ trả lời để chép. */
+  | { type: 'meta'; key: string; turn: TurnItemT | null; copyText: string }
+
+/** Tool có ghi file (thẻ file cuối lượt). */
+export const FILE_TOOLS: ReadonlySet<string> = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'ApplyPatch'])
+
+/** `phase` đang chạy lượt (lượt cuối chưa đóng). */
+function turnOpen(phase: string): boolean {
+  return phase === 'busy' || phase === 'waiting' || phase === 'starting'
+}
+
+export function buildRows(items: ChatItem[], phase: string): ViewRow[] {
+  const rows: ViewRow[] = []
+  let steps: Extract<ViewRow, { type: 'steps' }> | null = null
+  // Số liệu của lượt đang gom.
+  let files: ToolBlock[] = []
+  let texts: string[] = []
+  let hasAssistant = false
+  // Tool đang chờ người dùng duyệt: thẻ xin quyền đã hiện lệnh / diff, không lặp lại thành "Đang chạy…" trong khối bước.
+  const asking = new Set<string>()
+  for (const it of items) if (it.kind === 'ask' && it.state === 'pending' && it.toolUseId) asking.add(it.toolUseId)
+
+  const closeSteps = (): void => {
+    steps = null
+  }
+  const addEntry = (e: StepEntry): void => {
+    if (!steps) {
+      steps = { type: 'steps', key: `s:${e.key}`, entries: [] }
+      rows.push(steps)
     }
-  })
-  return out
+    steps.entries.push(e)
+  }
+  const endTurn = (turn: TurnItemT | null, key: string): void => {
+    closeSteps()
+    if (files.length) rows.push({ type: 'files', key: `f:${key}`, tools: files })
+    if (turn || (hasAssistant && texts.length)) rows.push({ type: 'meta', key: `m:${key}`, turn, copyText: texts.join('\n\n') })
+    files = []
+    texts = []
+    hasAssistant = false
+  }
+
+  for (const it of items) {
+    switch (it.kind) {
+      case 'user':
+        // Tin mới mà lượt trước chưa có mục `turn` (lịch sử cắt ngang): đóng lượt đó lại.
+        if (hasAssistant) endTurn(null, it.id)
+        closeSteps()
+        rows.push({ type: 'user', key: it.id, item: it })
+        break
+      case 'notice':
+        closeSteps()
+        rows.push({ type: 'notice', key: it.id, item: it })
+        break
+      case 'ask':
+        if (it.state === 'pending') {
+          closeSteps()
+          rows.push({ type: 'ask', key: it.id, item: it })
+        } else addEntry({ type: 'ask', key: it.id, item: it })
+        break
+      case 'turn':
+        endTurn(it, it.id)
+        break
+      case 'assistant': {
+        hasAssistant = true
+        if (!it.blocks.length) {
+          if (it.streaming) {
+            closeSteps()
+            rows.push({ type: 'answering', key: `${it.id}:a` })
+          }
+          break
+        }
+        const lastIdx = it.blocks.length - 1
+        it.blocks.forEach((b, i) => {
+          const key = `${it.id}:${i}`
+          const live = !!it.streaming && i === lastIdx
+          if (b.type === 'text') {
+            // Chữ rỗng (đang mở khối) không cắt khối bước.
+            if (!b.text.trim()) return
+            closeSteps()
+            texts.push(b.text.trim())
+            rows.push({ type: 'text', key, text: b.text, caret: live })
+          } else if (b.type === 'thinking') {
+            if (!b.text.trim() && !live) return
+            addEntry({ type: 'thinking', key, text: b.text, active: live })
+          } else {
+            if (b.state === 'running' && asking.has(b.toolUseId)) return
+            addEntry({ type: 'tool', key: b.toolUseId || key, block: b })
+            if (b.state === 'ok' && FILE_TOOLS.has(b.name)) files.push(b)
+          }
+        })
+        break
+      }
+    }
+  }
+  // Lượt cuối chưa đóng: còn chạy thì chưa hiện thẻ file / meta; đã dừng (rảnh / tắt) thì hiện.
+  if (hasAssistant && !turnOpen(phase)) endTurn(null, 'end')
+  return rows
+}
+
+/** Tóm tắt khối bước (lúc không chạy): "Đã làm 4 bước · có suy nghĩ", chip tên tool, số bước lỗi. */
+export function stepsSummary(entries: StepEntry[]): { label: string; chips: string[]; failed: number; running: ToolBlock | null } {
+  let tools = 0
+  let thinking = false
+  let failed = 0
+  let asks = 0
+  let running: ToolBlock | null = null
+  const chips: string[] = []
+  for (const e of entries) {
+    if (e.type === 'thinking') thinking = true
+    else if (e.type === 'ask') asks++
+    else {
+      tools++
+      if (e.block.state === 'error' || e.block.state === 'denied') failed++
+      if (e.block.state === 'running' && !running) running = e.block
+      const m = /^mcp__.+?__(.+)$/.exec(e.block.name)
+      const chip = m ? m[1] : e.block.name
+      if (!chips.includes(chip)) chips.push(chip)
+    }
+  }
+  let label: string
+  if (tools) label = `Đã làm ${tools} bước${thinking ? ' · có suy nghĩ' : ''}`
+  else if (thinking) label = 'Suy nghĩ'
+  else label = `${asks} yêu cầu đã trả lời`
+  return { label, chips, failed, running }
+}
+
+/** Đang chạy: có tool chưa xong hoặc đang stream suy nghĩ. */
+export function stepsActive(entries: StepEntry[]): boolean {
+  return entries.some((e) => (e.type === 'tool' && e.block.state === 'running') || (e.type === 'thinking' && e.active))
 }
 
 // ---------- số liệu ----------
@@ -140,40 +273,37 @@ export function shortModel(model: string | undefined): string {
   return s.length > 22 ? `${s.slice(0, 21)}…` : s
 }
 
-/** 840 → "<1 s", 12_300 → "12 s", 125_000 → "2 ph 05 s". */
+/** 840 → "<1s", 12_300 → "12s", 102_000 → "1m 42s", 3_900_000 → "1h 05m". */
 export function formatDuration(ms: number): string {
   if (!(ms > 0)) return ''
-  if (ms < 1000) return '<1 s'
+  if (ms < 1000) return '<1s'
   const s = Math.round(ms / 1000)
-  if (s < 60) return `${s} s`
-  return `${Math.floor(s / 60)} ph ${String(s % 60).padStart(2, '0')} s`
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
 }
 
-/** 0.0312 → "$0.03", 0.004 → "<$0.01". */
+/** 0.0312 → "$0,03", 0.004 → "<$0,01" (dấu phẩy thập phân kiểu Việt). */
 export function formatCost(usd: number | undefined): string {
   if (usd === undefined || !(usd > 0)) return ''
-  return usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`
+  return usd < 0.01 ? '<$0,01' : `$${usd.toFixed(2).replace('.', ',')}`
 }
 
 const OUTCOME_LABEL: Record<string, string> = {
-  success: 'xong',
   interrupted: 'đã ngắt',
   error_max_turns: 'hết lượt',
   error_during_execution: 'lỗi khi chạy'
 }
 
-/** Dòng tổng kết cuối lượt; null = không có gì đáng hiện (thành công mà không có số). */
+/** Dòng số liệu cuối lượt: "1m 42s · $0,21"; lượt không thành công thì có nhãn đầu ("đã ngắt · 3s"). null = không có gì. */
 export function turnLine(t: { durationMs: number; costUsd?: number; outcome: string }): string | null {
   const parts: string[] = []
-  const ok = t.outcome === 'success'
-  if (!ok) parts.push(OUTCOME_LABEL[t.outcome] ?? t.outcome.replace(/^error_/, '').replace(/_/g, ' '))
+  if (t.outcome !== 'success') parts.push(OUTCOME_LABEL[t.outcome] ?? t.outcome.replace(/^error_/, '').replace(/_/g, ' '))
   const d = formatDuration(t.durationMs)
   const c = formatCost(t.costUsd)
-  if (!parts.length && !d && !c) return null
-  if (ok) parts.push(OUTCOME_LABEL.success)
   if (d) parts.push(d)
   if (c) parts.push(c)
-  return parts.join(' · ')
+  return parts.length ? parts.join(' · ') : null
 }
 
 export type CtxTone = 'normal' | 'warn' | 'full'

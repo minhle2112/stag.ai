@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatImage, ChatItem, ChatState } from '@shared/chat'
 import { registerComposer, useChat, type ComposerHandle } from '../../store/chat'
+import { useSettings } from '../../store/settings'
+import { beginVoice, endVoice, useVoice, useVoiceFor } from '../../store/voice'
 import { Icon } from '../Icon'
 import {
   appendText,
@@ -9,6 +11,7 @@ import {
   ctxInfo,
   dataUrlToImage,
   historyStep,
+  IMAGE_TYPES,
   isImeKey,
   quotaLabel,
   shortModel,
@@ -27,6 +30,14 @@ interface Attached {
 export interface ComposerProps {
   agentId: string
   agentName: string
+  /** Workspace (giọng nói lấy từ vựng gợi ý). */
+  wsId: string
+  /** Model dự kiến khi phiên chưa báo model (cài đặt của agent). */
+  modelHint?: string
+  /** Mức suy nghĩ đang dùng ('' = không rõ). */
+  effort?: string
+  /** Bấm pill model · effort (mở Cài đặt → Adapter của agent). */
+  onModel?: () => void
   /** Phiên đang chạy. false = ô bị vô hiệu ("Phiên đã dừng"). */
   enabled: boolean
   state: ChatState
@@ -43,12 +54,31 @@ export interface ComposerProps {
   focusRef?: React.MutableRefObject<(() => void) | null>
 }
 
-/** Ô soạn tin: Enter gửi, Shift+Enter xuống dòng, dán ảnh, ↑ lấy lại tin cũ, Esc ngắt lượt; dưới là model / ctx / hạn mức. */
-export function Composer({ agentId, agentName, enabled, state, pending, queued, error, ctxLimit, offLabel, focusRef }: ComposerProps): React.JSX.Element {
+/**
+ * Ô soạn tin: một hộp bo tròn — trên là chip tin xếp hàng + ảnh đã dán, giữa là ô nhập (Enter gửi, Shift+Enter xuống
+ * dòng, ↑ tin cũ, Esc ngắt lượt), dưới là đính kèm, model · effort, ctx · hạn mức, mic, nút Gửi / Dừng.
+ */
+export function Composer({
+  agentId,
+  agentName,
+  wsId,
+  modelHint,
+  effort,
+  onModel,
+  enabled,
+  state,
+  pending,
+  queued,
+  error,
+  ctxLimit,
+  offLabel,
+  focusRef
+}: ComposerProps): React.JSX.Element {
   const [text, setTextState] = useState('')
   const [images, setImagesState] = useState<Attached[]>([])
   const [note, setNote] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   // Bản sao mới nhất để handler đăng ký một lần (giọng nói) luôn đọc đúng.
   const textRef = useRef('')
   const imagesRef = useRef<Attached[]>([])
@@ -229,10 +259,14 @@ export function Composer({ agentId, agentName, enabled, state, pending, queued, 
   const quota = q5 ?? q7
   const quotaTip = useMemo(() => [q5?.title, q7?.title].filter(Boolean).join('\n'), [q5?.title, q7?.title])
   const canSend = enabled && (!!text.trim() || images.length > 0)
-  const waitingHint = phase === 'waiting' ? (pending?.tool === 'AskUserQuestion' ? 'Chờ bạn trả lời ở thẻ phía trên' : 'Chờ bạn duyệt ở thẻ phía trên') : null
+  const waiting = phase === 'waiting'
+  const waitingHint = waiting ? (pending?.tool === 'AskUserQuestion' ? 'Chờ bạn trả lời ở thẻ phía trên' : 'Chờ bạn duyệt ở thẻ phía trên') : null
+  const model = shortModel(state.model) || shortModel(modelHint)
+  const pill = [model, effort].filter(Boolean).join(' · ')
+  const placeholder = !enabled ? (offLabel ?? 'Phiên đã dừng') : (waitingHint ?? `Nhắn cho ${agentName}…`)
 
   return (
-    <div className="shrink-0 border-t border-line bg-panel px-3 pt-2 pb-2 @max-[420px]/chat:px-2">
+    <div className="shrink-0 px-3 pt-1 pb-3 @max-[420px]/chat:px-2 @max-[420px]/chat:pb-2">
       <div className="mx-auto w-full max-w-[860px]">
         {error && (
           <div className="mb-1.5 flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-[12px] text-danger">
@@ -242,21 +276,11 @@ export function Composer({ agentId, agentName, enabled, state, pending, queued, 
             </button>
           </div>
         )}
-        {queued.length > 0 && (
-          <div className="mb-1.5 flex flex-col gap-1">
-            {queued.map((q, i) => (
-              <div key={`${i}:${q}`} className="flex min-w-0 items-center gap-1.5 text-[11px] text-dim">
-                <Icon name="hist" size={12} className="shrink-0" />
-                <span className="shrink-0">đang xếp hàng</span>
-                <span className="min-w-0 truncate text-muted">{q}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {waitingHint && <div className="mb-1.5 text-[11px] text-dim">{waitingHint}</div>}
 
         <div
-          className={`rounded-lg border bg-bg transition-colors ${enabled ? 'border-line-2 focus-within:border-line-3' : 'border-line opacity-60'}`}
+          className={`rounded-[14px] border bg-panel-2 transition-[border-color,opacity] ${
+            !enabled ? 'border-line opacity-60' : waiting && !text ? 'border-line-2 opacity-70 focus-within:opacity-100' : 'border-line-2 focus-within:border-line-3'
+          }`}
           onMouseDown={(e) => {
             // Bấm vùng trống của khung (không phải nút / ô nhập) → vào ô nhập.
             if (e.target === e.currentTarget) {
@@ -265,10 +289,22 @@ export function Composer({ agentId, agentName, enabled, state, pending, queued, 
             }
           }}
         >
-          {images.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-2 pt-2">
+          {(queued.length > 0 || images.length > 0) && (
+            <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
+              {/* Tin đã gửi lúc agent bận: đã nằm trong hàng đợi của CLI nên không rút lại được (không có ×). */}
+              {queued.map((q, i) => (
+                <span
+                  key={`${i}:${q}`}
+                  data-tip={q.length > 40 ? q : undefined}
+                  className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-dashed border-line-3 px-2 py-px text-[11px] text-muted"
+                >
+                  <Icon name="hist" size={11} className="shrink-0 text-dim" />
+                  <span className="shrink-0 text-dim">Xếp hàng:</span>
+                  <span className="min-w-0 truncate">{q}</span>
+                </span>
+              ))}
               {images.map((im) => (
-                <div key={im.id} className="group/img relative h-10 w-10 overflow-hidden rounded-md border border-line-2 bg-bg0">
+                <span key={im.id} className="group/img relative h-9 w-9 shrink-0 overflow-hidden rounded-md border border-line-2 bg-bg0">
                   <img src={im.url} alt="" className="h-full w-full object-cover" />
                   <button
                     type="button"
@@ -279,7 +315,7 @@ export function Composer({ agentId, agentName, enabled, state, pending, queued, 
                   >
                     <Icon name="x" size={10} />
                   </button>
-                </div>
+                </span>
               ))}
             </div>
           )}
@@ -290,7 +326,8 @@ export function Composer({ agentId, agentName, enabled, state, pending, queued, 
             disabled={!enabled}
             spellCheck={false}
             autoComplete="off"
-            placeholder={enabled ? `Nhắn cho ${agentName} · Shift+Enter xuống dòng` : (offLabel ?? 'Phiên đã dừng')}
+            placeholder={placeholder}
+            data-tip={enabled && !waitingHint ? 'Enter gửi · Shift+Enter xuống dòng · ↑ tin cũ' : undefined}
             onChange={(e) => {
               setText(e.target.value)
               // Gõ tiếp thì thôi duyệt lịch sử (bản đang hiện thành bản nháp).
@@ -298,38 +335,67 @@ export function Composer({ agentId, agentName, enabled, state, pending, queued, 
             }}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            className="block max-h-[168px] min-h-[34px] w-full resize-none bg-transparent px-3 py-2 text-[13px] leading-[1.5] text-fg outline-none field-sizing-content placeholder:text-dim"
+            className="block max-h-[168px] min-h-[44px] w-full resize-none bg-transparent px-3 py-2.5 text-[13px] leading-[1.5] text-fg outline-none field-sizing-content placeholder:text-dim"
           />
-          <div className="flex min-h-7 items-center gap-2.5 px-2 pb-1.5 font-mono text-[11px] text-dim">
-            {state.model && (
-              <span className="min-w-0 shrink truncate" data-tip={state.model}>
-                {shortModel(state.model)}
-              </span>
+          <div className="flex min-h-8 items-center gap-1.5 px-2 pb-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept={IMAGE_TYPES.join(',')}
+              multiple
+              hidden
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []))
+                e.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              disabled={!enabled}
+              onClick={() => fileRef.current?.click()}
+              data-tip="Đính kèm ảnh (hoặc dán thẳng vào ô)"
+              aria-label="Đính kèm ảnh"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line-2 text-muted hover:border-line-3 hover:text-fg disabled:opacity-40"
+            >
+              <Icon name="img" size="s" />
+            </button>
+            {pill && (
+              <button
+                type="button"
+                onClick={onModel}
+                disabled={!onModel}
+                data-tip={state.model ? `${state.model} · đổi model / effort` : 'Đổi model / effort'}
+                className="inline-flex h-6 min-w-0 shrink items-center gap-1 rounded-full border border-line-2 px-2 text-[11px] text-muted hover:border-line-3 hover:text-fg disabled:hover:border-line-2 disabled:hover:text-muted"
+              >
+                <span className="min-w-0 truncate">{pill}</span>
+                {onModel && <Icon name="cd" size={10} className="shrink-0" />}
+              </button>
             )}
-            {ctx && (
-              <span className={`inline-flex shrink-0 items-center gap-1.5 ${ctx.tone === 'full' ? 'text-danger' : 'text-muted'}`} data-tip={ctx.title}>
-                ctx {ctx.text}
-                {ctx.pct !== null && (
-                  <span className="h-[3px] w-10 overflow-hidden rounded-sm bg-panel-3 @max-[340px]/chat:hidden">
-                    <i className={`block h-full ${ctx.tone === 'full' ? 'bg-danger' : ctx.tone === 'warn' ? 'bg-wait' : 'bg-neutral'}`} style={{ width: `${ctx.pct}%` }} />
+            {(ctx || quota) && (
+              <span className="inline-flex min-w-0 shrink-0 items-center gap-1 font-mono text-[11px] text-dim">
+                {ctx && (
+                  <span className={ctx.tone === 'full' ? 'text-danger' : ctx.tone === 'warn' ? 'text-wait' : ''} data-tip={ctx.title}>
+                    ctx {ctx.text}
+                  </span>
+                )}
+                {ctx && quota && <span className="@max-[380px]/chat:hidden">·</span>}
+                {quota && (
+                  <span className="@max-[380px]/chat:hidden" data-tip={quotaTip}>
+                    {quota.text}
                   </span>
                 )}
               </span>
             )}
-            {quota && (
-              <span className="shrink-0 text-muted @max-[380px]/chat:hidden" data-tip={quotaTip}>
-                {quota.text}
-              </span>
-            )}
-            <div className="flex-1" />
-            {note && <span className="min-w-0 truncate font-sans text-wait">{note}</span>}
+            <div className="min-w-0 flex-1" />
+            {note && <span className="min-w-0 truncate text-[11px] text-wait">{note}</span>}
+            {enabled && <ComposerMic wsId={wsId} agentId={agentId} />}
             {busy && (
               <button
                 type="button"
                 onClick={() => useChat.getState().interrupt(agentId)}
                 data-tip="Dừng lượt này · Esc"
                 aria-label="Dừng"
-                className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line-2 bg-panel-2 text-danger hover:border-line-3 hover:bg-panel-3"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-fg text-bg0 hover:brightness-90"
               >
                 <Icon name="stop" size="s" />
               </button>
@@ -341,7 +407,7 @@ export function Composer({ agentId, agentName, enabled, state, pending, queued, 
                 onClick={() => doSend()}
                 data-tip={busy ? 'Gửi (xếp hàng) · Enter' : 'Gửi · Enter'}
                 aria-label="Gửi"
-                className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-accent bg-accent text-accent-on hover:brightness-110 disabled:border-line-2 disabled:bg-panel-2 disabled:text-dim disabled:hover:brightness-100"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent text-accent-on hover:brightness-110 disabled:bg-panel-3 disabled:text-dim disabled:hover:brightness-100"
               >
                 <Icon name="send" size="s" />
               </button>
@@ -350,5 +416,25 @@ export function Composer({ agentId, agentName, enabled, state, pending, queued, 
         </div>
       </div>
     </div>
+  )
+}
+
+/** Mic trên hàng nút của ô soạn tin: bấm để nói (chữ vào ô này), bấm lần nữa để dừng. Ẩn khi tắt giọng nói trong Cài đặt. */
+function ComposerMic({ wsId, agentId }: { wsId: string; agentId: string }): React.JSX.Element | null {
+  const on = useSettings((s) => s.value.app.voice.enabled)
+  const mine = useVoiceFor(agentId)
+  const phase = useVoice((s) => s.phase)
+  if (!on) return null
+  const live = mine && (phase === 'opening' || phase === 'listening')
+  return (
+    <button
+      type="button"
+      onClick={() => (live ? void endVoice() : void beginVoice({ wsId, agentId }))}
+      data-tip={live ? 'Dừng nói' : 'Nói để gõ'}
+      aria-label={live ? 'Dừng nói' : 'Nói để gõ'}
+      className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${live ? 'animate-pulse bg-danger/20 text-danger' : 'text-muted hover:bg-panel-3 hover:text-fg'}`}
+    >
+      <Icon name="mic" size="s" />
+    </button>
   )
 }

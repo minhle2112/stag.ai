@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react'
-import type { Agent, Workspace } from '@shared/types'
+import { resolveModel } from '@shared/settings'
+import { agentKind, type Agent, type Workspace } from '@shared/types'
 import { useChat } from '../../store/chat'
-import { useHandoffFor } from '../../store/settings'
+import { useHandoffFor, useSettings } from '../../store/settings'
+import { useUi } from '../../store/ui'
 import { Icon } from '../Icon'
 import { Button } from '../Modal'
 import { ChatList } from './ChatList'
@@ -34,6 +36,11 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
   const slice = useChat((s) => s.byAgent[agent.id])
   const ensure = useChat((s) => s.ensure)
   const handoff = useHandoffFor(agent.id)
+  const settings = useSettings((s) => s.value)
+  const openSettings = useUi((s) => s.openSettings)
+  const kind = agentKind(agent) === 'codex' ? 'codex' : 'claude'
+  // Model / effort theo cài đặt (app → workspace → agent); phiên đang chạy báo model thật qua state.model.
+  const cfg = useMemo(() => resolveModel(settings, kind, ws.id, agent.id), [settings, kind, ws.id, agent.id])
   const focusRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
@@ -74,6 +81,8 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
           items={items}
           phase={state.phase}
           agentId={agent.id}
+          agentName={agent.name}
+          wsId={ws.id}
           root={ws.path}
           primaryAsk={pending?.requestId ?? null}
           onBlankClick={() => focusRef.current?.()}
@@ -107,6 +116,10 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
         <Composer
           agentId={agent.id}
           agentName={agent.name}
+          wsId={ws.id}
+          modelHint={cfg.model}
+          effort={cfg.effort}
+          onModel={() => openSettings('adapters', { adapter: kind, agentId: agent.id })}
           enabled={running}
           state={state}
           pending={pending}

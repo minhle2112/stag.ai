@@ -3,7 +3,7 @@ import type { ChatBlock } from '@shared/chat'
 import { Icon } from '../Icon'
 import { jsonEqual } from './chatLogic'
 import { Markdown } from './Markdown'
-import { clipLines, describeTool, type AskQuestion, type DiffRow, type TodoItem, type ToolDetail, type ToolView } from './toolSummary'
+import { clipLines, describeTool, stepName, stepResult, type AskQuestion, type DiffRow, type TodoItem, type ToolDetail } from './toolSummary'
 
 type ToolBlock = Extract<ChatBlock, { type: 'tool' }>
 
@@ -11,17 +11,6 @@ const MONO_BOX = 'rounded bg-bg0 px-2 py-1.5 font-mono text-[12px] leading-[1.5]
 const OUTPUT_LINES = 12
 const DIFF_ROWS = 40
 const WRITE_LINES = 15
-
-/** Trạng thái tool: vòng xoay (đang chạy) / dấu tick xanh / dấu x đỏ. */
-export function ToolStatus({ state }: { state: ToolBlock['state'] }): React.JSX.Element {
-  if (state === 'running') return <span className="sdot in" data-tip="Đang chạy" />
-  if (state === 'ok') return <Icon name="check" size="s" className="text-work" />
-  return (
-    <span className="inline-flex" data-tip={state === 'denied' ? 'Bị từ chối' : 'Lỗi'}>
-      <Icon name="x" size="s" className="text-danger" />
-    </span>
-  )
-}
 
 /** Gập / mở thêm cho khối dài. */
 function MoreButton({ open, hidden, onClick }: { open: boolean; hidden: number; onClick: () => void }): React.JSX.Element {
@@ -48,7 +37,7 @@ function OutputBox({ text, truncated, error }: { text: string; truncated?: boole
 }
 
 /** Diff +/- (xanh lá nhạt / đỏ nhạt), gập sau `max` dòng. */
-function DiffBox({ rows, max = DIFF_ROWS }: { rows: DiffRow[]; max?: number }): React.JSX.Element {
+export function DiffBox({ rows, max = DIFF_ROWS }: { rows: DiffRow[]; max?: number }): React.JSX.Element {
   const [all, setAll] = useState(false)
   const shown = all ? rows : rows.slice(0, max)
   return (
@@ -244,48 +233,59 @@ export function ToolDetailView({
   }
 }
 
-/** Số thêm / bớt cạnh tên tool: "+3 −1". */
-function Stats({ view }: { view: ToolView }): React.JSX.Element | null {
-  const s = view.stats
-  if (!s || (!s.add && !s.del)) return null
+/** Số thêm / bớt: "+3 −1". */
+export function DiffStat({ add, del, className = '' }: { add: number; del: number; className?: string }): React.JSX.Element | null {
+  if (!add && !del) return null
   return (
-    <span className="shrink-0 font-mono text-[11px]">
-      {s.add > 0 && <span className="text-work">+{s.add}</span>}
-      {s.add > 0 && s.del > 0 && ' '}
-      {s.del > 0 && <span className="text-danger">−{s.del}</span>}
+    <span className={`shrink-0 font-mono text-[11px] ${className}`}>
+      {add > 0 && <span className="text-work">+{add}</span>}
+      {add > 0 && del > 0 && ' '}
+      {del > 0 && <span className="text-danger">−{del}</span>}
     </span>
   )
 }
 
-/** Mặc định gập cho mọi tool (gọn); mở ra thấy tham số đầy đủ + kết quả. */
-export const ToolCard = memo(
-  function ToolCard({ block, root }: { block: ToolBlock; root?: string }): React.JSX.Element {
+const RESULT_TONE = { ok: 'text-work', err: 'text-danger', dim: 'text-dim' } as const
+
+/**
+ * Một dòng trong khối "Đã làm N bước": tên tool, tham số (mono), kết quả ngắn (+/− cho file, ✓ / ✗, số dòng…).
+ * Bấm để mở chi tiết (lệnh / diff / output) như thẻ tool cũ.
+ */
+export const StepRow = memo(
+  function StepRow({ block, root }: { block: ToolBlock; root?: string }): React.JSX.Element {
     const view = useMemo(() => describeTool(block.name, block.input, { root }), [block.name, block.input, root])
     const [open, setOpen] = useState(false)
     const failed = block.state === 'error' || block.state === 'denied'
-    // Lỗi: hiện sẵn dòng đầu của thông báo ngay dưới thẻ để khỏi phải mở ra mới biết.
+    const result = stepResult(block.name, block.state, block.output)
+    const stats = view.stats && !failed && block.state !== 'running' ? view.stats : null
+    // Lỗi: dòng đầu của thông báo ngay dưới để khỏi phải mở ra mới biết.
     const errLine = failed && block.output ? clipLines(block.output.trim(), 1).head : ''
 
     return (
-      <div className={`overflow-hidden rounded-md border bg-bg ${failed ? 'border-danger/30' : 'border-line hover:border-line-2'}`}>
+      <div className="border-t border-line">
         <button
           type="button"
           onClick={() => setOpen(!open)}
           aria-expanded={open}
-          className="flex h-[26px] w-full items-center gap-2 px-2 text-left text-[12px]"
+          className="flex min-h-[30px] w-full items-center gap-2 px-2.5 py-1 text-left text-[12px] hover:bg-panel"
         >
-          <Icon name={view.icon} size="s" className="text-dim" />
-          <span className="shrink-0 text-muted @max-[380px]/chat:hidden">{view.label}</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-fg/90" data-tip={view.summary.length > 60 ? view.summary : undefined}>
+          <span className="min-w-[42px] shrink-0 font-semibold text-fg" data-tip={view.label}>
+            {stepName(block.name)}
+          </span>
+          <span className="min-w-0 flex-1 truncate font-mono text-muted" data-tip={view.summary.length > 60 ? view.summary : undefined}>
             {view.summary || '…'}
           </span>
-          <Stats view={view} />
-          <ToolStatus state={block.state} />
-          <Icon name="cr" size={12} className={`text-dim transition-transform ${open ? 'rotate-90' : ''}`} />
+          {block.state === 'running' ? (
+            <span className="sdot in" data-tip="Đang chạy" />
+          ) : stats && (stats.add || stats.del) ? (
+            <DiffStat add={stats.add} del={stats.del} />
+          ) : (
+            result && <span className={`shrink-0 font-mono text-[11px] ${RESULT_TONE[result.tone]}`}>{result.text}</span>
+          )}
         </button>
-        {!open && errLine && <div className="truncate border-t border-line px-2 py-1 font-mono text-[11px] text-danger/80">{errLine}</div>}
+        {!open && errLine && <div className="truncate px-2.5 pb-1.5 pl-[62px] font-mono text-[11px] text-danger/80">{errLine}</div>}
         {open && (
-          <div className="border-t border-line p-2">
+          <div className="border-t border-line bg-panel p-2">
             <ToolDetailView detail={view.detail} output={block.output} truncated={block.truncated} error={failed} />
             {block.state === 'running' && !block.output && <div className="mt-1.5 text-[11px] text-dim">Đang chạy…</div>}
           </div>

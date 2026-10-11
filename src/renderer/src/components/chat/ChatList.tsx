@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ChatItem } from '@shared/chat'
 import { Icon } from '../Icon'
-import { ChatRow } from './ChatItems'
-import { nearBottom, showWorking } from './chatLogic'
+import { ChatRow, type RowCtx } from './ChatItems'
+import { buildRows, nearBottom, showWorking } from './chatLogic'
 
 /**
  * Danh sách hội thoại cuộn được. Tự cuộn theo nội dung mới nếu người dùng đang ở đáy (±40px); cuộn lên thì dừng
@@ -12,6 +12,8 @@ export function ChatList({
   items,
   phase,
   agentId,
+  agentName,
+  wsId,
   root,
   primaryAsk,
   onBlankClick
@@ -19,6 +21,8 @@ export function ChatList({
   items: ChatItem[]
   phase: string
   agentId: string
+  agentName: string
+  wsId: string
   root?: string
   primaryAsk: string | null
   /** Bấm vào chỗ trống (không chọn chữ, không bấm nút) → đưa con trỏ về ô soạn tin. */
@@ -28,6 +32,9 @@ export function ChatList({
   const inner = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const [away, setAway] = useState(false)
+  // Tool + suy nghĩ liên tiếp gom thành khối "Đã làm N bước", cuối lượt có thẻ file + dòng số liệu.
+  const rows = useMemo(() => buildRows(items, phase), [items, phase])
+  const ctx = useMemo<RowCtx>(() => ({ agentId, agentName, wsId, root, primaryAsk }), [agentId, agentName, wsId, root, primaryAsk])
 
   const toBottom = (): void => {
     const el = scroller.current
@@ -71,9 +78,9 @@ export function ChatList({
         }}
         className="absolute inset-0 overflow-y-auto select-text"
       >
-        <div ref={inner} className="mx-auto flex w-full max-w-[860px] flex-col gap-3 px-4 pt-3 pb-4 @max-[420px]/chat:gap-2.5 @max-[420px]/chat:px-2.5">
-          {items.map((it) => (
-            <ChatRow key={it.id} item={it} agentId={agentId} root={root} primaryAsk={primaryAsk} />
+        <div ref={inner} className="mx-auto flex w-full max-w-[860px] flex-col gap-3.5 px-4 pt-4 pb-5 @max-[420px]/chat:gap-2.5 @max-[420px]/chat:px-2.5">
+          {rows.map((r) => (
+            <ChatRow key={r.key} row={r} ctx={ctx} />
           ))}
           {showWorking(items, phase) && (
             <div className="inline-flex items-center gap-1.5 text-[12px] text-dim">

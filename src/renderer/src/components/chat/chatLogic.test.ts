@@ -10,7 +10,9 @@ import {
   firstPendingAsk,
   formatCost,
   formatDuration,
-  groupBlocks,
+  buildRows,
+  stepsActive,
+  stepsSummary,
   historyStep,
   isImeKey,
   jsonEqual,
@@ -91,13 +93,73 @@ describe('applyEvent', () => {
   })
 })
 
-describe('groupBlocks / firstPendingAsk / showWorking', () => {
-  const tool = (id: string, state: 'running' | 'ok' = 'ok'): ChatBlock => ({ type: 'tool', toolUseId: id, name: 'Bash', input: {}, state })
+describe('buildRows / firstPendingAsk / showWorking', () => {
+  const tool = (id: string, state: 'running' | 'ok' | 'error' = 'ok', name = 'Bash', input: unknown = {}): ChatBlock => ({ type: 'tool', toolUseId: id, name, input, state })
+  const turn = (id: string): ChatItem => ({ kind: 'turn', id, at: 't', durationMs: 102_000, costUsd: 0.21, outcome: 'success' })
+  const types = (rows: ReturnType<typeof buildRows>): string[] => rows.map((r) => r.type)
 
-  it('gom tool liền nhau thành một nhóm', () => {
-    const g = groupBlocks([{ type: 'text', text: 'a' }, tool('1'), tool('2'), { type: 'text', text: 'b' }, tool('3')])
-    expect(g.map((x) => x.type)).toEqual(['text', 'tools', 'text', 'tools'])
-    expect(g[1].type === 'tools' && g[1].blocks.map((b) => b.toolUseId)).toEqual(['1', '2'])
+  it('gom tool + suy nghĩ liên tiếp qua nhiều tin assistant và thẻ xin quyền đã trả lời thành một khối', () => {
+    const rows = buildRows(
+      [
+        user('u', 'làm đi'),
+        asst('a1', [{ type: 'thinking', text: 'nghĩ' }, tool('1')]),
+        ask('k1', 'allowed'),
+        asst('a2', [tool('2', 'ok', 'Edit', { file_path: 'x.ts', old_string: 'a', new_string: 'b' })]),
+        asst('a3', [{ type: 'text', text: 'Xong.' }, tool('3')]),
+        turn('t')
+      ],
+      'idle'
+    )
+    expect(types(rows)).toEqual(['user', 'steps', 'text', 'steps', 'files', 'meta'])
+    const s = rows[1].type === 'steps' ? rows[1].entries.map((e) => e.type) : []
+    expect(s).toEqual(['thinking', 'tool', 'ask', 'tool'])
+    expect(rows[4].type === 'files' && rows[4].tools.map((t) => t.toolUseId)).toEqual(['2'])
+    expect(rows[5].type === 'meta' && rows[5].copyText).toBe('Xong.')
+  })
+
+  it('thẻ xin quyền đang chờ, thông báo và chữ cắt khối; chữ rỗng thì không', () => {
+    const rows = buildRows(
+      [asst('a1', [tool('1'), { type: 'text', text: '  ' }, tool('2')]), ask('k', 'pending'), asst('a2', [tool('3', 'running')])],
+      'waiting'
+    )
+    expect(types(rows)).toEqual(['steps', 'ask', 'steps'])
+    expect(rows[0].type === 'steps' && rows[0].entries).toHaveLength(2)
+  })
+
+  it('tool đang chờ duyệt không nằm trong khối bước (thẻ xin quyền đã hiện nó)', () => {
+    const pending: ChatItem = { kind: 'ask', id: 'k', at: 't', requestId: 'r', toolUseId: '2', tool: 'Bash', input: {}, canRemember: false, state: 'pending' }
+    const rows = buildRows([asst('a', [tool('1'), { type: 'text', text: 'x' }, tool('2', 'running')]), pending], 'waiting')
+    expect(types(rows)).toEqual(['steps', 'text', 'ask'])
+  })
+
+  it('lượt đang chạy chưa có thẻ file / meta; dừng giữa chừng thì có (turn = null)', () => {
+    const items = [user('u', 'x'), asst('a', [tool('1', 'ok', 'Write', { file_path: 'a.md', content: 'x' }), { type: 'text', text: 'ok' }])]
+    expect(types(buildRows(items, 'busy'))).toEqual(['user', 'steps', 'text'])
+    const idle = buildRows(items, 'idle')
+    expect(types(idle)).toEqual(['user', 'steps', 'text', 'files', 'meta'])
+    expect(idle[4].type === 'meta' && idle[4].turn).toBeNull()
+  })
+
+  it('tin mới khi lượt trước chưa đóng thì đóng lượt đó; file lỗi không vào thẻ file', () => {
+    const rows = buildRows([user('u1', 'a'), asst('a', [tool('1', 'error', 'Edit', { file_path: 'x' }), { type: 'text', text: 'hỏng' }]), user('u2', 'b')], 'idle')
+    expect(types(rows)).toEqual(['user', 'steps', 'text', 'meta', 'user'])
+  })
+
+  it('assistant đang stream chưa có khối → answering; suy nghĩ đang stream là bước đang chạy', () => {
+    expect(types(buildRows([user('u', 'x'), asst('a', [], true)], 'busy'))).toEqual(['user', 'answering'])
+    const rows = buildRows([asst('a', [{ type: 'thinking', text: '' }], true)], 'busy')
+    expect(rows[0].type === 'steps' && stepsActive(rows[0].entries)).toBe(true)
+  })
+
+  it('tóm tắt khối bước: số bước, suy nghĩ, chip không trùng, lỗi, tool đang chạy', () => {
+    const rows = buildRows([asst('a', [{ type: 'thinking', text: 'x' }, tool('1'), tool('2', 'error'), tool('3', 'running', 'mcp__stag__task_done')])], 'busy')
+    const entries = rows[0].type === 'steps' ? rows[0].entries : []
+    const s = stepsSummary(entries)
+    expect(s.label).toBe('Đã làm 3 bước · có suy nghĩ')
+    expect(s.chips).toEqual(['Bash', 'task_done'])
+    expect(s.failed).toBe(1)
+    expect(s.running?.toolUseId).toBe('3')
+    expect(stepsSummary([{ type: 'thinking', key: 'k', text: 'x', active: false }]).label).toBe('Suy nghĩ')
   })
 
   it('thẻ xin quyền chờ đầu tiên', () => {
@@ -145,22 +207,23 @@ describe('shortModel', () => {
 describe('định dạng số liệu', () => {
   it('thời lượng', () => {
     expect(formatDuration(0)).toBe('')
-    expect(formatDuration(400)).toBe('<1 s')
-    expect(formatDuration(12_300)).toBe('12 s')
-    expect(formatDuration(125_000)).toBe('2 ph 05 s')
+    expect(formatDuration(400)).toBe('<1s')
+    expect(formatDuration(12_300)).toBe('12s')
+    expect(formatDuration(102_000)).toBe('1m 42s')
+    expect(formatDuration(3_900_000)).toBe('1h 05m')
   })
 
   it('chi phí', () => {
     expect(formatCost(undefined)).toBe('')
     expect(formatCost(0)).toBe('')
-    expect(formatCost(0.004)).toBe('<$0.01')
-    expect(formatCost(0.0312)).toBe('$0.03')
+    expect(formatCost(0.004)).toBe('<$0,01')
+    expect(formatCost(0.0312)).toBe('$0,03')
   })
 
   it('dòng tổng kết lượt', () => {
-    expect(turnLine({ durationMs: 12_000, costUsd: 0.03, outcome: 'success' })).toBe('xong · 12 s · $0.03')
+    expect(turnLine({ durationMs: 12_000, costUsd: 0.03, outcome: 'success' })).toBe('12s · $0,03')
     expect(turnLine({ durationMs: 0, outcome: 'success' })).toBeNull()
-    expect(turnLine({ durationMs: 3000, outcome: 'interrupted' })).toBe('đã ngắt · 3 s')
+    expect(turnLine({ durationMs: 3000, outcome: 'interrupted' })).toBe('đã ngắt · 3s')
     expect(turnLine({ durationMs: 0, outcome: 'error_max_turns' })).toBe('hết lượt')
     expect(turnLine({ durationMs: 0, outcome: 'error_something_odd' })).toBe('something odd')
   })

@@ -2,17 +2,22 @@ import { describe, expect, it } from 'vitest'
 import {
   answersInput,
   answersOf,
-  askTitle,
+  askHeadline,
   clipLines,
   countLines,
   describeTool,
   diffStats,
+  fileChanges,
   lineDiff,
+  mergeFileChanges,
   parseMcpName,
   parseQuestions,
   patchRows,
   readRange,
-  shortenPath
+  rememberLabel,
+  shortenPath,
+  stepName,
+  stepResult
 } from './toolSummary'
 
 describe('shortenPath', () => {
@@ -171,18 +176,10 @@ describe('describeTool', () => {
   })
 })
 
-describe('parseMcpName / askTitle', () => {
+describe('parseMcpName', () => {
   it('tách tên MCP', () => {
     expect(parseMcpName('mcp__stag__task_done')).toEqual({ server: 'stag', tool: 'task_done' })
     expect(parseMcpName('Bash')).toBeNull()
-  })
-
-  it('tiêu đề thẻ xin quyền', () => {
-    expect(askTitle('Bash')).toBe('Cho phép chạy lệnh?')
-    expect(askTitle('Edit')).toBe('Cho phép sửa file?')
-    expect(askTitle('mcp__stag__task_done')).toBe('Cho phép stag · task_done?')
-    expect(askTitle('AskUserQuestion')).toBe('Agent hỏi bạn')
-    expect(askTitle('ExitPlanMode')).toBe('Duyệt kế hoạch?')
   })
 })
 
@@ -245,5 +242,46 @@ describe('ApplyPatch (Codex fileChange)', () => {
     const two = describeTool('ApplyPatch', { changes: [{ path: 'a', kind: 'add', diff: 'x' }, { path: 'b', kind: 'delete', diff: 'y' }] })
     expect(two.summary).toBe('2 file: a, b')
     expect(two.detail).toMatchObject({ kind: 'edit', rows: [{ t: '+' }, { t: '~' }, { t: '-' }] })
+  })
+})
+
+describe('giao diện Hội thoại: bước, file, thẻ xin quyền', () => {
+  it('tên bước bỏ tiền tố mcp', () => {
+    expect(stepName('mcp__stag__task_done')).toBe('task_done')
+    expect(stepName('Bash')).toBe('Bash')
+  })
+
+  it('kết quả ngắn của một bước', () => {
+    expect(stepResult('Bash', 'running')).toBeNull()
+    expect(stepResult('Bash', 'ok', 'x')).toEqual({ text: '✓', tone: 'ok' })
+    expect(stepResult('Bash', 'error', 'boom')).toEqual({ text: '✗', tone: 'err' })
+    expect(stepResult('Edit', 'denied')).toMatchObject({ tone: 'err' })
+    expect(stepResult('Read', 'ok', 'a\nb\nc\n')?.text).toBe('3 dòng')
+    expect(stepResult('Grep', 'ok', 'No matches found')?.text).toBe('0 kết quả')
+    expect(stepResult('Grep', 'ok', 'Found 4 files\na\nb\nc\nd')?.text).toBe('4 kết quả')
+    expect(stepResult('Glob', 'ok', 'a.ts\nb.ts')?.text).toBe('2 kết quả')
+  })
+
+  it('file đã sửa theo tool và gộp theo đường dẫn', () => {
+    expect(fileChanges('Bash', { command: 'ls' })).toEqual([])
+    const e = fileChanges('Edit', { file_path: 'C:\\p\\a.ts', old_string: 'x', new_string: 'y\nz' })
+    expect(e).toEqual([{ path: 'C:\\p\\a.ts', rows: [{ t: '-', s: 'x' }, { t: '+', s: 'y' }, { t: '+', s: 'z' }] }])
+    const w = fileChanges('Write', { file_path: 'c:/p/a.ts', content: 'q\n' })
+    const ap = fileChanges('ApplyPatch', { changes: [{ path: 'b.ts', kind: 'add', diff: 'n' }] })
+    const m = mergeFileChanges([...e, ...w, ...ap])
+    expect(m.map((f) => [f.path, f.add, f.del])).toEqual([
+      ['C:\\p\\a.ts', 3, 1],
+      ['b.ts', 1, 0]
+    ])
+    expect(m[0].rows.some((r) => r.t === '~')).toBe(true)
+  })
+
+  it('tiêu đề thẻ xin quyền và nhãn Luôn cho phép', () => {
+    expect(askHeadline('Tester', 'Bash')).toBe('Tester muốn chạy lệnh')
+    expect(askHeadline('Tester', 'Edit')).toBe('Tester muốn sửa file')
+    expect(askHeadline('Tester', 'mcp__stag__task_done')).toBe('Tester muốn dùng stag · task_done')
+    expect(askHeadline('Tester', 'AskUserQuestion')).toBe('Tester hỏi bạn')
+    expect(rememberLabel('Bash', { command: 'npm run dev\nnext' })).toBe('Luôn cho phép “npm run dev”')
+    expect(rememberLabel('Edit', {})).toBe('Luôn cho phép trong phiên')
   })
 })

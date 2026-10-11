@@ -6,22 +6,25 @@ import { Button } from '../Modal'
 import { isImeKey } from './chatLogic'
 import { Markdown } from './Markdown'
 import { ToolDetailView } from './ToolCard'
-import { answersInput, answersOf, askTitle, describeTool, parseQuestions, planOf, type AskQuestion, type ToolView } from './toolSummary'
+import { answersInput, answersOf, askHeadline, describeTool, parseQuestions, planOf, rememberLabel, type AskQuestion, type ToolView } from './toolSummary'
 
 type AskItem = Extract<ChatItem, { kind: 'ask' }>
 
-/** Thẻ đang chờ người dùng: viền + nền hổ phách (màu hổ phách chỉ dành cho thứ chờ bạn). */
-const FRAME = 'rounded-lg border border-wait/60 bg-wait/5 p-3'
+/** Thẻ đang chờ người dùng: viền hổ phách (màu hổ phách chỉ dành cho thứ chờ bạn) trên nền thẻ. */
+const FRAME = 'rounded-xl border border-wait/55 bg-panel-2 p-3'
 
 function Kbd({ children }: { children: string }): React.JSX.Element {
   return <span className="font-mono text-[11px] opacity-60 @max-[420px]/chat:hidden">{children}</span>
 }
 
-function Head({ icon, title }: { icon: 'shield' | 'ask' | 'kanban'; title: string }): React.JSX.Element {
+/** Tiêu đề: chấm chờ (hổ phách nhấp nháy) + "<Agent> muốn chạy lệnh". */
+function Head({ title }: { title: string }): React.JSX.Element {
   return (
-    <div className="flex items-center gap-2 text-[13px] font-semibold text-wait">
-      <Icon name={icon} />
-      <span className="min-w-0 flex-1 truncate">{title}</span>
+    <div className="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-fg">
+      <span className="sdot wa" />
+      <span className="min-w-0 flex-1 truncate" data-tip={title.length > 40 ? title : undefined}>
+        {title}
+      </span>
     </div>
   )
 }
@@ -29,27 +32,31 @@ function Head({ icon, title }: { icon: 'shield' | 'ask' | 'kanban'; title: strin
 const answer = (agentId: string, requestId: string, behavior: 'allow' | 'deny', opts?: { remember?: boolean; updatedInput?: unknown }): void =>
   useChat.getState().answer(agentId, requestId, behavior, opts)
 
-/** Xin quyền chạy một tool: tóm tắt (lệnh / đường dẫn / diff) + Cho phép / Từ chối / Luôn cho phép trong phiên. */
-function PermissionAsk({ item, view, agentId, primary }: { item: AskItem; view: ToolView; agentId: string; primary: boolean }): React.JSX.Element {
+/** Xin quyền chạy một tool: lý do, tóm tắt (lệnh / đường dẫn / diff) + Cho phép / Luôn cho phép / Từ chối (bên phải). */
+function PermissionAsk({ item, view, agentId, agentName, primary }: { item: AskItem; view: ToolView; agentId: string; agentName: string; primary: boolean }): React.JSX.Element {
+  const title = askHeadline(agentName, item.tool)
   return (
-    <div role="group" aria-label={askTitle(item.tool)} className={FRAME}>
-      <Head icon="shield" title={askTitle(item.tool)} />
+    <div role="group" aria-label={title} className={FRAME}>
+      <Head title={title} />
       {item.reason && item.reason !== view.summary && <div className="mt-1 text-[12px] break-words text-muted">{item.reason}</div>}
       <div className="mt-2">
         <ToolDetailView detail={view.detail} />
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <Button primary onClick={() => answer(agentId, item.requestId, 'allow')}>
           Cho phép {primary && <Kbd>Enter</Kbd>}
         </Button>
-        <Button onClick={() => answer(agentId, item.requestId, 'deny')}>
-          Từ chối {primary && <Kbd>Esc</Kbd>}
-        </Button>
         {item.canRemember && (
-          <Button variant="ghost" onClick={() => answer(agentId, item.requestId, 'allow', { remember: true })}>
-            Luôn cho phép trong phiên
+          <Button onClick={() => answer(agentId, item.requestId, 'allow', { remember: true })}>
+            <span className="max-w-[260px] truncate" data-tip="Cho phép cả những lần sau trong phiên này (theo gợi ý của agent)">
+              {rememberLabel(item.tool, item.input)}
+            </span>
           </Button>
         )}
+        <span className="flex-1" />
+        <Button variant="danger" onClick={() => answer(agentId, item.requestId, 'deny')}>
+          Từ chối {primary && <Kbd>Esc</Kbd>}
+        </Button>
       </div>
     </div>
   )
@@ -69,7 +76,19 @@ function Pick({ on, multi }: { on: boolean; multi: boolean }): React.JSX.Element
 }
 
 /** Agent hỏi chọn đáp án (AskUserQuestion của Claude, request_user_input của Codex). Một câu chọn một: bấm là gửi; còn lại chọn đủ rồi bấm Gửi. */
-function QuestionAsk({ item, questions, agentId, primary }: { item: AskItem; questions: AskQuestion[]; agentId: string; primary: boolean }): React.JSX.Element {
+function QuestionAsk({
+  item,
+  questions,
+  agentId,
+  agentName,
+  primary
+}: {
+  item: AskItem
+  questions: AskQuestion[]
+  agentId: string
+  agentName: string
+  primary: boolean
+}): React.JSX.Element {
   const [picked, setPicked] = useState<Record<string, string[]>>({})
   const [other, setOther] = useState<Record<string, string>>({})
   const single = questions.length === 1 && !questions[0].multiSelect
@@ -103,8 +122,8 @@ function QuestionAsk({ item, questions, agentId, primary }: { item: AskItem; que
   }
 
   return (
-    <div role="group" aria-label="Agent hỏi bạn" className={FRAME}>
-      <Head icon="ask" title="Agent hỏi bạn" />
+    <div role="group" aria-label={askHeadline(agentName, 'AskUserQuestion')} className={FRAME}>
+      <Head title={askHeadline(agentName, 'AskUserQuestion')} />
       <div className="mt-2 flex flex-col gap-3">
         {questions.map((q) => (
           <div key={q.question} className="flex flex-col gap-1.5">
@@ -123,7 +142,7 @@ function QuestionAsk({ item, questions, agentId, primary }: { item: AskItem; que
                     onClick={() => choose(q, o.label)}
                     aria-pressed={on}
                     className={`flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-left ${
-                      on ? 'border-accent/70 bg-accent/10' : 'border-line-2 bg-panel hover:border-line-3 hover:bg-panel-2'
+                      on ? 'border-accent/70 bg-accent/10' : 'border-line-2 bg-panel hover:border-line-3 hover:bg-panel-3'
                     }`}
                   >
                     <Pick on={on} multi={q.multiSelect} />
@@ -151,11 +170,12 @@ function QuestionAsk({ item, questions, agentId, primary }: { item: AskItem; que
           </div>
         ))}
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <Button primary disabled={!complete} onClick={() => submit(finalPicked)}>
           Gửi
         </Button>
-        <Button onClick={() => answer(agentId, item.requestId, 'deny')}>
+        <span className="flex-1" />
+        <Button variant="danger" onClick={() => answer(agentId, item.requestId, 'deny')}>
           Bỏ qua {primary && <Kbd>Esc</Kbd>}
         </Button>
       </div>
@@ -164,19 +184,21 @@ function QuestionAsk({ item, questions, agentId, primary }: { item: AskItem; que
 }
 
 /** Claude xin duyệt kế hoạch (ExitPlanMode): hiện kế hoạch markdown, Duyệt / Từ chối. */
-function PlanAsk({ item, agentId, primary }: { item: AskItem; agentId: string; primary: boolean }): React.JSX.Element {
+function PlanAsk({ item, agentId, agentName, primary }: { item: AskItem; agentId: string; agentName: string; primary: boolean }): React.JSX.Element {
   const plan = planOf(item.input)
+  const title = askHeadline(agentName, 'ExitPlanMode')
   return (
-    <div role="group" aria-label="Duyệt kế hoạch" className={FRAME}>
-      <Head icon="kanban" title="Duyệt kế hoạch?" />
-      <div className="mt-2 max-h-[340px] overflow-y-auto rounded-md border border-line bg-bg px-3 py-2">
+    <div role="group" aria-label={title} className={FRAME}>
+      <Head title={title} />
+      <div className="mt-2 max-h-[340px] overflow-y-auto rounded-lg border border-line bg-bg px-3 py-2">
         {plan ? <Markdown text={plan} /> : <div className="text-[12px] text-dim">Claude chưa gửi nội dung kế hoạch.</div>}
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <Button primary onClick={() => answer(agentId, item.requestId, 'allow')}>
           Duyệt kế hoạch
         </Button>
-        <Button onClick={() => answer(agentId, item.requestId, 'deny')}>
+        <span className="flex-1" />
+        <Button variant="danger" onClick={() => answer(agentId, item.requestId, 'deny')}>
           Từ chối {primary && <Kbd>Esc</Kbd>}
         </Button>
       </div>
@@ -212,11 +234,14 @@ function Resolved({ item, view }: { item: AskItem; view: ToolView }): React.JSX.
 export const AskCard = memo(function AskCard({
   item,
   agentId,
+  agentName,
   root,
   primary
 }: {
   item: AskItem
   agentId: string
+  /** Tên agent cho tiêu đề ("Tester muốn chạy lệnh"). */
+  agentName: string
   root?: string
   /** Thẻ đang nhận phím tắt Enter / Esc của composer (hiện gợi ý phím). */
   primary: boolean
@@ -225,8 +250,8 @@ export const AskCard = memo(function AskCard({
   if (item.state !== 'pending') return <Resolved item={item} view={view} />
   if (item.tool === 'AskUserQuestion') {
     const questions = parseQuestions(item.input)
-    if (questions.length) return <QuestionAsk item={item} questions={questions} agentId={agentId} primary={primary} />
+    if (questions.length) return <QuestionAsk item={item} questions={questions} agentId={agentId} agentName={agentName} primary={primary} />
   }
-  if (item.tool === 'ExitPlanMode') return <PlanAsk item={item} agentId={agentId} primary={primary} />
-  return <PermissionAsk item={item} view={view} agentId={agentId} primary={primary} />
+  if (item.tool === 'ExitPlanMode') return <PlanAsk item={item} agentId={agentId} agentName={agentName} primary={primary} />
+  return <PermissionAsk item={item} view={view} agentId={agentId} agentName={agentName} primary={primary} />
 })
