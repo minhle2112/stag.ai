@@ -3,6 +3,7 @@
   "productName": "stag.ai",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Run a team of AI coding agents per workspace, with a markdown vault as their memory",
   "main": "./out/main/index.js",
   "scripts": {

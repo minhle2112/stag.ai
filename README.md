@@ -82,3 +82,7 @@ Tests live next to the code as `*.test.ts`.
 ## Stack
 
 Electron 44 · electron-vite 5 · Vite 7 · React 19 · TypeScript 7 · Tailwind 4 · xterm.js 6 · node-pty · zustand · Model Context Protocol SDK · sherpa-onnx
+
+## License
+
+[MIT](LICENSE)
