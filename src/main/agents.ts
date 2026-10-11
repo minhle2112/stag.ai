@@ -43,6 +43,7 @@ import {
 } from '@shared/types'
 import type { Board, HookPayload } from './board'
 import type { BrowserService } from './browser'
+import type { DevServerService } from './devServer'
 import { ADAPTER_LABEL, independentSessionEnv, type AdapterService } from './adapters'
 import { codexArgs, codexHome, findCodexRollout, parseCodexContext } from './codex'
 import { externalArgs, spawnSpec, type ExternalAdapterStore } from './externalAdapters'
@@ -142,6 +143,10 @@ export class AgentService {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(IPC.agentRequests, list)
   })
   /** Việc đầu tiên agent khác giao cho agent mới tạo (agent_create): thành lời mở của phiên mới đầu tiên. */
+  /** Ô terminal chạy dev server: lệnh gõ sẵn khi phiên của nó mở (xem devTerminal). */
+  private pendingInput = new Map<string, string>()
+  /** pty gần nhất của mỗi ô terminal (đọc log cả khi phiên đã đóng). */
+  private lastPty = new Map<string, string>()
   private firstTasks = new Map<string, { from: string; task: string; created: boolean; handoff?: boolean; user?: boolean; scope?: string }>()
   /** Tin nhắn giữa agent (agent_send) chờ gõ vào terminal của agent nhận. */
   private mail = new AgentMail()
@@ -199,6 +204,57 @@ export class AgentService {
       return
     }
     this.ptys.write(run.ptyId, text, false)
+  }
+
+  /**
+   * Chạy `command` trong ô terminal tên `name` của workspace (dev server, xem DevServerService): chưa có thì tạo ô
+   * (đặt cạnh ô `near`, không có thì cạnh ô trên cùng), ô đang đóng thì mở lại; phiên đang chạy thì gõ lệnh vào luôn,
+   * chưa chạy thì giao diện mở phiên rồi app gõ lệnh. Trả về id agent của ô.
+   */
+  async devTerminal(workspaceId: string, name: string, command: string, near: string | null = null): Promise<string> {
+    const line = command + '\r'
+    let agent = this.data.agents.find((a) => a.workspaceId === workspaceId && agentKind(a) === 'terminal' && sameAgentName(a.name, name))
+    if (agent && this.running.has(agent.id)) {
+      this.typeInto(agent.id, line)
+      this.apiEvent({ type: 'open', workspaceId, agentId: agent.id, nearAgentId: near })
+      return agent.id
+    }
+    if (agent) {
+      this.pendingInput.set(agent.id, line)
+      this.apiEvent({ type: 'open', workspaceId, agentId: agent.id, nearAgentId: near })
+      return agent.id
+    }
+    // Tên đã có agent khác (không phải terminal) dùng: thêm số.
+    let unique = name
+    for (let i = 2; this.data.agents.some((a) => a.workspaceId === workspaceId && sameAgentName(a.name, unique)); i++) unique = `${name} ${i}`
+    agent = await this.create({ workspaceId, kind: 'terminal', name: unique, role: '', permissionMode: 'default' })
+    this.pendingInput.set(agent.id, line)
+    const event: AgentCreatedEvent = { agent, nearAgentId: near, open: true }
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(IPC.agentCreated, event)
+    return agent.id
+  }
+
+  private devServers: DevServerService | null = null
+
+  /** Gắn dịch vụ dev server (tool preview_*); tạo sau AgentService vì nó cần AgentService. */
+  attachDevServers(dev: DevServerService): void {
+    this.devServers = dev
+  }
+
+  /** Ô terminal còn phiên đang chạy không. */
+  isRunning(agentId: string): boolean {
+    return this.running.has(agentId)
+  }
+
+  /** Còn agent / ô này không (người dùng có thể đã xoá). */
+  has(agentId: string): boolean {
+    return this.data.agents.some((a) => a.id === agentId)
+  }
+
+  /** Chữ terminal của ô đã xuất (phiên đang chạy, hoặc phiên gần nhất), còn mã màu. */
+  terminalOutput(agentId: string): string {
+    const ptyId = this.running.get(agentId)?.ptyId ?? this.lastPty.get(agentId)
+    return ptyId ? this.ptys.output(ptyId) : ''
   }
 
   /** Gắn máy chủ trạng thái (hook + MCP) sau khi nó đã chạy. */
@@ -578,6 +634,13 @@ export class AgentService {
       { command: sh.path, args: sh.args, cwd: ws.path, cols: req.cols, rows: req.rows },
       { filterEnv: independentSessionEnv, onExit: () => this.finish(agent.id, ptyId) }
     )
+    this.lastPty.set(agent.id, ptyId)
+    const input = this.pendingInput.get(agent.id)
+    if (input) {
+      this.pendingInput.delete(agent.id)
+      // Chờ shell lên một chút để lệnh hiện sau dấu nhắc (gõ sớm vẫn chạy, chỉ hiện lộn xộn).
+      setTimeout(() => this.ptys.write(ptyId, input, false), 400)
+    }
     const run: Running = {
       agentId: agent.id,
       sessionId: randomUUID(),
@@ -830,6 +893,7 @@ export class AgentService {
       board: this.board,
       scope: () => resolveScope(this.settings.get(), ws.id, agent.id),
       browser: this.browser,
+      devServers: this.devServers?.agentApi(ws.id, agent.id),
       teammates: () =>
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
       handoff: (summary) => this.completeHandoff(agent.id, summary),

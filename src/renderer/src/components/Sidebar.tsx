@@ -98,11 +98,13 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
   return (
     <div className={`mt-px ${open ? 'pb-1' : ''}`}>
       <div
+        // Workspace đang xem: bấm để thu gọn / mở rộng. Workspace khác: chuyển sang (và mở rộng nếu đang thu gọn).
         onClick={() => {
+          if (current) return onToggle()
           setActive(ws.id)
           if (!open) onToggle()
         }}
-        data-tip={`${ws.path}${current ? '' : '\nBấm để chuyển sang workspace này'}`}
+        data-tip={`${ws.path}\n${current ? (open ? 'Bấm để thu gọn' : 'Bấm để mở rộng') : 'Bấm để chuyển sang workspace này'}`}
         data-tip-side="right"
         className={`group relative mx-1.5 flex h-7 cursor-pointer items-center gap-1.5 rounded-md pr-[3px] pl-2.5 font-medium whitespace-nowrap hover:bg-panel-2 hover:text-fg ${
           current ? 'bg-panel-2 font-semibold text-fg' : 'text-muted'

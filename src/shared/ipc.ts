@@ -179,6 +179,10 @@ export const IPC = {
   browserAskClosed: 'browser:ask-closed',
   /** Xoá cookie / dữ liệu trang của trình duyệt một workspace (hoặc mọi workspace). */
   browserClearData: 'browser:clear-data',
+  /** Dev server của dự án (Tab mới của browser): danh sách, chạy trong tab, huỷ. */
+  devServerList: 'dev-server:list',
+  devServerStart: 'dev-server:start',
+  devServerCancel: 'dev-server:cancel',
   /** Gõ bằng giọng nói: trạng thái model / tiến trình nhận dạng (get + sự kiện main → renderer). */
   voiceStatus: 'voice:status',
   voiceChanged: 'voice:changed',

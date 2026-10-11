@@ -60,7 +60,7 @@ export type AgentRequestInput = AgentRequest extends infer R ? (R extends AgentR
 export type AgentApiEvent =
   | { type: 'updated'; agent: Agent }
   /** Hiện ô của agent cạnh ô của agent đã xin, mở phiên mới nếu chưa chạy. */
-  | { type: 'open'; workspaceId: string; agentId: string; nearAgentId: string }
+  | { type: 'open'; workspaceId: string; agentId: string; nearAgentId: string | null }
   /** Agent đã bị xoá ở main: bỏ khỏi giao diện. */
   | { type: 'removed'; workspaceId: string; agentId: string }
 
@@ -70,8 +70,8 @@ export const MESSAGE_MAX = 4000
 /** Main báo renderer: agent vừa được tạo qua Agent API, thêm ô cạnh ô của agent đã tạo nó. */
 export interface AgentCreatedEvent {
   agent: Agent
-  /** Agent đã xin tạo (đặt ô mới cạnh ô này). */
-  nearAgentId: string
+  /** Agent đã xin tạo (đặt ô mới cạnh ô này); null = cạnh ô trên cùng (ô dev server người dùng mở từ browser). */
+  nearAgentId: string | null
   open: boolean
 }
 

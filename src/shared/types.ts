@@ -738,6 +738,18 @@ export interface BrowserTab {
   canGoForward: boolean
   /** DevTools của tab đang mở (cửa sổ riêng). */
   devtools: boolean
+  /** Tab đang chờ dev server mở cổng (Tab mới → "Dùng cái này"); có `error` = không chạy được. */
+  dev?: BrowserTabDev
+}
+
+export interface BrowserTabDev {
+  name: string
+  port: number
+  /** Lệnh hiển thị (`npm run dev`). */
+  command: string
+  /** Ô terminal đang chạy lệnh (null = chưa tạo xong). */
+  agentId: string | null
+  error?: string
 }
 
 /** Browser của một workspace. */

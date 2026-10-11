@@ -22,6 +22,7 @@ import { artifactPath, type ArtifactLog } from './artifacts'
 import { artifactThumb } from './artifactThumb'
 import type { Board } from './board'
 import type { BrowserService } from './browser'
+import type { DevServerService } from './devServer'
 import type { Notifier } from './notifier'
 import type { PtyManager } from './pty'
 import type { SettingsStore } from './settings'
@@ -40,7 +41,7 @@ import { AI_FIX_SECRET, type VoiceAiInfo, type VoiceCloudInfo } from '@shared/vo
 
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary, plugins: PluginHost, vaultIndexer: VaultIndexer): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary, plugins: PluginHost, vaultIndexer: VaultIndexer, dev: DevServerService): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -119,6 +120,12 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.agentRename, (_e, agentId: string, name: string) => agents.rename(agentId, name))
   ipcMain.handle(IPC.agentReorder, (_e, workspaceId: string, orderedIds: string[]) => agents.reorder(workspaceId, orderedIds))
   ipcMain.handle(IPC.browserDevTools, (_e, workspaceId: string, tabId: string) => browser.toggleDevTools(workspaceId, tabId))
+  ipcMain.handle(IPC.devServerList, (_e, workspaceId: string) => dev.list(ws(workspaceId).id))
+  ipcMain.handle(IPC.devServerStart, async (_e, workspaceId: string, name: string, tabId?: string) => {
+    const id = ws(workspaceId).id
+    dev.startInTab(id, await dev.resolve(id, name), typeof tabId === 'string' ? tabId : undefined)
+  })
+  ipcMain.handle(IPC.devServerCancel, (_e, workspaceId: string, tabId: string, name: string) => dev.cancelInTab(ws(workspaceId).id, tabId, name))
   ipcMain.handle(IPC.vaultIndex, (_e, vaultPath: string) => vaultIndexer.index(vaultPath))
   ipcMain.handle(IPC.vaultSearch, (_e, vaultPath: string, query: string) => vaultIndexer.search(vaultPath, query))
   ipcMain.handle(IPC.vaultWatch, (e, vaultPath: string) => vaultWatchers.watch(vaultPath, e.sender))

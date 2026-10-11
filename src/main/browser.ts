@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeImage, session as electronSession, WebContentsView, type Session, type WebContents } from 'electron'
 import { browserPartition, originDecision, toUrl } from '@shared/browser'
-import { DEFAULT_BROWSER, type Agent, type BrowserPermissionAsk, type BrowserSettings, type BrowserState, type BrowserTab, type BrowserTabOwner, type ViewRect } from '@shared/types'
+import { DEFAULT_BROWSER, type Agent, type BrowserPermissionAsk, type BrowserSettings, type BrowserState, type BrowserTab, type BrowserTabDev, type BrowserTabOwner, type ViewRect } from '@shared/types'
 import snapshotSrc from './inject/snapshot.js?raw'
 
 interface ConsoleEntry {
@@ -19,6 +19,8 @@ interface Tab {
   view: WebContentsView
   console: ConsoleEntry[]
   cdp: boolean
+  /** Đang chờ dev server (xem devTab). */
+  dev?: BrowserTabDev
 }
 
 interface WsBrowser {
@@ -46,6 +48,8 @@ const CONSOLE_MAX = 300
 const SNAPSHOT_MAX = 30_000
 const ASK_TIMEOUT = 2 * 60_000
 const SCREENSHOT_MAX_WIDTH = 1280
+/** Bán kính góc của view trang (px CSS, khung pane bo 12px). */
+const VIEW_RADIUS = 10
 
 const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
   Enter: { code: 'Enter', keyCode: 13, text: '\r' },
@@ -197,6 +201,8 @@ export class BrowserService {
       }
     })
     view.setBackgroundColor('#ffffff')
+    // Pane là khung nổi bo góc (như Claude desktop): bo cả trang cho khớp góc dưới của khung.
+    view.setBorderRadius(VIEW_RADIUS)
     view.setVisible(false)
     const tab: Tab = { id: randomUUID(), wsId, owner, view, console: [], cdp: false }
     b.tabs.push(tab)
@@ -317,7 +323,12 @@ export class BrowserService {
   }
 
   navigate(wsId: string, tabId: string, input: string): void {
-    this.tab(wsId, tabId).view.webContents.loadURL(toUrl(input, this.config.searchEngine)).catch(() => {})
+    const tab = this.tab(wsId, tabId)
+    if (tab.dev) {
+      tab.dev = undefined
+      this.emit(wsId)
+    }
+    tab.view.webContents.loadURL(toUrl(input, this.config.searchEngine)).catch(() => {})
   }
 
   back(wsId: string, tabId: string): void {
@@ -332,6 +343,47 @@ export class BrowserService {
 
   reload(wsId: string, tabId: string): void {
     this.tab(wsId, tabId).view.webContents.reload()
+  }
+
+  // ---- dev server (Tab mới → "Dùng cái này") ----
+
+  /**
+   * Đánh dấu tab của người dùng đang chờ dev server; `tabId` không còn (hoặc vắng) thì mở tab mới. Trả về id tab.
+   * Tab đó hiện trạng thái khởi động thay cho trang trống tới khi devOpen / devFail.
+   */
+  devTab(wsId: string, tabId: string | undefined, dev: BrowserTabDev): string {
+    const b = this.ws(wsId)
+    let tab = tabId ? b.tabs.find((t) => t.id === tabId && t.owner.kind === 'user') : undefined
+    if (!tab) tab = this.newTab(wsId, { kind: 'user' })
+    tab.dev = dev
+    b.active = tab.id
+    this.layout()
+    this.emit(wsId)
+    return tab.id
+  }
+
+  devUpdate(wsId: string, tabId: string, patch: Partial<BrowserTabDev>): void {
+    const tab = this.byWs.get(wsId)?.tabs.find((t) => t.id === tabId)
+    if (!tab?.dev) return
+    tab.dev = { ...tab.dev, ...patch }
+    this.emit(wsId)
+  }
+
+  /** Server đã lên: mở trang trong tab (nếu tab còn và vẫn đang chờ — người dùng chưa gõ địa chỉ khác). */
+  devOpen(wsId: string, tabId: string, url: string): void {
+    const tab = this.byWs.get(wsId)?.tabs.find((t) => t.id === tabId)
+    if (!tab?.dev) return
+    tab.dev = undefined
+    tab.view.webContents.loadURL(url).catch(() => {})
+    this.emit(wsId)
+  }
+
+  /** Bỏ trạng thái chờ (Huỷ / Quay lại): tab về trang trống. */
+  devClear(wsId: string, tabId: string): void {
+    const tab = this.byWs.get(wsId)?.tabs.find((t) => t.id === tabId)
+    if (!tab?.dev) return
+    tab.dev = undefined
+    this.emit(wsId)
   }
 
   /** Giao diện báo vị trí pane (null = pane đóng, hoặc đang có hộp thoại che). */
@@ -592,7 +644,8 @@ function describeTab(t: Tab): BrowserTab {
     loading: !dead && wc.isLoading(),
     canGoBack: !dead && wc.navigationHistory.canGoBack(),
     canGoForward: !dead && wc.navigationHistory.canGoForward(),
-    devtools: !dead && wc.isDevToolsOpened()
+    devtools: !dead && wc.isDevToolsOpened(),
+    ...(t.dev ? { dev: t.dev } : {})
   }
 }
 

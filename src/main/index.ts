@@ -8,6 +8,7 @@ import { ExternalAdapterStore } from './externalAdapters'
 import { ArtifactLog, serveArtifact } from './artifacts'
 import { Board } from './board'
 import { BrowserService } from './browser'
+import { DevServerService } from './devServer'
 import { StatusHub } from './hub'
 import { registerIpc, registerVoiceIpc, registerVoiceSystemIpc } from './ipc'
 import { VoiceService } from './voice'
@@ -266,6 +267,9 @@ const pluginEvent = (type: PluginEvent['type'], a: { id: string; name: string; w
   data
 })
 const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals, skills, memory, vaultIndexer)
+/** Dev server của dự án: Tab mới của browser + tool preview_* của agent. */
+const devServers = new DevServerService(workspaces, agents, browser)
+agents.attachDevServers(devServers)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -487,7 +491,7 @@ app.whenReady().then(async () => {
           plugins.callTool(t.pluginId, t.tool.name, params, { workspaceId: ws.id, workspaceName: ws.name, workspacePath: ws.path, agentId: a.id, agentName: a.name })
       }))
   })
-  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins, vaultIndexer)
+  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins, vaultIndexer, devServers)
   registerVoiceIpc(voice, new VocabCache(), workspaces, voiceCloud, cloudUsage)
   registerVoiceSystemIpc({
     secrets,

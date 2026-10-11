@@ -1,6 +1,7 @@
 import type { ChatEvent, ChatPermissionAnswer, ChatSendRequest, ChatSnapshot } from '@shared/chat'
 import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJobRun, PluginScaffoldRequest } from '@shared/plugins'
 import type { VoiceAiInfo, VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
+import type { DevServerList } from '@shared/launch'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type { AgentApiEvent, AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
@@ -212,6 +213,13 @@ const api = {
     },
     /** Xoá cookie và dữ liệu trang của workspace `workspaceId` (bỏ trống = mọi workspace). */
     clearData: (workspaceId?: string): Promise<void> => ipcRenderer.invoke(IPC.browserClearData, workspaceId)
+  },
+  devServer: {
+    /** Cách chạy dev server đã lưu (.stag/launch.json) + đoán được, kèm cổng nào đang mở. */
+    list: (workspaceId: string): Promise<DevServerList> => ipcRenderer.invoke(IPC.devServerList, workspaceId),
+    /** Chạy `name` (lưu vào .stag/launch.json) trong ô terminal; tab `tabId` (vắng = tab mới) mở trang khi cổng mở. */
+    start: (workspaceId: string, name: string, tabId?: string): Promise<void> => ipcRenderer.invoke(IPC.devServerStart, workspaceId, name, tabId),
+    cancel: (workspaceId: string, tabId: string, name: string): Promise<void> => ipcRenderer.invoke(IPC.devServerCancel, workspaceId, tabId, name)
   },
   workspace: {
     list: (): Promise<Workspace[]> => ipcRenderer.invoke(IPC.wsList),

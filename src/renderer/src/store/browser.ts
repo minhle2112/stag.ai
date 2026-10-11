@@ -34,6 +34,9 @@ interface BrowserStore {
   width: number
   /** Đang kéo đổi độ rộng: ẩn view trang để nó không nuốt sự kiện chuột. */
   resizing: boolean
+  /** Pane phóng to (nút ⤢): chiếm hết chỗ trừ phần tối thiểu bên trái; không lưu. */
+  expanded: boolean
+  setExpanded: (expanded: boolean) => void
   load: (wsId: string) => Promise<void>
   answer: (askId: string, allow: boolean) => Promise<void>
   /** "Luôn cho trang này": thêm origin vào Cài đặt → Trình duyệt → Trang luôn cho phép, rồi cho phép. */
@@ -59,6 +62,8 @@ export const useBrowser = create<BrowserStore>((set, get) => {
     asks: [],
     width: readWidth(),
     resizing: false,
+    expanded: false,
+    setExpanded: (expanded) => set({ expanded }),
 
     async load(wsId) {
       const state = await window.stag.browser.state(wsId)

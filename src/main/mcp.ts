@@ -6,6 +6,7 @@ import { overlapsOf, scopeLocks, unlocked } from '@shared/scope'
 import type { AgentCreateInput, AgentUpdateInput } from '@shared/agentApi'
 import type { Board } from './board'
 import { BROWSER_KEYS, type BrowserService } from './browser'
+import type { DevServerAgentApi } from './devServer'
 import type { MemoryResult, MemoryService, QueryFilter, Touch } from './memory'
 import type { PatchOp } from '@shared/noteSections'
 
@@ -18,6 +19,8 @@ export interface McpContext {
   /** Cài đặt khoá phạm vi thực tế của agent (đọc lại mỗi lần gọi; vắng = mặc định). */
   scope?: () => ScopeLockSettings
   browser: BrowserService
+  /** Tool preview_* (dev server của dự án); vắng = không có tool. */
+  devServers?: DevServerAgentApi
   /** Mọi agent trong workspace và phiên của họ có đang chạy không (cho task_list). */
   teammates(): Array<{ agent: Agent; running: boolean }>
   /** Ghi lại file .sessions/<id>.md sau khi việc đổi. */
@@ -304,6 +307,7 @@ export function createStagMcp(ctx: McpContext): McpServer {
   }
 
   const browserTools = registerBrowserTools(server, ctx)
+  if (ctx.devServers) registerDevServerTools(server, ctx.devServers)
   if (ctx.browserTools === false) hideFromList(server, browserTools)
   for (const t of ctx.extraTools ?? []) {
     server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: schemaOf(t.inputSchema) }, async (params: unknown) => {
@@ -685,6 +689,69 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): RegisteredToo
     run(({ only_errors }: { only_errors?: boolean }) => browser.agentConsole(agent, !!only_errors))
   ))
   return tools
+}
+
+/** Tool preview_*: chạy dev server của dự án trong ô terminal (người dùng thấy log), đọc log, dừng. */
+function registerDevServerTools(server: McpServer, dev: DevServerAgentApi): void {
+  const run =
+    <A>(fn: (args: A) => Promise<string>) =>
+    async (args: A): Promise<ToolResult> => {
+      try {
+        return ok(await fn(args))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  server.registerTool(
+    'preview_list',
+    {
+      title: 'List dev servers',
+      description: 'List the dev servers of this project (saved in .stag/launch.json or guessed from package.json), with port and whether each is running.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true }
+    },
+    run(() => dev.list())
+  )
+  server.registerTool(
+    'preview_start',
+    {
+      title: 'Start dev server',
+      description:
+        "Start the project's dev server in a stag.ai terminal cell the user can see (nothing is started if its port is already open), wait until the port opens, and return the URL. " +
+        'Use this instead of running the dev server in your own shell. Without arguments it starts the only known server; pass name to pick one from preview_list. ' +
+        'To add a new one, pass name + command + port (saved to .stag/launch.json). Then open the URL with browser_navigate.',
+      inputSchema: {
+        name: z.string().max(60).optional().describe('Dev server name from preview_list (or the new name when adding one)'),
+        command: z.string().max(500).optional().describe('Only to add a new server: command line, e.g. "npm run dev"'),
+        port: z.number().int().min(1).max(65535).optional().describe('Port the server listens on (required with command)'),
+        url: z.string().max(500).optional().describe('Page to open if not http://localhost:<port>')
+      }
+    },
+    run((args: { name?: string; command?: string; port?: number; url?: string }) => dev.start(args))
+  )
+  server.registerTool(
+    'preview_logs',
+    {
+      title: 'Dev server logs',
+      description: 'Read the output of a dev server started from stag.ai (its terminal cell): build errors, request logs. Colors are removed.',
+      inputSchema: {
+        name: z.string().min(1).max(60).describe('Dev server name'),
+        lines: z.number().int().min(1).max(1000).optional().describe('How many last lines (default 80)'),
+        search: z.string().max(200).optional().describe('Only lines containing this text (case-insensitive)')
+      },
+      annotations: { readOnlyHint: true }
+    },
+    run((args: { name: string; lines?: number; search?: string }) => dev.logs(args))
+  )
+  server.registerTool(
+    'preview_stop',
+    {
+      title: 'Stop dev server',
+      description: 'Stop a dev server started from stag.ai (closes the shell in its terminal cell; the cell stays).',
+      inputSchema: { name: z.string().min(1).max(60).describe('Dev server name') }
+    },
+    run((args: { name: string }) => dev.stop(args))
+  )
 }
 
 const noteArg = z

@@ -10,7 +10,14 @@ interface Session {
   owner: WebContents
   /** Lần cuối người dùng gõ vào terminal (ms); 0 = chưa gõ. */
   lastInput: number
+  /** Phần cuối chữ terminal đã xuất (log dev server cho tool preview_logs). */
+  output: string
 }
+
+/** Giữ chừng này ký tự cuối của mỗi terminal. */
+const OUTPUT_MAX = 200_000
+/** Terminal đã thoát vẫn giữ phần chữ cuối (để đọc vì sao lệnh chết), tối đa chừng này cái. */
+const ENDED_MAX = 20
 
 export interface SpawnExtras {
   env?: Record<string, string>
@@ -22,6 +29,7 @@ export interface SpawnExtras {
 /** Quản lý các terminal thật (ConPTY trên Windows) và đẩy dữ liệu về renderer sở hữu. */
 export class PtyManager {
   private sessions = new Map<string, Session>()
+  private ended = new Map<string, string>()
 
   spawn(owner: WebContents, opts: PtySpawnOptions, extras: SpawnExtras = {}): string {
     const id = randomUUID()
@@ -32,13 +40,18 @@ export class PtyManager {
       cwd: opts.cwd,
       env: { ...(extras.filterEnv ? extras.filterEnv(process.env) : process.env), FORCE_COLOR: '1', ...extras.env } as Record<string, string>
     })
-    this.sessions.set(id, { proc, owner, lastInput: 0 })
+    const session: Session = { proc, owner, lastInput: 0, output: '' }
+    this.sessions.set(id, session)
 
     proc.onData((data) => {
+      session.output += data
+      if (session.output.length > OUTPUT_MAX * 1.5) session.output = session.output.slice(-OUTPUT_MAX)
       if (!owner.isDestroyed()) owner.send(IPC.ptyData, id, data)
     })
     proc.onExit(({ exitCode, signal }) => {
       this.sessions.delete(id)
+      this.ended.set(id, session.output.slice(-OUTPUT_MAX))
+      if (this.ended.size > ENDED_MAX) this.ended.delete(this.ended.keys().next().value!)
       extras.onExit?.({ exitCode, signal })
       if (!owner.isDestroyed()) owner.send(IPC.ptyExit, id, { exitCode, signal })
     })
@@ -56,6 +69,11 @@ export class PtyManager {
     if (!s) return
     if (fromUser) s.lastInput = Date.now()
     s.proc.write(data)
+  }
+
+  /** Chữ terminal đã xuất (phần cuối, còn mã màu); terminal đã thoát thì là phần cuối lúc thoát. */
+  output(id: string): string {
+    return this.sessions.get(id)?.output.slice(-OUTPUT_MAX) ?? this.ended.get(id) ?? ''
   }
 
   lastInputAt(id: string): number {

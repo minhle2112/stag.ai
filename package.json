@@ -3,7 +3,7 @@
   "productName": "stag.ai",
   "version": "0.1.0",
   "private": true,
-  "description": "Điều hành đội agent AI viết code theo workspace, kèm vault Obsidian",
+  "description": "Run a team of AI coding agents per workspace, with a markdown vault as their memory",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
