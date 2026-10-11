@@ -14,18 +14,40 @@ function candidateLabel(c: VaultCandidate): string {
   return c.relPath || '(chính thư mục dự án)'
 }
 
+const samePath = (a: string, b: string): boolean => a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase()
+
 export function CreateWorkspaceDialog({ inspection, onClose, onCreated }: Props): React.JSX.Element {
-  const { candidates } = inspection
   const [name, setName] = useState(inspection.suggestedName)
-  const [choice, setChoice] = useState<string>(candidates[0]?.path ?? NEW)
+  /** Thư mục vault người dùng tự chọn ("Chọn thư mục vault khác…"), ở đâu cũng được. */
+  const [custom, setCustom] = useState<VaultCandidate | null>(null)
+  const candidates = custom && !inspection.candidates.some((c) => samePath(c.path, custom.path)) ? [...inspection.candidates, custom] : inspection.candidates
+  const [choice, setChoice] = useState<string>(inspection.candidates[0]?.path ?? NEW)
   const chosen = candidates.find((c) => c.path === choice)
-  // Mặc định: vault đúng mẫu → bổ sung phần còn thiếu; vault khác mẫu → giữ nguyên.
+  // Mặc định: vault đúng mẫu hoặc thư mục trống → bổ sung phần còn thiếu; vault khác mẫu → giữ nguyên.
   const [augment, setAugment] = useState<Record<string, boolean>>(
-    Object.fromEntries(candidates.map((c) => [c.path, c.kind === 'stag']))
+    Object.fromEntries(inspection.candidates.map((c) => [c.path, c.kind === 'stag']))
   )
   const [gitInit, setGitInit] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  async function pickVault(): Promise<void> {
+    setError(null)
+    try {
+      const c = await window.stag.vault.pick(inspection.path)
+      if (!c) return
+      const known = inspection.candidates.find((x) => samePath(x.path, c.path))
+      if (known) {
+        setChoice(known.path)
+        return
+      }
+      setCustom(c)
+      setChoice(c.path)
+      setAugment((a) => ({ ...a, [c.path]: c.kind === 'stag' || !!c.empty }))
+    } catch (e) {
+      setError(String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    }
+  }
 
   async function submit(): Promise<void> {
     setBusy(true)
@@ -83,7 +105,13 @@ export function CreateWorkspaceDialog({ inspection, onClose, onCreated }: Props)
                   Dùng vault có sẵn: <b>{candidateLabel(c)}</b>
                 </div>
                 <div className="mt-0.5 flex flex-wrap gap-1.5 text-[11px]">
-                  <Tag tone={c.kind === 'stag' ? 'ok' : 'warn'}>{c.kind === 'stag' ? 'đúng mẫu stag.ai' : 'vault khác mẫu'}</Tag>
+                  {c.empty ? (
+                    <Tag tone="muted">thư mục trống</Tag>
+                  ) : (
+                    <Tag tone={c.kind === 'stag' ? 'ok' : 'warn'}>{c.kind === 'stag' ? 'đúng mẫu stag.ai' : 'vault khác mẫu'}</Tag>
+                  )}
+                  {c === custom && <Tag tone="muted">tự chọn</Tag>}
+                  {c.outside && <Tag tone="muted">ngoài thư mục dự án</Tag>}
                 </div>
                 {choice === c.path && (
                   <label className="mt-2 flex items-center gap-2 text-muted">
@@ -105,12 +133,22 @@ export function CreateWorkspaceDialog({ inspection, onClose, onCreated }: Props)
               {candidates.length === 0 && <div className="text-[11px] text-muted">Không tìm thấy vault nào trong thư mục này.</div>}
             </div>
           </label>
+          <button
+            type="button"
+            onClick={() => void pickVault()}
+            disabled={busy}
+            className="w-full rounded-md border border-dashed border-line-2 p-2 text-left text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-50"
+          >
+            {custom ? 'Chọn thư mục vault khác…' : 'Chọn thư mục vault khác… (thư mục bất kỳ, kể cả ngoài dự án)'}
+          </button>
         </div>
       </Field>
 
       <Field label="Git">
         {inspection.isGitRepo ? (
-          <div className="text-muted">Thư mục là repo git: app sẽ thêm vault và .sessions/ vào .gitignore.</div>
+          <div className="text-muted">
+            Thư mục là repo git: app sẽ thêm {chosen?.outside ? '' : 'vault và '}.sessions/ vào .gitignore.
+          </div>
         ) : (
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={gitInit} onChange={(e) => setGitInit(e.target.checked)} />

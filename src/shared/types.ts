@@ -10,14 +10,18 @@ export interface Workspace {
   createdAt: string
 }
 
-export type VaultKind = 'stag' | 'obsidian'
+export type VaultKind = 'stag' | 'other'
 
 export interface VaultCandidate {
   path: string
   /** Đường dẫn tương đối so với thư mục dự án ('' = chính thư mục dự án). */
   relPath: string
-  /** 'stag' = có _INDEX.md đúng mẫu; 'obsidian' = vault markdown có sẵn khác mẫu (nhận ra nhờ thư mục .obsidian/). */
+  /** 'stag' = có _INDEX.md đúng mẫu; 'other' = thư mục note khác mẫu (tự tìm thấy nhờ `.obsidian/`, hoặc người dùng tự chọn). */
   kind: VaultKind
+  /** Thư mục người dùng tự chọn không có gì (bỏ qua mục ẩn): mặc định bổ sung theo template. */
+  empty?: boolean
+  /** Nằm ngoài thư mục dự án (không thêm vào .gitignore của dự án). */
+  outside?: boolean
 }
 
 export interface WorkspaceInspection {

@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import { basename, dirname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { NoteWriteResult, VaultCandidate, VaultNode } from '@shared/types'
 import { exists, isDir, readText } from './fsutil'
 
@@ -26,7 +26,7 @@ export async function detectVaults(projectDir: string): Promise<VaultCandidate[]
       found.push({
         path: dir,
         relPath: relative(projectDir, dir),
-        kind: stag ? 'stag' : 'obsidian'
+        kind: stag ? 'stag' : 'other'
       })
       return // không tìm vault lồng trong vault
     }
@@ -45,6 +45,25 @@ export async function detectVaults(projectDir: string): Promise<VaultCandidate[]
   await visit(projectDir, 0)
   // Vault đúng mẫu lên trước.
   return found.sort((a, b) => (a.kind === b.kind ? a.relPath.localeCompare(b.relPath) : a.kind === 'stag' ? -1 : 1))
+}
+
+/**
+ * Thư mục người dùng tự chọn làm vault (ở đâu cũng được, kể cả ngoài thư mục dự án): đúng mẫu stag.ai hay khác mẫu,
+ * có trống không. Không có thư mục → lỗi.
+ */
+export async function inspectVaultDir(dir: string, projectDir: string): Promise<VaultCandidate> {
+  const path = resolve(dir)
+  if (!(await isDir(path))) throw new Error(`Không tìm thấy thư mục: ${path}`)
+  const rel = relative(resolve(projectDir), path)
+  const outside = rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)
+  const entries = await fs.readdir(path)
+  return {
+    path,
+    relPath: outside ? path : rel,
+    kind: (await isStagVault(path)) ? 'stag' : 'other',
+    empty: !entries.some((n) => !n.startsWith('.')),
+    outside
+  }
 }
 
 /** Cây note của vault (thư mục + file .md), bỏ thư mục/tệp ẩn. */

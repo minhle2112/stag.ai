@@ -28,7 +28,7 @@ import type { PtyManager } from './pty'
 import type { SettingsStore } from './settings'
 import { detectShells } from './shells'
 import { prepareUserTemplates } from './templates'
-import { createNote, readNote, vaultTree, writeNote } from './vault'
+import { createNote, inspectVaultDir, readNote, vaultTree, writeNote } from './vault'
 import type { VaultActivityLog } from './vaultActivity'
 import { VaultIndexer, VaultWatchers } from './vaultIndex'
 import type { WorkspaceStore } from './workspace'
@@ -60,6 +60,12 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     return r.canceled ? null : r.filePaths[0]
   })
   ipcMain.handle(IPC.wsInspect, (_e, path: string) => workspaces.inspect(path))
+  // Hộp tạo workspace → "Chọn thư mục vault khác…": thư mục bất kỳ, kể cả ngoài dự án.
+  ipcMain.handle(IPC.vaultPick, async (e, projectPath: string) => {
+    const win = BrowserWindow.fromWebContents(e.sender)!
+    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục vault', defaultPath: projectPath, properties: ['openDirectory', 'createDirectory'] })
+    return r.canceled ? null : inspectVaultDir(r.filePaths[0], projectPath)
+  })
   ipcMain.handle(IPC.wsCreate, (_e, req: CreateWorkspaceRequest) => workspaces.create(req))
   ipcMain.handle(IPC.wsRemove, async (_e, id: string) => {
     const agentIds = (await agents.snapshot(id)).agents.map((a) => a.id)

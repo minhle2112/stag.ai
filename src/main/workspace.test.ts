@@ -223,6 +223,26 @@ describe('WorkspaceStore.create', () => {
     expect(gi).not.toContain('.obsidian/')
   })
 
+  it('vault tự chọn ngoài thư mục dự án (trống, bổ sung template): dùng đường dẫn tuyệt đối, .gitignore không có dòng ../', async () => {
+    const outside = join(root, 'Notes', 'My vault')
+    await fs.mkdir(outside, { recursive: true })
+    await fs.mkdir(join(project, '.git'))
+    const { workspace, report } = await new WorkspaceStore().create(req({ vault: { mode: 'existing', path: outside, augment: true } }))
+    expect(workspace.vaultPath).toBe(outside)
+    expect(await readFile(join(outside, '_INDEX.md'))).toMatch(/^---\r?\ntype: index/)
+    expect(await readFile(join(project, 'CLAUDE.md'))).toContain(outside)
+    const gi = await readFile(join(project, '.gitignore'))
+    expect(gi).not.toContain('..')
+    expect(gi.split('\n')).toContain('.sessions/')
+    expect(report.some((r) => r.includes('vault nằm ngoài thư mục dự án'))).toBe(true)
+  })
+
+  it('vault có sẵn mà thư mục không tồn tại → lỗi, không tạo gì', async () => {
+    const missing = join(root, 'nope')
+    await expect(new WorkspaceStore().create(req({ vault: { mode: 'existing', path: missing, augment: true } }))).rejects.toThrow(/Không tìm thấy thư mục vault/)
+    await expect(fs.stat(missing)).rejects.toThrow()
+  })
+
   it('báo lỗi: thư mục không có / đã là workspace (khác / \\) / vault mới trùng tên thư mục có sẵn', async () => {
     const store = new WorkspaceStore()
     await expect(store.create(req({ path: join(root, 'không có') }))).rejects.toThrow('Không tìm thấy thư mục')

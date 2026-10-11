@@ -14,6 +14,7 @@ export const IPC = {
   wsCreate: 'workspace:create',
   wsRemove: 'workspace:remove',
   vaultTree: 'vault:tree',
+  vaultPick: 'vault:pick',
   vaultRead: 'vault:read',
   openFolder: 'shell:open-folder',
   templatesOpen: 'templates:open',

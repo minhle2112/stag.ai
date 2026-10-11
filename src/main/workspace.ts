@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { app } from 'electron'
 import type { CreateWorkspaceRequest, CreateWorkspaceResult, Workspace, WorkspaceInspection } from '@shared/types'
@@ -65,6 +65,7 @@ export class WorkspaceStore {
     const req = { ...input, path: resolve(input.path) }
     if (req.vault.mode === 'existing') req.vault = { ...req.vault, path: resolve(req.vault.path) }
     if (!(await isDir(req.path))) throw new Error(`Không tìm thấy thư mục: ${req.path}`)
+    if (req.vault.mode === 'existing' && !(await isDir(req.vault.path))) throw new Error(`Không tìm thấy thư mục vault: ${req.vault.path}`)
     if (this.items.some((w) => samePath(w.path, req.path))) throw new Error('Thư mục này đã là một workspace trong app')
 
     const name = safeName(req.name) || defaultProjectName(req.path)
@@ -119,6 +120,10 @@ export class WorkspaceStore {
   private async ensureGitignore(projectDir: string, vaultPath: string): Promise<string> {
     const rel = relative(projectDir, vaultPath).replace(/\\/g, '/')
     if (!rel) return '.gitignore: vault chính là thư mục dự án, không thêm được vào .gitignore'
+    if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) {
+      const added = await ensureIgnored(projectDir, ['.sessions/'], 'stag.ai agent sessions (personal data, keep out of git)')
+      return `.gitignore: vault nằm ngoài thư mục dự án, không cần loại trừ${added.length ? `; thêm ${added.join(', ')}` : ''}`
+    }
     const added = await ensureIgnored(projectDir, [`${rel}/`, '.sessions/'], 'stag.ai vault + agent sessions (personal data, keep out of git)')
     return added.length ? `.gitignore: thêm ${added.join(', ')}` : '.gitignore: đã loại trừ vault và .sessions/, giữ nguyên'
   }

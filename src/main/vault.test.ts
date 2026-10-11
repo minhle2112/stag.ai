@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultProjectName, detectVaults, readNote, vaultDirName, vaultTree } from './vault'
+import { defaultProjectName, detectVaults, inspectVaultDir, readNote, vaultDirName, vaultTree } from './vault'
 
 let root: string
 let project: string
@@ -33,6 +33,29 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
 
+describe('inspectVaultDir (thư mục vault tự chọn)', () => {
+  it('đúng mẫu / khác mẫu / trống (bỏ mục ẩn); trong hay ngoài thư mục dự án', async () => {
+    await put('proj memory/_INDEX.md', STAG_INDEX)
+    expect(await inspectVaultDir(join(project, 'proj memory'), project)).toEqual({
+      path: join(project, 'proj memory'),
+      relPath: 'proj memory',
+      kind: 'stag',
+      empty: false,
+      outside: false
+    })
+    await put('deep/a/b/c/note.md', 'x')
+    expect(await inspectVaultDir(join(project, 'deep/a/b/c'), project)).toMatchObject({ relPath: join('deep', 'a', 'b', 'c'), kind: 'other', empty: false })
+    const outside = join(root, 'elsewhere')
+    await fs.mkdir(join(outside, '.obsidian'), { recursive: true })
+    expect(await inspectVaultDir(outside, project)).toEqual({ path: outside, relPath: outside, kind: 'other', empty: true, outside: true })
+    expect((await inspectVaultDir(project, project)).relPath).toBe('')
+  })
+
+  it('không có thư mục → lỗi', async () => {
+    await expect(inspectVaultDir(join(root, 'nope'), project)).rejects.toThrow(/Không tìm thấy thư mục/)
+  })
+})
+
 describe('detectVaults', () => {
   it('thư mục trống → không có vault', async () => {
     expect(await detectVaults(project)).toEqual([])
@@ -60,14 +83,14 @@ describe('detectVaults', () => {
     await mkdir('notes/.obsidian')
     await put('notes/a.md', 'x')
     expect(await detectVaults(project)).toEqual([
-      { path: join(project, 'notes'), relPath: 'notes', kind: 'obsidian' }
+      { path: join(project, 'notes'), relPath: 'notes', kind: 'other' }
     ])
   })
 
   it('chính thư mục dự án là vault → relPath rỗng, không quét vault lồng bên trong', async () => {
     await mkdir('.obsidian')
     await put('inner/_INDEX.md', STAG_INDEX)
-    expect(await detectVaults(project)).toEqual([{ path: project, relPath: '', kind: 'obsidian' }])
+    expect(await detectVaults(project)).toEqual([{ path: project, relPath: '', kind: 'other' }])
   })
 
   it('vault đúng mẫu lên trước, rồi theo relPath', async () => {
@@ -77,8 +100,8 @@ describe('detectVaults', () => {
     await mkdir('m memory/.obsidian')
     expect((await detectVaults(project)).map((v) => [v.relPath, v.kind])).toEqual([
       ['m memory', 'stag'],
-      ['a-obs', 'obsidian'],
-      ['z-obs', 'obsidian']
+      ['a-obs', 'other'],
+      ['z-obs', 'other']
     ])
   })
 

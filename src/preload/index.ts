@@ -53,6 +53,7 @@ import type {
   ViewRect,
   CreateWorkspaceResult,
   VaultIndex,
+  VaultCandidate,
   VaultNode,
   VaultSearchHit,
   Workspace,
@@ -230,6 +231,8 @@ const api = {
   },
   vault: {
     tree: (vaultPath: string): Promise<VaultNode[]> => ipcRenderer.invoke(IPC.vaultTree, vaultPath),
+    /** Hộp chọn thư mục làm vault (bất kỳ đâu); huỷ → null. */
+    pick: (projectPath: string): Promise<VaultCandidate | null> => ipcRenderer.invoke(IPC.vaultPick, projectPath),
     read: (vaultPath: string, rel: string): Promise<string> => ipcRenderer.invoke(IPC.vaultRead, vaultPath, rel),
     /** Lưu note; `base` = nội dung lúc bắt đầu sửa (file trên đĩa khác `base` → 'conflict', không ghi). */
     write: (vaultPath: string, rel: string, text: string, base: string | null): Promise<NoteWriteResult> =>
