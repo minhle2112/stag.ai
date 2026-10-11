@@ -211,6 +211,19 @@ describe('MemoryKeeper (trên đĩa)', () => {
     expect(archive.match(/## 2026-09-01/g)).toHaveLength(1)
   })
 
+  it('"Dọn ngay" (force): dọn cả khi _INDEX chưa quá hạn mức, vẫn theo số ngày', async () => {
+    await fs.writeFile(vault('_INDEX.md'), '# INDEX\n\n## Open items\n- [x] Old (2026-01-01)\n- [x] New (2026-10-11)\n- [ ] Open (2026-01-01)\n')
+    const k = new MemoryKeeper(() => cfg)
+    const now = new Date(2026, 9, 11, 12)
+    expect(await k.compactIndex(ws, cfg, now)).toBe(0)
+    expect(await k.compactIndex(ws, cfg, now, true)).toBe(1)
+    const after = await read('_INDEX.md')
+    expect(after).not.toContain('Old (2026-01-01)')
+    expect(after).toContain('- [x] New (2026-10-11)')
+    expect(after).toContain('- [ ] Open (2026-01-01)')
+    expect(await read('_INDEX archive.md')).toContain('- [x] Old (2026-01-01)')
+  })
+
   it('việc xong cũng dọn _INDEX (theo cài đặt cấp workspace)', async () => {
     const old = Array.from({ length: 150 }, (_, i) => `- [x] Old ${i} (2026-01-01) ${'y'.repeat(80)}`)
     await fs.writeFile(vault('_INDEX.md'), `# INDEX\n\n## Open items\n${old.join('\n')}\n`)

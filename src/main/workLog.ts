@@ -436,9 +436,11 @@ export class MemoryKeeper {
   /**
    * `_INDEX.md` quá hạn mức → dời mục đã xong cũ hơn `indexKeepDays` ngày sang `_INDEX archive` (xem splitIndexDone).
    * Ghi note cất TRƯỚC rồi mới thu gọn `_INDEX` (hỏng giữa chừng thì mục nằm hai nơi chứ không mất). Trả về số mục đã dời.
+   * `force` (nút "Dọn ngay" trong Cài đặt) = dọn cả khi `_INDEX` chưa quá hạn mức; quy tắc số ngày vẫn giữ.
    */
-  async compactIndex(ws: Workspace, cfg: MemorySettings, now = new Date()): Promise<number> {
-    if (!cfg.indexArchive) return 0
+  async compactIndex(ws: Workspace, cfg: MemorySettings, now = new Date(), force = false): Promise<number> {
+    if (!cfg.indexArchive && !force) return 0
+    const over = (text: string): boolean => force || sizeKb(text) > cfg.indexBudgetKb
     const file = join(ws.vaultPath, '_INDEX.md')
     const today = localDate(now.toISOString())
     const archiveFile = await this.indexArchiveFile(ws)
@@ -446,7 +448,7 @@ export class MemoryKeeper {
     let count = 0
     for (let attempt = 0; attempt < 3; attempt++) {
       const cur = await readText(file)
-      if (cur === null || sizeKb(cur) <= cfg.indexBudgetKb) return count
+      if (cur === null || !over(cur)) return count
       const plan = splitIndexDone(cur, cfg.indexKeepDays, today)
       if (!plan.moved.length) return count
       const fresh = plan.moved.filter((m) => !saved.has(m.text))
@@ -456,7 +458,7 @@ export class MemoryKeeper {
       })
       let retry = false
       await this.writer.update(file, (text) => {
-        if (text === null || sizeKb(text) <= cfg.indexBudgetKb) return null
+        if (text === null || !over(text)) return null
         const r = splitIndexDone(text, cfg.indexKeepDays, today)
         if (!r.moved.length) return null
         // `_INDEX` đổi giữa lúc đọc và lúc ghi: còn mục chưa cất thì cất rồi thử lại.

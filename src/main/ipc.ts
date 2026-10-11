@@ -87,6 +87,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.agentCreate, (_e, req: CreateAgentRequest) => agents.create(req))
   ipcMain.handle(IPC.agentStart, (e, req: StartAgentRequest) => agents.start(e.sender, req))
   ipcMain.handle(IPC.agentBroadcast, (_e, req: BroadcastRequest) => agents.broadcast(req))
+  ipcMain.handle(IPC.vaultCleanIndex, (_e, workspaceId: unknown) => agents.cleanIndexNow(typeof workspaceId === 'string' ? workspaceId : null))
   ipcMain.handle(IPC.agentSetCell, (_e, agentId: string, cell: 'cli' | 'chat') => agents.setCell(agentId, cell))
   ipcMain.handle(IPC.chatSnapshot, (_e, agentId: string) => agents.chatSnapshot(agentId))
   ipcMain.handle(IPC.chatSend, (_e, req: ChatSendRequest) => agents.chatSend(req))

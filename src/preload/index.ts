@@ -39,6 +39,7 @@ import type {
   BoardSnapshot,
   BrowserPermissionAsk,
   NoteWriteResult,
+  IndexCleanResult,
   OverrideLevel,
   Settings,
   SettingsOverridesPatch,
@@ -237,6 +238,8 @@ const api = {
     /** Lưu note; `base` = nội dung lúc bắt đầu sửa (file trên đĩa khác `base` → 'conflict', không ghi). */
     write: (vaultPath: string, rel: string, text: string, base: string | null): Promise<NoteWriteResult> =>
       ipcRenderer.invoke(IPC.vaultWrite, vaultPath, rel, text, base),
+    /** Nút "Dọn ngay": dời mục đã xong cũ khỏi `_INDEX.md` của workspace này (null = mọi workspace). */
+    cleanIndex: (workspaceId: string | null): Promise<IndexCleanResult[]> => ipcRenderer.invoke(IPC.vaultCleanIndex, workspaceId),
     /** Tạo note mới trong thư mục `folder` ('' = gốc vault); trả về `rel`. */
     create: (vaultPath: string, folder: string, name: string): Promise<string> => ipcRenderer.invoke(IPC.vaultCreate, vaultPath, folder, name),
     /** Agent đọc / ghi note nào trong workspace (từ lúc mở app). */

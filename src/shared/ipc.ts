@@ -82,6 +82,8 @@ export const IPC = {
   /** Lưu note người dùng sửa trong app (kèm nội dung gốc để phát hiện sửa chồng). */
   vaultWrite: 'vault:write',
   vaultCreate: 'vault:create',
+  /** Nút "Dọn ngay": dời mục đã xong cũ khỏi `_INDEX.md` của một / mọi workspace. */
+  vaultCleanIndex: 'vault:clean-index',
   /** Agent đọc / ghi note nào (theo workspace). */
   vaultActivity: 'vault:activity',
   /** main → renderer: nhật ký đọc/ghi note của một workspace vừa đổi (kèm workspaceId). */

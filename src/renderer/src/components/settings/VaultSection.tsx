@@ -59,6 +59,28 @@ export function VaultSection(): React.JSX.Element {
     level.lvl === 'app' ? undefined : { on: k in own, onReset: () => setField(k, undefined), parent: fmt(parent[k]) }
   const onOff = (v: unknown): string => (v ? 'bật' : 'tắt')
 
+  // Nút "Dọn ngay" của _INDEX.md: kết quả hiện ngay dưới nút (đổi cấp thì xoá).
+  const [cleaning, setCleaning] = useState(false)
+  const [cleanMsg, setCleanMsg] = useState('')
+  const [cleanFor, setCleanFor] = useState(key)
+  if (cleanFor !== key) {
+    setCleanFor(key)
+    setCleanMsg('')
+  }
+  function cleanNow(): void {
+    setCleaning(true)
+    setCleanMsg('')
+    window.stag.vault
+      .cleanIndex(level.lvl === 'ws' ? level.wsId! : null)
+      .then((list) => {
+        const line = (r: (typeof list)[number]): string =>
+          r.skipped ? `${r.name}: bỏ qua (${r.skipped})` : r.moved ? `${r.name}: đã dời ${r.moved} mục, _INDEX còn ${r.kb} KB` : `${r.name}: không có mục nào đủ cũ để dời (${r.kb} KB)`
+        setCleanMsg(list.length ? list.map(line).join(' · ') : 'Không có workspace nào.')
+      })
+      .catch((e: unknown) => setCleanMsg(`Lỗi: ${e instanceof Error ? e.message : String(e)}`))
+      .finally(() => setCleaning(false))
+  }
+
   return (
     <>
       <SectionTitle
@@ -167,6 +189,19 @@ export function VaultSection(): React.JSX.Element {
                   suffix="ngày"
                   onChange={(v) => setField('indexKeepDays', v)}
                 />
+              </Row>
+              <Row
+                label="Dọn ngay"
+                desc={
+                  level.lvl === 'ws'
+                    ? 'Dời ngay các mục đã xong cũ (theo số ngày ở trên) khỏi _INDEX.md của workspace này, không chờ quá hạn mức.'
+                    : 'Dời ngay các mục đã xong cũ khỏi _INDEX.md của mọi workspace (mỗi workspace theo cài đặt của nó; workspace đang tắt tính năng này thì bỏ qua), không chờ quá hạn mức.'
+                }
+                sub={cleanMsg || undefined}
+              >
+                <SmallButton onClick={cleanNow} disabled={cleaning}>
+                  {cleaning ? 'Đang dọn…' : level.lvl === 'ws' ? 'Dọn ngay' : 'Dọn mọi workspace'}
+                </SmallButton>
               </Row>
             </>
           )}

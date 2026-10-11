@@ -37,6 +37,7 @@ import {
   type CreateAgentRequest,
   type CanvasLayout,
   type PermissionMode,
+  type IndexCleanResult,
   type StartAgentRequest,
   type Task,
   type Workspace
@@ -65,7 +66,7 @@ import { loadCodexHistory } from './chat/codexHistory'
 import { AgentRequestQueue, type AgentRequestAnswer } from './agentRequests'
 import { createStagMcp, describeAgent, type AdapterInfo, type AgentInfo, type AgentLogInput, type ExtraTool } from './mcp'
 import { formatEntries, parseClaudeLog, parseCodexLog, readTailLines, redact, secretParts } from './sessionLog'
-import { archiveName, memoryRules, oneLine, type MemoryKeeper } from './workLog'
+import { archiveName, memoryRules, oneLine, sizeKb, type MemoryKeeper } from './workLog'
 import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
@@ -1577,6 +1578,36 @@ export class AgentService {
   private kill(run: Running): void {
     if (run.chat) run.chat.kill()
     else this.ptys.kill(run.ptyId)
+  }
+
+  /**
+   * Nút "Dọn ngay" (Cài đặt → Vault & bộ nhớ): dời mục đã xong cũ khỏi `_INDEX.md` của một workspace, hoặc mọi workspace
+   * (`workspaceId` null), không chờ quá hạn mức. Workspace tắt tính năng này thì bỏ qua.
+   */
+  async cleanIndexNow(workspaceId: string | null): Promise<IndexCleanResult[]> {
+    const list = workspaceId ? [this.workspaces.get(workspaceId)].filter((w): w is Workspace => !!w) : this.workspaces.list()
+    const out: IndexCleanResult[] = []
+    for (const ws of list) {
+      const base = { workspaceId: ws.id, name: ws.name }
+      const cfg = resolveMemory(this.settings.get(), ws.id, null)
+      const file = join(ws.vaultPath, '_INDEX.md')
+      if (!cfg.indexArchive) {
+        out.push({ ...base, moved: 0, kb: null, skipped: 'đang tắt ở workspace này' })
+        continue
+      }
+      if (!(await exists(file))) {
+        out.push({ ...base, moved: 0, kb: null, skipped: 'vault không có _INDEX.md' })
+        continue
+      }
+      try {
+        const moved = await this.memory.compactIndex(ws, cfg, new Date(), true)
+        const text = await fs.readFile(file, 'utf8')
+        out.push({ ...base, moved, kb: sizeKb(text) })
+      } catch (e) {
+        out.push({ ...base, moved: 0, kb: null, skipped: `lỗi: ${(e as Error).message}` })
+      }
+    }
+    return out
   }
 
   /**

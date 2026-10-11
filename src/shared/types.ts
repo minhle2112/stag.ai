@@ -557,6 +557,18 @@ export const NOTE_BUDGET_MIN = 2
 export const NOTE_BUDGET_MAX = 64
 export const KEEP_WORK_DONE_MIN = 3
 export const KEEP_WORK_DONE_MAX = 100
+/** Kết quả nút "Dọn ngay" cho `_INDEX.md` của một workspace. */
+export interface IndexCleanResult {
+  workspaceId: string
+  name: string
+  /** Số mục đã xong vừa dời sang `_INDEX archive`. */
+  moved: number
+  /** Cỡ `_INDEX.md` sau khi dọn (KB); null = không có `_INDEX.md`. */
+  kb: number | null
+  /** Lý do không dọn (tắt ở workspace này, không có `_INDEX.md`, lỗi). */
+  skipped?: string
+}
+
 export const INDEX_BUDGET_MIN = 4
 export const INDEX_BUDGET_MAX = 128
 export const INDEX_KEEP_DAYS_MIN = 0
