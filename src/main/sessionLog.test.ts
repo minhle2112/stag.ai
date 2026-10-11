@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { formatEntries, parseClaudeLog, parseCodexLog, readTailLines, redact, toolSummary, type LogEntry } from './sessionLog'
+import { formatEntries, parseClaudeLog, parseCodexLog, readTailLines, redact, secretParts, toolSummary, type LogEntry } from './sessionLog'
 
 const j = (o: unknown): string => JSON.stringify(o)
 const T = '2026-10-10T09:05:00.000Z'
@@ -108,5 +108,14 @@ describe('readTailLines', () => {
     expect(await readTailLines(file)).toEqual(['{"a":1}', '{"b":2}', '{"c":3}'])
     expect(await readTailLines(file, 12)).toEqual(['{"c":3}'])
     await fs.rm(dir, { recursive: true, force: true })
+  })
+})
+
+describe('secretParts', () => {
+  it('bí mật OAuth (JSON): che cả token trần bên trong', () => {
+    const blob = JSON.stringify({ version: 1, tokens: { access_token: 'at-123456789', refresh_token: 'rt-987654321' }, client: { client_id: 'cid' } })
+    const known = secretParts([blob, 'plain-key-123'])
+    expect(known).toEqual([blob, 'at-123456789', 'rt-987654321', 'plain-key-123'])
+    expect(redact('Authorization uses at-123456789 here', known)).toBe('Authorization uses [redacted] here')
   })
 })

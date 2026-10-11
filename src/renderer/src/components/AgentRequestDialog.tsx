@@ -122,6 +122,57 @@ function view(req: AgentRequest, kindOf: (id: string) => AgentKind): { title: st
         ),
         ok: 'Đổi quyền'
       }
+    case 'devserver':
+      return {
+        title: 'Agent muốn chạy dev server',
+        lead: (
+          <>
+            Agent {from} muốn chạy dev server <b>{req.dev.name}</b> trong một ô terminal
+          </>
+        ),
+        body: (
+          <Grid>
+            <Row label="Lệnh">
+              <code className="whitespace-pre-wrap">{req.dev.command}</code>
+            </Row>
+            <Row label="Cổng">{req.dev.port}</Row>
+            <Row label="Nguồn">
+              {req.dev.source === 'agent'
+                ? 'Agent tự đưa lệnh này (sẽ lưu vào .stag/launch.json)'
+                : req.dev.source === 'saved'
+                  ? 'Lấy từ .stag/launch.json của dự án'
+                  : 'App đoán từ package.json của dự án'}
+            </Row>
+            <Row label="Lưu ý">Lệnh chạy ngoài chế độ quyền của agent, với quyền của bạn. Đồng ý một lần thì lệnh này chạy lại được tới khi tắt app.</Row>
+          </Grid>
+        ),
+        ok: 'Chạy lệnh'
+      }
+    case 'drive': {
+      const verb = req.tool === 'send' ? 'gửi tin cho' : req.tool === 'open' ? 'mở phiên và giao việc cho' : 'bàn giao việc cho'
+      return {
+        title: 'Agent quyền thấp muốn sai agent quyền cao hơn',
+        lead: (
+          <>
+            Agent {from} muốn {verb} <b>{req.target.name}</b> ({req.target.kindLabel})
+          </>
+        ),
+        body: (
+          <Grid>
+            <Row label={`Quyền ${req.fromName}`}>
+              <Permission kind={kindOf(req.fromAgentId)} mode={req.from} />
+            </Row>
+            <Row label={`Quyền ${req.target.name}`}>
+              <Permission kind={kindOf(req.target.id)} mode={req.to} />
+            </Row>
+            <Row label="Nội dung">
+              <div className="max-h-48 overflow-y-auto whitespace-pre-wrap">{req.text}</div>
+            </Row>
+          </Grid>
+        ),
+        ok: req.tool === 'send' ? 'Gửi' : req.tool === 'open' ? 'Mở và giao việc' : 'Bàn giao'
+      }
+    }
   }
 }
 

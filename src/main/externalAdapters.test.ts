@@ -148,6 +148,22 @@ describe('chạy file .cmd', () => {
       args: '/d /s /c ""C:/Program Files/x/aider.cmd" --read "C:/p q/r.md""'
     })
   })
+
+  it('spawnSpec: tham số nhiều dòng với shim npm → chạy thẳng node + script (cmd.exe cắt ở xuống dòng)', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'stag-shim-'))
+    const shim = join(dir, 'claude.cmd')
+    await fs.writeFile(
+      shim,
+      '@ECHO off\r\nSETLOCAL\r\nCALL :find_dp0\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n'
+    )
+    expect(spawnSpec(shim, ['--append-system-prompt', 'a\nb'])).toEqual({
+      command: 'node',
+      args: [join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'), '--append-system-prompt', 'a\nb']
+    })
+    // Một dòng: vẫn qua cmd.exe như cũ.
+    expect((spawnSpec(shim, ['-p'], { ComSpec: 'cmd.exe' }) as { command: string }).command).toBe('cmd.exe')
+    await fs.rm(dir, { recursive: true, force: true })
+  })
 })
 
 describe('ExternalAdapterStore (thư mục cục bộ)', () => {

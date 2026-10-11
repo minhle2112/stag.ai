@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CATALOG, methodLabel } from '@shared/catalog'
-import { connectorSecrets, CONNECTOR_ID_RE, emptyConnector, ENV_KEY_RE, SECRET_NAME_RE, slugify, toolPolicy } from '@shared/connectors'
+import { connectorSecrets, CONNECTOR_ID_RE, emptyConnector, ENV_KEY_RE, OAUTH_SECRET_PREFIX, SECRET_NAME_RE, slugify, toolPolicy } from '@shared/connectors'
 import { splitArgs } from '@shared/settings'
 import {
   type CliAdapterId,
@@ -667,7 +667,8 @@ function SecretPicker({
       options={[
         ...(allowNone ? [{ value: '', label: '— Không —' }] : []),
         ...(missing ? [{ value, label: `${value} (chưa lưu!)` }] : []),
-        ...items.map((x) => ({ value: x.name, label: x.name })),
+        // Bí mật đăng nhập OAuth (khối JSON có refresh token) không dùng làm bí mật thường: chỉ connector OAuth của nó dùng.
+        ...items.filter((x) => !x.name.startsWith(OAUTH_SECRET_PREFIX) || x.name === value).map((x) => ({ value: x.name, label: x.name })),
         { value: '+new', label: '+ Bí mật mới…', disabled: !available }
       ]}
     />

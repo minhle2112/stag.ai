@@ -51,7 +51,19 @@ export type AgentRequest = AgentRequestBase &
     | { action: 'create'; create: AgentCreateDraft }
     | { action: 'stop' | 'delete'; target: AgentTargetInfo }
     | { action: 'permission'; target: AgentTargetInfo; from: PermissionMode; to: PermissionMode }
+    | { action: 'devserver'; dev: DevServerApproval }
+    /** Agent quyền thấp (`from`) gửi việc cho agent quyền cao hơn (`to`): agent_send / agent_open kèm việc / agent_handoff. */
+    | { action: 'drive'; tool: 'send' | 'open' | 'handoff'; target: AgentTargetInfo; text: string; from: PermissionMode; to: PermissionMode }
   )
+
+/** Agent xin chạy một dev server (preview_start): lệnh chạy ngoài sandbox của agent nên người dùng duyệt trước. */
+export interface DevServerApproval {
+  name: string
+  command: string
+  port: number
+  /** Lệnh do agent đưa, lấy từ `.stag/launch.json`, hay app đoán từ package.json. */
+  source: 'agent' | 'saved' | 'detected'
+}
 
 /** AgentRequest chưa có id / hạn (main điền khi đưa vào hàng đợi). */
 export type AgentRequestInput = AgentRequest extends infer R ? (R extends AgentRequest ? Omit<R, 'id' | 'until'> : never) : never

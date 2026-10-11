@@ -98,6 +98,15 @@ describe('DevServerService', () => {
     expect(await portOpen(port)).toBe(true)
   })
 
+  it('hai lần start song song (cả hai đều lưu cấu hình): chỉ một ô terminal', async () => {
+    const port = await freePort()
+    const { state, agents } = fakeAgents(() => setTimeout(() => void listen(port).then((s) => servers.push(s)), 300))
+    const dev = new DevServerService(workspaces, agents, browser)
+    const cfg = { name: 'web', runtimeExecutable: 'npm', runtimeArgs: ['run', 'dev'], port }
+    await Promise.all([dev.start('w', cfg), dev.start('w', cfg)])
+    expect(state.commands).toHaveLength(1)
+  })
+
   it('lệnh lỗi trong terminal → báo lỗi ngay, không đợi hết giờ; log đọc được', async () => {
     const port = await freePort()
     const { state, agents } = fakeAgents(() => {
@@ -118,5 +127,31 @@ describe('DevServerService', () => {
     await expect(api.start({ name: 'api', command: 'node server.js' })).rejects.toThrow(/name, command and port/)
     expect(await api.start({ name: 'api', command: 'node "my server.js"', port })).toContain(`http://localhost:${port}`)
     expect(await api.list()).toContain('- api: "node "my server.js""')
+  })
+
+  it('agentApi.start hỏi người dùng trước khi chạy lệnh chưa duyệt; từ chối thì không gõ lệnh', async () => {
+    const port = await freePort()
+    const { state, agents } = fakeAgents(() => setTimeout(() => void listen(port).then((s) => servers.push(s)), 50))
+    const dev = new DevServerService(workspaces, agents, browser)
+    const asked: unknown[] = []
+    let answer: 'allow' | 'deny' = 'deny'
+    const api = dev.agentApi('w', 'agent-1', async (d) => {
+      asked.push(d)
+      return answer
+    })
+    expect(await api.start({ name: 'web', command: 'npm run dev', port })).toMatch(/declined/)
+    expect(state.commands).toEqual([])
+    expect(asked).toEqual([{ name: 'web', command: 'npm run dev', port, source: 'agent' }])
+    await expect(dev.list('w')).resolves.toEqual({ saved: [], detected: [] })
+    answer = 'allow'
+    expect(await api.start({ name: 'web', command: 'npm run dev', port })).toContain(`http://localhost:${port}`)
+    expect(asked).toHaveLength(2)
+    expect(state.commands).toHaveLength(1)
+    // Đã duyệt lệnh này: lần sau không hỏi lại.
+    dev.stop('w', 'web')
+    for (const s of servers.splice(0)) s.close()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await api.start({ name: 'web' })).toContain(`http://localhost:${port}`)
+    expect(asked).toHaveLength(2)
   })
 })

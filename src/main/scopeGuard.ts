@@ -80,28 +80,51 @@ export function withoutDataHeredocs(cmd: string): string {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+/**
+ * Thư mục làm việc mà các phần của lệnh có thể chạy trong đó: thư mục của phiên + mỗi lần `cd` / `pushd` /
+ * `Set-Location` trong lệnh (`cd src && rm auth/x.ts` sửa `src/auth/x.ts`). Thà xét thừa còn hơn bỏ sót.
+ */
+export function shellCwds(cmd: string, cwd: string): string[] {
+  const out = [cwd]
+  let cur = cwd
+  for (const m of cmd.matchAll(/(?:^|[;&|\n(]\s*)(?:cd|pushd|chdir|set-location|sl)\s+(?:-\w+\s+)?("[^"]+"|'[^']+'|[^\s;&|)]+)/gi)) {
+    const target = m[1].replace(/^["']|["']$/g, '')
+    if (target === '-' || target === '~') continue
+    const abs = /^[a-z]:[\\/]/i.test(target) || /^[\\/]/.test(target)
+    cur = abs ? target : `${cur.replace(/[\\/]+$/, '')}/${target}`
+    out.push(cur)
+  }
+  return out
+}
+
 /** Các chữ trong lệnh (tách theo khoảng trắng, dấu ngoặc, toán tử shell) đổi được thành đường dẫn trong dự án. */
-function cmdPaths(cmd: string, root: string, cwd: string): string[] {
-  return cmd
+function cmdPaths(cmd: string, root: string, cwds: string[]): string[] {
+  const tokens = cmd
     .split(/[\s'"`;|&()<>,]+/)
     .filter(Boolean)
-    .map((t) => projectRel(t, root, cwd))
-    .filter((rel): rel is string => rel !== null && rel !== '')
+  const out = new Set<string>()
+  for (const cwd of cwds) for (const t of tokens) {
+    const rel = projectRel(t, root, cwd)
+    if (rel) out.add(rel)
+  }
+  return [...out]
 }
 
 /** Mọi đường dẫn trong lệnh rơi vào mục `e` đều nằm trong chỗ không khoá (và có ít nhất một). */
-function onlyUnlocked(cmd: string, e: ScopeEntry, free: ScopeEntry[], root: string, cwd: string): boolean {
-  const inside = cmdPaths(cmd, root, cwd).filter((rel) => entryHas(e, rel))
+function onlyUnlocked(cmd: string, e: ScopeEntry, free: ScopeEntry[], root: string, cwds: string[]): boolean {
+  const inside = cmdPaths(cmd, root, cwds).filter((rel) => entryHas(e, rel))
   return inside.length > 0 && inside.every((rel) => isUnlocked(rel, free))
 }
 
 /** Lệnh nhắc tới mục khoá này (theo ranh giới đường dẫn, '/' hay '\' đều được). `cwdRel` = thư mục của phiên so với dự án. */
-function mentions(cmd: string, e: ScopeEntry, root: string, cwd: string): boolean {
-  if (e.glob) return cmdPaths(cmd, root, cwd).some((rel) => e.glob!.test(rel))
+function mentions(cmd: string, e: ScopeEntry, root: string, cwds: string[]): boolean {
+  if (e.glob) return cmdPaths(cmd, root, cwds).some((rel) => e.glob!.test(rel))
   if (!e.key) return false
-  const cwdRel = projectRel(cwd, root) ?? ''
   const forms = [e.key]
-  if (cwdRel && e.key.startsWith(`${cwdRel}/`)) forms.push(e.key.slice(cwdRel.length + 1))
+  for (const cwd of cwds) {
+    const cwdRel = projectRel(cwd, root, root) ?? ''
+    if (cwdRel && e.key.startsWith(`${cwdRel}/`)) forms.push(e.key.slice(cwdRel.length + 1))
+  }
   return forms.some((f) => {
     const body = f.split('/').map(escapeRe).join('[\\\\/]+')
     return new RegExp(`(?:^|[\\s'"\`=(:\\\\/])${body}(?=$|[\\s'"\`);|&,:\\\\/])`, 'i').test(cmd)
@@ -160,6 +183,11 @@ export class ScopeGuard {
   private grants = new Map<string, Set<string>>()
   /** agentId → chỗ đã báo ở chế độ chỉ cảnh báo trong phiên này (báo mỗi chỗ một lần, không tính là cho qua). */
   private warned = new Map<string, Set<string>>()
+  /**
+   * agentId → lần gọi tool (askKey) mà PreToolUse đã trả 'ask' → các chỗ sẽ cho qua nếu tool chạy. Chỉ PostToolUse của
+   * đúng lần gọi đó mới cấp quyền: agent không tự gửi một PostToolUse giả (bằng token của nó) để mở khoá được.
+   */
+  private asked = new Map<string, Map<string, string[]>>()
 
   /** Báo mỗi lần đụng vùng khoá (hỏi / chặn / chỉ cảnh báo) (plugin: sự kiện scope.conflict). */
   onConflict?: (c: ScopeConflict) => void
@@ -176,7 +204,17 @@ export class ScopeGuard {
     const files = editTargets(p)
     if (!files?.length && !cmd) return undefined
     // Chặn thì chặn cả chỗ đã cho qua trước đó (khi còn ở chế độ hỏi).
-    let hits = await this.hits(ws, agent, p, cfg)
+    let hits: Hit[]
+    try {
+      hits = await this.hits(ws, agent, p, cfg)
+    } catch (e) {
+      // Không đọc được bảng việc (.stag/tasks.json hỏng / bị khoá): đừng lặng lẽ cho qua một lần sửa file. Claude Code
+      // hỏi người dùng trong terminal; Codex không có 'ask' (hỏi trong app cũng cần bảng việc) → cho qua, ghi log.
+      console.error('[scope]', e)
+      const writes = !!files?.length || (!!cmd && looksLikeWrite(withoutDataHeredocs(cmd)))
+      if (cfg.mode === 'warn' || kind === 'codex' || !writes) return undefined
+      return reply('ask', `stag.ai: không đọc được bảng việc để kiểm khoá phạm vi (${(e as Error).message}). Cho ${agent.name} ${cmd ? 'chạy lệnh này' : 'sửa file này'}?`)
+    }
     if (cfg.mode !== 'block') hits = hits.filter((h) => !this.grants.get(agent.id)?.has(h.grant))
     if (cfg.mode === 'warn') hits = hits.filter((h) => !this.warned.get(agent.id)?.has(h.grant))
     if (!hits.length) return undefined
@@ -206,6 +244,12 @@ export class ScopeGuard {
     }
     if (kind !== 'codex') {
       conflict('ask')
+      const pend = this.asked.get(agent.id) ?? new Map<string, string[]>()
+      pend.delete(askKey(p))
+      pend.set(askKey(p), hits.map((h) => h.grant))
+      // Người dùng từ chối thì không có PostToolUse: giữ có hạn để không phình mãi.
+      while (pend.size > MAX_PENDING_ASKS) pend.delete(pend.keys().next().value as string)
+      this.asked.set(agent.id, pend)
       const action = cmd ? `Lệnh này có thể sửa ${what}` : `${what}`
       return reply(
         'ask',
@@ -235,8 +279,13 @@ export class ScopeGuard {
     const files = editTargets(p)
     const cmd = cfg.guessShell ? shellCommand(p) : null
     if (!files?.length && !cmd) return
-    // Hook PreToolUse đã hỏi (Claude Code) mà tool vẫn chạy → người dùng đồng ý.
-    if (cfg.mode === 'ask') for (const h of await this.hits(ws, agent, p, cfg)) mark(this.grants, agent.id, h.grant)
+    // Hook PreToolUse đã hỏi (Claude Code) mà đúng lần gọi đó vẫn chạy → người dùng đồng ý.
+    const pend = this.asked.get(agent.id)
+    const granted = pend?.get(askKey(p))
+    if (granted) {
+      pend!.delete(askKey(p))
+      if (cfg.mode === 'ask') for (const g of granted) mark(this.grants, agent.id, g)
+    }
     // File đã sửa vẫn ghi vào việc ở mọi chế độ (cả khi tắt): bật lại khoá thì vùng khoá đã đủ.
     if (!files?.length) return
     const free = unlocked(ws.path, ws.vaultPath, cfg.exempt)
@@ -256,6 +305,7 @@ export class ScopeGuard {
   endSession(agentId: string): void {
     this.grants.delete(agentId)
     this.warned.delete(agentId)
+    this.asked.delete(agentId)
     this.board.cancelScopeAsks(agentId)
   }
 
@@ -275,9 +325,17 @@ export class ScopeGuard {
     }
     const raw = cfg.guessShell ? shellCommand(p) : null
     const cmd = raw && withoutDataHeredocs(raw)
-    if (cmd && looksLikeWrite(cmd)) hits.push(...shellHits(cmd, locks, free, ws.path, cwd))
+    if (cmd && looksLikeWrite(cmd)) hits.push(...shellHits(cmd, locks, free, ws.path, shellCwds(cmd, cwd)))
     return hits
   }
+}
+
+/** Số lần hỏi chưa có kết quả nhớ cho mỗi agent. */
+const MAX_PENDING_ASKS = 50
+
+/** Khoá một lần gọi tool: tool_use_id (Claude Code gửi ở cả Pre và PostToolUse), không có thì tên tool + tham số. */
+function askKey(p: HookPayload): string {
+  return p.tool_use_id || JSON.stringify([p.tool_name ?? '', p.tool_input ?? {}])
 }
 
 function mark(map: Map<string, Set<string>>, agentId: string, key: string): void {
@@ -291,13 +349,15 @@ function mark(map: Map<string, Set<string>>, agentId: string, key: string): void
  * hỏi hoài). Mẫu miễn khoá chỉ phủ một phần mục (vd. `**\/*.md` trong `src/`): bỏ qua khi mọi đường dẫn trong lệnh
  * rơi vào mục đều được miễn.
  */
-function shellHits(cmd: string, locks: ScopeLock[], free: ScopeEntry[], root: string, cwd: string): Hit[] {
+function shellHits(cmd: string, locks: ScopeLock[], free: ScopeEntry[], root: string, cwds: string[]): Hit[] {
   const hits: Hit[] = []
   for (const lock of locks) {
     for (const e of lock.entries) {
       if ((!e.key && !e.glob) || free.some((s) => covers(s, e))) continue
-      if (!mentions(cmd, e, root, cwd) || onlyUnlocked(cmd, e, free, root, cwd)) continue
-      if (!hits.some((h) => h.grant === `sh:${e.key}`)) hits.push({ grant: `sh:${e.key}`, label: e.label, task: lock.task, entry: e.label })
+      if (!mentions(cmd, e, root, cwds) || onlyUnlocked(cmd, e, free, root, cwds)) continue
+      // Khoá cấp quyền theo cả mẫu glob: `src/*.ts` và `src/*.md` (cùng key `src`) là hai chỗ khác nhau.
+      const grant = `sh:${e.key}|${e.glob?.source ?? ''}`
+      if (!hits.some((h) => h.grant === grant)) hits.push({ grant, label: e.label, task: lock.task, entry: e.label })
     }
   }
   return hits

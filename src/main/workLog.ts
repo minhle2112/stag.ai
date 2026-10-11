@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { MemorySettings, Task, Workspace } from '@shared/types'
-import { exists } from './fsutil'
+import { exists, readText } from './fsutil'
 
 /**
  * Bộ nhớ trong vault do app tự ghi (xem vault "Memory and work log"):
@@ -74,7 +74,8 @@ export function workDoneLine(c: ClosedTask): string {
   return `- ${localDate(t.doneAt ?? new Date().toISOString())} — "${oneLine(t.title, 120)}"${[what, note].filter(Boolean).map((x) => ` — ${x}`).join('')}`
 }
 
-const HEADING_RE = /^(#{1,6})\s+(.*?)\s*#*\s*$/
+/** Dấu `#` đóng chỉ tính khi có khoảng trắng trước (CommonMark): `## C#` là "C#". */
+const HEADING_RE = /^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
 
 /**
  * Chèn `lines` vào cuối mục `## <section>` (sau dòng không trống cuối cùng của mục, trước tiêu đề cùng cấp / cấp cao hơn
@@ -237,6 +238,17 @@ export class NoteWriter {
     return next
   }
 
+  /**
+   * Chạy `fn` (đổi tên / xoá file) khi mọi lần ghi đang chờ của các file này đã xong; lần ghi sau vào các file đó chờ
+   * `fn` xong (không ghi lại vào chỗ cũ giữa lúc đang chuyển).
+   */
+  exclusive<T>(files: string[], fn: () => Promise<T>): Promise<T> {
+    const keys = [...new Set(files.map((f) => f.toLowerCase()))]
+    const next = Promise.all(keys.map((k) => this.chains.get(k) ?? Promise.resolve())).then(fn)
+    for (const k of keys) this.chains.set(k, next.catch(() => {}))
+    return next
+  }
+
   private async run(file: string, edit: (text: string | null) => string | null): Promise<boolean> {
     for (let attempt = 0; attempt < 4; attempt++) {
       const before = await stamp(file)
@@ -253,6 +265,9 @@ export class NoteWriter {
   }
 }
 
+/** Một chuỗi ghi chung cho mọi chỗ ghi note trong app (nhật ký việc, tool memory_*, trình sửa note, plugin). */
+export const noteWriter = new NoteWriter()
+
 async function stamp(file: string): Promise<{ key: string } | null> {
   try {
     const s = await fs.stat(file)
@@ -264,7 +279,7 @@ async function stamp(file: string): Promise<{ key: string } | null> {
 
 /** Ghi nhật ký việc + note agent của các workspace. */
 export class MemoryKeeper {
-  readonly writer = new NoteWriter()
+  readonly writer = noteWriter
 
   constructor(private cfg: (ws: Workspace, agentId: string) => MemorySettings) {}
 
@@ -305,24 +320,40 @@ export class MemoryKeeper {
   async compact(ws: Workspace, agentName: string, cfg: MemorySettings): Promise<{ kb: number; archive: string } | null> {
     const file = join(this.agentsDir(ws), `${agentName}.md`)
     const archive = archiveName(agentName)
-    let moved: string[] = []
+    const archiveFile = join(this.agentsDir(ws), `${archive}.md`)
+    const date = localDate(new Date().toISOString())
+    /** Mục đã nằm trong note cất (chỉ những mục này mới được bỏ khỏi note agent). */
+    const saved = new Set<string>()
+    const toArchive = async (items: string[]): Promise<void> => {
+      await this.writer.update(archiveFile, (text) => {
+        const fresh = items.filter((i) => !text?.includes(i))
+        for (const i of items) saved.add(i)
+        return fresh.length ? touchUpdated(insertInSection(text ?? newArchive(agentName, date), WORK_DONE_SECTION, fresh), date) : null
+      })
+    }
+    // Ghi note cất TRƯỚC rồi mới rút gọn note agent: ghi hỏng giữa chừng thì mục bị chép hai nơi chứ không mất.
     let result: string | null = null
-    await this.writer.update(file, (text) => {
-      result = text
-      moved = []
-      if (text === null || sizeKb(text) <= cfg.noteBudgetKb) return null
-      const r = splitWorkDone(text, cfg.keepWorkDone, archive)
-      if (!r.moved.length) return null
-      moved = r.moved
-      result = r.note
-      return r.note
-    })
-    if (moved.length) {
-      const date = localDate(new Date().toISOString())
-      const items = moved
-      await this.writer.update(join(this.agentsDir(ws), `${archive}.md`), (text) =>
-        touchUpdated(insertInSection(text ?? newArchive(agentName, date), WORK_DONE_SECTION, items), date)
-      )
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const cur = await readText(file)
+      if (cur === null || sizeKb(cur) <= cfg.noteBudgetKb) return cur === null ? null : { kb: sizeKb(cur), archive }
+      const plan = splitWorkDone(cur, cfg.keepWorkDone, archive)
+      if (!plan.moved.length) return { kb: sizeKb(cur), archive }
+      await toArchive(plan.moved.filter((i) => !saved.has(i)))
+      let retry = false
+      await this.writer.update(file, (text) => {
+        result = text
+        if (text === null || sizeKb(text) <= cfg.noteBudgetKb) return null
+        const r = splitWorkDone(text, cfg.keepWorkDone, archive)
+        if (!r.moved.length) return null
+        // Note đổi giữa lúc đọc và lúc ghi: có mục chưa cất thì cất rồi thử lại.
+        if (r.moved.some((i) => !saved.has(i))) {
+          retry = true
+          return null
+        }
+        result = r.note
+        return r.note
+      })
+      if (!retry) break
     }
     const text = result as string | null
     return text === null ? null : { kb: sizeKb(text), archive }

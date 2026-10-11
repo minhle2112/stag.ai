@@ -77,6 +77,16 @@ describe('ChatModel — luồng một lượt có xin quyền', () => {
     expect(m.state).toMatchObject({ phase: 'idle', contextSize: 1000000, costUsd: 0.0054, contextUsed: 4001 })
   })
 
+  it('cửa sổ context: lấy đúng model của phiên (bỏ hậu tố [1m]), không lấy model phụ đứng trước', () => {
+    const m = new ChatModel()
+    m.ingest({ type: 'system', subtype: 'init', session_id: 's', model: 'claude-opus-5-5[1m]' })
+    m.ingest({ type: 'result', subtype: 'success', modelUsage: { 'claude-haiku-5-5': { contextWindow: 1000000 }, 'claude-opus-5-5': { contextWindow: 200000 } } })
+    expect(m.state.contextSize).toBe(200000)
+    const n = new ChatModel()
+    n.ingest({ type: 'result', subtype: 'success', modelUsage: { 'claude-haiku-5-5': { contextWindow: 200000 }, other: { contextWindow: 400000 } } })
+    expect(n.state.contextSize).toBe(400000)
+  })
+
   it('từ chối: permission_denied + tool_result bị từ chối → denied', () => {
     const m = new ChatModel()
     feed(m, writeRun())
@@ -165,5 +175,16 @@ describe('ChatModel — chi tiết', () => {
 
   it('resultText ghép mảng khối', () => {
     expect(resultText([{ type: 'text', text: 'a' }, { type: 'image' }, { type: 'text', text: 'b' }])).toBe('a\n[ảnh]\nb')
+  })
+
+  it('nạp lịch sử rồi thêm mục: id mới không trùng id trong lịch sử', () => {
+    const old = new ChatModel()
+    old.addUser('cũ', 'user')
+    old.addNotice('info', 'x')
+    const m = new ChatModel()
+    m.load(old.items)
+    const u = m.addUser('mới', 'user')
+    expect(old.items.map((i) => i.id)).not.toContain(u.id)
+    expect(m.items.map((i) => i.kind === 'user' ? i.text : i.kind)).toEqual(['cũ', 'notice', 'mới'])
   })
 })

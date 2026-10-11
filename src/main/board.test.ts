@@ -195,6 +195,14 @@ describe('Board: việc (task)', () => {
     expect((await fresh.snapshot(ws)).tasks).toEqual([done])
   })
 
+  it('hai task_start song song của cùng agent: chỉ mở được một việc', async () => {
+    const board = new Board(() => {})
+    const a = agent('a')
+    const r = await Promise.allSettled([board.startTask(ws, a, 's', 'Một', 'src/'), board.startTask(ws, a, 's', 'Hai', 'lib/')])
+    expect(r.map((x) => x.status).sort()).toEqual(['fulfilled', 'rejected'])
+    expect((await board.snapshot(ws)).tasks.filter((t) => t.agentId === 'a' && t.status === 'open')).toHaveLength(1)
+  })
+
   it('việc đóng → báo cho nhật ký việc: task_done (kèm log), bàn giao, người dùng đánh dấu xong; bỏ thì không', async () => {
     const closed = vi.fn()
     const board = new Board(() => {}, () => {}, closed)

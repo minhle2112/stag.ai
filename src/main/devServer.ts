@@ -19,6 +19,7 @@ import {
   type DevServerList,
   type LaunchConfig
 } from '@shared/launch'
+import type { DevServerApproval } from '@shared/agentApi'
 import type { Workspace } from '@shared/types'
 import type { AgentService } from './agents'
 import type { BrowserService } from './browser'
@@ -80,6 +81,8 @@ export class DevServerService {
   private starting = new Map<string, Starting>()
   /** Ô terminal đã chạy server nào (workspace + tên → id agent). */
   private cells = new Map<string, string>()
+  /** Lệnh người dùng đã duyệt (hoặc tự bấm chạy) trong lần chạy app này: workspace + cấu hình. */
+  private approved = new Set<string>()
 
   constructor(
     private workspaces: WorkspaceStore,
@@ -95,6 +98,10 @@ export class DevServerService {
 
   private key(wsId: string, name: string): string {
     return `${wsId}\0${name.trim().toLowerCase()}`
+  }
+
+  private approvalKey(wsId: string, cfg: LaunchConfig): string {
+    return JSON.stringify([this.key(wsId, cfg.name), cfg.runtimeExecutable, cfg.runtimeArgs ?? [], cfg.port])
   }
 
   private async saved(ws: Workspace): Promise<LaunchConfig[]> {
@@ -155,10 +162,6 @@ export class DevServerService {
   async start(wsId: string, cfg: LaunchConfig, o: StartOptions = {}): Promise<string> {
     const problem = launchProblem(cfg)
     if (problem) throw new Error(`Invalid dev server config: ${problem}`)
-    if (o.save !== false) {
-      const saved = (await this.saved(this.ws(wsId))).find((s) => sameName(s.name, cfg.name))
-      if (!saved || JSON.stringify(saved) !== JSON.stringify(cfg)) await this.save(wsId, cfg)
-    }
     const url = launchUrl(cfg)
     const key = this.key(wsId, cfg.name)
     const cur = this.starting.get(key)
@@ -167,10 +170,15 @@ export class DevServerService {
       if (id) o.onCell?.(id)
       return cur.promise
     }
-    if (await portOpen(cfg.port)) return url
 
     let cancelled = false
+    // Đăng ký lần khởi động ngay (trước mọi await): hai lần gọi song song dùng chung, không mở hai ô terminal.
     const run = async (): Promise<string> => {
+      if (o.save !== false) {
+        const saved = (await this.saved(this.ws(wsId))).find((s) => sameName(s.name, cfg.name))
+        if (!saved || JSON.stringify(saved) !== JSON.stringify(cfg)) await this.save(wsId, cfg)
+      }
+      if (await portOpen(cfg.port)) return url
       // Chỉ xét chữ in ra sau lần gõ lệnh này (ô dùng lại có thể còn lỗi của lần trước). Đo trước khi gõ.
       const prev = this.cellOf(wsId, cfg.name)
       const skip = prev && this.agents.isRunning(prev) ? this.agents.terminalOutput(prev).length : 0
@@ -255,6 +263,7 @@ export class DevServerService {
    * Không chờ: kết quả báo qua trạng thái tab.
    */
   startInTab(wsId: string, cfg: LaunchConfig, tabId?: string): void {
+    this.approved.add(this.approvalKey(wsId, cfg))
     const dev = { name: cfg.name, port: cfg.port, command: commandLabel(cfg), agentId: this.cellOf(wsId, cfg.name) }
     const tab = this.browser.devTab(wsId, tabId, dev)
     this.start(wsId, cfg, { onCell: (agentId) => this.browser.devUpdate(wsId, tab, { agentId }) }).then(
@@ -263,8 +272,11 @@ export class DevServerService {
     )
   }
 
-  /** Tool preview_* của một agent: trả lời bằng tiếng Anh cho agent. */
-  agentApi(wsId: string, agentId: string): DevServerAgentApi {
+  /**
+   * Tool preview_* của một agent: trả lời bằng tiếng Anh cho agent. `confirm` hỏi người dùng trước khi chạy một lệnh
+   * chưa được duyệt (lệnh chạy trong ô terminal của app, ngoài sandbox / chế độ quyền của agent).
+   */
+  agentApi(wsId: string, agentId: string, confirm?: (dev: DevServerApproval) => Promise<'allow' | 'deny' | 'timeout'>): DevServerAgentApi {
     return {
       list: async () => {
         const { saved, detected } = await this.list(wsId)
@@ -276,6 +288,7 @@ export class DevServerService {
       },
       start: async (input) => {
         let cfg: LaunchConfig
+        let source: DevServerApproval['source'] = 'agent'
         if (input.command) {
           if (!input.name || !input.port) throw new Error('To add a dev server, pass name, command and port together.')
           const parts = splitCommand(input.command)
@@ -283,7 +296,16 @@ export class DevServerService {
           cfg = { name: input.name, ...parts, port: input.port, ...(input.url ? { url: input.url } : {}) }
         } else {
           cfg = await this.resolve(wsId, input.name)
+          source = (await this.saved(this.ws(wsId))).some((s) => sameName(s.name, cfg.name)) ? 'saved' : 'detected'
           if (input.port) cfg = { ...cfg, port: input.port }
+        }
+        const approval = this.approvalKey(wsId, cfg)
+        if (confirm && !this.approved.has(approval) && !this.starting.has(this.key(wsId, cfg.name)) && !(await portOpen(cfg.port))) {
+          const answer = await confirm({ name: cfg.name, command: commandLabel(cfg), port: cfg.port, source })
+          if (answer === 'deny') return `The user declined to run dev server "${cfg.name}" (${commandLabel(cfg)}). Do not retry; ask the user what they want instead.`
+          if (answer === 'timeout')
+            return `Nobody confirmed running dev server "${cfg.name}" in stag.ai in time. Tell the user to look at the confirm card, or try again when they are ready.`
+          this.approved.add(approval)
         }
         const url = await this.start(wsId, cfg, { near: agentId }).catch((e: Error) => {
           throw new Error(`Dev server "${cfg.name}" did not start: ${e.message} Read preview_logs for details.`)

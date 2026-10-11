@@ -293,7 +293,8 @@ const api = {
     install: (req: AdapterInstallRequest): Promise<InstalledAdapter> => ipcRenderer.invoke(IPC.adapterExtInstall, req),
     remove: (id: string): Promise<void> => ipcRenderer.invoke(IPC.adapterExtRemove, id),
     update: (id: string, patch: InstalledAdapterPatch): Promise<InstalledAdapter> => ipcRenderer.invoke(IPC.adapterExtUpdate, id, patch),
-    check: (id: string): Promise<ExternalAdapterStatus> => ipcRenderer.invoke(IPC.adapterExtCheck, id),
+    /** `runVersion` = chạy lệnh lấy phiên bản của gói (chỉ khi người dùng bấm kiểm tra). */
+    check: (id: string, runVersion = false): Promise<ExternalAdapterStatus> => ipcRenderer.invoke(IPC.adapterExtCheck, id, runVersion),
     onChanged(cb: (list: InstalledAdapter[]) => void): () => void {
       const fn = (_e: IpcRendererEvent, list: InstalledAdapter[]): void => cb(list)
       ipcRenderer.on(IPC.adapterExtChanged, fn)

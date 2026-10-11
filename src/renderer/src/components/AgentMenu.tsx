@@ -106,7 +106,7 @@ export function AgentMenuPanel({
       {running && item(terminal ? 'Đóng terminal' : 'Dừng phiên', () => stop(agent.id))}
       {shown && item('Đóng ô', () => hide(ws.id, agent.id))}
       {item('Đổi tên…', onRename)}
-      {agentKind(agent) === 'claude' &&
+      {(agentKind(agent) === 'claude' || agentKind(agent) === 'codex') &&
         !running &&
         !starting &&
         item(agent.cell === 'chat' ? 'Đổi sang ô CLI (terminal)' : 'Đổi sang ô Chat', () => void setCell(ws.id, agent.id, agent.cell === 'chat' ? 'cli' : 'chat').catch((e) => window.alert(String((e as Error).message ?? e))))}

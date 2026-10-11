@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { frontmatterKeys, noteName, outlineText, patchSection, readField, readSection, rewriteLinks, writeField, type PatchOp } from '@shared/noteSections'
+import { frontmatterKeys, noteName, outlineText, patchSection, readField, readSection, repointLinks, writeField, type PatchOp } from '@shared/noteSections'
 import { isAttachment, resolveNote, splitFrontmatter } from '@shared/wikilink'
 import { findSecrets } from './sessionLog'
 import { fold, type Cached, type VaultIndexer } from './vaultIndex'
@@ -340,24 +340,34 @@ export class MemoryService {
     const exists = [...cache.keys()].some((r) => r.toLowerCase() === dest.toLowerCase() && r.toLowerCase() !== from.toLowerCase())
     if (exists) throw new Error(`${dest} already exists`)
     const before = [...cache.keys()].map((rel) => ({ rel }))
+    const moved = (rel: string): string => (rel === from ? dest : rel)
+    const after = before.map((n) => ({ rel: moved(n.rel) }))
     const touched: Touch[] = []
-    // Link tới chính nó trong note (vd `[[Tên#mục]]`) sửa trước khi chuyển.
-    await this.edit(vaultPath, from, (text) => (text === null ? null : rewriteLinks(text, from, from, dest, before).text))
+    // Link trong chính note (tới nó `[[Tên#mục]]`, link tương đối khi đổi thư mục) sửa trước khi chuyển.
+    await this.edit(vaultPath, from, (text) => (text === null ? null : repointLinks(text, from, dest, before, after, moved).text))
     const src = fullPath(vaultPath, from)
     const dst = fullPath(vaultPath, dest)
-    await fs.mkdir(dirname(dst), { recursive: true })
-    await fs.rename(src, dst)
+    // Trong chuỗi ghi của hai file: lần ghi đang chờ vào note cũ xong trước, không ai ghi lại chỗ cũ giữa lúc chuyển.
+    await this.writer.exclusive([src, dst], async () => {
+      await fs.mkdir(dirname(dst), { recursive: true })
+      await fs.rename(src, dst)
+    })
     touched.push({ rel: dest, kind: 'write' })
     let fixed = 0
     const changed: string[] = []
     for (const rel of before.map((n) => n.rel)) {
       if (rel === from) continue
       const c = cache.get(rel)
-      if (!c?.links.some((l) => l.target && resolveNote(l.target, rel, before) === from)) continue
+      // Link tới note bị chuyển, hoặc link bằng tên tới note khác trùng tên mới (sau khi chuyển sẽ trỏ nhầm).
+      const stale = (t: string): boolean => {
+        const old = resolveNote(t, rel, before)
+        return !!old && resolveNote(t, rel, after) !== moved(old)
+      }
+      if (!c?.links.some((l) => l.target && stale(l.target))) continue
       let n = 0
       await this.edit(vaultPath, rel, (text) => {
         if (text === null) return null
-        const r = rewriteLinks(text, rel, from, dest, before)
+        const r = repointLinks(text, rel, rel, before, after, moved)
         n = r.count
         return r.text
       })
@@ -377,8 +387,10 @@ export class MemoryService {
     let trashRel = `.trash/${rel}`
     for (let i = 2; await exists(join(resolve(vaultPath), trashRel)); i++) trashRel = `.trash/${rel.replace(/\.md$/i, '')} (${i}).md`
     const dst = join(resolve(vaultPath), trashRel)
-    await fs.mkdir(dirname(dst), { recursive: true })
-    await fs.rename(fullPath(vaultPath, rel), dst)
+    await this.writer.exclusive([fullPath(vaultPath, rel), dst], async () => {
+      await fs.mkdir(dirname(dst), { recursive: true })
+      await fs.rename(fullPath(vaultPath, rel), dst)
+    })
     return {
       text: `Moved ${rel} to the vault trash (${trashRel}).${backlinks.length ? ` These notes still link to it: ${backlinks.join(', ')}.` : ''}`,
       touched: [{ rel, kind: 'write' }]

@@ -1,4 +1,5 @@
-// Hợp đồng dữ liệu của ô chat (Claude Code chạy `-p --input-format stream-json --output-format stream-json`).
+// Hợp đồng dữ liệu của ô chat (Claude Code chạy `-p --input-format stream-json --output-format stream-json`; Codex chạy
+// `codex app-server`, sự kiện được dịch sang cùng các mục này, tên tool theo quy ước của Claude — xem main/chat/codexProtocol.ts).
 // Main giữ danh sách `ChatItem` của từng agent làm nguồn sự thật và đẩy thay đổi sang renderer; renderer chỉ vẽ.
 // Quyết định thiết kế: vault `50 Decisions/2026-10-10 Chat-style agent cell postponed to the design phase.md`.
 

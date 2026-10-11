@@ -26,7 +26,8 @@ export function headings(md: string): Heading[] {
       fence = f[1]
       continue
     }
-    const m = /^(#{1,6})[ \t]+(.+?)[ \t#]*$/.exec(lines[i])
+    // Dấu `#` đóng chỉ tính khi có khoảng trắng trước (CommonMark): `## C#` là "C#", `## Tên ##` là "Tên".
+    const m = /^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(lines[i])
     if (m) out.push({ level: m[1].length, text: m[2].trim(), line: i })
   }
   return out
@@ -156,11 +157,23 @@ export function readField(md: string, key: string): string | null {
   return [first, ...rest].filter((l, i) => i > 0 || l.trim()).join('\n').trim()
 }
 
+/**
+ * Giá trị YAML một dòng hợp lệ: `[…]` / `{…}` / chuỗi đã có ngoặc kép giữ nguyên; chữ thường mà YAML sẽ đọc sai
+ * (`a: b`, `#x`, `- x`, `@x`, `x #y`…) thì đặt trong ngoặc kép.
+ */
+export function yamlValue(v: string): string {
+  const t = v.replace(/\r?\n/g, ' ').trim()
+  if (/^\[.*\]$/.test(t) || /^\{.*\}$/.test(t) || /^"(?:[^"\\]|\\.)*"$/.test(t) || /^'(?:[^']|'')*'$/.test(t)) return t
+  const plain = t !== '' && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(t) && !/:(\s|$)/.test(t) && !/\s#/.test(t)
+  const dash = /^-[^\s-]/.test(t) // số âm / chữ bắt đầu bằng '-' liền chữ vẫn là chữ thường hợp lệ
+  return plain || dash ? t : `"${t.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
 /** Ghi một trường frontmatter (`value` là YAML một dòng, vd `done` hoặc `[a, b]`); null = xoá trường. Chưa có frontmatter thì tạo. */
 export function writeField(md: string, key: string, value: string | null): string {
   if (!/^[A-Za-z_][\w-]*$/.test(key.trim())) throw new Error(`Bad frontmatter key "${key}"`)
   const nl = eol(md)
-  const line = value === null ? null : `${key.trim()}: ${value.replace(/\r?\n/g, ' ').trim()}`
+  const line = value === null ? null : `${key.trim()}: ${yamlValue(value)}`
   const { frontmatter, body } = splitFrontmatter(md)
   if (frontmatter === null) {
     if (line === null) return md
@@ -178,15 +191,38 @@ export const noteName = (rel: string): string => rel.slice(rel.lastIndexOf('/') 
 
 /**
  * Sửa link trong `md` (note `fromRel`) đang trỏ tới `oldRel` thành trỏ tới `newRel` (sau khi đổi tên / chuyển note).
- * `notes` = danh sách note TRƯỚC khi đổi (để phân giải link cũ). Giữ `#heading`, `|bí danh`, `!` nhúng.
- * Link wiki viết bằng tên → tên mới (đường dẫn đầy đủ nếu tên mới trùng note khác); link markdown → đường dẫn mới
- * tính từ thư mục của note nguồn. Trả về chuỗi mới và số link đã sửa.
+ * `notes` = danh sách note TRƯỚC khi đổi. `fromRel === oldRel` = chính note bị chuyển. Xem `repointLinks`.
  */
 export function rewriteLinks(md: string, fromRel: string, oldRel: string, newRel: string, notes: readonly NoteRef[]): { text: string; count: number } {
-  const links = extractLinks(md)
-  if (!links.some((l) => l.target && resolveNote(l.target, fromRel, notes) === oldRel)) return { text: md, count: 0 }
-  const newName = noteName(newRel)
-  const nameTaken = notes.some((n) => n.rel !== oldRel && noteName(n.rel).toLowerCase() === newName.toLowerCase())
+  const moved = (rel: string): string => (rel === oldRel ? newRel : rel)
+  return repointLinks(md, fromRel, moved(fromRel), notes, notes.map((n) => ({ rel: moved(n.rel) })), moved)
+}
+
+/**
+ * Sau khi đổi tên / chuyển note: mỗi link trong `md` (note ở `srcBefore`, giờ ở `srcAfter`) trước trỏ tới note X
+ * (phân giải theo `before`) thì sau vẫn phải trỏ tới `moved(X)` (phân giải theo `after`); link nào lệch thì viết lại.
+ * Sửa được cả link tới note bị chuyển, link bằng tên tới một note khác trùng tên mới (không bị "cướp" sang note bị
+ * chuyển), và link tương đối trong chính note bị chuyển. Link vẫn đúng thì giữ nguyên chữ.
+ * Giữ `#heading`, `|bí danh`, `!` nhúng; bỏ qua code. Link wiki viết bằng tên → tên (đường dẫn đầy đủ nếu tên trùng
+ * note khác); link markdown → đường dẫn tương đối từ thư mục mới của note nguồn. Trả về chuỗi mới và số link đã sửa.
+ */
+export function repointLinks(
+  md: string,
+  srcBefore: string,
+  srcAfter: string,
+  before: readonly NoteRef[],
+  after: readonly NoteRef[],
+  moved: (rel: string) => string
+): { text: string; count: number } {
+  /** Note mà link phải trỏ tới sau khi chuyển; null = link không cần sửa. */
+  const fix = (target: string): string | null => {
+    const old = resolveNote(target, srcBefore, before)
+    if (!old) return null
+    const want = moved(old)
+    return resolveNote(target, srcAfter, after) === want ? null : want
+  }
+  if (!extractLinks(md).some((l) => l.target && fix(l.target))) return { text: md, count: 0 }
+  const unique = (rel: string): boolean => after.filter((n) => noteName(n.rel).toLowerCase() === noteName(rel).toLowerCase()).length === 1
   const lines = md.split(/(\r?\n)/)
   let count = 0
   let fence: string | null = null
@@ -208,10 +244,10 @@ export function rewriteLinks(md: string, fromRel: string, oldRel: string, newRel
     let out = line.replace(/(!?)\[\[([^[\]\n]+?)\]\]/g, (all, bang: string, inner: string, at: number) => {
       if (inCode(at)) return all
       const { target, heading, alias } = splitWikilink(inner)
-      if (!target || resolveNote(target, fromRel, notes) !== oldRel) return all
+      const want = target ? fix(target) : null
+      if (!want) return all
       count++
-      const usePath = target.includes('/') || nameTaken
-      const t = usePath ? newRel.replace(/\.md$/i, '') : newName
+      const t = target.includes('/') || !unique(want) ? want.replace(/\.md$/i, '') : noteName(want)
       return `${bang}[[${t}${heading ? `#${heading}` : ''}${alias ? `|${alias}` : ''}]]`
     })
     out = out.replace(/(!?\[[^\]\n]*\]\(\s*<?)([^)\s>]+)(>?(?:\s+["'][^"'\n]*["'])?\s*\))/g, (all, pre: string, href: string, post: string, at: number) => {
@@ -224,10 +260,11 @@ export function rewriteLinks(md: string, fromRel: string, oldRel: string, newRel
       }
       const hash = decoded.indexOf('#')
       const target = (hash === -1 ? decoded : decoded.slice(0, hash)).trim()
-      if (!target || resolveNote(target, fromRel, notes) !== oldRel) return all
+      const want = target ? fix(target) : null
+      if (!want) return all
       count++
       const frag = hash === -1 ? '' : decoded.slice(hash)
-      return `${pre}${encodeURI(relativePath(fromRel, newRel) + frag)}${post}`
+      return `${pre}${encodeURI(relativePath(srcAfter, want) + frag)}${post}`
     })
     lines[i] = out
   }

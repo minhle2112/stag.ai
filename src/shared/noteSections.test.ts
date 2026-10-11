@@ -34,6 +34,10 @@ describe('heading', () => {
     expect(outlineText(NOTE)).toContain('    ### Phase 1')
   })
 
+  it('`#` đóng chỉ khi có khoảng trắng trước: `## C#` là "C#"', () => {
+    expect(headings('## C#\n## F# ##\n## Tên ###\n').map((h) => h.text)).toEqual(['C#', 'F#', 'Tên'])
+  })
+
   it('đọc phần dưới heading (gồm heading con), không phân biệt hoa thường, có `#`', () => {
     expect(readSection(NOTE, 'goal')).toBe('Do X.\n\n```\n## not a heading\n```')
     expect(readSection(NOTE, '## Phases')).toBe('### Phase 1\nOne.\n### Phase 2\nTwo.')
@@ -85,6 +89,12 @@ describe('frontmatter', () => {
     expect(frontmatterKeys(writeField(NOTE, 'tags', null))).toEqual(['type', 'aliases'])
     expect(writeField('# T\n', 'type', 'log')).toBe('---\ntype: log\n---\n# T\n')
     expect(() => writeField(NOTE, 'bad key', 'x')).toThrow()
+    // Chữ YAML sẽ đọc sai → ngoặc kép; mảng / chuỗi đã có ngoặc / số âm giữ nguyên.
+    expect(readField(writeField(NOTE, 'status', 'blocked: waiting'), 'status')).toBe('"blocked: waiting"')
+    expect(readField(writeField(NOTE, 'status', '#1 "top"'), 'status')).toBe('"#1 \\"top\\""')
+    expect(readField(writeField(NOTE, 'status', 'a #b'), 'status')).toBe('"a #b"')
+    expect(readField(writeField(NOTE, 'status', '- x'), 'status')).toBe('"- x"')
+    for (const v of ['[a, b]', '{a: 1}', '"x: y"', '-5', 'C#', 'https://x.y/z']) expect(readField(writeField(NOTE, 'status', v), 'status')).toBe(v)
   })
 })
 
@@ -104,5 +114,17 @@ describe('rewriteLinks', () => {
     expect(rewriteLinks('[[Old]]', 'b/Src.md', 'a/Old.md', 'a/Other.md', notes).text).toBe('[[a/Other]]')
     const same = 'nothing here'
     expect(rewriteLinks(same, 'b/Src.md', 'a/Old.md', 'a/New.md', notes)).toEqual({ text: same, count: 0 })
+  })
+
+  it('tên mới trùng note khác: link bằng tên tới note đó vẫn trỏ đúng (không bị note vừa chuyển cướp)', () => {
+    // b/Src có [[Other]] → c/Other. Chuyển a/Old → b/Other: cùng thư mục với Src nên [[Other]] sẽ trỏ nhầm.
+    const r = rewriteLinks('[[Other]] and [[Old]]', 'b/Src.md', 'a/Old.md', 'b/Other.md', notes)
+    expect(r.text).toBe('[[c/Other]] and [[b/Other]]')
+    expect(r.count).toBe(2)
+  })
+
+  it('chính note bị chuyển sang thư mục khác: link markdown tương đối tính lại', () => {
+    const r = rewriteLinks('[src](../b/Src.md), [self](Old.md#x), [[Other]]', 'a/Old.md', 'a/Old.md', 'd/e/Moved.md', notes)
+    expect(r.text).toBe('[src](../../b/Src.md), [self](Moved.md#x), [[Other]]')
   })
 })

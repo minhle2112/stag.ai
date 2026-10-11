@@ -28,7 +28,20 @@ export class WorkspaceStore {
 
   async load(): Promise<void> {
     const raw = await readText(this.file)
-    this.items = raw ? (JSON.parse(raw) as Workspace[]) : []
+    if (!raw) {
+      this.items = []
+      return
+    }
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (!Array.isArray(parsed)) throw new Error('not a list')
+      this.items = parsed.filter((w): w is Workspace => !!w && typeof w === 'object' && typeof w.id === 'string' && typeof w.path === 'string')
+    } catch (e) {
+      // File hỏng (tắt máy giữa lúc ghi…): giữ bản hỏng cạnh đó để cứu tay, app vẫn mở được với danh sách trống.
+      console.error('[workspaces]', e)
+      await fs.copyFile(this.file, `${this.file}.broken-${Date.now()}`).catch(() => undefined)
+      this.items = []
+    }
   }
 
   list(): Workspace[] {
@@ -39,9 +52,21 @@ export class WorkspaceStore {
     return this.items.find((w) => w.id === id)
   }
 
-  private async save(): Promise<void> {
+  private saving: Promise<void> = Promise.resolve()
+
+  /** Lần ghi nối đuôi nhau (hai lần ghi song song không giẫm file tạm của nhau). */
+  private save(): Promise<void> {
+    const p = this.saving.then(() => this.write())
+    this.saving = p.catch(() => undefined)
+    return p
+  }
+
+  private async write(): Promise<void> {
     await fs.mkdir(app.getPath('userData'), { recursive: true })
-    await fs.writeFile(this.file, JSON.stringify(this.items, null, 2), 'utf8')
+    // Ghi file tạm rồi đổi tên: tắt máy giữa chừng không để lại file nửa vời (mất hết workspace).
+    const tmp = `${this.file}.tmp`
+    await fs.writeFile(tmp, JSON.stringify(this.items, null, 2), 'utf8')
+    await fs.rename(tmp, this.file)
   }
 
   /** Bỏ workspace khỏi app. Không xoá file nào trên đĩa. */
@@ -124,7 +149,7 @@ export class WorkspaceStore {
       const added = await ensureIgnored(projectDir, ['.sessions/'], 'stag.ai agent sessions (personal data, keep out of git)')
       return `.gitignore: vault nằm ngoài thư mục dự án, không cần loại trừ${added.length ? `; thêm ${added.join(', ')}` : ''}`
     }
-    const added = await ensureIgnored(projectDir, [`${rel}/`, '.sessions/'], 'stag.ai vault + agent sessions (personal data, keep out of git)')
+    const added = await ensureIgnored(projectDir, [`${gitignoreEscape(rel)}/`, '.sessions/'], 'stag.ai vault + agent sessions (personal data, keep out of git)')
     return added.length ? `.gitignore: thêm ${added.join(', ')}` : '.gitignore: đã loại trừ vault và .sessions/, giữ nguyên'
   }
 
@@ -152,6 +177,17 @@ export class WorkspaceStore {
 }
 
 /** Thêm các dòng còn thiếu vào .gitignore (chỉ khi thư mục là repo git). Trả về các dòng đã thêm. */
+/**
+ * Đường dẫn → mẫu .gitignore khớp đúng chữ đó: thoát `\ * ? [`, `#` / `!` ở đầu và dấu cách ở cuối (tên vault như
+ * "#notes" hay "a [b]" không thành chú thích / mẫu glob).
+ */
+export function gitignoreEscape(path: string): string {
+  return path
+    .replace(/[\\*?[]/g, '\\$&')
+    .replace(/^([#!])/, '\\$1')
+    .replace(/ $/, '\\ ')
+}
+
 export async function ensureIgnored(projectDir: string, entries: string[], header: string): Promise<string[]> {
   if (!(await exists(join(projectDir, '.git')))) return []
   const file = join(projectDir, '.gitignore')

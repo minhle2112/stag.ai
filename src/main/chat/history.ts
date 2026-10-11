@@ -63,23 +63,30 @@ export function itemsFromTranscript(text: string, partial = false): ChatItem[] {
       }
       const t = parts.text.trim()
       if (!t && !parts.images) continue
-      // Lệnh / thông báo hệ thống của CLI không phải lời người dùng.
-      if (/^<(command-name|command-message|local-command|system-reminder)/.test(t)) continue
-      // Claude Code ghi dòng này vào transcript khi người dùng ngắt lượt.
-      if (/^\[Request interrupted by user/.test(t)) {
-        model.addNotice('info', 'Đã ngắt lượt')
-        continue
-      }
-      if (APP_OPENINGS.has(t)) {
-        model.addUser(t, 'app')
-        continue
-      }
-      const am = AGENT_MESSAGE.exec(t)
-      if (am) model.addUser(am[2].trim(), 'agent', { from: am[1] })
-      else model.addUser(t, 'user', { images: parts.images })
+      userItem(model, t, parts.images)
     }
   }
   return model.items.slice(-MAX_ITEMS)
+}
+
+/**
+ * Một lời "người dùng" trong transcript / rollout → mục user (lời mở của app, tin agent khác gửi, lời người dùng) hoặc
+ * thông báo. Bỏ lệnh / thông báo hệ thống của CLI.
+ */
+export function userItem(model: ChatModel, text: string, images = 0): void {
+  if (/^<(command-name|command-message|local-command|system-reminder|turn_aborted)/.test(text)) return
+  // Claude Code ghi dòng này vào transcript khi người dùng ngắt lượt.
+  if (/^\[Request interrupted by user/.test(text)) {
+    model.addNotice('info', 'Đã ngắt lượt')
+    return
+  }
+  if (APP_OPENINGS.has(text)) {
+    model.addUser(text, 'app')
+    return
+  }
+  const am = AGENT_MESSAGE.exec(text)
+  if (am) model.addUser(am[2].trim(), 'agent', { from: am[1] })
+  else model.addUser(text, 'user', { images })
 }
 
 /** Đọc lịch sử từ file transcript (chỉ phần cuối). File chưa có / không đọc được → []. */

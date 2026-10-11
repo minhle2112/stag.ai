@@ -375,6 +375,14 @@ function createWindow(): void {
 
   win.once('ready-to-show', () => win.show())
   browser.attachWindow(win)
+  // Renderer tải lại / chết giữa lúc đang nói: không còn ai báo "xong" → gỡ Esc toàn hệ thống, ẩn ô nổi, bỏ chạy nền.
+  const resetVoice = (): void => {
+    globalVoice.setActive(false)
+    void overlay.update({ phase: 'idle' })
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.setBackgroundThrottling(true)
+  }
+  win.webContents.on('did-start-loading', resetVoice)
+  win.webContents.on('render-process-gone', resetVoice)
   win.webContents.on('did-finish-load', () => {
     const factor = settings.general().zoom / 100
     win.webContents.setZoomFactor(factor)

@@ -51,6 +51,7 @@ describe('isLocalUrl', () => {
   it('localhost, *.localhost, 127.x, ::1', () => {
     for (const u of ['http://localhost:1', 'http://app.localhost', 'http://127.0.0.5', 'http://[::1]:3000']) expect(isLocalUrl(new URL(u))).toBe(true)
     expect(isLocalUrl(new URL('https://localhost.example.com'))).toBe(false)
+    for (const u of ['http://127.evil.com', 'http://127.0.0.1.nip.io', 'http://127.0.0.1x']) expect(isLocalUrl(new URL(u))).toBe(false)
   })
 })
 

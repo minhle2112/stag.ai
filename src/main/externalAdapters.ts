@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { promises as fs } from 'node:fs'
-import { delimiter, extname, isAbsolute, join, resolve } from 'node:path'
+import { existsSync, promises as fs, readFileSync } from 'node:fs'
+import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { MODEL_RE, parseEnv, splitArgs } from '@shared/settings'
 import type {
   AdapterInstallRequest,
@@ -130,9 +130,34 @@ export function cmdQuote(a: string): string {
 
 const isBatch = (p: string): boolean => /\.(cmd|bat)$/i.test(p)
 
-/** Lệnh thật cho node-pty: file .cmd/.bat chạy qua cmd.exe với dòng lệnh tự dựng (xem PtySpawnOptions.args). */
+/**
+ * File .cmd do npm sinh (cmd-shim): `"%_prog%" "%dp0%\…\cli.js" %*` → chạy thẳng node với script đó. null = không
+ * phải shim npm (hoặc không đọc được).
+ */
+export function npmShimTarget(path: string): { command: string; script: string } | null {
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+  const m = /"%dp0%\\([^"]+\.[cm]?js)"\s+%\*/i.exec(text)
+  if (!m) return null
+  const dir = dirname(path)
+  const node = join(dir, 'node.exe')
+  return { command: existsSync(node) ? node : 'node', script: join(dir, m[1]) }
+}
+
+/**
+ * Lệnh thật cho node-pty / spawn: file .cmd/.bat chạy qua cmd.exe với dòng lệnh tự dựng (xem PtySpawnOptions.args).
+ * cmd.exe cắt dòng lệnh ở ký tự xuống dòng: tham số nhiều dòng (luật phiên, lời mở) với shim npm thì chạy thẳng node.
+ */
 export function spawnSpec(path: string, args: string[], env: NodeJS.ProcessEnv = process.env): { command: string; args: string[] | string } {
   if (!isBatch(path)) return { command: path, args }
+  if (args.some((a) => /[\r\n]/.test(a))) {
+    const shim = npmShimTarget(path)
+    if (shim) return { command: shim.command, args: [shim.script, ...args] }
+  }
   const line = [path, ...args].map(cmdQuote).join(' ')
   return { command: env.ComSpec || env.COMSPEC || 'cmd.exe', args: `/d /s /c "${line}"` }
 }
@@ -338,7 +363,11 @@ export class ExternalAdapterStore {
     )
   }
 
-  async check(id: string): Promise<ExternalAdapterStatus> {
+  /**
+   * Tìm file chạy; `runVersion` thì chạy thêm lệnh lấy phiên bản của gói. Lệnh đó là mã của gói vừa cài: chỉ chạy khi
+   * người dùng bấm kiểm tra, không tự chạy lúc mở trang adapter (ngay sau khi cài).
+   */
+  async check(id: string, runVersion = false): Promise<ExternalAdapterStatus> {
     const status: ExternalAdapterStatus = { id, path: null, version: null, error: null, checkedAt: new Date().toISOString() }
     const a = this.get(id)
     if (!a) return { ...status, error: 'Adapter không còn' }
@@ -347,7 +376,7 @@ export class ExternalAdapterStore {
     } catch (e) {
       return { ...status, error: (e as Error).message }
     }
-    if (!a.manifest.versionArgs.length) return status
+    if (!runVersion || !a.manifest.versionArgs.length) return status
     const spec = spawnSpec(status.path, a.manifest.versionArgs.map((x) => fillPkg(x, a.dir)))
     const r = await run(spec.command, spec.args, { env: { ...independentSessionEnv(process.env), ...parseEnv(a.env).vars }, cwd: a.dir })
     if (r.ok) status.version = (r.out || r.err).trim().split(/\r?\n/)[0] || null

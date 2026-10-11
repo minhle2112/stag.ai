@@ -718,6 +718,7 @@ function registerDevServerTools(server: McpServer, dev: DevServerAgentApi): void
       title: 'Start dev server',
       description:
         "Start the project's dev server in a stag.ai terminal cell the user can see (nothing is started if its port is already open), wait until the port opens, and return the URL. " +
+        'The first time a command runs, stag.ai shows the user a confirm card and this call waits for their answer. ' +
         'Use this instead of running the dev server in your own shell. Without arguments it starts the only known server; pass name to pick one from preview_list. ' +
         'To add a new one, pass name + command + port (saved to .stag/launch.json). Then open the URL with browser_navigate.',
       inputSchema: {

@@ -26,10 +26,12 @@ const isAbs = (p: string): boolean => /^[a-z]:\//i.test(p) || p.startsWith('/')
  * thư mục dự án, '/' và chữ thường (Windows không phân biệt hoa thường). null = nằm ngoài dự án.
  */
 export function projectRel(path: string, root: string, base = root): string | null {
-  let p = norm(path.trim())
+  // Git Bash / MSYS viết ổ đĩa kiểu `/c/Users/...` (agent chạy lệnh trong bash trên Windows) → `c:/Users/...`.
+  const msys = (s: string): string => (/^[a-z]:\//i.test(root.replace(/\\/g, '/')) ? s.replace(/^\/([a-z])(?=\/|$)/i, '$1:') : s)
+  let p = msys(norm(path.trim()))
   if (!p) return null
   const r = norm(root).replace(/\/+$/, '').toLowerCase()
-  if (!isAbs(p)) p = `${norm(base).replace(/\/+$/, '')}/${p}`
+  if (!isAbs(p)) p = `${msys(norm(base)).replace(/\/+$/, '')}/${p}`
   // Gộp `.` và `..` (không đụng ổ đĩa).
   const out: string[] = []
   for (const seg of p.split('/')) {
@@ -49,7 +51,35 @@ export function contains(a: string, b: string): boolean {
   return a === '' || a === b || b.startsWith(`${a}/`)
 }
 
-function globRegex(rel: string): RegExp {
+/** Vị trí `}` khớp với `{` ở `open` (tính lồng nhau); -1 nếu không đóng. */
+function closingBrace(s: string, open: number): number {
+  let depth = 0
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === '{') depth++
+    else if (s[i] === '}' && --depth === 0) return i
+  }
+  return -1
+}
+
+/** Tách theo dấu phẩy ở cấp ngoài cùng (dấu phẩy trong `{…}` lồng bên trong thì giữ). */
+function splitTopLevel(s: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const c of s) {
+    if (c === '{') depth++
+    else if (c === '}') depth = Math.max(0, depth - 1)
+    if (c === ',' && depth === 0) {
+      out.push(cur)
+      cur = ''
+    } else cur += c
+  }
+  out.push(cur)
+  return out
+}
+
+/** Mẫu glob → nguồn regex. `{a,b}` đổi đệ quy nên `*` / `?` / `{…}` bên trong cũng thành ký tự đại diện. */
+function globSource(rel: string): string {
   let re = ''
   for (let i = 0; i < rel.length; i++) {
     const c = rel[i]
@@ -63,20 +93,25 @@ function globRegex(rel: string): RegExp {
       } else re += '[^/]*'
     } else if (c === '?') re += '[^/]'
     else if (c === '{') {
-      const end = rel.indexOf('}', i)
+      const end = closingBrace(rel, i)
       if (end < 0) re += '\\{'
       else {
-        re += `(?:${rel
-          .slice(i + 1, end)
-          .split(',')
-          .map((s) => s.replace(/[.+^$()|[\]\\]/g, '\\$&'))
-          .join('|')})`
+        re += `(?:${splitTopLevel(rel.slice(i + 1, end)).map(globSource).join('|')})`
         i = end
       }
     } else re += c.replace(/[.+^$()|[\]\\{}]/g, '\\$&')
   }
-  // Mẫu khớp một thư mục thì mọi thứ bên trong cũng thuộc phạm vi.
-  return new RegExp(`^${re}(?:/.*)?$`)
+  return re
+}
+
+/** null = mẫu không dựng được regex (khi đó khoá cả thư mục phía trước ký tự đại diện: thà báo thừa). */
+function globRegex(rel: string): RegExp | null {
+  try {
+    // Mẫu khớp một thư mục thì mọi thứ bên trong cũng thuộc phạm vi.
+    return new RegExp(`^${globSource(rel)}(?:/.*)?$`)
+  } catch {
+    return null
+  }
 }
 
 /** Tách theo dấu phẩy, chấm phẩy, xuống dòng; dấu phẩy trong `{a,b}` của glob thì giữ. */
@@ -136,7 +171,8 @@ export function parseScope(scope: string, root: string): ScopeEntry[] {
     const prefix = head.includes('/') ? head.slice(0, head.lastIndexOf('/')) : ''
     const key = prefix ? projectRel(prefix, root) : projectRel('.', root)
     if (key === null) continue
-    entries.push({ key, label, glob: globRegex(full) })
+    const glob = globRegex(full)
+    entries.push(glob ? { key, label, glob } : { key, label })
   }
   return entries
 }

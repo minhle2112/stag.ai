@@ -72,15 +72,12 @@ export interface CodexLaunch {
   userArgs?: string[]
 }
 
-/** Tham số cho codex.exe (truyền thẳng qua CreateProcess, không qua cmd.exe: luật phiên dài, nhiều dòng). */
-export function codexArgs(o: CodexLaunch): string[] {
-  const args = o.resumeId ? ['resume', o.resumeId] : []
-  args.push(
-    // Không gắn vào daemon app-server dùng chung: daemon không mang biến môi trường / cấu hình của phiên này.
-    '--no-daemon',
-    '--dangerously-bypass-hook-trust',
-    '-c',
-    `developer_instructions=${tomlString(o.rules)}`,
+/**
+ * Cấu hình `-c` chung của phiên agent Codex (ô CLI và ô chat): file luật dự án, máy chủ MCP stag, hook về StatusHub.
+ * Không gồm luật phiên (`developer_instructions`): ô CLI truyền qua `-c`, ô chat qua tham số `thread/start`.
+ */
+export function codexConfigArgs(o: Pick<CodexLaunch, 'mcpUrl' | 'hookUrl'>): string[] {
+  return [
     // Dự án tạo bởi stag.ai có CLAUDE.md (luật dùng vault), không có AGENTS.md.
     '-c',
     'project_doc_fallback_filenames=["CLAUDE.md"]',
@@ -94,17 +91,99 @@ export function codexArgs(o: CodexLaunch): string[] {
     'mcp_servers.stag.default_tools_approval_mode="approve"',
     // Mặc định Codex chỉ chờ tool 60 s; agent_create chờ người dùng xác nhận trong app tới AGENT_REQUEST_MS (280 s).
     '-c',
-    'mcp_servers.stag.tool_timeout_sec=330'
-  )
+    'mcp_servers.stag.tool_timeout_sec=330',
+    ...codexHookArgs(o.hookUrl)
+  ]
+}
+
+/** Hook của app (`-c hooks.<Sự kiện>=…`). */
+export function codexHookArgs(hookUrl: string): string[] {
+  const args: string[] = []
   // Codex hạ thời hạn hook Interrupt xuống 3 giây (và hiện cảnh báo nếu đặt cao hơn).
   for (const ev of CODEX_HOOK_EVENTS) {
     const reply = CODEX_REPLY_EVENTS.has(ev)
-    const hook = codexHookCommand(o.hookUrl, reply)
+    const hook = codexHookCommand(hookUrl, reply)
     args.push('-c', `hooks.${ev}=[{hooks=[{type="command",command=${tomlString(hook)},timeout=${reply ? CODEX_REPLY_SECONDS + 10 : ev === 'Interrupt' ? 3 : 10}}]}]`)
   }
+  return args
+}
+
+/** Tham số cho codex.exe (truyền thẳng qua CreateProcess, không qua cmd.exe: luật phiên dài, nhiều dòng). */
+export function codexArgs(o: CodexLaunch): string[] {
+  const args = o.resumeId ? ['resume', o.resumeId] : []
+  args.push(
+    // Không gắn vào daemon app-server dùng chung: daemon không mang biến môi trường / cấu hình của phiên này.
+    '--no-daemon',
+    '--dangerously-bypass-hook-trust',
+    '-c',
+    `developer_instructions=${tomlString(o.rules)}`,
+    ...codexConfigArgs(o)
+  )
   args.push(...codexPermissionArgs(o.permissionMode), ...(o.userArgs ?? []))
   if (!o.resumeId && o.prompt) args.push(o.prompt)
   return args
+}
+
+// ---- ô chat: `codex app-server` (JSON-RPC qua stdio, xem chat/codexSession.ts) ----
+
+/**
+ * Hook trong lớp cấu hình `-c` bị app-server coi là chưa tin cậy (không chạy), và `--dangerously-bypass-hook-trust`
+ * chỉ có ở TUI. App đánh dấu tin cậy đúng các hook của chính nó (nguồn "sessionFlags"): `hooks.state."<key>".trusted_hash`,
+ * key / hash lấy qua `hooks/list` của một app-server chạy thử (xem chat/codexSession.ts). Viết dạng bảng inline vì khoá
+ * có dấu chấm: `-c hooks.state."<key>".trusted_hash=…` không ăn (đã thử với 0.162.0).
+ */
+export function codexHookTrustArgs(trusted: Array<{ key: string; hash: string }>): string[] {
+  if (!trusted.length) return []
+  return ['-c', `hooks.state={${trusted.map((t) => `${tomlString(t.key)}={trusted_hash=${tomlString(t.hash)}}`).join(',')}}`]
+}
+
+/**
+ * Tham số người dùng (Cài đặt → Adapter → Codex: model, mức suy nghĩ, tham số thêm) cho app-server: app-server chỉ
+ * nhận `-c` / `--enable` / `--disable`; cờ của TUI có khoá cấu hình tương đương thì đổi sang `-c`, không có thì bỏ.
+ */
+export function codexAppServerUserArgs(args: string[]): { args: string[]; dropped: string[] } {
+  const toml: Record<string, string> = {
+    '-m': 'model',
+    '--model': 'model',
+    '-s': 'sandbox_mode',
+    '--sandbox': 'sandbox_mode',
+    '-a': 'approval_policy',
+    '--ask-for-approval': 'approval_policy',
+    '-p': 'profile',
+    '--profile': 'profile'
+  }
+  const out: string[] = []
+  const dropped: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    const eq = a.startsWith('--') ? a.indexOf('=') : -1
+    const flag = eq > 0 ? a.slice(0, eq) : a
+    const value = (): string | undefined => (eq > 0 ? a.slice(eq + 1) : args[++i])
+    if (flag === '-c' || flag === '--config' || flag === '--enable' || flag === '--disable') {
+      const v = value()
+      if (v !== undefined) out.push(flag === '--config' ? '-c' : flag, v)
+    } else if (flag === '--strict-config') out.push(flag)
+    else if (toml[flag]) {
+      const v = value()
+      if (v !== undefined) out.push('-c', `${toml[flag]}=${tomlString(v)}`)
+    } else dropped.push(a)
+  }
+  return { args: out, dropped }
+}
+
+/** Mức quyền của app → tham số `thread/start` / `thread/resume` của app-server ({} = theo ~/.codex/config.toml). */
+export function codexThreadPermission(mode: PermissionMode): { sandbox?: string; approvalPolicy?: string; approvalsReviewer?: string } {
+  switch (mode) {
+    case 'acceptEdits':
+      return { sandbox: 'workspace-write', approvalPolicy: 'on-request' }
+    case 'auto':
+      // Như `--approve-for-me` của TUI: agent duyệt của Codex tự trả lời các yêu cầu.
+      return { sandbox: 'workspace-write', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review' }
+    case 'plan':
+      return { sandbox: 'read-only', approvalPolicy: 'on-request' }
+    default:
+      return {}
+  }
 }
 
 /**
@@ -139,9 +218,11 @@ export function codexHome(env: NodeJS.ProcessEnv = process.env, home = homedir()
 
 /**
  * Rollout của một thread: `sessions/YYYY/MM/DD/rollout-<giờ địa phương>-<id>.jsonl` (có thể đã nén `.zst`
- * nếu cũ). Tìm trong vài ngày gần nhất; file chỉ được tạo khi Codex ghi lần đầu, chưa có thì null.
+ * nếu cũ). Tìm trong `days` ngày gần nhất trước; `deep` thì không thấy sẽ quét mọi ngày (mới trước) — thread được
+ * tiếp tục từ lâu vẫn nằm ở ngày tạo. File chỉ được tạo khi Codex ghi lần đầu, chưa có thì null.
  */
-export async function findCodexRollout(threadId: string, now = new Date(), home = codexHome(), days = 3): Promise<string | null> {
+export async function findCodexRollout(threadId: string, now = new Date(), home = codexHome(), days = 3, deep = true): Promise<string | null> {
+  const match = (n: string): boolean => n.startsWith('rollout-') && n.endsWith(`-${threadId}.jsonl`)
   for (let d = 0; d < days; d++) {
     const t = new Date(now.getTime() - d * 86_400_000)
     const dir = join(home, 'sessions', String(t.getFullYear()), String(t.getMonth() + 1).padStart(2, '0'), String(t.getDate()).padStart(2, '0'))
@@ -151,9 +232,20 @@ export async function findCodexRollout(threadId: string, now = new Date(), home 
     } catch {
       continue
     }
-    const hit = names.find((n) => n.startsWith('rollout-') && n.endsWith(`-${threadId}.jsonl`))
+    const hit = names.find(match)
     if (hit) return join(dir, hit)
   }
+  if (!deep) return null
+  const root = join(home, 'sessions')
+  const sub = async (p: string): Promise<string[]> =>
+    (await fs.readdir(p).catch(() => [] as string[])).filter((n) => /^\d+$/.test(n)).sort((a, b) => Number(b) - Number(a))
+  for (const y of await sub(root))
+    for (const m of await sub(join(root, y)))
+      for (const d of await sub(join(root, y, m))) {
+        const dir = join(root, y, m, d)
+        const hit = (await fs.readdir(dir).catch(() => [] as string[])).find(match)
+        if (hit) return join(dir, hit)
+      }
   return null
 }
 

@@ -132,6 +132,31 @@ export function lineDiff(oldText: string, newText: string): DiffRow[] {
   return [...head, ...mid, ...tail]
 }
 
+/**
+ * Một thay đổi file của Codex (fileChange: add / delete / update) → dòng diff. `update` mang unified diff
+ * (`@@ -1,2 +1,3 @@`, dòng `+` / `-` / ` `); add / delete mang nội dung file mới / cũ.
+ */
+export function patchRows(kind: string, diff: string): DiffRow[] {
+  const lines = diff.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n')
+  if (!diff) return []
+  if (kind === 'add') return lines.map((s) => ({ t: '+', s }))
+  if (kind === 'delete') return lines.map((s) => ({ t: '-', s }))
+  if (!lines.some((l) => l.startsWith('@@'))) return lines.map((s) => ({ t: ' ', s }))
+  const rows: DiffRow[] = []
+  let hunks = 0
+  for (const l of lines) {
+    if (l.startsWith('@@')) {
+      if (hunks++ > 0) rows.push({ t: '~', s: '' })
+    } else if (hunks === 0 || l.startsWith('\\')) {
+      // Đầu diff (diff --git / index / --- / +++) và "\ No newline at end of file".
+      continue
+    } else if (l.startsWith('+')) rows.push({ t: '+', s: l.slice(1) })
+    else if (l.startsWith('-')) rows.push({ t: '-', s: l.slice(1) })
+    else rows.push({ t: ' ', s: l.startsWith(' ') ? l.slice(1) : l })
+  }
+  return rows
+}
+
 export function diffStats(rows: DiffRow[]): { add: number; del: number } {
   let add = 0
   let del = 0
@@ -244,6 +269,9 @@ const LABEL: Record<string, { icon: IconName; label: string }> = {
   Read: { icon: 'file', label: 'Đọc file' },
   Edit: { icon: 'fdiff', label: 'Sửa file' },
   MultiEdit: { icon: 'fdiff', label: 'Sửa file' },
+  ApplyPatch: { icon: 'fdiff', label: 'Sửa file' },
+  Permissions: { icon: 'shield', label: 'Thêm quyền' },
+  MCP: { icon: 'conn', label: 'Mở trang của máy chủ MCP' },
   Write: { icon: 'pen', label: 'Ghi file' },
   NotebookEdit: { icon: 'fdiff', label: 'Sửa notebook' },
   Glob: { icon: 'search', label: 'Tìm file' },
@@ -337,6 +365,52 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
         summary: [shortenPath(path, opts.root), range].filter(Boolean).join(' · '),
         stats: null,
         detail: { kind: 'read', path, range }
+      }
+    }
+    case 'ApplyPatch': {
+      // Codex (fileChange): một hoặc nhiều file, mỗi file một unified diff.
+      const changes = Array.isArray(i.changes) ? i.changes.map(rec) : []
+      const paths = changes.map((c) => str(c.path))
+      let rows: DiffRow[] = []
+      changes.forEach((c, k) => {
+        if (k > 0) rows.push({ t: '~', s: '' })
+        rows = rows.concat(patchRows(str(c.kind), str(c.diff)))
+      })
+      const added = changes.length === 1 && str(changes[0].kind) === 'add'
+      const removed = changes.length === 1 && str(changes[0].kind) === 'delete'
+      const summary = paths.length > 1 ? `${paths.length} file: ${paths.map((x) => shortenPath(x, opts.root, 40)).join(', ')}` : shortenPath(paths[0] ?? '', opts.root)
+      return {
+        icon: added ? 'pen' : 'fdiff',
+        label: added ? 'Tạo file' : removed ? 'Xoá file' : LABEL.ApplyPatch.label,
+        summary: clip(summary, SUMMARY_MAX),
+        stats: rows.length ? diffStats(rows) : null,
+        detail: { kind: 'edit', path: paths.join(', '), rows, replaceAll: false, edits: changes.length > 1 ? changes.length : 1 }
+      }
+    }
+    case 'Permissions': {
+      const perms = rec(i.permissions)
+      const fsPerm = rec(perms.fileSystem)
+      const net = rec(perms.network)
+      const lines = [
+        ...['read', 'write'].flatMap((k) => (Array.isArray(fsPerm[k]) ? (fsPerm[k] as unknown[]).map((p) => `${k === 'read' ? 'Đọc' : 'Ghi'}: ${String(p)}`) : [])),
+        net.enabled === true ? 'Mạng: bật' : ''
+      ].filter(Boolean)
+      return {
+        icon: 'shield',
+        label: 'Thêm quyền',
+        summary: clip(lines[0] ?? compactJson(perms, SUMMARY_MAX), SUMMARY_MAX),
+        stats: null,
+        detail: lines.length ? { kind: 'text', text: lines.join('\n') } : { kind: 'json', json: jsonOf(perms) }
+      }
+    }
+    case 'MCP': {
+      const url = str(i.url)
+      return {
+        icon: 'conn',
+        label: `Máy chủ MCP ${str(i.server)}`.trim(),
+        summary: clip(firstLine(str(i.message)) || url, SUMMARY_MAX),
+        stats: null,
+        detail: { kind: 'text', text: [str(i.message), url ? `Mở: ${url}` : ''].filter(Boolean).join('\n\n') }
       }
     }
     case 'Edit':
@@ -488,7 +562,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
 
 /** Tên ở thẻ xin quyền: "Cho phép chạy lệnh?" (chữ đầu thường). */
 export function askTitle(name: string): string {
-  if (name === 'AskUserQuestion') return 'Claude hỏi bạn'
+  if (name === 'AskUserQuestion') return 'Agent hỏi bạn'
   if (name === 'ExitPlanMode') return 'Duyệt kế hoạch?'
   const meta = LABEL[name]
   if (meta) return `Cho phép ${meta.label.charAt(0).toLowerCase()}${meta.label.slice(1)}?`

@@ -20,6 +20,7 @@ beforeEach(async () => {
   await write('.obsidian/workspace.json', '{}')
   await write('.trash/Cũ.md', '[[Browser]]')
   await write('ghi chú.txt', 'không phải note')
+  await write('node_modules/pkg/README.md', '# gói')
 })
 
 afterEach(async () => {
@@ -105,6 +106,7 @@ describe('fold / isHiddenChange', () => {
     expect(isHiddenChange('a/.trash/x.md')).toBe(true)
     expect(isHiddenChange('30 Features\\Browser.md')).toBe(false)
     expect(isHiddenChange(null)).toBe(false)
+    expect(isHiddenChange('node_modules/pkg/README.md')).toBe(true)
   })
 })
 

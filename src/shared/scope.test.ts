@@ -23,6 +23,9 @@ describe('projectRel', () => {
     expect(projectRel('C:\\Users\\a\\Proj\\src\\Auth\\Login.ts', ROOT)).toBe('src/auth/login.ts')
     expect(projectRel('c:/users/A/proj/src', ROOT)).toBe('src')
     expect(projectRel(ROOT, ROOT)).toBe('')
+    // Git Bash: /c/... = C:/...
+    expect(projectRel('/c/Users/a/Proj/src/x.ts', ROOT)).toBe('src/x.ts')
+    expect(projectRel('x.ts', ROOT, '/c/Users/a/Proj/lib')).toBe('lib/x.ts')
   })
 
   it('tương đối tính từ base (cwd của phiên), gộp . và ..', () => {
@@ -69,6 +72,21 @@ describe('parseScope', () => {
     const [brace] = parseScope('src/{a,b}.ts', ROOT)
     expect(entryHas(brace, 'src/a.ts')).toBe(true)
     expect(entryHas(brace, 'src/c.ts')).toBe(false)
+  })
+
+  it('glob: ký tự đại diện và ngoặc lồng bên trong {…} không làm hỏng regex', () => {
+    const [e] = parseScope('src/{*.ts,lib}', ROOT)
+    expect(entryHas(e, 'src/a.ts')).toBe(true)
+    expect(entryHas(e, 'src/lib/x.js')).toBe(true)
+    expect(entryHas(e, 'src/a.js')).toBe(false)
+    const [q] = parseScope('src/{a?,b/**/*.md}', ROOT)
+    expect(entryHas(q, 'src/ab')).toBe(true)
+    expect(entryHas(q, 'src/b/x/y.md')).toBe(true)
+    const [n] = parseScope('src/{a,{b,c}d}.ts', ROOT)
+    expect(entryHas(n, 'src/cd.ts')).toBe(true)
+    expect(entryHas(n, 'src/c.ts')).toBe(false)
+    const [open] = parseScope('src/{a*.ts', ROOT)
+    expect(entryHas(open, 'src/{ab.ts')).toBe(true)
   })
 
   it('thư mục chứa file theo ranh giới thư mục', () => {

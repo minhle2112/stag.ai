@@ -45,7 +45,7 @@ import type { Board, HookPayload } from './board'
 import type { BrowserService } from './browser'
 import type { DevServerService } from './devServer'
 import { ADAPTER_LABEL, independentSessionEnv, type AdapterService } from './adapters'
-import { codexArgs, codexHome, findCodexRollout, parseCodexContext } from './codex'
+import { codexAppServerUserArgs, codexArgs, codexConfigArgs, codexHome, codexThreadPermission, findCodexRollout, parseCodexContext } from './codex'
 import { externalArgs, spawnSpec, type ExternalAdapterStore } from './externalAdapters'
 import { claudeServers, claudeSettingsExtra, codexConfiguredServers, codexConnectorArgs, connectorEnv, resolveCommands } from './connectors'
 import type { SecretStore } from './secrets'
@@ -59,10 +59,12 @@ import type { StatusHub } from './hub'
 import { AgentMail, mailReady } from './agentMail'
 import { loadHistory } from './chat/history'
 import { isClaudeFolderTrusted } from './trust'
-import { ChatSession } from './chat/session'
+import { ChatSession, type ChatSessionBase, type ChatSessionOptions } from './chat/session'
+import { CodexChatSession } from './chat/codexSession'
+import { loadCodexHistory } from './chat/codexHistory'
 import { AgentRequestQueue, type AgentRequestAnswer } from './agentRequests'
 import { createStagMcp, describeAgent, type AdapterInfo, type AgentInfo, type AgentLogInput, type ExtraTool } from './mcp'
-import { formatEntries, parseClaudeLog, parseCodexLog, readTailLines, redact } from './sessionLog'
+import { formatEntries, parseClaudeLog, parseCodexLog, readTailLines, redact, secretParts } from './sessionLog'
 import { archiveName, memoryRules, oneLine, type MemoryKeeper } from './workLog'
 import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
@@ -79,9 +81,9 @@ import { ensureIgnored, type WorkspaceStore } from './workspace'
 import { normalizeLayout } from './agentLayout'
 import { emptyCanvas } from '@shared/canvas'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
-import { effectiveConnectors, toolPolicy } from '@shared/connectors'
+import { effectiveConnectors, OAUTH_SECRET_PREFIX, toolPolicy } from '@shared/connectors'
 import { effectiveSkills } from '@shared/skills'
-import type { ChatPermissionAnswer, ChatSendRequest, ChatSnapshot } from '@shared/chat'
+import type { ChatItem, ChatPermissionAnswer, ChatSendRequest, ChatSnapshot } from '@shared/chat'
 import { MODEL_RE, resolveAgentApi, resolveMemory, resolveModel, resolveScope } from '@shared/settings'
 
 /** Bản bàn giao agent viết (tool session_handoff), chờ phiên sau đọc. */
@@ -116,8 +118,10 @@ interface Running extends AgentRun {
   token?: string
   /** Đang nhờ agent bàn giao: lúc gõ lời nhờ, và Claude Code đã nhận lời nhờ đó chưa (UserPromptSubmit). */
   handoffAsk?: { at: number; submitted: boolean }
-  /** Ô chat: tiến trình stream-json thay cho pty (ptyId chỉ là nhãn `chat:<phiên>`). */
-  chat?: ChatSession
+  /** Ô chat: tiến trình stream-json (Claude) / app-server (Codex) thay cho pty (ptyId chỉ là nhãn `chat:<phiên>`). */
+  chat?: ChatSessionBase
+  /** Người dùng (hoặc Agent API) bấm dừng: không tự mở phiên mới dù đang chờ bàn giao. */
+  userStopped?: boolean
 }
 
 /** Lời nhờ bàn giao chưa được gửi đi / agent chưa xong sau chừng này thì coi là hỏng. */
@@ -135,7 +139,11 @@ export class AgentService {
   private data: StoreFile = { agents: [], layouts: {} }
   private running = new Map<string, Running>()
   /** Phiên ô chat theo agent: giữ lại sau khi thoát để ô vẫn hiện hội thoại cho tới khi mở phiên mới. */
-  private chats = new Map<string, ChatSession>()
+  private chats = new Map<string, ChatSessionBase>()
+  /** Phiên đang mở (chưa vào `running`): lần gọi start song song dùng chung, không mở hai tiến trình. */
+  private startingRuns = new Map<string, Promise<AgentRun>>()
+  /** Bấm dừng lúc phiên đang mở: dừng ngay khi mở xong. */
+  private stopAfterStart = new Set<string>()
 
   private hub: StatusHub | null = null
   /** Yêu cầu của agent chờ người dùng xác nhận (Agent API: agent_create…); renderer nhận qua IPC.agentRequests. */
@@ -317,8 +325,8 @@ export class AgentService {
       permissionMode: terminal || req.kind === 'external' ? 'default' : req.permissionMode,
       createdAt: new Date().toISOString(),
       ...(req.kind === 'external' ? { adapterId: req.adapterId } : {}),
-      // Ô chat chỉ có cho Claude Code (Codex: chưa có).
-      ...(req.cell === 'chat' && req.kind === 'claude' ? { cell: 'chat' as const } : {})
+      // Ô chat: Claude Code (stream-json) và Codex (app-server); adapter ngoài / terminal chỉ có ô CLI.
+      ...(req.cell === 'chat' && cli ? { cell: 'chat' as const } : {})
     }
     this.data.agents.push(agent)
     await this.save()
@@ -332,8 +340,26 @@ export class AgentService {
     return agent
   }
 
-  /** Mở một phiên CLI (Claude Code / Codex) cho agent trong terminal thật. */
-  async start(owner: WebContents, req: StartAgentRequest): Promise<AgentRun> {
+  /** Mở một phiên CLI (Claude Code / Codex) cho agent trong terminal thật. Gọi lại khi đang mở → chờ chung lần đó. */
+  start(owner: WebContents, req: StartAgentRequest): Promise<AgentRun> {
+    const id = req.agentId
+    const cur = this.startingRuns.get(id)
+    if (cur) return cur
+    this.stopAfterStart.delete(id)
+    const p = this.doStart(owner, req)
+      .then((run) => {
+        if (this.stopAfterStart.delete(id)) this.stop(id)
+        return run
+      })
+      .finally(() => {
+        this.stopAfterStart.delete(id)
+        if (this.startingRuns.get(id) === p) this.startingRuns.delete(id)
+      })
+    this.startingRuns.set(id, p)
+    return p
+  }
+
+  private async doStart(owner: WebContents, req: StartAgentRequest): Promise<AgentRun> {
     const agent = this.data.agents.find((a) => a.id === req.agentId)
     if (!agent) throw new Error('Agent không tồn tại')
     const existing = this.running.get(agent.id)
@@ -344,21 +370,24 @@ export class AgentService {
 
     if (!this.hub) throw new Error('Máy chủ trạng thái của app chưa sẵn sàng')
     const kind = agentKind(agent)
-    const chatMode = kind === 'claude' && agent.cell === 'chat'
+    const chatMode = (kind === 'claude' || kind === 'codex') && agent.cell === 'chat'
     const ext = kind === 'external' ? this.external.get(agent.adapterId ?? '') : undefined
     if (kind === 'external' && !ext) throw new Error(`Adapter "${agent.adapterId}" của agent này đã bị gỡ. Cài lại ở Cài đặt → Adapter.`)
     if (kind !== 'claude' && kind !== 'codex' && !ext) throw new Error('Loại agent này chưa được hỗ trợ')
     // `claude -p` bỏ qua hộp thoại "tin cậy thư mục": ô chat chỉ chạy ở thư mục người dùng đã tin ở ô CLI.
-    if (chatMode && !(await isClaudeFolderTrusted(ws.path)))
+    if (chatMode && kind === 'claude' && !(await isClaudeFolderTrusted(ws.path)))
       throw new Error(
         'Claude Code chưa được xác nhận tin cậy thư mục dự án này. Đổi agent sang ô CLI, mở phiên một lần và chọn "Yes, I trust this folder", rồi quay lại ô chat.'
       )
     const exe = ext ? await this.external.exe(ext) : (await this.adapters.exe(kind as 'claude' | 'codex')).path
     // Connector (MCP) bật cho agent này; thiếu bí mật → báo lỗi ngay, trước khi ghi gì.
-    const conn = effectiveConnectors(this.settings.get(), agent.workspaceId, agent.id)
+    const all = effectiveConnectors(this.settings.get(), agent.workspaceId, agent.id)
+    // Adapter ngoài không nhận cấu hình MCP: không dùng được connector nào, nên không đưa bí mật của chúng vào phiên.
+    const conn = ext && !ext.manifest.mcpConfigFlag ? { ...all, servers: [] } : all
     // Connector đăng nhập OAuth: làm mới token trước (hết hạn mà không làm mới được → báo lỗi, không mở phiên).
     const fresh = await this.oauth.fresh(conn.servers.filter((c) => c.oauth).map((c) => ({ name: c.bearerSecret, label: c.label || c.id })))
-    const connEnv = connectorEnv(conn.servers, (n) => fresh.get(n) ?? this.secrets.get(n))
+    // Bí mật OAuth chỉ đi vào phiên dưới dạng access token đã làm mới, không bao giờ cả khối JSON (có refresh token).
+    const connEnv = connectorEnv(conn.servers, (n) => fresh.get(n) ?? (n.startsWith(OAUTH_SECRET_PREFIX) ? undefined : this.secrets.get(n)))
     const connCmds = await resolveCommands(conn.servers, ws.path)
     // Adapter ngoài không có cách tiếp tục phiên (chưa biết id phiên của CLI đó).
     const resume = req.resume && !!agent.lastSessionId && !ext
@@ -453,19 +482,25 @@ export class AgentService {
       userEnv = l.env
       transcriptFile = null
     } else if (kind === 'codex') {
-      args = codexArgs({
-        rules: rules + skillText,
-        ...this.hub.endpoints(),
-        permissionMode: agent.permissionMode,
-        resumeId: codexResume,
-        prompt: opening,
-        userArgs: [
-          ...codexConnectorArgs(conn, connCmds, await codexConfiguredServers(ws.path), connEnv),
-          ...(await codexSkillArgs(sk.denied.codex, ws.path)),
-          ...this.adapters.launchArgs('codex', agent)
-        ]
-      })
-      transcriptFile = (codexResume && (await findCodexRollout(codexResume))) || join(ws.path, '.sessions', `${sessionId}.rollout-pending`)
+      const codexUser = [...codexConnectorArgs(conn, connCmds, await codexConfiguredServers(ws.path), connEnv), ...(await codexSkillArgs(sk.denied.codex, ws.path))]
+      if (chatMode) {
+        // Ô chat: `codex [-c …] app-server`; luật phiên + mức quyền đi qua thread/start (xem chat/codexSession.ts).
+        const user = codexAppServerUserArgs(this.adapters.launchArgs('codex', agent))
+        if (user.dropped.length) console.warn('[codex-chat] bỏ tham số không dùng được với app-server:', user.dropped.join(' '))
+        args = [...codexConfigArgs(this.hub.endpoints()), ...codexUser, ...user.args]
+        // Context lấy thẳng từ thread/tokenUsage/updated, không cần theo rollout.
+        transcriptFile = null
+      } else {
+        args = codexArgs({
+          rules: rules + skillText,
+          ...this.hub.endpoints(),
+          permissionMode: agent.permissionMode,
+          resumeId: codexResume,
+          prompt: opening,
+          userArgs: [...codexUser, ...this.adapters.launchArgs('codex', agent)]
+        })
+        transcriptFile = (codexResume && (await findCodexRollout(codexResume))) || join(ws.path, '.sessions', `${sessionId}.rollout-pending`)
+      }
     } else {
       args = resume ? ['--resume', sessionId] : ['--session-id', sessionId]
       // Ô chat: một tiến trình sống suốt phiên, vào / ra bằng JSON từng dòng; xin quyền qua control_request (xem chat/session.ts).
@@ -504,16 +539,39 @@ export class AgentService {
       ...statusEnv
     }
     let ptyId: string
-    let chat: ChatSession | undefined
+    let chat: ChatSessionBase | undefined
     try {
       if (chatMode) {
         ptyId = `chat:${sessionId}`
-        const spec = spawnSpec(command, Array.isArray(args) ? args : [args])
-        // Tiếp tục phiên: đọc lại từ transcript. Phiên mới (kể cả sau bàn giao): giữ hội thoại cũ trong ô, chỉ chen thêm dòng ngăn cách.
-        const history = resume ? await loadHistory(transcriptPath(ws.path, sessionId)) : (this.chats.get(agent.id)?.snapshot().items ?? []).slice(-200)
-        chat = this.makeChat(owner, agent, ptyId, { command: spec.command, args: spec.args, cwd: ws.path, env: { ...independentSessionEnv(process.env), ...sessionEnv } })
+        const env = { ...independentSessionEnv(process.env), ...sessionEnv }
+        // Tiếp tục phiên: đọc lại từ transcript / rollout. Phiên mới (kể cả sau bàn giao): giữ hội thoại cũ trong ô, chỉ chen thêm dòng ngăn cách.
+        const kept = (this.chats.get(agent.id)?.snapshot().items ?? []).slice(-200)
+        let history: ChatItem[]
+        if (kind === 'codex') {
+          history = codexResume ? await loadCodexHistory(await findCodexRollout(codexResume, new Date(), codexHome(), 60)) : kept
+          chat = new CodexChatSession({
+            ...this.chatCallbacks(owner, agent, ptyId),
+            command,
+            args: args as string[],
+            cwd: ws.path,
+            env,
+            thread: { cwd: ws.path, developerInstructions: rules + skillText, ...codexThreadPermission(agent.permissionMode) },
+            resumeId: codexResume,
+            hookUrl: this.hub.endpoints().hookUrl,
+            onSessionId: (threadId) => {
+              if (agent.lastSessionId === threadId) return
+              agent.lastSessionId = threadId
+              void this.save()
+              this.apiEvent({ type: 'updated', agent: { ...agent } })
+            }
+          })
+        } else {
+          const spec = spawnSpec(command, Array.isArray(args) ? args : [args])
+          history = resume ? await loadHistory(transcriptPath(ws.path, sessionId)) : kept
+          chat = new ChatSession({ ...this.chatCallbacks(owner, agent, ptyId), command: spec.command, args: spec.args, cwd: ws.path, env })
+        }
         chat.start(history, sessionId, resume)
-        // Phiên mới: lời mở đi như lượt đầu tiên (tiếp tục phiên thì Claude đứng chờ người dùng gõ).
+        // Phiên mới: lời mở đi như lượt đầu tiên (tiếp tục phiên thì agent đứng chờ người dùng gõ).
         if (!resume) chat.send(opening, { origin: 'app' })
       } else {
         ptyId = this.ptys.spawn(
@@ -547,7 +605,7 @@ export class AgentService {
       vars,
       transcript,
       token: hubToken.token,
-      rolloutKnown: kind === 'codex' ? !transcriptFile!.endsWith('.rollout-pending') : undefined,
+      rolloutKnown: kind === 'codex' ? !transcriptFile?.endsWith('.rollout-pending') : undefined,
       chat
     }
     if (chat) this.chats.set(agent.id, chat)
@@ -558,29 +616,29 @@ export class AgentService {
     else this.board.setActivity(agent, 'starting')
     this.board.setHandoff(agent, undefined)
     if (kind === 'claude') agent.lastSessionId = sessionId
-    // Bản bàn giao đã chép vào file phiên mới: dùng một lần.
-    if (handoff) delete this.data.handoffs![agent.id]
+    // Bản bàn giao đã chép vào file phiên mới: dùng một lần. Tiếp tục phiên cũ thay cho bản bàn giao: bỏ nó (để
+    // lần mở phiên mới sau này không đọc một bản bàn giao đã cũ).
+    if (handoff || (resume && this.data.handoffs?.[agent.id])) delete this.data.handoffs![agent.id]
     await this.save()
     this.pluginHooks.onSession?.('agent.session.started', agent)
-    return publicRun(run)
+    return { ...publicRun(run), ...(agent.lastSessionId ? { lastSessionId: agent.lastSessionId } : {}) }
   }
 
-  /** Dựng ChatSession cho một agent: sự kiện → renderer, thoát → finish, ctx / phase → board. */
-  private makeChat(owner: WebContents, agent: Agent, ptyId: string, o: { command: string; args: string[] | string; cwd: string; env: NodeJS.ProcessEnv }): ChatSession {
+  /** Nối phiên ô chat của một agent với app: sự kiện → renderer, thoát → finish, ctx / phase → board. */
+  private chatCallbacks(owner: WebContents, agent: Agent, ptyId: string): Pick<ChatSessionOptions, 'emit' | 'onExit' | 'onContext' | 'onPhase'> {
     const agentId = agent.id
-    return new ChatSession({
-      ...o,
+    return {
       emit: (e) => {
         if (!owner.isDestroyed()) owner.send(IPC.chatEvent, { ...e, agentId })
       },
       onExit: () => this.finish(agentId, ptyId),
       onContext: (used, size) => this.onContext(agentId, ptyId, { used, size, at: new Date().toISOString() }),
       onPhase: (phase) => {
-        // Hook của Claude Code cũng cập nhật trạng thái; ở đây chỉ phần hook không biết: thẻ xin quyền qua control_request.
+        // Hook của CLI cũng cập nhật trạng thái; ở đây chỉ phần hook không biết: thẻ xin quyền trong ô chat.
         if (phase === 'waiting') this.board.setActivity(agent, 'waiting', { reason: 'permission' })
         else if (phase === 'busy' && this.board.statusOf(agentId)?.reason === 'permission') this.board.setActivity(agent, 'working')
       }
-    })
+    }
   }
 
   /** Hội thoại của ô chat (phiên đang chạy, hoặc phiên gần nhất đọc từ transcript khi chưa có tiến trình). */
@@ -590,7 +648,11 @@ export class AgentService {
     const agent = this.data.agents.find((a) => a.id === agentId)
     const ws = agent ? this.workspaces.get(agent.workspaceId) : undefined
     if (!agent || !ws || !agent.lastSessionId) return { items: [], state: { phase: 'off' } }
-    return { items: await loadHistory(transcriptPath(ws.path, agent.lastSessionId)), state: { phase: 'off', sessionId: agent.lastSessionId } }
+    const items =
+      agentKind(agent) === 'codex'
+        ? await loadCodexHistory(await findCodexRollout(agent.lastSessionId, new Date(), codexHome(), 60))
+        : await loadHistory(transcriptPath(ws.path, agent.lastSessionId))
+    return { items, state: { phase: 'off', sessionId: agent.lastSessionId } }
   }
 
   chatSend(req: ChatSendRequest): void {
@@ -614,7 +676,8 @@ export class AgentService {
   async setCell(agentId: string, cell: 'cli' | 'chat'): Promise<Agent> {
     const agent = this.data.agents.find((a) => a.id === agentId)
     if (!agent) throw new Error('Agent không tồn tại')
-    if (agentKind(agent) !== 'claude') throw new Error('Ô chat chỉ có cho Claude Code')
+    const kind = agentKind(agent)
+    if (kind !== 'claude' && kind !== 'codex') throw new Error('Ô chat chỉ có cho Claude Code và Codex')
     if (this.running.has(agentId)) throw new Error('Dừng phiên đang chạy trước khi đổi giao diện ô')
     if (cell === 'chat') agent.cell = 'chat'
     else delete agent.cell
@@ -672,10 +735,18 @@ export class AgentService {
     const agent = this.data.agents.find((a) => a.id === agentId)
     if (!agent || agentKind(agent) === 'terminal') return
     this.board.setActivity(agent, 'stopped')
+    // Người dùng dừng trong lúc chờ bàn giao: không mở phiên mới; bản bàn giao giữ cho lần mở phiên sau.
+    if (run.userStopped && this.board.statusOf(agentId)?.handoff === 'restarting') this.board.setHandoff(agent, undefined)
     this.pluginHooks.onSession?.('agent.session.stopped', agent)
     // Đóng vì đã bàn giao: nhờ giao diện mở phiên mới trong cùng ô (sau khi nó nhận sự kiện thoát
     // của terminal cũ, PtyManager gửi sự kiện đó ngay sau khi gọi hàm này).
-    if (this.board.statusOf(agentId)?.handoff === 'restarting' && this.data.handoffs?.[agentId]) {
+    const restarting = !run.userStopped && this.board.statusOf(agentId)?.handoff === 'restarting' && !!this.data.handoffs?.[agentId]
+    // Tin agent khác gửi mà chưa kịp gõ: không gõ vào một phiên sau (người dùng mở lại lúc khác). Bàn giao thì giữ làm
+    // lời mở của phiên sau (thẻ việc đã chuyển sang agent này rồi). Phiên tự mở lại vì bàn giao thì giữ nguyên hàng chờ.
+    if (!restarting)
+      for (const m of this.mail.drain(agentId))
+        if (m.handoff && !this.firstTasks.has(agentId)) this.firstTasks.set(agentId, { from: m.fromName, task: m.text, created: false, handoff: true })
+    if (restarting) {
       setImmediate(() => {
         if (!run.owner.isDestroyed()) run.owner.send(IPC.agentRestart, agentId)
       })
@@ -777,10 +848,12 @@ export class AgentService {
     if (payload.hook_event_name === 'SessionStart' && threadId && agent.lastSessionId !== threadId) {
       agent.lastSessionId = threadId
       await this.save()
+      this.apiEvent({ type: 'updated', agent: { ...agent } })
     }
     if (payload.transcript_path) run.rolloutKnown = true
     if (run.rolloutKnown || !threadId) return
-    const file = await findCodexRollout(threadId)
+    // Thread mới: rollout nằm ở hôm nay / mấy hôm gần đây; không quét sâu ở mỗi hook.
+    const file = await findCodexRollout(threadId, new Date(), codexHome(), 3, false)
     if (file && this.running.get(agent.id) === run && !run.rolloutKnown) {
       run.rolloutKnown = true
       await run.transcript?.follow(file)
@@ -893,7 +966,9 @@ export class AgentService {
       board: this.board,
       scope: () => resolveScope(this.settings.get(), ws.id, agent.id),
       browser: this.browser,
-      devServers: this.devServers?.agentApi(ws.id, agent.id),
+      devServers: this.devServers?.agentApi(ws.id, agent.id, (dev) =>
+        this.confirm(agent, 'preview_start', { workspaceId: ws.id, fromAgentId: agent.id, fromName: agent.name, action: 'devserver', dev })
+      ),
       teammates: () =>
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
       handoff: (summary) => this.completeHandoff(agent.id, summary),
@@ -1101,6 +1176,28 @@ export class AgentService {
     return answer
   }
 
+  /**
+   * Agent quyền thấp sai agent quyền cao hơn (gõ việc vào phiên của nó): agent plan / default không được mượn agent
+   * auto để làm điều chính nó không được làm → hỏi người dùng trước. null = được làm tiếp; chuỗi = trả lời cho agent.
+   */
+  private async approveDrive(caller: Agent, ws: Workspace, target: Agent, tool: 'send' | 'open' | 'handoff', text: string): Promise<string | null> {
+    if (!isCliKind(agentKind(target)) || !permissionAbove(target.permissionMode, caller.permissionMode)) return null
+    const answer = await this.confirm(caller, `agent_${tool}`, {
+      workspaceId: ws.id,
+      fromAgentId: caller.id,
+      fromName: caller.name,
+      action: 'drive',
+      tool,
+      target: this.targetInfo(target),
+      text,
+      from: caller.permissionMode,
+      to: target.permissionMode
+    })
+    if (answer === 'allow') return null
+    const what = tool === 'send' ? 'sending this message to' : tool === 'open' ? 'opening with this task' : 'handing your task over to'
+    return AgentService.declined(answer, `${what} "${target.name}", which has a higher permission mode (${target.permissionMode}) than yours (${caller.permissionMode}); nothing was sent`)
+  }
+
   private static declined(answer: AgentRequestAnswer, what: string): string {
     return answer === 'deny'
       ? `The user declined: ${what}. Do not retry; ask the user what they want instead.`
@@ -1197,6 +1294,10 @@ export class AgentService {
       return `"${target.name}" is already running; its cell is shown to the user.`
     }
     if (task && agentKind(target) === 'terminal') throw new Error('A terminal cell cannot receive a task.')
+    if (task) {
+      const no = await this.approveDrive(caller, ws, target, 'open', task)
+      if (no) return no
+    }
     if (task) this.firstTasks.set(target.id, { from: caller.name, task, created: false })
     this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
     return `Opening "${target.name}" in a new session next to your cell${task ? ', starting with your task' : ''} (if the user is looking at another workspace, it starts when they open this one).`
@@ -1220,6 +1321,8 @@ export class AgentService {
     const text = input.text.trim()
     if (!text) throw new Error('text is empty.')
     if (text.length > MESSAGE_MAX) throw new Error(`text is too long (max ${MESSAGE_MAX} characters).`)
+    const no = await this.approveDrive(caller, ws, target, 'send', text)
+    if (no) return no
     this.mail.enqueue(target.id, { fromId: caller.id, fromName: caller.name, text, at: Date.now() })
     this.deliverMail()
     const left = this.mail.pending(target.id)
@@ -1297,6 +1400,8 @@ export class AgentService {
       throw new Error(
         `"${target.name}" still has an open task "${busy.title}" (scope: ${busy.scope || 'not set'}). Nothing was handed off. Tell the user; ${target.name} can finish it with task_done first, or use agent_send for a small request.`
       )
+    const no = await this.approveDrive(caller, ws, target, 'handoff', summary)
+    if (no) return no
 
     const card = await this.board.transferTask(ws, caller.id, target, run?.sessionId ?? '', summary, input.title)
     const body = handoffBody(caller.name, summary, card)
@@ -1332,10 +1437,12 @@ export class AgentService {
 
   /** Giá trị thật trong kho bí mật (để che trong nhật ký / trạng thái trả cho agent). */
   private secretValues(): string[] {
-    return this.secrets
-      .list()
-      .items.map((i) => this.secrets.get(i.name) ?? '')
-      .filter(Boolean)
+    return secretParts(
+      this.secrets
+        .list()
+        .items.map((i) => this.secrets.get(i.name) ?? '')
+        .filter(Boolean)
+    )
   }
 
   /** Tool agent_status: agent kia đang làm gì (rẻ, không đọc transcript). */
@@ -1458,7 +1565,10 @@ export class AgentService {
 
   stop(agentId: string): void {
     const run = this.running.get(agentId)
-    if (run) this.kill(run)
+    if (run) {
+      run.userStopped = true
+      this.kill(run)
+    } else if (this.startingRuns.has(agentId)) this.stopAfterStart.add(agentId)
   }
 
   /** Dừng tiến trình của một phiên (pty hoặc tiến trình ô chat). */

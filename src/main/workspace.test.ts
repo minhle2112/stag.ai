@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CreateWorkspaceRequest } from '@shared/types'
 import { today } from './fsutil'
-import { autoMemoryDir, ensureIgnored, safeName, WorkspaceStore } from './workspace'
+import { autoMemoryDir, ensureIgnored, gitignoreEscape, safeName, WorkspaceStore } from './workspace'
 
 // userData và thư mục home (~/.claude/projects/...) đều trỏ vào thư mục tạm.
 // Template gốc lấy từ resources/templates của repo (chỉ đọc) để test đúng template thật.
@@ -259,6 +259,30 @@ describe('WorkspaceStore.create', () => {
     const { workspace } = await new WorkspaceStore().create(req({ name: 'A/B:C' }))
     expect(workspace.name).toBe('A-B-C')
     expect(workspace.vaultPath).toBe(join(project, 'A-B-C memory'))
+  })
+})
+
+describe('WorkspaceStore.load', () => {
+  it('workspaces.json hỏng: mở với danh sách trống, giữ bản hỏng; lưu lại được', async () => {
+    await fs.mkdir(paths.userData, { recursive: true })
+    const file = join(paths.userData, 'workspaces.json')
+    await fs.writeFile(file, '[{"id":"a","pa')
+    const store = new WorkspaceStore()
+    await store.load()
+    expect(store.list()).toEqual([])
+    expect((await fs.readdir(paths.userData)).some((n) => n.startsWith('workspaces.json.broken-'))).toBe(true)
+    await Promise.all([store.create(req()), store.remove('nope')])
+    expect(JSON.parse(await readFile(file))).toHaveLength(1)
+  })
+})
+
+describe('gitignoreEscape', () => {
+  it('thoát ký tự đặc biệt của .gitignore', () => {
+    expect(gitignoreEscape('Demo memory')).toBe('Demo memory')
+    expect(gitignoreEscape('#notes')).toBe('\\#notes')
+    expect(gitignoreEscape('!x')).toBe('\\!x')
+    expect(gitignoreEscape('a [b]*?')).toBe('a \\[b]\\*\\?')
+    expect(gitignoreEscape('trail ')).toBe('trail\\ ')
   })
 })
 

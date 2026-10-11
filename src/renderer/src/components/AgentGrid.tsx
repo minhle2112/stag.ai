@@ -191,8 +191,8 @@ function AgentCell({ ws, agent, state }: { ws: Workspace; agent: Agent; state: W
   // Agent của adapter ngoài: hiện tên adapter (vd. Aider) trên ô nhận diện.
   const extLabel = useExternalAdapters((s) => (kind === 'external' ? (s.items.find((x) => x.manifest.id === agent.adapterId)?.manifest.label ?? `${agent.adapterId} (đã gỡ)`) : null))
   const view = statusView(running, starting, status, kind)
-  // Ô chat (Claude Code chạy stream-json, xem shared/chat.ts): hội thoại thay cho terminal.
-  const chat = kind === 'claude' && agent.cell === 'chat'
+  // Ô chat (Claude Code stream-json / Codex app-server, xem shared/chat.ts): hội thoại thay cho terminal.
+  const chat = (kind === 'claude' || kind === 'codex') && agent.cell === 'chat'
 
   useEffect(() => {
     if (chat) return

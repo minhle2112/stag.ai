@@ -76,6 +76,14 @@ export class AgentMail {
     return this.queues.get(targetId)?.length ?? 0
   }
 
+  /** Phiên của agent nhận đã đóng: lấy ra (và bỏ khỏi hàng chờ) các tin chưa gõ. */
+  drain(targetId: string): MailItem[] {
+    const q = this.queues.get(targetId) ?? []
+    this.queues.delete(targetId)
+    this.quietUntil.delete(targetId)
+    return q
+  }
+
   /** Agent nhận bị xoá: bỏ tin của nó. */
   forget(agentId: string): void {
     this.queues.delete(agentId)

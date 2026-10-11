@@ -61,3 +61,14 @@ describe('AgentMail.check', () => {
     expect(m.pending('b')).toBe(0)
   })
 })
+
+describe('AgentMail.drain', () => {
+  it('lấy hết tin chưa gõ và bỏ khỏi hàng chờ', () => {
+    const m = new AgentMail()
+    m.enqueue('t', { fromId: 'a', fromName: 'A', text: 'x', at: 1 })
+    m.enqueue('t', { fromId: 'a', fromName: 'A', text: 'h', at: 2, handoff: true })
+    expect(m.drain('t').map((i) => i.text)).toEqual(['x', 'h'])
+    expect(m.pending('t')).toBe(0)
+    expect(m.drain('t')).toEqual([])
+  })
+})

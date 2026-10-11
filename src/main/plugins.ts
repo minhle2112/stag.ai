@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { basename, extname, join, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import {
   fillSlotUrl,
   newCapabilities,
@@ -111,6 +111,8 @@ interface Entry {
   dir: string
   installedAt: string
   approved: PluginCapability[]
+  /** Lúc người dùng duyệt plugin (kể cả plugin không xin quyền nào: worker vẫn là một tiến trình Node). Vắng = chưa duyệt. */
+  approvedAt?: string
   config: Record<string, unknown>
   /** Mã bí mật trong địa chỉ webhook (chỉ ở userData, không ra vault). */
   webhookToken?: string
@@ -239,6 +241,8 @@ export class PluginHost {
     try {
       const raw = JSON.parse((await readText(this.file)) ?? '{}') as { plugins?: Entry[] }
       this.entries = (raw.plugins ?? []).filter((e) => e?.manifest?.id)
+      // Bản cũ chưa có approvedAt: plugin đã được duyệt quyền thì coi như đã duyệt; plugin 0 quyền phải duyệt một lần.
+      for (const e of this.entries) if (!e.approvedAt && e.approved?.length) e.approvedAt = e.installedAt
     } catch {
       this.entries = []
     }
@@ -338,7 +342,8 @@ export class PluginHost {
     const r = this.runtime(e.manifest.id)
     let state = r.status.state
     const missing = newCapabilities(e.manifest, e.approved)
-    if (missing.length) state = e.approved.length || !e.manifest.capabilities.length ? 'upgrade_pending' : 'approval_pending'
+    if (!e.approvedAt) state = 'approval_pending'
+    else if (missing.length) state = 'upgrade_pending'
     else if (!this.enabled(e)) state = 'disabled'
     else if (!e.manifest.entrypoints.worker) state = 'ready'
     const { webhookToken, ...rest } = e
@@ -384,7 +389,7 @@ export class PluginHost {
 
   /** Plugin được chạy: đã duyệt đủ quyền và bật ở cấp app. */
   private runnable(e: Entry): boolean {
-    return !newCapabilities(e.manifest, e.approved).length && this.enabled(e)
+    return !!e.approvedAt && !newCapabilities(e.manifest, e.approved).length && this.enabled(e)
   }
 
   // ---- cài / gỡ ----
@@ -439,6 +444,7 @@ export class PluginHost {
       installedAt: old?.installedAt ?? now(),
       // Cài lại: giữ quyền đã duyệt (chỉ những quyền manifest mới vẫn xin); quyền mới → chờ duyệt.
       approved: old ? old.approved.filter((c) => manifest.capabilities.includes(c)) : [],
+      ...(old?.approvedAt ? { approvedAt: old.approvedAt } : {}),
       config: normalizePluginConfig(manifest.instanceConfigSchema, old?.config ?? {}).config,
       ...(manifest.webhooks.length || old?.webhookToken ? { webhookToken: old?.webhookToken ?? newToken() } : {})
     }
@@ -460,6 +466,7 @@ export class PluginHost {
   async approve(id: string): Promise<InstalledPlugin> {
     const e = this.get(id)
     e.approved = [...e.manifest.capabilities]
+    e.approvedAt = now()
     await this.save()
     this.log(id, 'info', `Đã duyệt quyền: ${e.approved.join(', ') || '(không có)'}`)
     if (this.runnable(e)) await this.start(id)
@@ -731,30 +738,39 @@ export class PluginHost {
       case 'config.get':
         return e.config
       case 'state.get':
-        return (await this.readState(id))[stateKey(p)]
-      case 'state.set': {
-        const st = await this.readState(id)
-        st[stateKey(p)] = p.value
-        await this.writeState(id, st)
+        return this.updateState(id, (st) => ({ result: st[stateKey(p)], changed: false }))
+      case 'state.set':
+        return this.updateState(id, (st) => {
+          st[stateKey(p)] = p.value
+          return { result: null, changed: true }
+        })
+      case 'state.delete':
+        return this.updateState(id, (st) => {
+          delete st[stateKey(p)]
+          return { result: null, changed: true }
+        })
+      case 'agents.list': {
+        // Chỉ workspace / agent mà plugin đang bật.
+        const all = api.agents()
+        return {
+          ...all,
+          workspaces: all.workspaces.filter((w) => this.onIn(id, w.id)),
+          agents: all.agents.filter((a) => this.onIn(id, a.workspaceId, a.id))
+        }
+      }
+      case 'agent.sessions.send': {
+        const agentId = s(p.agentId)
+        const a = api.agents().agents.find((x) => x.id === agentId)
+        if (a && !this.onIn(id, a.workspaceId, a.id)) throw Object.assign(new Error('Plugin đang tắt ở agent / workspace này.'), { code: -32001 })
+        await api.sendToAgent(agentId, s(p.text, 20_000))
         return null
       }
-      case 'state.delete': {
-        const st = await this.readState(id)
-        delete st[stateKey(p)]
-        await this.writeState(id, st)
-        return null
-      }
-      case 'agents.list':
-        return api.agents()
-      case 'agent.sessions.send':
-        await api.sendToAgent(s(p.agentId), s(p.text, 20_000))
-        return null
       case 'board.list':
-        return api.board(s(p.workspaceId))
+        return api.board(this.wsOn(id, s(p.workspaceId)))
       case 'vault.read':
-        return api.vaultRead(s(p.workspaceId), s(p.path, 1000))
+        return api.vaultRead(this.wsOn(id, s(p.workspaceId)), s(p.path, 1000))
       case 'vault.write':
-        await api.vaultWrite(s(p.workspaceId), s(p.path, 1000), typeof p.content === 'string' ? p.content : '')
+        await api.vaultWrite(this.wsOn(id, s(p.workspaceId)), s(p.path, 1000), typeof p.content === 'string' ? p.content : '')
         return null
       case 'files.list': {
         const ws = this.filesWorkspace(id, s(p.workspaceId))
@@ -772,6 +788,17 @@ export class PluginHost {
     }
   }
 
+  /** Plugin bật ở workspace / agent này (Cài đặt → Plugin theo cấp). */
+  private onIn(id: string, workspaceId: string, agentId?: string): boolean {
+    return !this.settings || pluginOn(this.settings, id, workspaceId, agentId)
+  }
+
+  /** `workspaceId` nếu plugin bật ở đó, không thì lỗi (board / vault của workspace đã tắt plugin). */
+  private wsOn(id: string, workspaceId: string): string {
+    if (!this.onIn(id, workspaceId)) throw Object.assign(new Error('Plugin đang tắt ở workspace này.'), { code: -32001 })
+    return workspaceId
+  }
+
   /** Workspace cho files.*: phải có, và plugin không bị tắt ở workspace đó. */
   private filesWorkspace(id: string, workspaceId: string): { path: string; vaultPath: string } {
     const ws = this.deps.api.workspacePaths(workspaceId)
@@ -780,26 +807,31 @@ export class PluginHost {
     return ws
   }
 
-  private stateWrites = new Map<string, Promise<void>>()
+  /** Lần đọc / ghi trạng thái đang chờ theo plugin: nối đuôi nhau, hai lời gọi song song không mất thay đổi của nhau. */
+  private stateChain = new Map<string, Promise<unknown>>()
 
-  private async readState(id: string): Promise<Record<string, unknown>> {
-    await this.stateWrites.get(id)
-    try {
-      return JSON.parse((await readText(join(this.root, 'state', `${id}.json`))) ?? '{}') as Record<string, unknown>
-    } catch {
-      return {}
+  private updateState<T>(id: string, fn: (st: Record<string, unknown>) => { result: T; changed: boolean }): Promise<T> {
+    const file = join(this.root, 'state', `${id}.json`)
+    const run = async (): Promise<T> => {
+      let st: Record<string, unknown>
+      try {
+        st = JSON.parse((await readText(file)) ?? '{}') as Record<string, unknown>
+      } catch {
+        st = {}
+      }
+      const { result, changed } = fn(st)
+      if (!changed) return result
+      const text = JSON.stringify(st)
+      if (text.length > 5_000_000) throw new Error('Dữ liệu của plugin vượt 5 MB.')
+      await fs.mkdir(dirname(file), { recursive: true })
+      // Ghi file tạm rồi đổi tên: tắt máy giữa chừng không để lại JSON hỏng (mất hết dữ liệu của plugin).
+      await fs.writeFile(`${file}.tmp`, text, 'utf8')
+      await fs.rename(`${file}.tmp`, file)
+      return result
     }
-  }
-
-  private async writeState(id: string, st: Record<string, unknown>): Promise<void> {
-    const text = JSON.stringify(st)
-    if (text.length > 5_000_000) throw new Error('Dữ liệu của plugin vượt 5 MB.')
-    const p = (async () => {
-      await fs.mkdir(join(this.root, 'state'), { recursive: true })
-      await fs.writeFile(join(this.root, 'state', `${id}.json`), text, 'utf8')
-    })()
-    this.stateWrites.set(id, p.catch(() => {}))
-    await p
+    const p = (this.stateChain.get(id) ?? Promise.resolve()).then(run)
+    this.stateChain.set(id, p.catch(() => undefined))
+    return p
   }
 
   // ---- sự kiện, tool, slot ----
@@ -1049,6 +1081,7 @@ export class PluginHost {
   async bridge(id: string, method: string, params: Record<string, unknown>, ctx: PluginCallContext): Promise<unknown> {
     const e = this.get(id)
     if (!this.runnable(e)) throw new Error(`Plugin ${e.manifest.displayName} chưa được duyệt quyền hoặc đang tắt.`)
+    if (ctx.workspaceId && !this.onIn(id, ctx.workspaceId, ctx.agentId)) throw new Error(`Plugin ${e.manifest.displayName} đang tắt ở workspace / agent này.`)
     if (method === 'data.get' || method === 'action.perform') {
       const key = typeof params.key === 'string' ? params.key.slice(0, 100) : ''
       if (!key) throw new Error('Thiếu "key".')

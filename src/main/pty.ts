@@ -42,6 +42,9 @@ export class PtyManager {
     })
     const session: Session = { proc, owner, lastInput: 0, output: '' }
     this.sessions.set(id, session)
+    // Cửa sổ đóng thì tắt terminal; terminal thoát trước thì gỡ listener (không thì mỗi phiên để lại một listener).
+    const onDestroyed = (): void => this.kill(id)
+    owner.once('destroyed', onDestroyed)
 
     proc.onData((data) => {
       session.output += data
@@ -50,12 +53,12 @@ export class PtyManager {
     })
     proc.onExit(({ exitCode, signal }) => {
       this.sessions.delete(id)
+      if (!owner.isDestroyed()) owner.removeListener('destroyed', onDestroyed)
       this.ended.set(id, session.output.slice(-OUTPUT_MAX))
       if (this.ended.size > ENDED_MAX) this.ended.delete(this.ended.keys().next().value!)
       extras.onExit?.({ exitCode, signal })
       if (!owner.isDestroyed()) owner.send(IPC.ptyExit, id, { exitCode, signal })
     })
-    owner.once('destroyed', () => this.kill(id))
     return id
   }
 

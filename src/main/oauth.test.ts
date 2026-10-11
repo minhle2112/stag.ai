@@ -85,8 +85,14 @@ describe('OAuthService', () => {
     const saved = JSON.parse(secrets.get('OAUTH_DEMO')!)
     expect(saved.tokens).toMatchObject({ access_token: 'at-1', refresh_token: 'rt-1' })
     expect(saved.client.client_id).toBe('cid-1')
-    // Còn 60 s (< 5 phút) → làm mới.
-    expect(await oauth.accessToken('OAUTH_DEMO')).toBe('at-2')
+    // Còn 60 s (< 5 phút) → làm mới; gọi song song chỉ làm mới một lần (refresh token xoay vòng dùng được một lần).
+    const posts = log.length
+    expect(await Promise.all([oauth.accessToken('OAUTH_DEMO'), oauth.accessToken('OAUTH_DEMO'), oauth.fresh([{ name: 'OAUTH_DEMO', label: 'demo' }])])).toEqual([
+      'at-2',
+      'at-2',
+      new Map([['OAUTH_DEMO', 'at-2']])
+    ])
+    expect(log.length - posts).toBe(1)
     expect(JSON.parse(secrets.get('OAUTH_DEMO')!).tokens).toMatchObject({ access_token: 'at-2', refresh_token: 'rt-1' })
     // Đã có hạn dài → dùng luôn, không gọi máy chủ.
     const before = log.length

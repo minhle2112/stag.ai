@@ -219,6 +219,8 @@ export interface AgentRun {
   startedAt: string
   /** Thiếu = 'cli'. */
   mode?: AgentCell
+  /** `Agent.lastSessionId` ở main lúc trả về (Codex: thread id, khác `sessionId` của app; có thể chưa biết). */
+  lastSessionId?: string
 }
 
 export interface AgentsSnapshot {

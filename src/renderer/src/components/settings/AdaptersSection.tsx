@@ -324,14 +324,15 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
   const [error, run] = useSaveError()
   const [busy, setBusy] = useState<'reinstall' | 'remove' | null>(null)
 
-  const check = (): void => {
+  // Mở trang: chỉ tìm file chạy. Bấm "Kiểm tra lại": chạy cả lệnh lấy phiên bản (mã của gói).
+  const check = (runVersion = false): void => {
     setStatus('loading')
     window.stag.externalAdapters
-      .check(id)
+      .check(id, runVersion)
       .then(setStatus)
       .catch((e) => setStatus({ id, path: null, version: null, error: errText(e), checkedAt: new Date().toISOString() }))
   }
-  useEffect(check, [id, a?.installedAt])
+  useEffect(() => check(), [id, a?.installedAt])
 
   if (!a) {
     return (
@@ -412,7 +413,7 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
           sub={st?.error ? <span className="text-danger">{st.error}</span> : st?.path ? <span className={mono}>{st.path}</span> : 'Đang tìm…'}
         />
         <Row label="Phiên bản" sub={st?.version ?? (status === 'loading' ? 'Đang kiểm tra…' : '—')}>
-          <SmallButton onClick={check} disabled={status === 'loading'}>
+          <SmallButton onClick={() => check(true)} disabled={status === 'loading'}>
             {status === 'loading' ? 'Đang kiểm tra…' : 'Kiểm tra lại'}
           </SmallButton>
         </Row>

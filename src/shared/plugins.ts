@@ -586,6 +586,8 @@ export interface InstalledPlugin {
   installedAt: string
   /** Quyền người dùng đã duyệt (khác manifest.capabilities → chờ duyệt). */
   approved: PluginCapability[]
+  /** Lúc người dùng duyệt plugin; vắng = chưa duyệt (chưa chạy, kể cả khi không xin quyền nào). */
+  approvedAt?: string
   /** Cấu hình hiện tại (theo instanceConfigSchema; không có bí mật). */
   config: Record<string, unknown>
   status: PluginStatus

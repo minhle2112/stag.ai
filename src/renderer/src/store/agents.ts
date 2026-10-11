@@ -210,7 +210,8 @@ export const useAgents = create<AgentsState>((set, get) => {
         if (run.mode !== 'chat') bindPty(agentId, run.ptyId)
         patch(wsId, (cur) => ({
           running: { ...cur.running, [agentId]: run },
-          agents: cur.agents.map((a) => (a.id === agentId ? { ...a, lastSessionId: run.sessionId } : a))
+          // Id để "tiếp tục phiên" do main giữ (Codex: thread id, biết sau qua sự kiện 'updated').
+          agents: cur.agents.map((a) => (a.id === agentId && run.lastSessionId ? { ...a, lastSessionId: run.lastSessionId } : a))
         }))
       } catch (e) {
         patch(wsId, (cur) => ({ errors: { ...cur.errors, [agentId]: errMsg(e) } }))

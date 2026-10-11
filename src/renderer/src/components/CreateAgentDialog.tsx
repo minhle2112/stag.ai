@@ -122,7 +122,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, onCanc
         name: trimmed,
         role: role.trim(),
         permissionMode: mode,
-        ...(kind === 'claude' && cell === 'chat' ? { cell } : {}),
+        ...(cli && cell === 'chat' ? { cell } : {}),
         ...(cli && model.trim() ? { model: model.trim() } : {}),
         ...(cli && effort ? { effort } : {}),
         ...(!terminal && firstTask.trim() ? { firstTask: firstTask.trim() } : {}),
@@ -224,7 +224,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, onCanc
               </div>
             </Label>
             )}
-            {kind === 'claude' && (
+            {cli && (
               <Label text="Giao diện ô">
                 <div className="flex items-center gap-3">
                   <Seg
@@ -236,7 +236,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, onCanc
                     ]}
                   />
                   <span className="text-[12px] text-muted">
-                    {cell === 'chat' ? 'Hội thoại có thẻ tool, duyệt quyền bằng nút. Cùng phiên với CLI, đổi qua lại được.' : 'Claude Code chạy nguyên bản trong terminal.'}
+                    {cell === 'chat' ? 'Hội thoại có thẻ tool, duyệt quyền bằng nút. Cùng phiên với CLI, đổi qua lại được.' : `${kind === 'codex' ? 'Codex' : 'Claude Code'} chạy nguyên bản trong terminal.`}
                   </span>
                 </div>
               </Label>

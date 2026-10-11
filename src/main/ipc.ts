@@ -186,7 +186,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   })
   ipcMain.handle(IPC.adapterExtRemove, (_e, id: string) => external.remove(String(id)))
   ipcMain.handle(IPC.adapterExtUpdate, (_e, id: string, patch: InstalledAdapterPatch) => external.update(String(id), patch ?? {}))
-  ipcMain.handle(IPC.adapterExtCheck, (_e, id: string) => external.check(String(id)))
+  ipcMain.handle(IPC.adapterExtCheck, (_e, id: string, runVersion?: unknown) => external.check(String(id), runVersion === true))
   // ---- Connector (MCP) + bí mật ----
   /** Thư mục chạy thử / quét: thư mục dự án của workspace (máy chủ phạm vi local / project phụ thuộc nó), không có thì thư mục nhà. */
   const cwdOf = (workspaceId?: string | null): string => (workspaceId && workspaces.get(workspaceId)?.path) || homedir()

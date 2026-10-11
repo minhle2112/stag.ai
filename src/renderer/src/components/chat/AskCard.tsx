@@ -68,7 +68,7 @@ function Pick({ on, multi }: { on: boolean; multi: boolean }): React.JSX.Element
   )
 }
 
-/** Claude hỏi chọn đáp án (AskUserQuestion). Một câu chọn một: bấm là gửi; còn lại chọn đủ rồi bấm Gửi. */
+/** Agent hỏi chọn đáp án (AskUserQuestion của Claude, request_user_input của Codex). Một câu chọn một: bấm là gửi; còn lại chọn đủ rồi bấm Gửi. */
 function QuestionAsk({ item, questions, agentId, primary }: { item: AskItem; questions: AskQuestion[]; agentId: string; primary: boolean }): React.JSX.Element {
   const [picked, setPicked] = useState<Record<string, string[]>>({})
   const [other, setOther] = useState<Record<string, string>>({})
@@ -103,8 +103,8 @@ function QuestionAsk({ item, questions, agentId, primary }: { item: AskItem; que
   }
 
   return (
-    <div role="group" aria-label="Claude hỏi bạn" className={FRAME}>
-      <Head icon="ask" title="Claude hỏi bạn" />
+    <div role="group" aria-label="Agent hỏi bạn" className={FRAME}>
+      <Head icon="ask" title="Agent hỏi bạn" />
       <div className="mt-2 flex flex-col gap-3">
         {questions.map((q) => (
           <div key={q.question} className="flex flex-col gap-1.5">

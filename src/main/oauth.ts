@@ -172,8 +172,21 @@ export class OAuthService {
     this.pending?.cancel()
   }
 
+  /** Lần làm mới đang chạy theo tên bí mật: nhiều phiên cùng xin token thì dùng chung một lần (refresh token xoay vòng chỉ dùng được một lần). */
+  private refreshing = new Map<string, Promise<string>>()
+
   /** Access token còn hạn của bí mật OAuth (làm mới nếu sắp hết). Ném lỗi nếu phải đăng nhập lại. */
-  async accessToken(name: string, label = name): Promise<string> {
+  accessToken(name: string, label = name): Promise<string> {
+    const cur = this.refreshing.get(name)
+    if (cur) return cur
+    const p = this.doAccessToken(name, label).finally(() => {
+      if (this.refreshing.get(name) === p) this.refreshing.delete(name)
+    })
+    this.refreshing.set(name, p)
+    return p
+  }
+
+  private async doAccessToken(name: string, label: string): Promise<string> {
     const st = this.read(name)
     if (!st) throw new Error(`Connector "${label}" chưa đăng nhập (hoặc thông tin đăng nhập hỏng). Bấm "Đăng nhập lại" ở trang của nó.`)
     const exp = st.tokens.expires_at

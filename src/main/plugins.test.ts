@@ -138,6 +138,11 @@ describe('PluginHost', () => {
     expect(host.toolsFor('w2', 'a9')).toEqual([])
     host.emit({ type: 'task.done', at: '', workspaceId: 'w2', agentId: 'a9', data: { title: 'x' } })
     expect(host.list()[0].status.events).toBe(0)
+    // Lời gọi host cũng theo công tắc workspace / agent: agents.list bỏ chỗ đã tắt, trang ở workspace tắt bị chặn.
+    await host.applySettings(normalizeSettings({ version: 2, workspaces: { w2: { plugins: { 'stag.hello': false } } }, agents: { a2: { plugins: { 'stag.hello': false } } } }))
+    const listed = (await host.bridge('stag.hello', 'agents.list', {}, { workspaceId: 'w1' })) as { agents: Array<{ id: string }> }
+    expect(listed.agents.map((a) => a.id)).toEqual(['a1'])
+    await expect(host.bridge('stag.hello', 'agents.list', {}, { workspaceId: 'w2' })).rejects.toThrow(/đang tắt/)
 
     await host.applySettings(normalizeSettings({ version: 2, app: { plugins: { toggles: { 'stag.hello': false } } } }))
     expect(host.list()[0].status).toMatchObject({ state: 'disabled', pid: null })
@@ -194,6 +199,22 @@ runWorker(definePlugin({ async setup(ctx) {
     expect(sent).toEqual([['a1', 'rm -rf']])
   })
 
+  it('plugin không xin quyền nào vẫn chờ duyệt trước khi chạy worker', async () => {
+    const dir = join(tmp, 'zero')
+    await fs.mkdir(dir, { recursive: true })
+    const sdk = resolve('resources/plugin-sdk/stag-plugin-sdk.mjs').replace(/\\/g, '/')
+    await fs.writeFile(join(dir, 'w.mjs'), `import { definePlugin, runWorker } from 'file:///${sdk}'\nrunWorker(definePlugin({ async setup() {} }))`)
+    await fs.writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'zero', version: '1.0.0', stagPlugin: { id: 'acme.zero', capabilities: [], entrypoints: { worker: 'w.mjs' } } }))
+    const p = await host.install({ type: 'local', path: dir })
+    expect(p.status.state).toBe('approval_pending')
+    expect(p.status.pid).toBeNull()
+    const ready = await host.approve('acme.zero')
+    expect(ready.status.state).toBe('ready')
+    expect(ready.approvedAt).toBeTruthy()
+    // Cài lại cùng plugin: giữ lần duyệt.
+    expect((await host.install({ type: 'local', path: dir })).status.state).toBe('ready')
+  })
+
   it('gỡ, lưu và đọc lại registry', async () => {
     await host.install({ type: 'local', path: await linkPlugin(join(tmp, 'link')) })
     await host.install({ type: 'local', path: HELLO })
@@ -248,6 +269,9 @@ describe('PluginHost: trang, việc theo lịch, webhook', () => {
     await until(() => streams.length === 4)
     await host.bridge('stag.hello', 'state.set', { key: 'k', value: 1 }, ctx)
     expect(await host.bridge('stag.hello', 'state.get', { key: 'k' }, ctx)).toBe(1)
+    // Ghi song song nhiều khoá: không mất khoá nào (đọc-sửa-ghi nối đuôi).
+    await Promise.all(Array.from({ length: 8 }, (_, i) => host.bridge('stag.hello', 'state.set', { key: `p${i}`, value: i }, ctx)))
+    expect(await Promise.all(Array.from({ length: 8 }, (_, i) => host.bridge('stag.hello', 'state.get', { key: `p${i}` }, ctx)))).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
     await expect(host.bridge('stag.hello', 'vault.read', { workspaceId: 'w1', path: 'a.md' }, ctx)).rejects.toThrow(/chưa được cấp quyền "vault.read"/)
     await expect(host.bridge('stag.hello', 'shutdown', {}, ctx)).rejects.toThrow(/không gọi được/)
     await expect(host.bridge('stag.hello', 'data.get', { key: 'nope' }, ctx)).rejects.toThrow(/chưa được đăng ký/)

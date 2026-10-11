@@ -161,6 +161,25 @@ const SECRET_VALUES: RegExp[] = [
   /(\b[A-Za-z0-9_]*(?:api[_-]?key|secret|token|password|passwd|pwd)[A-Za-z0-9_]*\s*[:=]\s*["']?)[^\s"',;]{6,}/gi
 ]
 
+/**
+ * Giá trị bí mật để che: nguyên giá trị, và với bí mật đăng nhập OAuth (JSON) thêm từng token bên trong — phiên agent
+ * nhận access token trần, không phải cả khối JSON.
+ */
+export function secretParts(values: string[]): string[] {
+  const out = new Set<string>()
+  for (const v of values) {
+    out.add(v)
+    if (!v.startsWith('{')) continue
+    try {
+      const j = JSON.parse(v) as { tokens?: Record<string, unknown>; client?: Record<string, unknown> }
+      for (const t of [j?.tokens?.access_token, j?.tokens?.refresh_token, j?.client?.client_secret]) if (typeof t === 'string' && t) out.add(t)
+    } catch {
+      // không phải JSON
+    }
+  }
+  return [...out]
+}
+
 /** Che bí mật: giá trị thật trong kho bí mật của app (`known`) + mẫu thường gặp. */
 export function redact(text: string, known: string[] = []): string {
   let t = text

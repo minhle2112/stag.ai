@@ -20,6 +20,8 @@ export interface HookPayload {
   tool_name?: string
   /** Tham số của tool (PreToolUse / PostToolUse), để biết file nào sắp bị sửa (xem scopeGuard.ts). */
   tool_input?: Record<string, unknown>
+  /** Id lần gọi tool (cùng giá trị ở PreToolUse và PostToolUse của một lần gọi). */
+  tool_use_id?: string
   /** Thư mục làm việc của phiên (đường dẫn tương đối trong tool_input tính từ đây). */
   cwd?: string
   notification_type?: string
@@ -275,11 +277,13 @@ export class Board {
   }
 
   async startTask(ws: Workspace, agent: Agent, sessionId: string, title: string, scope: string): Promise<Task> {
-    const open = await this.openTask(ws, agent.id)
-    if (open)
-      throw new Error(
-        `You still have an unfinished task: "${open.title}". Call task_done for it first, or task_update if you only change the title/scope.`
-      )
+    const busy = (open: Task | undefined): void => {
+      if (open)
+        throw new Error(
+          `You still have an unfinished task: "${open.title}". Call task_done for it first, or task_update if you only change the title/scope.`
+        )
+    }
+    busy(await this.openTask(ws, agent.id))
     const task: Task = {
       id: randomUUID(),
       agentId: agent.id,
@@ -290,7 +294,10 @@ export class Board {
       status: 'open',
       createdAt: new Date().toISOString()
     }
-    ;(await this.tasks(ws)).push(task)
+    // Xét lại ngay trước khi thêm (không còn await xen giữa): hai lần task_start song song không mở được hai việc.
+    const list = await this.tasks(ws)
+    busy(list.find((t) => t.agentId === agent.id && t.status === 'open'))
+    list.push(task)
     await this.save(ws)
     this.events({ kind: 'taskStarted', workspaceId: ws.id, agentId: agent.id, agentName: agent.name, title: task.title, scope: task.scope })
     return task

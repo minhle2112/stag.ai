@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SCOPE, type Agent, type ScopeLockSettings, type Workspace } from '@shared/types'
 import { Board } from './board'
-import { editTargets, looksLikeWrite, ScopeGuard, withoutDataHeredocs, type ScopeConflict } from './scopeGuard'
+import { editTargets, looksLikeWrite, ScopeGuard, shellCwds, withoutDataHeredocs, type ScopeConflict } from './scopeGuard'
 import { overlapWarning } from './mcp'
 
 vi.mock('electron', () => ({
@@ -106,6 +106,7 @@ describe('ScopeGuard — Claude Code', () => {
 
   it('người dùng cho qua (tool đã chạy) → không hỏi lại file đó trong phiên này', async () => {
     const f = join(root, 'src', 'auth', 'login.ts')
+    expect(await guard.preToolUse(ws, B, 'claude', edit(f))).toBeDefined()
     await guard.postToolUse(ws, B, edit(f, 'PostToolUse'))
     expect(await guard.preToolUse(ws, B, 'claude', edit(f))).toBeUndefined()
     // File khác trong vùng khoá vẫn hỏi.
@@ -157,6 +158,12 @@ describe('lệnh shell', () => {
     expect(await guard.preToolUse(ws, A, 'claude', sh('rm src/auth/x.ts'))).toBeUndefined()
   })
 
+  it('`cd` trong lệnh: đường dẫn tương đối sau đó tính từ thư mục mới', async () => {
+    expect(await guard.preToolUse(ws, B, 'claude', sh('cd src && rm auth/x.ts'))).toBeDefined()
+    expect(await guard.preToolUse(ws, B, 'claude', sh('cd src; rm ui/x.ts'))).toBeUndefined()
+    expect(shellCwds('cd "a b" && pushd c; Set-Location -Path D:\\x', 'C:/p')).toEqual(['C:/p', 'C:/p/a b', 'C:/p/a b/c', 'D:\\x'])
+  })
+
   it('thân heredoc của cat / tee là dữ liệu: nhắc tới đường dẫn khoá trong đó thì không hỏi', async () => {
     const note = "cat > \"Demo memory/50 Decisions/x.md\" <<'EOF'\nTests in `src/auth/login.ts` must change.\nEOF\nsed -i 's/a/b/' _INDEX.md"
     expect(await guard.preToolUse(ws, B, 'claude', sh(note))).toBeUndefined()
@@ -166,7 +173,21 @@ describe('lệnh shell', () => {
     expect(withoutDataHeredocs("a\ncat <<-END > f\n\tsrc/auth\n\tEND\nrm src/auth/x")).toBe('a\ncat <<-END > f\n\tEND\nrm src/auth/x')
   })
 
+  it('PostToolUse giả (không có PreToolUse đã hỏi đúng lần gọi đó) không cấp quyền', async () => {
+    const f = join(root, 'src', 'auth', 'login.ts')
+    await guard.postToolUse(ws, B, edit(f, 'PostToolUse'))
+    expect(await guard.preToolUse(ws, B, 'claude', edit(f))).toBeDefined()
+    // Có tool_use_id: chỉ đúng id đã hỏi mới tính.
+    const call = (event: string, id: string) => ({ ...edit(f, event), tool_use_id: id })
+    expect(await guard.preToolUse(ws, B, 'claude', call('PreToolUse', 't1'))).toBeDefined()
+    await guard.postToolUse(ws, B, call('PostToolUse', 't2'))
+    expect(await guard.preToolUse(ws, B, 'claude', call('PreToolUse', 't3'))).toBeDefined()
+    await guard.postToolUse(ws, B, call('PostToolUse', 't1'))
+    expect(await guard.preToolUse(ws, B, 'claude', call('PreToolUse', 't4'))).toBeUndefined()
+  })
+
   it('đã chạy (người dùng cho) → không hỏi lại mục đó', async () => {
+    await guard.preToolUse(ws, B, 'claude', sh('rm src/auth/x.ts'))
     await guard.postToolUse(ws, B, sh('rm src/auth/x.ts', 'PostToolUse'))
     expect(await guard.preToolUse(ws, B, 'claude', sh('rm src/auth/y.ts'))).toBeUndefined()
   })
@@ -222,6 +243,24 @@ describe('Cài đặt khoá phạm vi', () => {
     guard.onConflict = (c) => seen.push(c.decision)
   })
 
+  it('không đọc được bảng việc: Claude hỏi người dùng (không lặng lẽ cho qua); lệnh chỉ đọc / Codex cho qua', async () => {
+    const broken = new ScopeGuard({ snapshot: async () => Promise.reject(new Error('EBUSY')) } as unknown as Board, () => cfg)
+    const r = await broken.preToolUse(ws, B, 'claude', login())
+    expect(r?.hookSpecificOutput.permissionDecision).toBe('ask')
+    expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('EBUSY')
+    expect(await broken.preToolUse(ws, B, 'claude', sh('git status'))).toBeUndefined()
+    expect(await broken.preToolUse(ws, B, 'codex', login())).toBeUndefined()
+  })
+
+  it('cấp quyền lệnh shell theo từng mẫu glob: hai mẫu cùng thư mục gốc không dùng chung một lần cho qua', async () => {
+    await board.finishTask(ws, 'a', 'x')
+    await board.startTask(ws, A, 's2', 'Glob', 'src/*.ts, src/*.md')
+    await guard.preToolUse(ws, B, 'claude', sh('rm src/a.ts'))
+    await guard.postToolUse(ws, B, sh('rm src/a.ts', 'PostToolUse'))
+    expect(await guard.preToolUse(ws, B, 'claude', sh('rm src/b.ts'))).toBeUndefined()
+    expect((await guard.preToolUse(ws, B, 'claude', sh('rm src/c.md')))?.hookSpecificOutput.permissionDecision).toBe('ask')
+  })
+
   it('off: không xét gì, không báo', async () => {
     cfg.mode = 'off'
     expect(await guard.preToolUse(ws, B, 'claude', login())).toBeUndefined()
@@ -247,6 +286,7 @@ describe('Cài đặt khoá phạm vi', () => {
   })
 
   it('block: chặn thẳng (Claude và Codex, không hộp thoại), cả chỗ đã cho qua trước đó', async () => {
+    await guard.preToolUse(ws, B, 'claude', login())
     await guard.postToolUse(ws, B, edit(join(root, 'src', 'auth', 'login.ts'), 'PostToolUse'))
     expect(await guard.preToolUse(ws, B, 'claude', login())).toBeUndefined()
     cfg.mode = 'block'
@@ -258,7 +298,7 @@ describe('Cài đặt khoá phạm vi', () => {
     expect(c?.hookSpecificOutput.permissionDecision).toBe('deny')
     expect((await board.snapshot(ws)).scopeAsks).toEqual([])
     expect((await guard.preToolUse(ws, B, 'codex', sh('rm src/auth/x.ts')))?.hookSpecificOutput.permissionDecisionReason).toContain('run this command')
-    expect(seen).toEqual(['blocked', 'blocked', 'blocked'])
+    expect(seen).toEqual(['ask', 'blocked', 'blocked', 'blocked'])
     // Chính chủ và chỗ ngoài vùng khoá vẫn sửa được.
     expect(await guard.preToolUse(ws, A, 'claude', login())).toBeUndefined()
     expect(await guard.preToolUse(ws, B, 'claude', edit(join(root, 'src', 'ui', 'x.ts')))).toBeUndefined()

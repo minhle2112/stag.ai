@@ -51,8 +51,8 @@ export class ChatModel {
   state: ChatState = { phase: 'off' }
   now: () => string = () => new Date().toISOString()
 
-  private seq = 0
-  private byId = new Map<string, ChatItem>()
+  protected seq = 0
+  protected byId = new Map<string, ChatItem>()
   /** message.id (Anthropic) → có dựng từ stream_event (khối đã đủ, `assistant` chỉ để đối chiếu). */
   private streamed = new Set<string>()
   /** Khối đang stream: item id → (index khối của API → vị trí trong blocks). */
@@ -144,7 +144,13 @@ export class ChatModel {
   load(items: ChatItem[]): void {
     this.items = []
     this.byId.clear()
-    for (const it of items) this.put(it)
+    for (const it of items) {
+      this.put(it)
+      // Mục app tự đặt id (u-3, n-7, t-2…) trong lịch sử được dựng bằng một ChatModel khác: đánh số tiếp sau
+      // để mục mới không trùng id (trùng thì `put` thay mục cũ tại chỗ, tin mới hiện lên đầu hội thoại).
+      const n = /^[a-z]+-(\d+)$/.exec(it.id)
+      if (n) this.seq = Math.max(this.seq, Number(n[1]))
+    }
   }
 
   // ---- đọc một dòng stdout ----
@@ -184,7 +190,7 @@ export class ChatModel {
     }
   }
 
-  private put(item: ChatItem): void {
+  protected put(item: ChatItem): void {
     const had = this.byId.get(item.id)
     this.byId.set(item.id, item)
     if (had) {
@@ -195,8 +201,22 @@ export class ChatModel {
       this.items.push(item)
       // Phiên rất dài: bỏ bớt mục cũ nhất (transcript trên đĩa vẫn đủ).
       if (this.items.length > MAX_ITEMS) {
-        for (const d of this.items.splice(0, TRIM_ITEMS)) this.byId.delete(d.id)
+        for (const d of this.items.splice(0, TRIM_ITEMS)) {
+          this.byId.delete(d.id)
+          this.forget(d.id)
+        }
       }
+    }
+  }
+
+  /** Mục bị bỏ khỏi bộ nhớ: bỏ luôn dữ liệu phụ theo id của nó (không thì các map lớn mãi trong phiên dài). */
+  protected forget(id: string): void {
+    this.streamed.delete(id)
+    this.blockPos.delete(id)
+    for (const [toolUseId, owner] of this.toolOwner) {
+      if (owner !== id) continue
+      this.toolOwner.delete(toolUseId)
+      this.partialJson.delete(toolUseId)
     }
   }
 
@@ -296,6 +316,7 @@ export class ChatModel {
       let blocks = cur.blocks
       if (block.type === 'tool') {
         const json = this.partialJson.get(block.toolUseId) ?? ''
+        this.partialJson.delete(block.toolUseId)
         if (json) {
           try {
             const parsed: unknown = JSON.parse(json)
@@ -448,8 +469,13 @@ export class ChatModel {
     const modelUsage = isObj(ev.modelUsage) ? ev.modelUsage : null
     let size: number | undefined
     if (modelUsage) {
-      const model = this.state.model && isObj(modelUsage[this.state.model]) ? (modelUsage[this.state.model] as Json) : (Object.values(modelUsage).find(isObj) as Json | undefined)
-      size = model ? num(model.contextWindow) : undefined
+      // modelUsage có cả model phụ (vd. Haiku cho việc nền, cửa sổ nhỏ hơn): lấy đúng model của phiên (tên có thể
+      // khác hậu tố `[1m]`), không thấy thì lấy cửa sổ lớn nhất — đừng lấy đại mục đầu tiên.
+      const base = (k: string): string => k.replace(/\[[^\]]*\]$/, '').toLowerCase()
+      const want = this.state.model ? base(this.state.model) : ''
+      const entries = Object.entries(modelUsage).filter((e): e is [string, Json] => isObj(e[1]))
+      const own = entries.find(([k]) => k === this.state.model) ?? (want ? entries.find(([k]) => base(k) === want) : undefined)
+      size = own ? num(own[1].contextWindow) : entries.map(([, v]) => num(v.contextWindow) ?? 0).reduce((a, b) => Math.max(a, b), 0) || undefined
     }
     const started = this.turnStartedAt
     this.turnStartedAt = null

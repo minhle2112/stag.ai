@@ -4,9 +4,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   CODEX_HOOK_EVENTS,
+  codexAppServerUserArgs,
   codexArgs,
+  codexConfigArgs,
+  codexHookTrustArgs,
   codexHookCommand,
   codexPermissionArgs,
+  codexThreadPermission,
   findCodexRollout,
   isCodexSessionVar,
   parseCodexContext,
@@ -110,6 +114,15 @@ describe('findCodexRollout', () => {
     await fs.writeFile(join(dir, 'rollout-2026-10-08T23-59-01-abc.jsonl'), '')
     expect(await findCodexRollout('abc', now, home)).toBe(join(dir, 'rollout-2026-10-08T23-59-01-abc.jsonl'))
   })
+
+  it('thread cũ hơn khoảng ngày: quét sâu mới thấy (tắt deep thì không)', async () => {
+    const now = new Date(2026, 9, 9, 12, 0)
+    const dir = join(home, 'sessions', '2025', '12', '31')
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(join(dir, 'rollout-2025-12-31T10-00-00-old.jsonl'), '')
+    expect(await findCodexRollout('old', now, home, 3, false)).toBeNull()
+    expect(await findCodexRollout('old', now, home)).toBe(join(dir, 'rollout-2025-12-31T10-00-00-old.jsonl'))
+  })
 })
 
 describe('isCodexSessionVar', () => {
@@ -117,5 +130,42 @@ describe('isCodexSessionVar', () => {
     for (const k of ['CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CODEX_SANDBOX', 'CODEX_SANDBOX_NETWORK_DISABLED', 'CODEX_MANAGED_BY_NPM'])
       expect(isCodexSessionVar(k)).toBe(true)
     for (const k of ['CODEX_HOME', 'OPENAI_API_KEY', 'PATH']) expect(isCodexSessionVar(k)).toBe(false)
+  })
+})
+
+describe('ô chat (app-server)', () => {
+  it('cấu hình chung: MCP stag + hook, không có luật phiên / cờ TUI', () => {
+    const args = codexConfigArgs(base)
+    expect(args.filter((a) => a !== '-c')).toEqual(configs(args))
+    expect(configs(args).some((x) => x.startsWith('developer_instructions='))).toBe(false)
+    expect(configs(args).filter((x) => x.startsWith('hooks.')).length).toBe(CODEX_HOOK_EVENTS.length)
+    // Ô CLI dùng đúng phần cấu hình đó.
+    expect(codexArgs(base).join('\n')).toContain(args.join('\n'))
+  })
+
+  it('tin cậy hook: bảng inline, khoá có dấu chấm / dấu \\ được đặt trong nháy', () => {
+    expect(codexHookTrustArgs([])).toEqual([])
+    const [flag, value] = codexHookTrustArgs([
+      { key: 'C:\\<session-flags>\\config.toml:pre_tool_use:0:0', hash: 'sha256:aa' },
+      { key: 'C:\\<session-flags>\\config.toml:stop:0:0', hash: 'sha256:bb' }
+    ])
+    expect(flag).toBe('-c')
+    expect(value).toBe(
+      'hooks.state={"C:\\\\<session-flags>\\\\config.toml:pre_tool_use:0:0"={trusted_hash="sha256:aa"},"C:\\\\<session-flags>\\\\config.toml:stop:0:0"={trusted_hash="sha256:bb"}}'
+    )
+  })
+
+  it('tham số người dùng: -m → model, giữ -c / --enable, bỏ cờ chỉ có ở TUI', () => {
+    expect(codexAppServerUserArgs(['-m', 'gpt-6', '-c', 'model_reasoning_effort="high"', '--enable', 'x', '--search', '--model=o9', '--no-alt-screen'])).toEqual({
+      args: ['-c', 'model="gpt-6"', '-c', 'model_reasoning_effort="high"', '--enable', 'x', '-c', 'model="o9"'],
+      dropped: ['--search', '--no-alt-screen']
+    })
+  })
+
+  it('mức quyền → tham số thread/start', () => {
+    expect(codexThreadPermission('default')).toEqual({})
+    expect(codexThreadPermission('plan')).toEqual({ sandbox: 'read-only', approvalPolicy: 'on-request' })
+    expect(codexThreadPermission('acceptEdits')).toEqual({ sandbox: 'workspace-write', approvalPolicy: 'on-request' })
+    expect(codexThreadPermission('auto')).toMatchObject({ approvalsReviewer: 'auto_review' })
   })
 })

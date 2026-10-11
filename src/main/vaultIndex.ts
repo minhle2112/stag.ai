@@ -36,7 +36,13 @@ function withInlineTags(meta: NoteMeta, text: string): NoteMeta {
   return extra.length ? { ...meta, tags: [...meta.tags, ...extra] } : meta
 }
 
-/** Mọi file .md trong vault (bỏ file/thư mục bắt đầu bằng `.`, như `.obsidian`, `.trash`). */
+/**
+ * Thư mục gói / môi trường không bao giờ là note (vault đặt ngay thư mục dự án thì có `node_modules` hàng chục nghìn
+ * file .md). Chỉ tên chắc chắn không phải thư mục note của người dùng.
+ */
+const SKIP_DIRS = new Set(['node_modules', '__pycache__', 'venv', 'bower_components'])
+
+/** Mọi file .md trong vault (bỏ file/thư mục bắt đầu bằng `.`, như `.obsidian`, `.trash`, và SKIP_DIRS). */
 async function listNotes(vaultPath: string): Promise<Array<{ rel: string; full: string; mtime: number; size: number }>> {
   const out: Array<{ rel: string; full: string; mtime: number; size: number }> = []
   async function walk(dir: string, relDir: string): Promise<void> {
@@ -50,7 +56,9 @@ async function listNotes(vaultPath: string): Promise<Array<{ rel: string; full: 
       if (e.name.startsWith('.')) continue
       const full = join(dir, e.name)
       const rel = relDir ? `${relDir}/${e.name}` : e.name
-      if (e.isDirectory()) await walk(full, rel)
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name.toLowerCase())) await walk(full, rel)
+      }
       else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
         try {
           const st = await fs.stat(full)
@@ -173,7 +181,7 @@ function snippet(line: string, at: number): string {
 /** Phần đường dẫn (do fs.watch báo) nằm trong thư mục/tệp ẩn như `.obsidian` → bỏ qua (Obsidian ghi workspace.json liên tục). */
 export function isHiddenChange(filename: string | null): boolean {
   if (!filename) return false
-  return filename.split(/[\\/]/).some((seg) => seg.startsWith('.'))
+  return filename.split(/[\\/]/).some((seg) => seg.startsWith('.') || SKIP_DIRS.has(seg.toLowerCase()))
 }
 
 const CHANGE_DEBOUNCE_MS = 300

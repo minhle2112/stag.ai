@@ -169,6 +169,17 @@ describe('MemoryKeeper (trên đĩa)', () => {
     expect(memoryRules(cfg, r2)).toContain('condense it yourself')
   })
 
+  it('ghi note cất hỏng → note agent giữ nguyên, không mất mục Work done nào', async () => {
+    cfg = { ...DEFAULT_MEMORY, noteBudgetKb: 2, keepWorkDone: 3 }
+    const lines = Array.from({ length: 30 }, (_, i) => `- 2026-01-${String(i + 1).padStart(2, '0')} — "task ${i + 1}" — ${'x'.repeat(60)}`)
+    const before = `---\ntype: agent\nupdated: 2026-01-01\n---\n# Tester\n\n## Work done\n${lines.join('\n')}\n`
+    await fs.writeFile(vault('60 Agents', 'Tester.md'), before)
+    // Chỗ của note cất là một thư mục: ghi vào đó lỗi.
+    await fs.mkdir(vault('60 Agents', 'Tester archive.md'))
+    await expect(new MemoryKeeper(() => cfg).compact(ws, 'Tester', cfg)).rejects.toThrow()
+    expect(await read('60 Agents', 'Tester.md')).toBe(before)
+  })
+
   it('đổi tên agent: đổi tên note cất và liên kết hai chiều', async () => {
     await fs.writeFile(vault('60 Agents', 'Tester archive.md'), '# Tester archive\n\nBack to: [[Tester]]\n')
     await fs.writeFile(vault('60 Agents', 'QA.md'), 'Older items: [[Tester archive]]\n')

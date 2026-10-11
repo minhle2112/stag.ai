@@ -10,6 +10,7 @@ import {
   lineDiff,
   parseMcpName,
   parseQuestions,
+  patchRows,
   readRange,
   shortenPath
 } from './toolSummary'
@@ -180,7 +181,7 @@ describe('parseMcpName / askTitle', () => {
     expect(askTitle('Bash')).toBe('Cho phép chạy lệnh?')
     expect(askTitle('Edit')).toBe('Cho phép sửa file?')
     expect(askTitle('mcp__stag__task_done')).toBe('Cho phép stag · task_done?')
-    expect(askTitle('AskUserQuestion')).toBe('Claude hỏi bạn')
+    expect(askTitle('AskUserQuestion')).toBe('Agent hỏi bạn')
     expect(askTitle('ExitPlanMode')).toBe('Duyệt kế hoạch?')
   })
 })
@@ -218,5 +219,31 @@ describe('AskUserQuestion / ExitPlanMode', () => {
     const p = describeTool('ExitPlanMode', { plan: '# Kế hoạch\n- bước 1' })
     expect(p.summary).toBe('Kế hoạch')
     expect(p.detail).toMatchObject({ kind: 'plan', plan: '# Kế hoạch\n- bước 1' })
+  })
+})
+
+describe('ApplyPatch (Codex fileChange)', () => {
+  it('unified diff → dòng +/-, nhiều hunk ngăn bằng ~, bỏ phần đầu diff', () => {
+    const diff = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n@@ -9 +9 @@\n-x\n+y\n\\ No newline at end of file\n'
+    expect(patchRows('update', diff)).toEqual([
+      { t: ' ', s: 'a' },
+      { t: '-', s: 'b' },
+      { t: '+', s: 'c' },
+      { t: '~', s: '' },
+      { t: '-', s: 'x' },
+      { t: '+', s: 'y' }
+    ])
+    expect(patchRows('add', 'x\ny\n')).toEqual([{ t: '+', s: 'x' }, { t: '+', s: 'y' }])
+    expect(patchRows('delete', 'x')).toEqual([{ t: '-', s: 'x' }])
+  })
+
+  it('mô tả: một file / nhiều file, tạo file', () => {
+    const one = describeTool('ApplyPatch', { changes: [{ path: 'C:\\p\\src\\a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-a\n+b\n' }] }, { root: 'C:\\p' })
+    expect(one).toMatchObject({ label: 'Sửa file', summary: 'src/a.ts', stats: { add: 1, del: 1 } })
+    const add = describeTool('ApplyPatch', { changes: [{ path: 'n.txt', kind: 'add', diff: 'hi' }] })
+    expect(add).toMatchObject({ label: 'Tạo file', icon: 'pen' })
+    const two = describeTool('ApplyPatch', { changes: [{ path: 'a', kind: 'add', diff: 'x' }, { path: 'b', kind: 'delete', diff: 'y' }] })
+    expect(two.summary).toBe('2 file: a, b')
+    expect(two.detail).toMatchObject({ kind: 'edit', rows: [{ t: '+' }, { t: '~' }, { t: '-' }] })
   })
 })

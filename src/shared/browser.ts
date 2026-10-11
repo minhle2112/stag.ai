@@ -14,10 +14,10 @@ export function searchUrl(engine: SearchEngine, query: string): string {
   return (SEARCH[engine] ?? SEARCH.google) + encodeURIComponent(query)
 }
 
-/** localhost, 127.x, ::1, *.localhost — agent dùng tự do. */
+/** localhost, 127.x.x.x (đúng dạng IPv4, không phải tên miền `127.evil.com`), ::1, *.localhost — agent dùng tự do. */
 export function isLocalUrl(url: URL): boolean {
   const h = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
-  return h === 'localhost' || h.endsWith('.localhost') || h === '::1' || /^127\./.test(h)
+  return h === 'localhost' || h.endsWith('.localhost') || h === '::1' || /^127(\.\d{1,3}){3}$/.test(h)
 }
 
 /**

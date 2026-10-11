@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { NoteWriteResult, VaultCandidate, VaultNode } from '@shared/types'
 import { exists, isDir, readText } from './fsutil'
+import { noteWriter } from './workLog'
 
 /** Thư mục không bao giờ quét khi tìm vault. */
 const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.sessions', '.stag', 'out', 'dist', 'build', '.venv', 'venv', 'target', '.next'])
@@ -120,16 +121,16 @@ export async function readNote(vaultPath: string, rel: string): Promise<string> 
 export async function writeNote(vaultPath: string, rel: string, text: string, base: string | null): Promise<NoteWriteResult> {
   const full = notePath(vaultPath, rel)
   if (!rel.toLowerCase().endsWith('.md')) throw new Error('Chỉ sửa được note .md')
-  if (base !== null) {
-    let disk: string | null
-    try {
-      disk = await fs.readFile(full, 'utf8')
-    } catch {
-      disk = null
+  // Qua chuỗi ghi chung: không chen giữa một lần đọc-sửa-ghi của agent / nhật ký việc.
+  let conflict: { disk: string | null } | null = null
+  await noteWriter.update(full, (disk) => {
+    if (base !== null && disk !== base) {
+      conflict = { disk }
+      return null
     }
-    if (disk !== base) return { status: 'conflict', disk }
-  }
-  await fs.writeFile(full, text, 'utf8')
+    return text
+  })
+  if (conflict) return { status: 'conflict', disk: (conflict as { disk: string | null }).disk }
   userWrote(vaultPath, rel)
   return { status: 'saved' }
 }
@@ -138,8 +139,7 @@ export async function writeNote(vaultPath: string, rel: string, text: string, ba
 export async function putNote(vaultPath: string, rel: string, text: string): Promise<void> {
   const full = notePath(vaultPath, rel)
   if (!rel.toLowerCase().endsWith('.md')) throw new Error('Chỉ ghi được note .md')
-  await fs.mkdir(dirname(full), { recursive: true })
-  await fs.writeFile(full, text, 'utf8')
+  await noteWriter.update(full, () => text)
 }
 
 /**
