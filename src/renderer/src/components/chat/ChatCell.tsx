@@ -8,7 +8,7 @@ import { Icon } from '../Icon'
 import { Button } from '../Modal'
 import { ChatList } from './ChatList'
 import { Composer } from './Composer'
-import { DEFAULT_CTX_LIMIT, EMPTY_ITEMS, firstPendingAsk, OFF_STATE } from './chatLogic'
+import { chatZoom, DEFAULT_CTX_LIMIT, EMPTY_ITEMS, firstPendingAsk, OFF_STATE } from './chatLogic'
 
 export interface ChatCellProps {
   ws: Workspace
@@ -37,6 +37,7 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
   const ensure = useChat((s) => s.ensure)
   const handoff = useHandoffFor(agent.id)
   const settings = useSettings((s) => s.value)
+  const zoom = chatZoom(settings.app.general.terminalFontSize)
   const openSettings = useUi((s) => s.openSettings)
   const kind = agentKind(agent) === 'codex' ? 'codex' : 'claude'
   // Model / effort theo cài đặt (app → workspace → agent); phiên đang chạy báo model thật qua state.model.
@@ -57,7 +58,9 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
   const empty = items.length === 0
 
   return (
-    <div className="@container/chat absolute inset-0 flex min-h-0 flex-col bg-panel text-[13px]">
+    // Cỡ chữ (Cài đặt → Chung) phóng cả ô chat bằng `zoom`: chữ, khoảng cách và biểu tượng giữ đúng tỉ lệ; ô hẹp
+    // tương đối hơn nên các mốc @container (ẩn chip, thu gọn) cũng đổi theo.
+    <div className="@container/chat absolute inset-0 flex min-h-0 flex-col bg-panel text-[13px]" style={zoom === 1 ? undefined : { zoom }}>
       {empty ? (
         <div className="relative min-h-0 flex-1">
           {!stopped && (

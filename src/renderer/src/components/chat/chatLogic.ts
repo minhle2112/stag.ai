@@ -436,6 +436,21 @@ export function appendText(cur: string, add: string): string {
   return `${cur} ${add}`
 }
 
+// ---------- cỡ chữ ----------
+
+/**
+ * Cỡ chữ terminal mà ô chat vẽ đúng 1:1 (px). Nhỏ hơn cỡ mặc định 13 một chút để ô chat mặc định to hơn terminal
+ * (13 / 12 ≈ 1,08: chữ thường 13px → ~14px).
+ */
+export const CHAT_BASE_FONT = 12
+const DEFAULT_TERMINAL_FONT = 13
+
+/** Hệ số phóng của ô chat theo cỡ chữ terminal trong Cài đặt (lạ / thiếu = theo cỡ mặc định 13px). */
+export function chatZoom(fontSize: number | undefined): number {
+  const size = fontSize && Number.isFinite(fontSize) && fontSize > 0 ? fontSize : DEFAULT_TERMINAL_FONT
+  return Math.round((size / CHAT_BASE_FONT) * 1000) / 1000
+}
+
 // ---------- cuộn ----------
 
 /** Cách đáy ≤ `slack` px thì coi là đang ở đáy (tự cuộn theo nội dung mới). */

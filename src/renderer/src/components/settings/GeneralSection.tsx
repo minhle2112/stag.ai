@@ -98,7 +98,7 @@ export function GeneralSection(): React.JSX.Element {
         <Row label="Shell cho ô Terminal" desc="Đã chuyển sang Adapter → Terminal.">
           <SmallButton onClick={() => openSettings('adapters', { adapter: 'terminal' })}>Mở</SmallButton>
         </Row>
-        <Row label="Cỡ chữ" desc="Cho mọi terminal: ô agent và ô Terminal. Áp dụng ngay.">
+        <Row label="Cỡ chữ" desc="Cho mọi ô agent (terminal và ô Chat) và ô Terminal. Áp dụng ngay.">
           <Stepper
             label="Cỡ chữ terminal"
             value={g.terminalFontSize}

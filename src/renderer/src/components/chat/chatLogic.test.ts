@@ -11,6 +11,7 @@ import {
   formatCost,
   formatDuration,
   buildRows,
+  chatZoom,
   stepsActive,
   stepsSummary,
   historyStep,
@@ -174,6 +175,18 @@ describe('buildRows / firstPendingAsk / showWorking', () => {
     expect(showWorking([asst('2', [tool('t', 'running')])], 'busy')).toBe(false)
     expect(showWorking([asst('2', [{ type: 'text', text: 'x' }])], 'busy')).toBe(true)
     expect(showWorking([ask('a')], 'waiting')).toBe(false)
+  })
+})
+
+describe('chatZoom', () => {
+  it('theo cỡ chữ terminal; mặc định 13px thì ô chat to hơn một chút', () => {
+    expect(chatZoom(12)).toBe(1)
+    expect(chatZoom(13)).toBe(1.083)
+    expect(chatZoom(18)).toBe(1.5)
+    expect(chatZoom(9)).toBe(0.75)
+    expect(chatZoom(undefined)).toBe(1.083)
+    expect(chatZoom(0)).toBe(1.083)
+    expect(chatZoom(Number.NaN)).toBe(1.083)
   })
 })
 
