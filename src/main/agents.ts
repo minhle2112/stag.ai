@@ -67,6 +67,8 @@ import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
 import type { VaultActivityLog } from './vaultActivity'
+import type { VaultIndexer } from './vaultIndex'
+import { MemoryService, memoryToolRules } from './memory'
 import type { PtyManager } from './pty'
 import type { SettingsStore } from './settings'
 import { resolveShell } from './shells'
@@ -145,6 +147,8 @@ export class AgentService {
   private mail = new AgentMail()
   private handoffTimer: NodeJS.Timeout | null = null
   private guard: ScopeGuard
+  /** Tool memory_* của agent (đọc / sửa vault qua app). */
+  private notes: MemoryService
 
   constructor(
     private ptys: PtyManager,
@@ -160,8 +164,10 @@ export class AgentService {
     private oauth: OAuthService,
     private approvals: ApprovalQueue,
     private skills: SkillLibrary,
-    private memory: MemoryKeeper
+    private memory: MemoryKeeper,
+    vaultIndexer: VaultIndexer
   ) {
+    this.notes = new MemoryService(vaultIndexer, memory.writer, () => this.secretValues())
     // Đọc cài đặt khoá phạm vi mỗi lần gọi tool: đổi trong Settings là có tác dụng ngay, không cần mở lại phiên.
     this.guard = new ScopeGuard(board, (ws, a) => resolveScope(this.settings.get(), ws.id, a.id))
   }
@@ -334,7 +340,14 @@ export class AgentService {
       SESSION_ID: sessionId,
       SESSION_FILE: sessionFile,
       AGENT_NOTE: agentNote,
-      RECALL: structured ? `read ${join(ws.vaultPath, '_INDEX.md')}` : 'find and read the related notes in the vault',
+      RECALL:
+        memCfg.agentTools === 'off'
+          ? structured
+            ? `read ${join(ws.vaultPath, '_INDEX.md')}`
+            : 'find and read the related notes in the vault'
+          : structured
+            ? 'call memory_read("_INDEX") (stag tool)'
+            : 'find and read the related notes in the vault with memory_search / memory_query',
       OPENING: first
         ? first.user
           ? userFirstTaskOpening(first.task, first.scope)
@@ -349,6 +362,7 @@ export class AgentService {
       PREVIOUS_HANDOFF: handoff ? `From session ${handoff.fromSessionId} (${handoff.at}):\n\n${handoff.summary}` : '',
       AGENT_API: agentApiRules(resolveAgentApi(this.settings.get(), ws.id, agent.id)),
       MEMORY_RULES: memoryRules(memCfg, noteSize ?? { kb: 0, archive: archiveName(agent.name) }),
+      MEMORY_TOOLS: memoryToolRules(memCfg.agentTools),
       USER_LANGUAGE: userLanguage(),
       DATE: today(),
       NOW: new Date().toISOString()
@@ -835,6 +849,11 @@ export class AgentService {
       },
       // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi; phiên mở sau đó không thấy tool.
       browserTools: browserToolsOn(this.settings.get(), ws.id, agent.id),
+      memory: {
+        service: this.notes,
+        mode: resolveMemory(this.settings.get(), ws.id, agent.id).agentTools,
+        touched: (t) => this.activity.record(ws, agent, t)
+      },
       agentApi: resolveAgentApi(this.settings.get(), ws.id, agent.id),
       syncSessionFile: async () => {
         const cur = this.running.get(agent.id)

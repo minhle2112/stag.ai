@@ -1,31 +1,11 @@
 import { promises as fs } from 'node:fs'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { NoteWriteResult, VaultCandidate, VaultNode } from '@shared/types'
-import { exists, isDir, readText, samePath } from './fsutil'
+import { exists, isDir, readText } from './fsutil'
 
 /** Thư mục không bao giờ quét khi tìm vault. */
 const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.sessions', '.stag', 'out', 'dist', 'build', '.venv', 'venv', 'target', '.next'])
 const SCAN_DEPTH = 2
-
-/** Danh sách vault Obsidian đã đăng ký: `%APPDATA%\obsidian\obsidian.json` (chỉ đọc). */
-export async function readObsidianRegistry(): Promise<Array<{ id: string; path: string }>> {
-  const appData = process.env.APPDATA
-  if (!appData) return []
-  const raw = await readText(join(appData, 'obsidian', 'obsidian.json'))
-  if (!raw) return []
-  try {
-    const vaults = (JSON.parse(raw) as { vaults?: Record<string, { path?: string }> }).vaults ?? {}
-    return Object.entries(vaults)
-      .filter(([, v]) => typeof v.path === 'string')
-      .map(([id, v]) => ({ id, path: v.path! }))
-  } catch {
-    return []
-  }
-}
-
-export async function findRegisteredId(vaultPath: string): Promise<string | undefined> {
-  return (await readObsidianRegistry()).find((v) => samePath(v.path, vaultPath))?.id
-}
 
 /** `_INDEX.md` có frontmatter `type: index` → vault đúng mẫu stag.ai. */
 async function isStagVault(dir: string): Promise<boolean> {
@@ -37,7 +17,6 @@ async function isStagVault(dir: string): Promise<boolean> {
 
 /** Quét thư mục dự án (nông, tối đa 2 cấp) để tìm vault có sẵn. */
 export async function detectVaults(projectDir: string): Promise<VaultCandidate[]> {
-  const registry = await readObsidianRegistry()
   const found: VaultCandidate[] = []
 
   async function visit(dir: string, depth: number): Promise<void> {
@@ -47,8 +26,7 @@ export async function detectVaults(projectDir: string): Promise<VaultCandidate[]
       found.push({
         path: dir,
         relPath: relative(projectDir, dir),
-        kind: stag ? 'stag' : 'obsidian',
-        registered: registry.some((v) => samePath(v.path, dir))
+        kind: stag ? 'stag' : 'obsidian'
       })
       return // không tìm vault lồng trong vault
     }
@@ -117,8 +95,8 @@ export async function readNote(vaultPath: string, rel: string): Promise<string> 
 
 /**
  * Ghi note người dùng sửa trong app. `base` = nội dung lúc bắt đầu sửa (lần đọc / lưu gần nhất): file trên
- * đĩa đã khác `base` nghĩa là Obsidian hoặc agent vừa sửa → không ghi, trả về bản trên đĩa để người dùng chọn.
- * Ghi thẳng vào file (không qua file tạm + đổi tên) để Obsidian thấy như một lần sửa bình thường.
+ * đĩa đã khác `base` nghĩa là agent hoặc chương trình khác vừa sửa → không ghi, trả về bản trên đĩa để người dùng chọn.
+ * Ghi thẳng vào file (không qua file tạm + đổi tên) để trình theo dõi file thấy như một lần sửa bình thường.
  */
 export async function writeNote(vaultPath: string, rel: string, text: string, base: string | null): Promise<NoteWriteResult> {
   const full = notePath(vaultPath, rel)

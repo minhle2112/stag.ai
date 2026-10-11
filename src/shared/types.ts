@@ -16,10 +16,8 @@ export interface VaultCandidate {
   path: string
   /** Đường dẫn tương đối so với thư mục dự án ('' = chính thư mục dự án). */
   relPath: string
-  /** 'stag' = có _INDEX.md đúng mẫu; 'obsidian' = chỉ có .obsidian/. */
+  /** 'stag' = có _INDEX.md đúng mẫu; 'obsidian' = vault markdown có sẵn khác mẫu (nhận ra nhờ thư mục .obsidian/). */
   kind: VaultKind
-  /** Đã có trong danh sách vault của Obsidian. */
-  registered: boolean
 }
 
 export interface WorkspaceInspection {
@@ -60,7 +58,7 @@ export interface VaultNode {
 export interface VaultNoteInfo {
   /** Đường dẫn tương đối trong vault, phân cách '/', có đuôi `.md`. */
   rel: string
-  /** Tên file bỏ `.md` (Obsidian hiển thị và link theo tên này). */
+  /** Tên file bỏ `.md` (`[[link]]` trỏ theo tên này). */
   name: string
   /** `type:` trong frontmatter (log / decision / feature / agent…), dùng tô màu graph. */
   type: string | null
@@ -138,10 +136,6 @@ export interface ArtifactStat {
 
 /** Nội dung xem trước dạng chữ của một artifact. */
 export type ArtifactText = { status: 'ok'; text: string; truncated: boolean } | { status: 'binary' } | { status: 'missing' }
-
-export type ObsidianOpenResult =
-  | { status: 'opened' }
-  | { status: 'needs-register'; vaultPath: string; obsidianInstalled: boolean }
 
 /** Mức tự quyền của Claude Code ('default' = theo cài đặt Claude Code của người dùng). */
 export type PermissionMode = 'default' | 'acceptEdits' | 'auto' | 'plan'
@@ -540,7 +534,12 @@ export interface MemorySettings {
   noteBudgetKb: number
   /** Số dòng "Work done" mới nhất giữ lại trong note khi cất (phần cũ hơn sang archive). */
   keepWorkDone: number
+  /** Tool memory_* trong MCP stag (agent đọc / tìm / sửa vault qua app): đầy đủ, chỉ đọc, hoặc tắt. */
+  agentTools: MemoryToolsMode
 }
+
+export const MEMORY_TOOL_MODES = ['full', 'read', 'off'] as const
+export type MemoryToolsMode = (typeof MEMORY_TOOL_MODES)[number]
 
 export const NOTE_BUDGET_MIN = 2
 export const NOTE_BUDGET_MAX = 64
@@ -632,7 +631,7 @@ export type OverrideLevel = 'workspace' | 'agent'
 export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPercent: 80 }
 export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true, exempt: [] }
 export const DEFAULT_AGENT_API: AgentApiSettings = { manage: true, message: true, confirmCreate: true, read: true }
-export const DEFAULT_MEMORY: MemorySettings = { workLog: true, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 15 }
+export const DEFAULT_MEMORY: MemorySettings = { workLog: true, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 15, agentTools: 'full' }
 export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
 export const VOICE_UNLOAD_MAX = 120
 export const DEFAULT_VOICE: VoiceSettings = { enabled: true, engine: 'local', hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true, aiFix: false, sendCommand: false, global: false, globalHotkey: 'ctrl+shift+space' }

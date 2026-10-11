@@ -170,6 +170,22 @@ export function redact(text: string, known: string[] = []): string {
   return t
 }
 
+/**
+ * Bí mật chắc chắn có trong `text` (giá trị trong kho bí mật của app, chuỗi khoá / token có dạng rõ ràng, `Bearer …`)
+ * — để chặn agent ghi vào vault. Không dùng mẫu `key=value` của redact vì dễ khớp nhầm chữ thường ("token: expires").
+ */
+export function findSecrets(text: string, known: string[] = []): string[] {
+  const out: string[] = []
+  for (const v of known) if (v && v.length >= 6 && text.includes(v)) out.push('a value from the stag.ai secret store')
+  for (const re of [...SECRET_TOKENS, SECRET_VALUES[0]]) {
+    re.lastIndex = 0
+    const m = re.exec(text)
+    re.lastIndex = 0
+    if (m) out.push(`"${m[0].slice(0, 8)}…"`)
+  }
+  return out
+}
+
 const WHO: Record<LogEntry['who'], string> = { user: 'USER', agent: 'AGENT', tool: 'TOOL', error: 'ERROR' }
 
 /** Bỏ dấu tiếng Việt và hoa / thường để tìm. */

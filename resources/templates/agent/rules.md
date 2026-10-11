@@ -11,6 +11,7 @@ MEMORY
 - The project's main vault: {{VAULT_PATH}} (rules in the project's CLAUDE.md).
 - Your own memory: {{AGENT_NOTE}}. Read it at the start; update it when you learn something specific to you (role, habits, unfinished work). Keep it short, condense when it grows.
 {{MEMORY_RULES}}
+{{MEMORY_TOOLS}}
 
 KANBAN (MCP tools of "stag")
 - task_start(title, scope): call as soon as the task is clear → your card shows in the "working" column. Only one open task at a time. Write the scope as paths relative to the project folder, comma-separated (e.g. `src/auth/, tests/auth/*.test.ts`): stag.ai locks those paths, plus every file you edit, for you until task_done.

@@ -10,7 +10,7 @@ const VIEWS: Array<{ tab: MainTab; icon: IconName; tip: string }> = [
   { tab: 'agents', icon: 'grid', tip: 'Agent · Ctrl+1' },
   { tab: 'kanban', icon: 'kanban', tip: 'Kanban · Ctrl+2' },
   { tab: 'artifacts', icon: 'fdiff', tip: 'Artifacts · tệp agent đã tạo / sửa · Ctrl+3' },
-  { tab: 'vault', icon: 'vault', tip: 'Vault Obsidian · Ctrl+4' },
+  { tab: 'vault', icon: 'vault', tip: 'Vault (bộ nhớ) · Ctrl+4' },
   { tab: 'log', icon: 'brain', tip: 'Nhật ký & bộ nhớ · Ctrl+5' }
 ]
 

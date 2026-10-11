@@ -26,6 +26,7 @@ import { agentKind } from '@shared/types'
 import type { PluginEvent } from '@shared/plugins'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
+import { VaultIndexer } from './vaultIndex'
 import { WorkspaceStore } from './workspace'
 import { VocabCache } from './voiceVocab'
 import { CloudUsage, VoiceCloud } from './voiceCloud'
@@ -82,6 +83,8 @@ const board = new Board(
   // Việc đóng → nhật ký việc trong vault + mục "Work done" của note agent (workLog.ts).
   (ws, c) => void memory.taskClosed(ws, c).catch((e) => console.error('[memory]', e))
 )
+/** Chỉ mục vault dùng chung: Vault Viewer + tool memory_* của agent. */
+const vaultIndexer = new VaultIndexer()
 const memory = new MemoryKeeper((ws, agentId) => resolveMemory(settings.get(), ws.id, agentId))
 const send = (channel: string, ...args: unknown[]): void => {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...args)
@@ -262,7 +265,7 @@ const pluginEvent = (type: PluginEvent['type'], a: { id: string; name: string; w
   agentName: a.name,
   data
 })
-const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals, skills, memory)
+const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals, skills, memory, vaultIndexer)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -484,7 +487,7 @@ app.whenReady().then(async () => {
           plugins.callTool(t.pluginId, t.tool.name, params, { workspaceId: ws.id, workspaceName: ws.name, workspacePath: ws.path, agentId: a.id, agentName: a.name })
       }))
   })
-  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins)
+  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins, vaultIndexer)
   registerVoiceIpc(voice, new VocabCache(), workspaces, voiceCloud, cloudUsage)
   registerVoiceSystemIpc({
     secrets,

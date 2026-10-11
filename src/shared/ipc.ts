@@ -15,8 +15,6 @@ export const IPC = {
   wsRemove: 'workspace:remove',
   vaultTree: 'vault:tree',
   vaultRead: 'vault:read',
-  vaultOpenObsidian: 'vault:open-obsidian',
-  vaultIsRegistered: 'vault:is-registered',
   openFolder: 'shell:open-folder',
   templatesOpen: 'templates:open',
   agentSnapshot: 'agent:snapshot',

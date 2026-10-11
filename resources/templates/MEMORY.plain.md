@@ -1,1 +1,1 @@
-- The project's main memory is the Obsidian vault `{{VAULT_PATH}}` — AT THE START OF EVERY SESSION read the related notes in it before doing anything; this file is only a cache, on conflict the vault wins.
+- The project's main memory is the vault `{{VAULT_PATH}}` — AT THE START OF EVERY SESSION read the related notes in it before doing anything; this file is only a cache, on conflict the vault wins.

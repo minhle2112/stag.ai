@@ -20,6 +20,8 @@ Back to: [[_INDEX]]
 2. Then read the notes related to the upcoming work (project, feature, decision, latest log).
 3. **Do not act on "memory" before recalling.**
 
+**How:** agents running inside stag.ai use the `memory_*` tools of the app's MCP server `stag` — `memory_read` (also lists backlinks), `memory_search`, `memory_query`, `memory_list` to recall; `memory_append`, `memory_patch`, `memory_write`, `memory_move` to record. Other tools read and edit the `.md` files directly; the format is the same (markdown + `[[links]]` + frontmatter).
+
 ## Record
 | What was learned | Where to write it |
 |---|---|
@@ -46,11 +48,10 @@ After recording: update the auto memory cache if needed (pointers only, do not c
 
 ## Renaming / moving the vault
 If the vault folder is renamed or moved:
-1. Reopen the vault in Obsidian ("Open folder as vault").
-2. Fix the path in `CLAUDE.md` at the project root, in this note, and in the auto memory cache (`MEMORY.md`).
+1. Fix the path in `CLAUDE.md` at the project root, in this note, and in the auto memory cache (`MEMORY.md`).
 
 ## Worktree
 The vault only lives in the main project folder. Sessions running in a git worktree must point to the vault by the absolute path above.
 
 ## Git
-The vault and `.obsidian/` are personal data → listed in `.gitignore`, never pushed to GitHub.
+The vault is personal data → listed in `.gitignore`, never pushed to GitHub.

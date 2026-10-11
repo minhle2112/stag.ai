@@ -44,9 +44,19 @@ describe('Cài đặt bộ nhớ (nhật ký việc, note agent)', () => {
       workspaces: { w1: { memory: { workLog: false } } },
       agents: { a1: { memory: { workLog: true, noteBudgetKb: 4 } } }
     })
-    expect(resolveMemory(s, 'w1', 'a1')).toEqual({ workLog: true, agentWorkDone: true, noteBudgetKb: 4, keepWorkDone: 20 })
-    expect(resolveMemory(s, 'w1', 'a2')).toEqual({ workLog: false, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 20 })
+    expect(resolveMemory(s, 'w1', 'a1')).toEqual({ workLog: true, agentWorkDone: true, noteBudgetKb: 4, keepWorkDone: 20, agentTools: 'full' })
+    expect(resolveMemory(s, 'w1', 'a2')).toEqual({ workLog: false, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 20, agentTools: 'full' })
     expect(patchApp(DEFAULT_SETTINGS.app, { memory: { agentWorkDone: false } }).memory).toEqual({ ...DEFAULT_MEMORY, agentWorkDone: false })
+  })
+
+  it('tool bộ nhớ cho agent: full / read / off, giá trị lạ về mặc định, ghi đè theo agent', () => {
+    expect(DEFAULT_MEMORY.agentTools).toBe('full')
+    expect(normalizeMemory({ agentTools: 'nope' }).agentTools).toBe('full')
+    expect(normalizeOverrides({ memory: { agentTools: 'read' } })).toEqual({ memory: { agentTools: 'read' } })
+    expect(normalizeOverrides({ memory: { agentTools: 'x' } })).toBeNull()
+    const s = normalizeSettings({ version: 2, workspaces: { w1: { memory: { agentTools: 'read' } } }, agents: { a1: { memory: { agentTools: 'off' } } } })
+    expect(resolveMemory(s, 'w1', 'a1').agentTools).toBe('off')
+    expect(resolveMemory(s, 'w1', 'a2').agentTools).toBe('read')
   })
 })
 

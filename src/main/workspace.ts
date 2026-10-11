@@ -83,7 +83,6 @@ export class WorkspaceStore {
     if (req.vault.mode === 'new') {
       if (await exists(vaultPath)) throw new Error(`Đã có thư mục "${vars.VAULT_DIR}". Hãy chọn "dùng vault có sẵn".`)
       const created = await copyVaultTemplate(vaultPath, vars)
-      await fs.mkdir(join(vaultPath, '.obsidian'), { recursive: true })
       report.push(`Tạo vault mới "${vars.VAULT_DIR}" (${created.filter((c) => c.endsWith('.md')).length} note)`)
     } else if (req.vault.augment) {
       const created = await copyVaultTemplate(vaultPath, vars, true)
@@ -105,7 +104,7 @@ export class WorkspaceStore {
     }
     if (isGit) report.push(await this.ensureGitignore(req.path, vaultPath))
 
-    // 3. CLAUDE.md + cache auto memory. Vault không có _INDEX.md (vault Obsidian khác mẫu, giữ nguyên)
+    // 3. CLAUDE.md + cache auto memory. Vault không có _INDEX.md (vault có sẵn khác mẫu, giữ nguyên)
     //    thì dùng biến thể "plain", để không chỉ agent tới những note không tồn tại.
     const structured = await exists(join(vaultPath, '_INDEX.md'))
     report.push(await this.ensureClaudeMd(req.path, vars, structured))
@@ -120,7 +119,7 @@ export class WorkspaceStore {
   private async ensureGitignore(projectDir: string, vaultPath: string): Promise<string> {
     const rel = relative(projectDir, vaultPath).replace(/\\/g, '/')
     if (!rel) return '.gitignore: vault chính là thư mục dự án, không thêm được vào .gitignore'
-    const added = await ensureIgnored(projectDir, [`${rel}/`, '.obsidian/', '.sessions/'], 'Obsidian vault + agent sessions (personal data, keep out of git)')
+    const added = await ensureIgnored(projectDir, [`${rel}/`, '.sessions/'], 'stag.ai vault + agent sessions (personal data, keep out of git)')
     return added.length ? `.gitignore: thêm ${added.join(', ')}` : '.gitignore: đã loại trừ vault và .sessions/, giữ nguyên'
   }
 

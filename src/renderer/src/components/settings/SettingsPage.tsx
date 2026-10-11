@@ -196,7 +196,7 @@ function AboutSection(): React.JSX.Element {
   )
   return (
     <>
-      <SectionTitle title="Giới thiệu" desc="stag.ai: điều hành một đội agent AI viết code, mỗi workspace có vault Obsidian làm bộ nhớ." />
+      <SectionTitle title="Giới thiệu" desc="stag.ai: điều hành một đội agent AI viết code, mỗi workspace có một vault (note markdown) làm bộ nhớ, agent đọc / sửa qua app." />
       <Group title="Phiên bản">
         {line('stag.ai', meta ? `${meta.version}${meta.packaged ? '' : ' (dev)'}` : undefined)}
         {line('Electron', meta?.electron)}

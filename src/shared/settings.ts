@@ -31,6 +31,7 @@ import {
   type GeneralSettings,
   type HandoffSettings,
   type MemorySettings,
+  MEMORY_TOOL_MODES,
   type ModelSettings,
   type PermissionMode,
   type ScopeLockSettings,
@@ -138,7 +139,8 @@ export function normalizeMemory(raw: unknown): MemorySettings {
     workLog: bool(r.workLog, d.workLog),
     agentWorkDone: bool(r.agentWorkDone, d.agentWorkDone),
     noteBudgetKb: int(r.noteBudgetKb, d.noteBudgetKb, NOTE_BUDGET_MIN, NOTE_BUDGET_MAX),
-    keepWorkDone: int(r.keepWorkDone, d.keepWorkDone, KEEP_WORK_DONE_MIN, KEEP_WORK_DONE_MAX)
+    keepWorkDone: int(r.keepWorkDone, d.keepWorkDone, KEEP_WORK_DONE_MIN, KEEP_WORK_DONE_MAX),
+    agentTools: oneOf(r.agentTools, MEMORY_TOOL_MODES, d.agentTools)
   }
 }
 
@@ -149,6 +151,7 @@ function partialMemory(raw: unknown): Partial<MemorySettings> | undefined {
   const out: Partial<MemorySettings> = {}
   for (const k of ['workLog', 'agentWorkDone'] as const) if (typeof r[k] === 'boolean') out[k] = full[k]
   for (const k of ['noteBudgetKb', 'keepWorkDone'] as const) if (typeof r[k] === 'number' && Number.isFinite(r[k])) out[k] = full[k]
+  if ((MEMORY_TOOL_MODES as readonly unknown[]).includes(r.agentTools)) out.agentTools = full.agentTools
   return Object.keys(out).length ? out : undefined
 }
 

@@ -17,7 +17,7 @@ _(none yet)_
 
 ## Folders
 - `{{PROJECT_PATH}}` — project folder
-- `{{VAULT_DIR}}/` — Obsidian vault (primary memory, not in git)
+- `{{VAULT_DIR}}/` — vault (primary memory, not in git)
 
 ## Timeline
 - {{DATE}} — Workspace created in stag.ai, vault initialized. See [[{{DATE}}]].

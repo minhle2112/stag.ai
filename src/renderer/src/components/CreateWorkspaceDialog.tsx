@@ -19,7 +19,7 @@ export function CreateWorkspaceDialog({ inspection, onClose, onCreated }: Props)
   const [name, setName] = useState(inspection.suggestedName)
   const [choice, setChoice] = useState<string>(candidates[0]?.path ?? NEW)
   const chosen = candidates.find((c) => c.path === choice)
-  // Mặc định: vault đúng mẫu → bổ sung phần còn thiếu; vault Obsidian khác mẫu → giữ nguyên.
+  // Mặc định: vault đúng mẫu → bổ sung phần còn thiếu; vault khác mẫu → giữ nguyên.
   const [augment, setAugment] = useState<Record<string, boolean>>(
     Object.fromEntries(candidates.map((c) => [c.path, c.kind === 'stag']))
   )
@@ -83,8 +83,7 @@ export function CreateWorkspaceDialog({ inspection, onClose, onCreated }: Props)
                   Dùng vault có sẵn: <b>{candidateLabel(c)}</b>
                 </div>
                 <div className="mt-0.5 flex flex-wrap gap-1.5 text-[11px]">
-                  <Tag tone={c.kind === 'stag' ? 'ok' : 'warn'}>{c.kind === 'stag' ? 'đúng mẫu stag.ai' : 'vault Obsidian khác mẫu'}</Tag>
-                  <Tag tone={c.registered ? 'ok' : 'muted'}>{c.registered ? 'đã đăng ký trong Obsidian' : 'chưa đăng ký trong Obsidian'}</Tag>
+                  <Tag tone={c.kind === 'stag' ? 'ok' : 'warn'}>{c.kind === 'stag' ? 'đúng mẫu stag.ai' : 'vault khác mẫu'}</Tag>
                 </div>
                 {choice === c.path && (
                   <label className="mt-2 flex items-center gap-2 text-muted">
@@ -111,7 +110,7 @@ export function CreateWorkspaceDialog({ inspection, onClose, onCreated }: Props)
 
       <Field label="Git">
         {inspection.isGitRepo ? (
-          <div className="text-muted">Thư mục là repo git: app sẽ thêm vault và .obsidian/ vào .gitignore.</div>
+          <div className="text-muted">Thư mục là repo git: app sẽ thêm vault và .sessions/ vào .gitignore.</div>
         ) : (
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={gitInit} onChange={(e) => setGitInit(e.target.checked)} />

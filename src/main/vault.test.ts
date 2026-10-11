@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultProjectName, detectVaults, findRegisteredId, readNote, readObsidianRegistry, vaultDirName, vaultTree } from './vault'
+import { defaultProjectName, detectVaults, readNote, vaultDirName, vaultTree } from './vault'
 
 let root: string
 let project: string
@@ -20,13 +20,6 @@ async function mkdir(rel: string): Promise<void> {
   await fs.mkdir(join(project, rel), { recursive: true })
 }
 
-/** Viết obsidian.json giả trong %APPDATA% tạm (không bao giờ đọc file thật của người dùng). */
-async function registry(paths: Record<string, string>): Promise<void> {
-  const vaults = Object.fromEntries(Object.entries(paths).map(([id, path]) => [id, { path, ts: 1, open: true }]))
-  await fs.mkdir(join(appData, 'obsidian'), { recursive: true })
-  await fs.writeFile(join(appData, 'obsidian', 'obsidian.json'), JSON.stringify({ vaults }), 'utf8')
-}
-
 beforeEach(async () => {
   root = await fs.mkdtemp(join(tmpdir(), 'stag-vault-'))
   project = join(root, 'proj')
@@ -40,39 +33,6 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
 
-describe('readObsidianRegistry', () => {
-  it('không có obsidian.json → rỗng', async () => {
-    expect(await readObsidianRegistry()).toEqual([])
-  })
-
-  it('không có APPDATA → rỗng', async () => {
-    vi.stubEnv('APPDATA', undefined)
-    expect(await readObsidianRegistry()).toEqual([])
-  })
-
-  it('file hỏng → rỗng, không ném lỗi', async () => {
-    await fs.mkdir(join(appData, 'obsidian'), { recursive: true })
-    await fs.writeFile(join(appData, 'obsidian', 'obsidian.json'), '{hỏng', 'utf8')
-    expect(await readObsidianRegistry()).toEqual([])
-  })
-
-  it('đọc danh sách, bỏ mục không có path', async () => {
-    await fs.mkdir(join(appData, 'obsidian'), { recursive: true })
-    await fs.writeFile(
-      join(appData, 'obsidian', 'obsidian.json'),
-      JSON.stringify({ vaults: { a: { path: 'C:\\v1' }, b: { ts: 1 } } }),
-      'utf8'
-    )
-    expect(await readObsidianRegistry()).toEqual([{ id: 'a', path: 'C:\\v1' }])
-  })
-
-  it('findRegisteredId so đường dẫn không phân biệt / \\ và hoa thường', async () => {
-    await registry({ abc: 'C:/Users/X/Proj/Proj memory' })
-    expect(await findRegisteredId('c:\\users\\x\\proj\\proj memory\\')).toBe('abc')
-    expect(await findRegisteredId('C:\\khác')).toBeUndefined()
-  })
-})
-
 describe('detectVaults', () => {
   it('thư mục trống → không có vault', async () => {
     expect(await detectVaults(project)).toEqual([])
@@ -81,7 +41,7 @@ describe('detectVaults', () => {
   it('thư mục con có _INDEX.md type: index → vault đúng mẫu stag', async () => {
     await put('proj memory/_INDEX.md', STAG_INDEX)
     expect(await detectVaults(project)).toEqual([
-      { path: join(project, 'proj memory'), relPath: 'proj memory', kind: 'stag', registered: false }
+      { path: join(project, 'proj memory'), relPath: 'proj memory', kind: 'stag' }
     ])
   })
 
@@ -96,18 +56,18 @@ describe('detectVaults', () => {
     expect(await detectVaults(project)).toEqual([])
   })
 
-  it('có .obsidian/ → vault Obsidian khác mẫu', async () => {
+  it('có .obsidian/ → vault có sẵn khác mẫu', async () => {
     await mkdir('notes/.obsidian')
     await put('notes/a.md', 'x')
     expect(await detectVaults(project)).toEqual([
-      { path: join(project, 'notes'), relPath: 'notes', kind: 'obsidian', registered: false }
+      { path: join(project, 'notes'), relPath: 'notes', kind: 'obsidian' }
     ])
   })
 
   it('chính thư mục dự án là vault → relPath rỗng, không quét vault lồng bên trong', async () => {
     await mkdir('.obsidian')
     await put('inner/_INDEX.md', STAG_INDEX)
-    expect(await detectVaults(project)).toEqual([{ path: project, relPath: '', kind: 'obsidian', registered: false }])
+    expect(await detectVaults(project)).toEqual([{ path: project, relPath: '', kind: 'obsidian' }])
   })
 
   it('vault đúng mẫu lên trước, rồi theo relPath', async () => {
@@ -128,17 +88,6 @@ describe('detectVaults', () => {
     await mkdir(join('node_modules', 'pkg', '.obsidian'))
     await mkdir(join('.git', '.obsidian'))
     expect((await detectVaults(project)).map((v) => v.relPath)).toEqual([join('a', 'b')])
-  })
-
-  it('gắn nhãn registered theo obsidian.json (giả, trong APPDATA tạm)', async () => {
-    await put('proj memory/_INDEX.md', STAG_INDEX)
-    await mkdir('other/.obsidian')
-    await registry({ id1: join(project, 'proj memory').replace(/\\/g, '/').toUpperCase() })
-    const found = await detectVaults(project)
-    expect(found.map((v) => [v.relPath, v.registered])).toEqual([
-      ['proj memory', true],
-      ['other', false]
-    ])
   })
 })
 

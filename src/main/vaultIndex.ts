@@ -12,7 +12,7 @@ const SEARCH_MAX_NOTES = 50
 const SEARCH_MAX_LINES = 5
 const SNIPPET = 160
 
-interface Cached {
+export interface Cached {
   mtime: number
   size: number
   meta: NoteMeta
@@ -142,6 +142,11 @@ export class VaultIndexer {
     }
     hits.sort((a, b) => Number(b.titleMatch) - Number(a.titleMatch) || b.matches.length - a.matches.length || b.mtime - a.mtime)
     return hits.slice(0, SEARCH_MAX_NOTES).map(({ mtime: _m, ...h }) => h)
+  }
+
+  /** Mọi note đã quét (rel → nội dung + meta + link), đọc lại file đã đổi; cho tool memory_* của agent. */
+  async notes(vaultPath: string): Promise<ReadonlyMap<string, Cached>> {
+    return this.scan(vaultPath)
   }
 
   forget(vaultPath: string): void {

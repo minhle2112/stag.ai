@@ -48,8 +48,6 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
   const { vaultPath } = workspace
   const vaultName = vaultPath.split(/[\\/]/).filter(Boolean).pop() ?? vaultPath
   const [tree, setTree] = useState<VaultNode[]>([])
-  const [registered, setRegistered] = useState<boolean | null>(null)
-  const [guide, setGuide] = useState(false)
   const [view, setView] = useState<'note' | 'graph'>('note')
   const { index, tick, error } = useVaultIndex(vaultPath)
   // Vault tự báo khi đổi (tick); nút "Làm mới" để dự phòng khi không theo dõi được (vd. vault tạo sau khi mở tab).
@@ -67,7 +65,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<VaultSearchHit[] | null>(null)
 
-  /** Chế độ sửa (giữ nguyên khi chuyển note, như Obsidian). */
+  /** Chế độ sửa (giữ nguyên khi chuyển note). */
   const [editing, setEditing] = useState(false)
   const [editStatus, setEditStatus] = useState<EditorStatus | null>(null)
   const [newNote, setNewNote] = useState(false)
@@ -106,17 +104,6 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
   const loadTree = useCallback(() => {
     window.stag.vault.tree(vaultPath).then(setTree, () => setTree([]))
   }, [vaultPath])
-
-  const checkRegistered = useCallback(() => {
-    window.stag.vault.isRegistered(vaultPath).then(setRegistered, () => setRegistered(null))
-  }, [vaultPath])
-
-  // Quay lại app (vd. sau khi đăng ký vault trong Obsidian) thì kiểm lại.
-  useEffect(() => {
-    checkRegistered()
-    window.addEventListener('focus', checkRegistered)
-    return () => window.removeEventListener('focus', checkRegistered)
-  }, [checkRegistered])
 
   // Cây file đọc lại mỗi khi vault đổi.
   useEffect(() => loadTree(), [loadTree, changed])
@@ -299,11 +286,6 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
 
   const openAt = useCallback((rel: string, line?: number) => open(rel, line ? { line, flash: true } : undefined), [open])
 
-  async function openObsidian(): Promise<void> {
-    const r = await window.stag.vault.openInObsidian(vaultPath)
-    if (r.status === 'needs-register') setGuide(true)
-  }
-
   const searching = query.trim() !== ''
   // Khung hẹp (vd. mở trình duyệt bên phải): tự ẩn cột liên kết (< LINKS_MIN) rồi cột cây (< TREE_MIN) cho phần note còn
   // đủ rộng; có nút bật lại.
@@ -365,10 +347,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
           <IconButton
             icon="ref"
             tip="Làm mới cây note và chỉ mục"
-            onClick={() => {
-              setReload((n) => n + 1)
-              checkRegistered()
-            }}
+            onClick={() => setReload((n) => n + 1)}
           />
           <IconButton icon="folder" tip="Mở thư mục vault" onClick={() => window.stag.openFolder(vaultPath)} />
           <IconButton
@@ -377,11 +356,6 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
             on={editing && view === 'note'}
             onClick={() => toggleEditRef.current()}
             className={!canEdit && !editing && !(view === 'graph' && docReady) ? 'opacity-40' : ''}
-          />
-          <IconButton
-            icon="ext"
-            tip={registered === false ? 'Mở trong Obsidian · vault chưa đăng ký, sẽ có hướng dẫn' : 'Mở trong Obsidian'}
-            onClick={openObsidian}
           />
           {(width < TREE_MIN || treeOpen === false) && (
             <IconButton
@@ -525,49 +499,6 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
           </aside>
         </div>
       </div>
-
-      {guide && (
-        <Modal
-          title="Đăng ký vault trong Obsidian (chỉ cần làm 1 lần)"
-          onClose={() => setGuide(false)}
-          footer={
-            <>
-              <Button onClick={() => setGuide(false)}>Đóng</Button>
-              <Button
-                primary
-                onClick={async () => {
-                  const ok = await window.stag.vault.isRegistered(vaultPath)
-                  setRegistered(ok)
-                  if (ok) {
-                    setGuide(false)
-                    window.stag.vault.openInObsidian(vaultPath)
-                  }
-                }}
-              >
-                Tôi đã đăng ký xong — mở vault
-              </Button>
-            </>
-          }
-        >
-          <p className="mb-3 text-muted">
-            Obsidian chưa biết vault này, và không có cách mở thẳng một vault chưa đăng ký. App đã mở Obsidian và{' '}
-            <b className="text-fg">chép sẵn đường dẫn vault vào clipboard</b>.
-          </p>
-          <ol className="list-decimal space-y-1.5 pl-5">
-            <li>
-              Trong Obsidian, bấm tên vault ở góc dưới bên trái → <b>Manage vaults…</b>
-            </li>
-            <li>
-              Ở mục <b>Open folder as vault</b>, bấm <b>Open</b>.
-            </li>
-            <li>
-              Dán đường dẫn (<kbd className="font-mono">Ctrl</kbd>+<kbd className="font-mono">V</kbd>) vào ô địa chỉ của hộp chọn thư mục → <b>Select Folder</b>.
-            </li>
-          </ol>
-          <div className="mt-3 rounded-md bg-panel-2 px-2 py-1.5 font-mono text-[12px] break-all select-text">{vaultPath}</div>
-          {registered === false && <p className="mt-3 text-[12px] text-muted">Chưa thấy vault trong danh sách của Obsidian.</p>}
-        </Modal>
-      )}
 
       {newNote && (
         <NewNoteDialog

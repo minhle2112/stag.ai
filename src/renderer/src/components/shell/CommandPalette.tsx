@@ -87,7 +87,7 @@ function PaletteBody(): React.JSX.Element {
       { id: 'v-agents', group: 'Màn hình', label: 'Agent', hint: 'Ctrl 1', icon: 'grid', run: go(() => setTab('agents')), keywords: 'luoi cell' },
       { id: 'v-kanban', group: 'Màn hình', label: 'Kanban', hint: 'Ctrl 2', icon: 'kanban', run: go(() => setTab('kanban')), keywords: 'viec cho ban' },
       { id: 'v-artifacts', group: 'Màn hình', label: 'Artifacts', hint: 'Ctrl 3', icon: 'fdiff', run: go(() => setTab('artifacts')), keywords: 'tep file diff' },
-      { id: 'v-vault', group: 'Màn hình', label: 'Vault Obsidian', hint: 'Ctrl 4', icon: 'vault', run: go(() => setTab('vault')), keywords: 'note do thi graph' },
+      { id: 'v-vault', group: 'Màn hình', label: 'Vault (bộ nhớ)', hint: 'Ctrl 4', icon: 'vault', run: go(() => setTab('vault')), keywords: 'note do thi graph bo nho memory obsidian' },
       { id: 'v-log', group: 'Màn hình', label: 'Nhật ký & bộ nhớ', hint: 'Ctrl 5', icon: 'brain', run: go(() => setTab('log')), keywords: 'log memory' }
     ]
     for (const { plugin, slot } of slotsOf(pluginItems, settingsValue, 'page', active?.id))

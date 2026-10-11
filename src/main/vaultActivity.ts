@@ -62,7 +62,11 @@ export class VaultActivityLog {
 
   /** Ghi các note một lần gọi tool vừa đụng tới (hook PostToolUse). */
   onToolUse(ws: Workspace, agent: Agent, p: HookPayload): void {
-    const touches = vaultTouches(p, ws.vaultPath, ws.path)
+    this.record(ws, agent, vaultTouches(p, ws.vaultPath, ws.path))
+  }
+
+  /** Ghi các note agent vừa đọc / ghi (từ hook, hoặc trực tiếp từ tool memory_* của MCP stag). */
+  record(ws: Workspace, agent: Agent, touches: Array<{ rel: string; kind: 'read' | 'write' }>): void {
     if (!touches.length) return
     const list = this.byWs.get(ws.id) ?? []
     const now = new Date()

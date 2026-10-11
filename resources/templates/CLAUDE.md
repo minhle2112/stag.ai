@@ -10,4 +10,5 @@ _(Describe the project in 2–3 lines.)_
 - **Every session must read `{{VAULT_DIR}}/_INDEX.md` (then the related notes) before doing anything.** In a worktree, use the absolute path above.
 - Learned something new (convention, error, decision, finished work) → record it in the vault per `{{VAULT_DIR}}/00 Meta/Memory Protocol.md`.
 - **The vault is written entirely in English** (file and folder names, frontmatter, headings, body), whatever language the conversation uses.
+- Agents running inside stag.ai read and write the vault with the app's `memory_*` tools (MCP server `stag`); other tools edit the `.md` files directly.
 - **Never store passwords / API keys / tokens** in the vault.

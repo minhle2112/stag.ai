@@ -22,13 +22,12 @@ import { artifactPath, type ArtifactLog } from './artifacts'
 import { artifactThumb } from './artifactThumb'
 import type { Board } from './board'
 import type { BrowserService } from './browser'
-import { openInObsidian } from './obsidian'
 import type { Notifier } from './notifier'
 import type { PtyManager } from './pty'
 import type { SettingsStore } from './settings'
 import { detectShells } from './shells'
 import { prepareUserTemplates } from './templates'
-import { createNote, findRegisteredId, readNote, vaultTree, writeNote } from './vault'
+import { createNote, readNote, vaultTree, writeNote } from './vault'
 import type { VaultActivityLog } from './vaultActivity'
 import { VaultIndexer, VaultWatchers } from './vaultIndex'
 import type { WorkspaceStore } from './workspace'
@@ -39,10 +38,9 @@ import { aiFix } from './voiceFix'
 import { typeText, type GlobalVoice, type KeySender, type OverlayState, type VoiceOverlay } from './voiceSystem'
 import { AI_FIX_SECRET, type VoiceAiInfo, type VoiceCloudInfo } from '@shared/voice'
 
-const vaultIndexer = new VaultIndexer()
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary, plugins: PluginHost): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary, plugins: PluginHost, vaultIndexer: VaultIndexer): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
@@ -75,8 +73,6 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.vaultWrite, (_e, vaultPath: string, rel: string, text: string, base: string | null) => writeNote(vaultPath, rel, text, base))
   ipcMain.handle(IPC.vaultCreate, (_e, vaultPath: string, folder: string, name: string) => createNote(vaultPath, folder, name))
   ipcMain.handle(IPC.vaultActivity, (_e, workspaceId: string) => activity.list(workspaceId))
-  ipcMain.handle(IPC.vaultOpenObsidian, (_e, vaultPath: string) => openInObsidian(vaultPath))
-  ipcMain.handle(IPC.vaultIsRegistered, async (_e, vaultPath: string) => !!(await findRegisteredId(vaultPath)))
   ipcMain.handle(IPC.openFolder, (_e, path: string) => shell.openPath(path))
   ipcMain.handle(IPC.templatesOpen, async () => shell.openPath(await prepareUserTemplates()))
 

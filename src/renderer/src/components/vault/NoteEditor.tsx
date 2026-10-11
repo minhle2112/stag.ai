@@ -300,8 +300,8 @@ export function NoteEditor({ vaultPath, rel, disk, notes, onStatus }: Props): Re
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-wait/40 bg-wait/10 px-4 py-2 text-[12px] text-wait">
           <span className="min-w-0 flex-1">
             {conflict.disk === null
-              ? 'Note vừa bị xoá hoặc đổi tên bên ngoài (Obsidian hoặc agent) trong lúc bạn sửa.'
-              : 'Note vừa bị sửa bên ngoài (Obsidian hoặc agent) trong lúc bạn đang sửa. Chưa ghi gì đè lên nhau.'}
+              ? 'Note vừa bị xoá hoặc đổi tên bên ngoài (agent hoặc chương trình khác) trong lúc bạn sửa.'
+              : 'Note vừa bị sửa bên ngoài (agent hoặc chương trình khác) trong lúc bạn đang sửa. Chưa ghi gì đè lên nhau.'}
           </span>
           {conflict.disk !== null && (
             <Button

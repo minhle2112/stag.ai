@@ -94,14 +94,14 @@ describe('ensureIgnored', () => {
 })
 
 describe('WorkspaceStore.create', () => {
-  it('tạo vault mới đúng mẫu + .obsidian + CLAUDE.md + cache MEMORY.md', async () => {
+  it('tạo vault mới đúng mẫu (không tạo .obsidian) + CLAUDE.md + cache MEMORY.md', async () => {
     const store = new WorkspaceStore()
     const { workspace, report } = await store.create(req())
     const vault = join(project, 'Demo memory')
 
     expect(workspace).toMatchObject({ name: 'Demo', path: project, vaultPath: vault })
     expect(await readFile(join(vault, '_INDEX.md'))).toMatch(/^---\r?\ntype: index/)
-    expect((await fs.stat(join(vault, '.obsidian'))).isDirectory()).toBe(true)
+    await expect(fs.stat(join(vault, '.obsidian'))).rejects.toThrow()
     expect(await readFile(join(vault, '10 Demo', 'Demo.md'))).toContain('Demo')
     expect(await fs.readdir(join(vault, '40 Log'))).toContain(`${today()}.md`)
     // .keep không bị chép vào vault thật
@@ -215,11 +215,12 @@ describe('WorkspaceStore.create', () => {
     expect(report.some((r) => r.startsWith('Bổ sung vào vault có sẵn'))).toBe(true)
   })
 
-  it('repo git có sẵn → .gitignore loại trừ vault, .obsidian/, .sessions/', async () => {
+  it('repo git có sẵn → .gitignore loại trừ vault, .sessions/ (không thêm .obsidian/)', async () => {
     await fs.mkdir(join(project, '.git'))
     await new WorkspaceStore().create(req())
     const gi = await readFile(join(project, '.gitignore'))
-    expect(gi.split('\n')).toEqual(expect.arrayContaining(['Demo memory/', '.obsidian/', '.sessions/']))
+    expect(gi.split('\n')).toEqual(expect.arrayContaining(['Demo memory/', '.sessions/']))
+    expect(gi).not.toContain('.obsidian/')
   })
 
   it('báo lỗi: thư mục không có / đã là workspace (khác / \\) / vault mới trùng tên thư mục có sẵn', async () => {

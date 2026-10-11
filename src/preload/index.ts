@@ -51,7 +51,6 @@ import type {
   Task,
   ViewRect,
   CreateWorkspaceResult,
-  ObsidianOpenResult,
   VaultIndex,
   VaultNode,
   VaultSearchHit,
@@ -236,13 +235,11 @@ const api = {
       ipcRenderer.on(IPC.vaultActivityChanged, fn)
       return () => ipcRenderer.removeListener(IPC.vaultActivityChanged, fn)
     },
-    openInObsidian: (vaultPath: string): Promise<ObsidianOpenResult> => ipcRenderer.invoke(IPC.vaultOpenObsidian, vaultPath),
-    isRegistered: (vaultPath: string): Promise<boolean> => ipcRenderer.invoke(IPC.vaultIsRegistered, vaultPath),
     /** Chỉ mục toàn vault: note (kèm type/aliases/tags) + link đã phân giải. */
     index: (vaultPath: string): Promise<VaultIndex> => ipcRenderer.invoke(IPC.vaultIndex, vaultPath),
     /** Tìm toàn văn, không phân biệt hoa thường và dấu tiếng Việt. */
     search: (vaultPath: string, query: string): Promise<VaultSearchHit[]> => ipcRenderer.invoke(IPC.vaultSearch, vaultPath, query),
-    /** Gọi `cb` khi file trong vault đổi (đã gộp 300ms, bỏ qua `.obsidian/`). Trả về hàm huỷ theo dõi. */
+    /** Gọi `cb` khi file trong vault đổi (đã gộp 300ms, bỏ qua thư mục ẩn như `.trash/`). Trả về hàm huỷ theo dõi. */
     watch(vaultPath: string, cb: () => void): () => void {
       const fn = (_e: IpcRendererEvent, path: string): void => {
         if (path === vaultPath) cb()

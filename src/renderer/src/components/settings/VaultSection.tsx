@@ -1,9 +1,15 @@
 import { useState } from 'react'
 import { resolveMemory } from '@shared/settings'
-import { KEEP_WORK_DONE_MAX, KEEP_WORK_DONE_MIN, NOTE_BUDGET_MAX, NOTE_BUDGET_MIN, type MemorySettings } from '@shared/types'
+import { KEEP_WORK_DONE_MAX, KEEP_WORK_DONE_MIN, NOTE_BUDGET_MAX, NOTE_BUDGET_MIN, type MemorySettings, type MemoryToolsMode } from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { LevelBar, useLevel, type LevelKey } from './levels'
-import { ErrorBar, Group, Note, Row, SectionTitle, SmallButton, Stepper, Switch, useSaveError } from './controls'
+import { ErrorBar, Group, Note, Row, Select, SectionTitle, SmallButton, Stepper, Switch, useSaveError } from './controls'
+
+const TOOL_MODES: Record<MemoryToolsMode, { label: string; desc: string }> = {
+  full: { label: 'Đọc và ghi', desc: 'Agent đọc, tìm, sửa, đổi tên note qua app (memory_read, memory_search, memory_patch, memory_move…). App chặn ghi bí mật và không cho ghi đè thay đổi của người khác.' },
+  read: { label: 'Chỉ đọc', desc: 'Agent đọc và tìm qua app; muốn ghi thì agent tự sửa file note như trước.' },
+  off: { label: 'Tắt', desc: 'Không có tool memory_*: agent tự đọc / sửa file trong vault bằng công cụ file của nó.' }
+}
 
 /**
  * Cài đặt → Vault & bộ nhớ: bộ mẫu vault + app tự ghi nhật ký việc / note agent (xem vault "Memory and work log").
@@ -46,7 +52,7 @@ export function VaultSection(): React.JSX.Element {
     <>
       <SectionTitle
         title="Vault & bộ nhớ"
-        desc="Mỗi workspace có một vault Obsidian làm bộ nhớ, tạo từ bộ mẫu dưới đây. App tự ghi việc agent làm xong vào vault, và giữ note riêng của từng agent gọn trong hạn mức."
+        desc="Mỗi workspace có một vault (thư mục note markdown) làm bộ nhớ, tạo từ bộ mẫu dưới đây. Agent đọc / sửa vault qua tool của app; app tự ghi việc agent làm xong vào vault, và giữ note riêng của từng agent gọn trong hạn mức."
         right={<LevelBar level={key} setLevel={setKey} has={(o) => !!o?.memory} />}
       />
       <ErrorBar error={error} />
@@ -55,6 +61,17 @@ export function VaultSection(): React.JSX.Element {
           <SmallButton icon="folder" onClick={() => void window.stag.openTemplates()}>
             Mở thư mục mẫu
           </SmallButton>
+        </Row>
+      </Group>
+
+      <Group title="Tool bộ nhớ cho agent">
+        <Row label="Agent dùng vault qua app" desc={TOOL_MODES[effective.agentTools].desc} override={override('agentTools', (v) => TOOL_MODES[v as MemoryToolsMode].label)}>
+          <Select
+            label="Agent dùng vault qua app"
+            value={effective.agentTools}
+            onChange={(v: MemoryToolsMode) => setField('agentTools', v)}
+            options={(Object.keys(TOOL_MODES) as MemoryToolsMode[]).map((v) => ({ value: v, label: TOOL_MODES[v].label }))}
+          />
         </Row>
       </Group>
 
@@ -106,7 +123,7 @@ export function VaultSection(): React.JSX.Element {
       </Group>
       <Note>
         Agent không tự ghi lại dòng &quot;xong việc&quot; nữa, chỉ ghi điều đáng nhớ (quyết định, lỗi gặp, bài học). Hạn mức note được kiểm khi phiên agent mở và sau
-        mỗi việc xong.
+        mỗi việc xong. Đổi chế độ tool bộ nhớ có tác dụng từ phiên agent mở sau (phiên đang chạy gọi tool đã tắt thì nhận lỗi).
       </Note>
     </>
   )
