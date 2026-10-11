@@ -10,21 +10,21 @@ import { Button, Modal } from './Modal'
 function Row({ label, children }: { label: string; children: ReactNode }): React.JSX.Element {
   return (
     <>
-      <div className="text-muted">{label}</div>
+      <div className="text-dim">{label}</div>
       <div className="min-w-0 break-words">{children}</div>
     </>
   )
 }
 
 function Grid({ children }: { children: ReactNode }): React.JSX.Element {
-  return <div className="mt-3 grid grid-cols-[110px_1fr] gap-x-3 gap-y-1.5 rounded-md bg-panel-2 px-3 py-2.5 text-[13px]">{children}</div>
+  return <div className="mt-3 grid grid-cols-[96px_1fr] gap-x-2.5 gap-y-1.5 rounded-md border border-line bg-bg p-2.5 text-[12px]">{children}</div>
 }
 
 function Permission({ kind, mode }: { kind: AgentKind; mode: string }): React.JSX.Element {
   const perm = permissionModes(kind).find((p) => p.id === mode)
   return (
     <>
-      <span className={mode === 'auto' ? 'font-semibold text-amber-300' : ''}>{perm?.label ?? mode}</span>
+      <span className={mode === 'auto' ? 'font-semibold text-wait' : ''}>{perm?.label ?? mode}</span>
       {perm && <div className="text-[12px] text-muted">{perm.hint}</div>}
     </>
   )
@@ -141,10 +141,14 @@ export function AgentRequestDialog(): React.JSX.Element | null {
   return (
     <Modal
       title={v.title}
-      width="w-[600px]"
+      icon="code"
+      tone="accent"
+      width="w-[560px]"
       footer={
         <>
-          <Button onClick={() => answer(req.id, false)}>Từ chối</Button>
+          <Button variant="ghost" onClick={() => answer(req.id, false)}>
+            Từ chối
+          </Button>
           <Button primary onClick={() => answer(req.id, true)}>
             {v.ok}
           </Button>

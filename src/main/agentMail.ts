@@ -9,6 +9,8 @@ export interface MailItem {
   at: number
   /** Bàn giao (agent_handoff): `text` là nội dung bàn giao, gõ theo mẫu handoffMessage thay cho agentMessage. */
   handoff?: boolean
+  /** Người dùng phát lệnh (Broadcast): gõ nguyên văn như người dùng gõ, không bọc "tin từ agent". */
+  user?: boolean
 }
 
 /** Mỗi agent nhận giữ tối đa chừng này tin chưa gõ. */

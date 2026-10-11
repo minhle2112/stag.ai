@@ -8,9 +8,9 @@ export const STATUS_BAR_REFRESH_MS = 60_000
 /** Màu theo tone: chấm nhỏ trước chữ (tone default không có chấm) + màu chữ. */
 export const STATUS_TONE: Record<PluginStatusText['tone'], { dot: string | null; text: string }> = {
   default: { dot: null, text: 'text-muted' },
-  ok: { dot: 'bg-emerald-400', text: 'text-emerald-300' },
-  warn: { dot: 'bg-amber-400', text: 'text-amber-300' },
-  error: { dot: 'bg-red-400', text: 'text-red-300' }
+  ok: { dot: 'bg-work', text: 'text-work' },
+  warn: { dot: 'bg-wait', text: 'text-wait' },
+  error: { dot: 'bg-danger', text: 'text-danger' }
 }
 
 /** Mục bấm được khi có `open` (mở URL) hoặc `action` (gọi worker). */

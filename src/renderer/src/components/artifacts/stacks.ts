@@ -5,12 +5,12 @@ import { fold } from '../vault/highlight'
 export type ArtifactCategory = 'image' | 'video' | 'document' | 'text' | 'file'
 
 export const CATEGORIES: Array<{ id: ArtifactCategory | 'all'; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'image', label: 'Images' },
-  { id: 'video', label: 'Videos' },
-  { id: 'document', label: 'Documents' },
-  { id: 'text', label: 'Text' },
-  { id: 'file', label: 'Files' }
+  { id: 'all', label: 'Tất cả' },
+  { id: 'image', label: 'Ảnh' },
+  { id: 'video', label: 'Video' },
+  { id: 'document', label: 'Tài liệu' },
+  { id: 'text', label: 'Văn bản' },
+  { id: 'file', label: 'Tệp khác' }
 ]
 
 const BY_EXT: Record<ArtifactCategory, string[]> = {
@@ -130,6 +130,85 @@ export function filterStacks(stacks: readonly ArtifactStack[], category: Artifac
       (!agentId || s.agents.some((a) => a.id === agentId)) &&
       (!q || fold(s.rel).includes(q) || s.agents.some((a) => fold(a.name).includes(q)))
   )
+}
+
+/** Cách gom danh sách bên trái: theo thư mục, theo agent, theo giờ của lần tạo / sửa gần nhất. */
+export type ArtifactGroupMode = 'dir' | 'agent' | 'time'
+
+/** Một dòng của danh sách: cả file (đã gom) hoặc một lần tạo / sửa (`event`). */
+export interface ArtifactRow {
+  stack: ArtifactStack
+  event?: ArtifactEvent
+}
+
+export interface ArtifactGroup {
+  key: string
+  label: string
+  /** Chỉ có khi gom theo agent. */
+  agent?: { id: string; name: string }
+  rows: ArtifactRow[]
+}
+
+/** Nhóm giờ của một mốc ISO theo giờ địa phương: "Hôm nay · 14:00 – 15:00". */
+export function timeBucket(iso: string, now: Date = new Date()): { key: string; label: string } {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return { key: 'unknown', label: '(không rõ giờ)' }
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const diff = Math.round((today.getTime() - day.getTime()) / 86_400_000)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  const dayLabel = diff === 0 ? 'Hôm nay' : diff === 1 ? 'Hôm qua' : `${p(d.getDate())}/${p(d.getMonth() + 1)}`
+  const h = d.getHours()
+  return { key: `${day.getTime()}-${p(h)}`, label: `${dayLabel} · ${p(h)}:00 – ${p((h + 1) % 24)}:00` }
+}
+
+/**
+ * Gom các dòng thành nhóm, giữ thứ tự xuất hiện (dòng đầu vào đã xếp mới → cũ nên nhóm mới nhất đứng đầu).
+ * Gom theo agent: file nhiều agent cùng đụng tới nằm trong nhóm của từng agent; `onlyAgent` giữ lại một agent.
+ */
+export function groupRows(rows: readonly ArtifactRow[], mode: ArtifactGroupMode, opts: { now?: Date; onlyAgent?: string | null } = {}): ArtifactGroup[] {
+  const out = new Map<string, ArtifactGroup>()
+  const add = (key: string, label: string, row: ArtifactRow, agent?: { id: string; name: string }): void => {
+    let g = out.get(key)
+    if (!g) {
+      g = { key, label, agent, rows: [] }
+      out.set(key, g)
+    }
+    g.rows.push(row)
+  }
+  for (const row of rows) {
+    const { stack, event } = row
+    if (mode === 'dir') add(stack.dir.toLowerCase(), stack.dir ? `${stack.dir}/` : '(thư mục gốc)', row)
+    else if (mode === 'agent') {
+      const who = event ? [{ id: event.agentId, name: event.agentName }] : stack.agents
+      for (const a of who) if (!opts.onlyAgent || a.id === opts.onlyAgent) add(a.id, a.name, row, a)
+    } else {
+      const b = timeBucket(event?.at ?? stack.last, opts.now)
+      add(b.key, b.label, row)
+    }
+  }
+  return [...out.values()]
+}
+
+/**
+ * Dấu đầu dòng: `+` tạo mới (lần đầu agent ghi cả file), `~` đã sửa, `-` đã xoá.
+ * `agentId`: nhìn từ một agent (nhóm theo agent) — chỉ tính các lần agent đó đụng tới file.
+ */
+export function markerOf(row: ArtifactRow, agentId?: string): 'add' | 'mod' | 'del' {
+  const { stack, event } = row
+  if (event) return event.kind === 'delete' ? 'del' : event.kind === 'write' ? 'add' : 'mod'
+  if (stack.deleted) return 'del'
+  const mine = agentId ? stack.events.filter((e) => e.agentId === agentId) : stack.events
+  const list = mine.length ? mine : stack.events
+  // `events` xếp mới → cũ: phần tử cuối là lần đầu tiên.
+  return list[list.length - 1].kind === 'write' ? 'add' : 'mod'
+}
+
+/** Mốc ISO hiện ở cuối dòng: lần tạo / sửa của dòng, hoặc (nhìn từ một agent) lần gần nhất của agent đó. */
+export function rowTime(row: ArtifactRow, agentId?: string): string {
+  const { stack, event } = row
+  if (event) return event.at
+  return (agentId ? stack.events.find((e) => e.agentId === agentId)?.at : undefined) ?? stack.last
 }
 
 export function kindLabel(kind: ArtifactEvent['kind']): string {

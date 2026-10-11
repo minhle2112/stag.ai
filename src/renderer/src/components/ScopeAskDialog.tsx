@@ -14,10 +14,16 @@ export function ScopeAskDialog(): React.JSX.Element | null {
   const minutes = Math.max(1, Math.round((Date.parse(ask.until) - Date.now()) / 60_000))
   return (
     <Modal
-      title="Hai agent đụng cùng một chỗ"
+      title="Khoá phạm vi"
+      icon="lock"
+      tone="wait"
+      width="w-[470px]"
       footer={
         <>
-          <Button onClick={() => answer(false)}>Từ chối</Button>
+          <Button variant="danger" onClick={() => answer(false)}>
+            Từ chối
+          </Button>
+          <span className="flex-1" />
           <Button primary onClick={() => answer(true)}>
             Cho sửa
           </Button>

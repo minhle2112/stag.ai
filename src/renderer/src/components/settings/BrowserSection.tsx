@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react'
 import { homePageInput, originInput, SEARCH_ENGINE_LABELS } from '@shared/browser'
 import { browserToolsOn } from '@shared/settings'
-import { agentKind, type BrowserSettings, type ExternalPagePolicy, type SearchEngine } from '@shared/types'
-import { useAgents } from '../../store/agents'
+import { type BrowserSettings, type ExternalPagePolicy, type SearchEngine } from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { useWorkspaces } from '../../store/workspaces'
-import { ErrorBar, Group, Row, SectionTitle, Select, SmallButton, Switch, useSaveError } from './controls'
-import { useLevel, type LevelKey } from './levels'
-
-const input = 'rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-accent'
+import { ErrorBar, Group, INPUT_MONO, Row, SectionTitle, Select, SmallButton, Switch, useSaveError } from './controls'
+import { LevelBar, useLevel, type LevelKey } from './levels'
 
 const EXTERNAL: Record<ExternalPagePolicy, { label: string; desc: string }> = {
   ask: { label: 'Hỏi bạn', desc: 'Hiện hộp thoại khi agent mở một trang ngoài localhost lần đầu; cho phép thì dùng được tới khi tắt app.' },
@@ -21,11 +18,16 @@ export function BrowserSection(): React.JSX.Element {
   const br = useSettings((s) => s.value.app.browser)
   const save = useSettings((s) => s.save)
   const [error, run] = useSaveError()
+  const [level, setLevel] = useState<LevelKey>('app')
   const set = (patch: Partial<BrowserSettings>): void => run(save({ browser: patch }))
 
   return (
     <>
-      <SectionTitle title="Trình duyệt" desc="Trình duyệt trong app (nút Browser trên thanh trên) và việc agent dùng nó. Thay đổi được lưu ngay." />
+      <SectionTitle
+        title="Trình duyệt"
+        desc="Trình duyệt trong app (nút Browser trên thanh trên) và việc agent dùng nó. Thay đổi được lưu ngay. Cấp workspace / agent chỉ đổi việc bật / tắt tool trình duyệt của agent."
+        right={<LevelBar level={level} setLevel={setLevel} has={(o) => o?.browser?.agentTools !== undefined} />}
+      />
       <ErrorBar error={error} />
 
       <Group title="Duyệt web">
@@ -40,7 +42,7 @@ export function BrowserSection(): React.JSX.Element {
         </Row>
       </Group>
 
-      <AgentToolsGroup run={run} />
+      <AgentToolsGroup run={run} level={level} />
 
       <Group title="Agent mở trang ngoài localhost">
         <Row label="Khi agent mở trang ngoài" desc={EXTERNAL[br.externalPages].desc}>
@@ -85,13 +87,8 @@ function HomePageRow({ value, onSave }: { value: string; onSave: (v: string) => 
     <Row
       label="Trang tab mới"
       htmlFor="browser-home"
-      desc={
-        bad ? (
-          <span className="text-red-300">Cần một địa chỉ web, vd. localhost:5173 hoặc github.com.</span>
-        ) : (
-          'Trang mở khi bấm "+" trong trình duyệt. Bỏ trống = trang trống.'
-        )
-      }
+      desc={'Trang mở khi bấm "+" trong trình duyệt. Bỏ trống = trang trống.'}
+      sub={bad ? <span className="text-danger">Cần một địa chỉ web, vd. localhost:5173 hoặc github.com.</span> : undefined}
     >
       <input
         id="browser-home"
@@ -101,7 +98,7 @@ function HomePageRow({ value, onSave }: { value: string; onSave: (v: string) => 
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => e.key === 'Enter' && commit()}
-        className={`w-72 ${input} ${bad ? 'border-red-500/60' : ''}`}
+        className={`w-72 ${INPUT_MONO} ${bad ? 'border-danger/60!' : ''}`}
       />
     </Row>
   )
@@ -125,14 +122,13 @@ function AllowedOrigins({ list, moot, onSave }: { list: string[]; moot: boolean;
     <>
       <Row
         label="Trang luôn cho phép"
-        desc={
+        desc='Agent mở các origin này mà không hỏi, kể cả sau khi mở lại app. Hộp thoại "Agent muốn mở trang ngoài" có nút "Luôn cho trang này".'
+        sub={
           bad ? (
-            <span className="text-red-300">{bad}</span>
+            <span className="text-danger">{bad}</span>
           ) : moot ? (
             'Đang "Luôn cho" nên danh sách này chưa cần; nó có tác dụng khi bạn chuyển về "Hỏi bạn" hoặc "Luôn chặn".'
-          ) : (
-            'Agent mở các origin này mà không hỏi, kể cả sau khi mở lại app. Hộp thoại "Agent muốn mở trang ngoài" có nút "Luôn cho trang này".'
-          )
+          ) : undefined
         }
       >
         <input
@@ -145,14 +141,14 @@ function AllowedOrigins({ list, moot, onSave }: { list: string[]; moot: boolean;
             setBad('')
           }}
           onKeyDown={(e) => e.key === 'Enter' && add()}
-          className={`w-56 ${input} ${bad ? 'border-red-500/60' : ''}`}
+          className={`w-56 ${INPUT_MONO} ${bad ? 'border-danger/60!' : ''}`}
         />
-        <SmallButton onClick={add} disabled={!text.trim()}>
+        <SmallButton icon="plus" onClick={add} disabled={!text.trim()}>
           Thêm
         </SmallButton>
       </Row>
       {list.map((o) => (
-        <Row key={o} label={<span className="font-mono text-[12.5px]">{o}</span>}>
+        <Row key={o} label={<span className="font-mono text-[12px]">{o}</span>}>
           <SmallButton onClick={() => onSave(list.filter((x) => x !== o))}>Bỏ</SmallButton>
         </Row>
       ))}
@@ -160,58 +156,33 @@ function AllowedOrigins({ list, moot, onSave }: { list: string[]; moot: boolean;
   )
 }
 
-/** "Cho agent dùng trình duyệt" theo cấp: mặc định cho mọi agent → workspace → agent. */
-function AgentToolsGroup({ run }: { run: (p: Promise<unknown>) => void }): React.JSX.Element {
+/** "Cho agent dùng trình duyệt" theo cấp: mặc định cho mọi agent → workspace → agent (cấp chọn ở tiêu đề trang). */
+function AgentToolsGroup({ run, level: key }: { run: (p: Promise<unknown>) => void; level: LevelKey }): React.JSX.Element {
   const settings = useSettings((s) => s.value)
   const save = useSettings((s) => s.save)
   const saveOverrides = useSettings((s) => s.saveOverrides)
-  const workspaces = useWorkspaces((s) => s.items)
-  const byWs = useAgents((s) => s.byWs)
-  const [key, setKey] = useState<LevelKey>('app')
   const level = useLevel(key)
-
-  const mark = (o?: { browser?: { agentTools?: boolean } }): string => (o?.browser?.agentTools !== undefined ? ' •' : '')
-  const options = [
-    { value: 'app', label: 'Mặc định cho mọi agent' },
-    ...workspaces.flatMap((w) => [
-      { value: `ws:${w.id}`, label: `Workspace: ${w.name}${mark(settings.workspaces[w.id])}` },
-      ...(byWs[w.id]?.agents ?? [])
-        .filter((a) => agentKind(a) !== 'terminal')
-        .map((a) => ({ value: `agent:${w.id}:${a.id}`, label: `↳ Agent: ${a.name}${mark(settings.agents[a.id])}` }))
-    ])
-  ]
 
   const own = level.lvl === 'ws' ? settings.workspaces[level.wsId!]?.browser?.agentTools : level.lvl === 'agent' ? settings.agents[level.agentId!]?.browser?.agentTools : undefined
   const parent = level.lvl === 'agent' ? browserToolsOn(settings, level.wsId, null) : settings.app.browser.agentTools
-  const setOwn = (v: 'inherit' | 'on' | 'off'): void =>
+  const setOwn = (v: boolean | undefined): void =>
     run(
       saveOverrides(level.lvl === 'ws' ? 'workspace' : 'agent', level.lvl === 'ws' ? level.wsId! : level.agentId!, {
-        browser: v === 'inherit' ? null : { agentTools: v === 'on' }
+        browser: v === undefined ? null : { agentTools: v }
       })
     )
 
   return (
     <Group title="Agent dùng trình duyệt">
-      <Row label="Áp dụng cho" desc="Workspace ghi đè mặc định của app; agent ghi đè workspace của nó. Dấu • = có cài đặt riêng.">
-        <Select label="Cấp áp dụng trình duyệt" value={level.lvl === 'app' ? 'app' : key} onChange={setKey} options={options} />
-      </Row>
       <Row
         label="Cho agent dùng trình duyệt"
         desc="Tool browser_* (mở trang, đọc trang, bấm, gõ, chụp màn hình, console). Tắt thì phiên mở sau không thấy các tool này; phiên đang chạy gọi tool sẽ bị từ chối ngay."
+        override={level.lvl === 'app' ? undefined : { on: own !== undefined, onReset: () => setOwn(undefined), parent: parent ? 'bật' : 'tắt' }}
       >
         {level.lvl === 'app' ? (
           <Switch label="Cho mọi agent dùng trình duyệt" checked={settings.app.browser.agentTools} onChange={(agentTools) => run(save({ browser: { agentTools } }))} />
         ) : (
-          <Select
-            label={`Trình duyệt cho ${level.name}`}
-            value={own === undefined ? 'inherit' : own ? 'on' : 'off'}
-            onChange={setOwn}
-            options={[
-              { value: 'inherit', label: `Theo cấp trên (${parent ? 'bật' : 'tắt'})` },
-              { value: 'on', label: 'Bật' },
-              { value: 'off', label: 'Tắt' }
-            ]}
-          />
+          <Switch label={`Trình duyệt cho ${level.name}`} checked={own ?? parent} onChange={(v) => setOwn(v)} />
         )}
       </Row>
     </Group>
@@ -244,15 +215,8 @@ function ClearDataRow(): React.JSX.Element {
   return (
     <Row
       label="Xoá cookie và dữ liệu trang"
-      desc={
-        error ? (
-          <span className="text-red-300">{error}</span>
-        ) : state === 'done' ? (
-          'Đã xoá. Trang đang mở có thể cần tải lại.'
-        ) : (
-          'Đăng xuất khỏi mọi trang và xoá dữ liệu trang lưu (localStorage, cache…) của trình duyệt trong app.'
-        )
-      }
+      desc="Đăng xuất khỏi mọi trang và xoá dữ liệu trang lưu (localStorage, cache…) của trình duyệt trong app."
+      sub={error ? <span className="text-danger">{error}</span> : state === 'done' ? 'Đã xoá. Trang đang mở có thể cần tải lại.' : undefined}
     >
       <Select
         label="Xoá dữ liệu của"
@@ -264,14 +228,13 @@ function ClearDataRow(): React.JSX.Element {
         }}
         options={[{ value: '', label: 'Mọi workspace' }, ...workspaces.map((w) => ({ value: w.id, label: `Workspace: ${w.name}` }))]}
       />
-      <button
-        type="button"
+      <SmallButton
+        variant={confirm ? 'dangerSolid' : 'danger'}
         disabled={state === 'busy'}
         onClick={() => (confirm ? void clear() : (setConfirm(true), setState('')))}
-        className={`rounded-md px-3 py-1.5 text-[12.5px] disabled:opacity-40 ${confirm ? 'bg-red-500/90 text-white' : 'bg-panel-2 text-red-300 hover:bg-line'}`}
       >
         {state === 'busy' ? 'Đang xoá…' : confirm ? 'Bấm lần nữa để xoá' : 'Xoá'}
-      </button>
+      </SmallButton>
     </Row>
   )
 }

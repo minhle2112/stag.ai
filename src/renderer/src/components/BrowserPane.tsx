@@ -3,6 +3,8 @@ import type { BrowserTab, Workspace } from '@shared/types'
 import { useBrowser } from '../store/browser'
 import { useUi } from '../store/ui'
 import { Button, Modal } from './Modal'
+import { Icon } from './Icon'
+import { IconButton } from './shell/IconButton'
 
 /**
  * Pane browser của một workspace. Trang thật là WebContentsView do main vẽ đè lên vùng `viewport`;
@@ -43,33 +45,45 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
     }
   }, [wsId, modals, resizing, b])
 
+  const driver = active?.owner.kind === 'agent' ? active.owner.agentName : null
+  const toggleBrowser = useUi((s) => s.toggleBrowser)
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-9 shrink-0 items-end gap-1 overflow-x-auto border-b border-line px-1.5 pt-1.5">
+      <div className="flex h-[38px] shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-1.5">
         {state?.tabs.map((t) => (
           <TabButton key={t.id} tab={t} active={t.id === state.activeTabId} onSelect={() => b.activate(wsId, t.id)} onClose={() => b.closeTab(wsId, t.id)} />
         ))}
-        <button onClick={() => b.newTab(wsId)} className="mb-1 rounded px-2 py-0.5 text-muted hover:bg-panel-2 hover:text-fg" title="Tab mới">
-          +
-        </button>
+        <IconButton icon="plus" size="s" tip="Tab mới · Ctrl+T" onClick={() => b.newTab(wsId)} />
+        <div className="flex-1" />
+        {active && /^https?:\/\//i.test(active.url) && (
+          <IconButton icon="ext" size="s" tip="Mở bằng trình duyệt ngoài" onClick={() => window.open(active.url)} />
+        )}
+        <IconButton icon="x" size="s" tip="Đóng · Ctrl+Shift+B" onClick={toggleBrowser} />
       </div>
 
       <AddressBar wsId={wsId} tab={active} />
 
+      {driver && (
+        <div className="flex h-[30px] shrink-0 items-center gap-1.5 border-b border-line bg-accent/10 px-2.5 text-[12px]">
+          <span className="h-1.5 w-1.5 rounded-full bg-work" />
+          <b className="font-semibold">{driver}</b>
+          <span className="text-muted">đang điều khiển tab này</span>
+        </div>
+      )}
+
       <div ref={viewport} className="relative min-h-0 flex-1 bg-bg">
         {!active && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-muted">
-            <div>Chưa có tab nào.</div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-dim">
+            <Icon name="globe" size={28} />
             <div className="text-[12px]">
-              Gõ địa chỉ ở trên để mở trang, ví dụ <span className="font-mono">localhost:5173</span>. Agent cũng mở tab ở đây khi dùng browser.
+              Gõ địa chỉ ở trên, ví dụ <span className="font-mono text-muted">localhost:5173</span>. Agent cũng mở tab ở đây khi dùng trình duyệt.
             </div>
             <Button onClick={() => b.newTab(wsId)}>Tab mới</Button>
           </div>
         )}
         {active && resizing && (
-          <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-muted">
-            Thả chuột để giữ độ rộng này
-          </div>
+          <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-dim">Thả chuột để giữ độ rộng này</div>
         )}
       </div>
     </div>
@@ -142,7 +156,7 @@ export function BrowserDock({ workspace }: { workspace: Workspace }): React.JSX.
   return (
     <aside
       ref={aside}
-      className="relative shrink-0 border-l border-line bg-panel"
+      className="relative shrink-0 border-l border-line bg-bg"
       style={{ width: `clamp(${PANE_MIN}px, ${(width * 100).toFixed(3)}%, calc(100% - ${MAIN_MIN}px))` }}
     >
       {/* Phần lớn thanh kéo nằm bên trái mép pane: phần nằm trên vùng trang sẽ bị view che. */}
@@ -173,31 +187,29 @@ function tabLabel(t: BrowserTab): string {
 }
 
 function TabButton({ tab, active, onSelect, onClose }: { tab: BrowserTab; active: boolean; onSelect: () => void; onClose: () => void }): React.JSX.Element {
+  const agent = tab.owner.kind === 'agent' ? tab.owner.agentName : null
+  const letter = (tabLabel(tab).replace(/[^\p{L}\p{N}]/gu, '').charAt(0) || '·').toUpperCase()
   return (
     <div
       onClick={onSelect}
       onAuxClick={(e) => e.button === 1 && onClose()}
-      title={tab.url}
-      className={`group flex max-w-[200px] min-w-[90px] shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border border-b-0 px-2 py-1 text-[12px] ${
-        active ? 'border-line bg-panel-2 text-fg' : 'border-transparent text-muted hover:bg-panel-2/60 hover:text-fg'
+      data-tip={`${tab.title || tabLabel(tab)}\n${tab.url}${agent ? `\n${agent} đang điều khiển` : ''}`}
+      className={`group flex h-[26px] max-w-[160px] min-w-[80px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md pr-[3px] pl-2 text-[12px] whitespace-nowrap ${
+        active ? 'bg-panel-3 text-fg' : 'text-muted hover:bg-panel-2'
       }`}
     >
-      {tab.loading && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />}
-      {tab.owner.kind === 'agent' && (
-        <span className="shrink-0 rounded bg-accent/15 px-1 text-accent" title={`Tab của agent ${tab.owner.agentName}`}>
-          {tab.owner.agentName}
-        </span>
-      )}
+      <span className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[3px] bg-accent text-[9px] leading-none font-bold text-accent-on">{letter}</span>
       <span className="min-w-0 flex-1 truncate">{tabLabel(tab)}</span>
+      {(tab.loading || agent) && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${agent ? 'bg-work' : 'animate-pulse bg-accent'}`} />}
       <button
         onClick={(e) => {
           e.stopPropagation()
           onClose()
         }}
-        className="shrink-0 rounded px-0.5 text-muted opacity-0 hover:bg-line hover:text-fg group-hover:opacity-100"
-        title="Đóng tab"
+        className={`grid h-5 w-5 shrink-0 place-items-center rounded text-dim hover:bg-line hover:text-fg ${active ? '' : 'opacity-0 group-hover:opacity-100'}`}
+        data-tip="Đóng tab"
       >
-        ×
+        <Icon name="x" size="s" />
       </button>
     </div>
   )
@@ -222,45 +234,54 @@ function AddressBar({ wsId, tab }: { wsId: string; tab: BrowserTab | undefined }
     ;(document.activeElement as HTMLElement | null)?.blur()
   }
 
-  const nav = 'rounded px-1.5 text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent'
+  const navBtn = (icon: 'al' | 'ar' | 'ref', tip: string, disabled: boolean, fn: () => void): React.JSX.Element => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={fn}
+      data-tip={tip}
+      aria-label={tip}
+      className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent"
+    >
+      <Icon name={icon} size="s" />
+    </button>
+  )
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-1.5">
-      <button className={nav} disabled={!tab?.canGoBack} onClick={() => tab && b.back(wsId, tab.id)} title="Lùi">
-        ←
-      </button>
-      <button className={nav} disabled={!tab?.canGoForward} onClick={() => tab && b.forward(wsId, tab.id)} title="Tới">
-        →
-      </button>
-      <button className={nav} disabled={!tab} onClick={() => tab && b.reload(wsId, tab.id)} title="Tải lại">
-        ↻
-      </button>
-      <input
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onFocus={(e) => {
-          setEditing(true)
-          e.target.select()
-        }}
-        onBlur={() => setEditing(false)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') go()
-          if (e.key === 'Escape') {
-            setText(shownUrl)
-            ;(e.target as HTMLInputElement).blur()
-          }
-        }}
-        placeholder="Nhập địa chỉ hoặc từ khoá"
-        spellCheck={false}
-        className="h-7 min-w-0 flex-1 rounded-md border border-line bg-bg px-2 font-mono text-[12px] text-fg outline-none select-text focus:border-accent/60"
-      />
+    <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1.5">
+      {navBtn('al', 'Lùi', !tab?.canGoBack, () => tab && b.back(wsId, tab.id))}
+      {navBtn('ar', 'Tới', !tab?.canGoForward, () => tab && b.forward(wsId, tab.id))}
+      {navBtn('ref', 'Tải lại', !tab, () => tab && b.reload(wsId, tab.id))}
+      <div className="mx-1 flex h-[22px] min-w-0 flex-1 items-center gap-1.5 rounded-[5px] border border-line-2 bg-bg0 px-2 focus-within:border-accent/50">
+        <Icon name="globe" size="s" className="text-dim" />
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onFocus={(e) => {
+            setEditing(true)
+            e.target.select()
+          }}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') go()
+            if (e.key === 'Escape') {
+              setText(shownUrl)
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+          placeholder="Nhập địa chỉ hoặc từ khoá"
+          spellCheck={false}
+          className="min-w-0 flex-1 border-0 bg-transparent p-0 font-mono text-[11px] text-fg outline-none select-text placeholder:text-dim"
+        />
+      </div>
       <button
-        className={`${nav} font-mono text-[12px] ${tab?.devtools ? 'bg-panel-2 text-accent' : ''}`}
+        type="button"
         disabled={!tab}
         onClick={() => tab && b.toggleDevTools(wsId, tab.id)}
-        title={tab?.devtools ? 'Đóng DevTools của tab này' : 'Mở DevTools của tab này (cửa sổ riêng)'}
         aria-pressed={!!tab?.devtools}
+        data-tip={tab?.devtools ? 'Đóng DevTools của tab này' : 'Mở DevTools của tab này · F12'}
+        className={`grid h-6 w-6 shrink-0 place-items-center rounded-md hover:bg-panel-3 hover:text-fg disabled:opacity-30 ${tab?.devtools ? 'bg-panel-3 text-accent' : 'text-muted'}`}
       >
-        {'</>'}
+        <Icon name="code" size="s" />
       </button>
     </div>
   )

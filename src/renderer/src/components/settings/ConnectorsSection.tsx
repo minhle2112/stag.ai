@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
+import { CATALOG, methodLabel } from '@shared/catalog'
 import { connectorSecrets, CONNECTOR_ID_RE, emptyConnector, ENV_KEY_RE, SECRET_NAME_RE, slugify, toolPolicy } from '@shared/connectors'
 import { splitArgs } from '@shared/settings'
 import {
@@ -12,29 +13,50 @@ import {
   type ToolPolicy
 } from '@shared/types'
 import { useAgents } from '../../store/agents'
+import { useApprovals } from '../../store/approvals'
 import { useSecrets } from '../../store/secrets'
 import { useSettings } from '../../store/settings'
 import { useUi } from '../../store/ui'
 import { useWorkspaces } from '../../store/workspaces'
+import { Icon } from '../Icon'
 import { Button, Modal } from '../Modal'
-import { Badge, errText, type Tone } from './AdaptersSection'
-import { useApprovals } from '../../store/approvals'
+import { Seg } from '../ui/Seg'
+import { errText } from './AdaptersSection'
 import { BrowseView, catalogOf, ConnectorLogo, ReviewView } from './ConnectorCatalog'
-import { methodLabel } from '@shared/catalog'
-import { ErrorBar, Group, Row, Select, SmallButton, Switch, useSaveError } from './controls'
-import { LevelPicker, LevelToggle, setAtLevel, useLevel, type Level, type LevelKey } from './levels'
+import {
+  Badge,
+  Callout,
+  DetailHead,
+  Empty,
+  ErrorBar,
+  Group,
+  INPUT,
+  INPUT_MONO,
+  InfoTip,
+  LogoTile,
+  Row,
+  SearchBox,
+  SectionTitle,
+  Select,
+  SmallButton,
+  TEXTAREA,
+  Tile,
+  Tiles,
+  useSaveError,
+  type Tone
+} from './controls'
+import { LevelBar, LevelToggle, setAtLevel, useLevel, type Level, type LevelKey } from './levels'
 
 /**
  * Settings → Connector: máy chủ MCP cho phiên agent. Hai loại:
  * - Connector của stag.ai: người dùng thêm (mẫu / tự cấu hình / dán JSON), app đưa vào phiên Claude Code,
- *   Codex và adapter ngoài đọc được file MCP; bí mật lấy từ Settings → Secrets.
+ *   Codex và adapter ngoài đọc được file MCP; bí mật lấy từ Settings → Kho bí mật.
  * - Máy chủ có sẵn trong Claude Code / Codex: CLI tự nạp, ở đây chỉ tắt bớt cho phiên agent.
- * Bật / tắt theo cấp app → workspace → agent.
+ * Bật / tắt theo cấp app → workspace → agent (công tắc cấp ở tiêu đề trang).
  */
 
 type View = { type: 'list' } | { type: 'detail'; id: string }
 
-const TONE: Record<Tone, string> = { ok: 'bg-emerald-400', warn: 'bg-amber-400', bad: 'bg-red-400', muted: 'bg-muted/60' }
 const RUNTIME: Record<CliAdapterId, string> = { claude: 'Claude Code', codex: 'Codex' }
 const SOURCE: Record<InheritedServer['source'], string> = {
   'claude.ai': 'claude.ai',
@@ -69,6 +91,7 @@ export function ConnectorsSection(): React.JSX.Element {
   const [view, setView] = useState<View>(focus?.connector ? { type: 'detail', id: focus.connector } : { type: 'list' })
   const [level, setLevel] = useState<LevelKey>(() => agentLevel(focus?.agentId))
   const [adding, setAdding] = useState(false)
+  const [q, setQ] = useState('')
 
   useEffect(() => {
     if (focus?.review) setTab('review')
@@ -88,47 +111,60 @@ export function ConnectorsSection(): React.JSX.Element {
     setTab('connected')
     setView({ type: 'detail', id })
   }
-  const navItem = (id: Tab, label: string, icon: ReactNode, count?: number, alert?: boolean): React.JSX.Element => (
-    <button
-      type="button"
-      onClick={() => {
-        setTab(id)
-        if (id === 'connected') setView({ type: 'list' })
-      }}
-      aria-current={tab === id}
-      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${tab === id ? 'bg-panel-2 font-medium text-fg' : 'text-muted hover:bg-panel-2 hover:text-fg'}`}
-    >
-      {icon}
-      <span className="flex-1">{label}</span>
-      {count ? (
-        <span className={`rounded-full px-1.5 text-[10.5px] tabular-nums ${alert ? 'bg-amber-400 font-semibold text-black' : 'bg-line/70 text-muted'}`}>{count}</span>
-      ) : null}
-    </button>
-  )
+  const inDetail = tab === 'connected' && view.type === 'detail'
 
   return (
     <>
-      <div className="-mt-2 mb-4 flex items-center gap-2 border-b border-line pb-3">
-        <PlugIcon className="h-4 w-4 text-muted" />
-        <span className="text-[12.5px] font-semibold uppercase tracking-wider">Connector</span>
-        <span className="rounded-full border border-line px-2 py-px text-[10.5px] text-muted">MCP</span>
-      </div>
-      <div className="flex gap-6">
-        <nav className="w-40 shrink-0" aria-label="Connector">
-          {navItem('browse', 'Danh mục', <StoreIcon className="h-4 w-4" />)}
-          {navItem('connected', 'Đã kết nối', <PlugIcon className="h-4 w-4" />, items.length)}
-          {navItem('review', 'Duyệt', <ShieldIcon className="h-4 w-4" />, pending, true)}
-        </nav>
-        <div className="min-w-0 flex-1">
-          {tab === 'browse' && <BrowseView onOpen={open} onCustom={() => setAdding(true)} />}
-          {tab === 'review' && <ReviewView connectorLabel={(id) => items.find((c) => c.id === id)} />}
-          {tab === 'connected' &&
-            (view.type === 'list' ? (
-              <ConnectorList level={level} setLevel={setLevel} open={(id) => setView({ type: 'detail', id })} onAdd={() => setTab('browse')} />
-            ) : (
-              <ConnectorDetail key={view.id} id={view.id} level={level} onBack={() => setView({ type: 'list' })} onRenamed={(id) => setView({ type: 'detail', id })} />
-            ))}
+      <SectionTitle
+        title="Connector (MCP)"
+        desc="Máy chủ MCP cho agent thêm tool. App đưa chúng vào phiên Claude Code, Codex và adapter ngoài đọc được file MCP. Token / API key cất ở Kho bí mật, truyền qua biến môi trường, không nằm trên dòng lệnh."
+        right={<LevelBar level={level} setLevel={setLevel} field="connectors" />}
+      />
+      {!inDetail && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Seg
+            value={tab}
+            onChange={(id) => {
+              setTab(id)
+              if (id === 'connected') setView({ type: 'list' })
+            }}
+            options={[
+              { value: 'connected', label: `Đã kết nối${items.length ? ` · ${items.length}` : ''}`, tip: 'Connector của stag.ai và máy chủ có sẵn trong CLI' },
+              { value: 'browse', label: `Danh mục · ${CATALOG.length}`, tip: 'Kết nối dịch vụ từ danh mục' },
+              {
+                value: 'review',
+                label: (
+                  <>
+                    Duyệt
+                    {pending > 0 && <span className="rounded-full bg-wait px-1.5 text-[11px] font-semibold text-[#2a1c00]">{pending}</span>}
+                  </>
+                ),
+                tip: 'Lần gọi tool đang chờ bạn duyệt'
+              }
+            ]}
+          />
+          {tab === 'browse' ? <SearchBox className="min-w-[160px] flex-1" value={q} onChange={setQ} placeholder="Tìm connector" label="Tìm connector" /> : <div className="flex-1" />}
+          {tab === 'connected' && (
+            <SmallButton variant="primary" icon="plus" onClick={() => setTab('browse')}>
+              Kết nối thêm
+            </SmallButton>
+          )}
+          {tab === 'browse' && (
+            <SmallButton icon="plus" onClick={() => setAdding(true)} tip="Thêm máy chủ MCP tự cấu hình hoặc dán JSON">
+              Công cụ riêng
+            </SmallButton>
+          )}
         </div>
+      )}
+      <div className="min-w-0">
+        {tab === 'browse' && <BrowseView q={q} onOpen={open} />}
+        {tab === 'review' && <ReviewView connectorLabel={(id) => items.find((c) => c.id === id)} />}
+        {tab === 'connected' &&
+          (view.type === 'list' ? (
+            <ConnectorList level={level} open={(id) => setView({ type: 'detail', id })} />
+          ) : (
+            <ConnectorDetail key={view.id} id={view.id} level={level} onBack={() => setView({ type: 'list' })} onRenamed={(id) => setView({ type: 'detail', id })} />
+          ))}
       </div>
       {adding && (
         <AddConnectorDialog
@@ -175,17 +211,7 @@ async function enableOnlyAt(level: Level, c: Connector): Promise<void> {
 
 // ---- danh sách ----
 
-function ConnectorList({
-  level,
-  setLevel,
-  open,
-  onAdd
-}: {
-  level: LevelKey
-  setLevel: (l: LevelKey) => void
-  open: (id: string) => void
-  onAdd: () => void
-}): React.JSX.Element {
+function ConnectorList({ level, open }: { level: LevelKey; open: (id: string) => void }): React.JSX.Element {
   const items = useSettings((s) => s.value.app.connectors.items)
   const secrets = useSecrets((s) => s.items)
   const lv = useLevel(level)
@@ -193,59 +219,38 @@ function ConnectorList({
 
   return (
     <>
-      <div className="mb-2 flex items-center gap-2.5">
-        <h1 className="text-[18px] font-semibold tracking-tight">Đã kết nối</h1>
-        <div className="flex-1" />
-        <button
-          type="button"
-          onClick={onAdd}
-          className="flex items-center gap-1.5 rounded-md bg-fg px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90"
-        >
-          <span className="text-[15px] leading-none">+</span> Kết nối thêm
-        </button>
-      </div>
-      <p className="mb-5 text-[12.5px] leading-relaxed text-muted">
-        Máy chủ MCP cho agent thêm tool. App đưa chúng vào phiên Claude Code, Codex và adapter
-        ngoài đọc được file MCP. Token / API key cất ở <b className="font-medium text-fg">Secrets</b>, truyền qua biến môi trường, không nằm trên dòng lệnh.
-      </p>
-
-      <LevelPicker level={level} setLevel={setLevel} field="connectors" />
-
-      <SectionHead icon={<PlugIcon className="h-4 w-4 text-muted" />}>Connector của stag.ai</SectionHead>
-      {items.length === 0 ? (
-        <div className="mb-7 flex flex-col items-center rounded-lg border border-line bg-panel px-6 py-10 text-center">
-          <PlugIcon className="mb-3 h-7 w-7 text-muted" />
-          <div className="text-[13px] font-medium">Chưa kết nối gì</div>
-          <div className="mt-1 text-[12px] text-muted">Chọn một dịch vụ ở Danh mục, hoặc chép một máy chủ có sẵn bên dưới.</div>
-        </div>
-      ) : (
-        <div className="mb-7 divide-y divide-line rounded-lg border border-line bg-panel">
-          {items.map((c) => {
-            const miss = missing(c)
-            const tone: Tone = miss.length ? 'bad' : c.testedAt ? 'ok' : 'muted'
-            const line = [
-              c.id,
-              ...(c.oauth ? ['đăng nhập OAuth'] : []),
-              c.transport === 'http' ? c.url : [c.command, ...c.args].join(' '),
-              c.testedAt ? `${c.tools.length} tool` : 'chưa thử',
-              ...(miss.length ? [`thiếu bí mật ${miss.join(', ')}`] : [])
-            ].join(' · ')
-            return (
-              <Line
-                key={c.id}
-                logo={<ConnectorLogo slug={c.catalog?.slug} name={c.label || c.id} size={30} />}
-                tone={tone}
-                title={c.label || c.id}
-                badge={<Badge>{c.transport === 'http' ? 'HTTP' : 'stdio'}</Badge>}
-                line={line}
-                lineBad={miss.length > 0}
-                onOpen={() => open(c.id)}
-                control={<ConnToggle k={c.id} level={lv} label={c.label || c.id} />}
-              />
-            )
-          })}
-        </div>
-      )}
+      <Group title="Connector của stag.ai" flush>
+        {items.length === 0 ? (
+          <Empty title="Chưa kết nối gì">Chọn một dịch vụ ở Danh mục, hoặc chép một máy chủ có sẵn bên dưới.</Empty>
+        ) : (
+          <Tiles>
+            {items.map((c) => {
+              const miss = missing(c)
+              const tone: Tone = miss.length ? 'bad' : c.testedAt ? 'ok' : 'muted'
+              const line = [
+                c.id,
+                ...(c.oauth ? ['đăng nhập OAuth'] : []),
+                c.transport === 'http' ? c.url : [c.command, ...c.args].join(' '),
+                c.testedAt ? `${c.tools.length} tool` : 'chưa thử'
+              ].join(' · ')
+              return (
+                <Tile
+                  key={c.id}
+                  logo={<ConnectorLogo slug={c.catalog?.slug} name={c.label || c.id} size={30} />}
+                  dot={tone}
+                  title={c.label || c.id}
+                  badge={<Badge>{c.transport === 'http' ? 'HTTP' : 'stdio'}</Badge>}
+                  sub={<span className="font-mono text-[11px]">{line}</span>}
+                  tip={line}
+                  alert={miss.length ? `thiếu bí mật ${miss.join(', ')}` : undefined}
+                  onOpen={() => open(c.id)}
+                  control={<ConnToggle k={c.id} level={lv} label={c.label || c.id} />}
+                />
+              )
+            })}
+          </Tiles>
+        )}
+      </Group>
 
       <InheritedGroup runtime="claude" level={lv} />
       <InheritedGroup runtime="codex" level={lv} />
@@ -303,112 +308,69 @@ function InheritedGroup({ runtime, level }: { runtime: CliAdapterId; level: Leve
       .catch((e) => setCopyMsg(errText(e)))
   }
 
+  const help =
+    runtime === 'claude'
+      ? `Máy chủ ${RUNTIME.claude} tự nạp: connector claude.ai, plugin, claude mcp add, .mcp.json của dự án${ws ? ` (theo thư mục của workspace ${ws.name})` : ''}. Quét chạy claude mcp list (có kiểm tra kết nối, không tốn quota). Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.`
+      : 'Máy chủ trong ~/.codex/config.toml (và .codex/config.toml của dự án). Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.'
+
   return (
-    <>
-      <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold">
-        <ServerIcon className="h-4 w-4 text-muted" />
-        Có sẵn trong {RUNTIME[runtime]}
-        <div className="flex-1" />
+    <Group
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Có sẵn trong {RUNTIME[runtime]}
+          <InfoTip text={help} />
+        </span>
+      }
+      action={
         <SmallButton onClick={doScan} disabled={busy}>
           {busy ? 'Đang quét…' : scan ? 'Quét lại' : 'Quét'}
         </SmallButton>
-      </div>
-      <div className="mb-2 text-[12px] leading-relaxed text-muted">
-        {runtime === 'claude' ? (
-          <>
-            Máy chủ {RUNTIME.claude} tự nạp: connector claude.ai, plugin, <code>claude mcp add</code>, <code>.mcp.json</code> của dự án
-            {ws ? ` (theo thư mục của workspace ${ws.name})` : ''}. Quét chạy <code>claude mcp list</code> (có kiểm tra kết nối, không tốn quota). Tắt ở đây
-            chỉ áp dụng cho phiên agent của stag.ai.
-          </>
-        ) : (
-          <>
-            Máy chủ trong <code>~/.codex/config.toml</code> (và <code>.codex/config.toml</code> của dự án). Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.
-          </>
-        )}
-      </div>
+      }
+    >
       {scan?.cwd && (
-        <div className="mb-2 truncate text-[11.5px] text-muted" title={scan.cwd}>
+        <div className="mb-2 truncate text-[11px] text-dim" data-tip={scan.cwd}>
           Quét lúc {new Date(scan.scannedAt).toLocaleTimeString()} ở {scan.cwd}
         </div>
       )}
       {scan?.error && <ErrorBar error={scan.error} />}
-      {copyMsg && <div className="mb-2 rounded-md border border-line bg-panel-2/60 px-3 py-2 text-[12px]">{copyMsg}</div>}
-      <div className="mb-7 divide-y divide-line rounded-lg border border-line bg-panel">
-        {rows.length === 0 ? (
-          <div className="px-4 py-4 text-[12.5px] text-muted">{busy ? 'Đang quét…' : scan ? 'Không có máy chủ nào.' : 'Bấm Quét để xem.'}</div>
-        ) : (
-          rows.map((s) => {
+      {copyMsg && <Callout className="mb-2">{copyMsg}</Callout>}
+      {rows.length === 0 ? (
+        <div className="border-b border-line py-3 text-[12px] text-dim">{busy ? 'Đang quét…' : scan ? 'Không có máy chủ nào.' : 'Bấm Quét để xem.'}</div>
+      ) : (
+        <Tiles min={260}>
+          {rows.map((s) => {
             const tone: Tone = /connected|bật/i.test(s.status) ? 'ok' : /fail|error|lỗi|không thấy/i.test(s.status) ? 'bad' : /auth|pending|approval/i.test(s.status) ? 'warn' : 'muted'
+            const line = [s.target, s.status].filter(Boolean).join(' · ')
             return (
-              <Line
+              <Tile
                 key={s.key}
-                tone={tone}
+                logo={<LogoTile>{(s.name.replace(/[^\p{L}\p{N}]/gu, '')[0] ?? '?').toUpperCase()}</LogoTile>}
+                dot={tone}
                 title={s.name}
                 badge={<Badge>{SOURCE[s.source]}</Badge>}
-                line={[s.target, s.status].filter(Boolean).join(' · ')}
+                sub={<span className="font-mono text-[11px]">{line}</span>}
+                tip={line}
                 control={
                   <>
                     {s.copyable && (
-                      <button
-                        type="button"
-                        title="Chép thành connector của stag.ai (dùng được cả với Codex / adapter ngoài)"
+                      <SmallButton
+                        variant="ghost"
+                        size="xs"
+                        tip="Chép thành connector của stag.ai (dùng được cả với Codex / adapter ngoài)"
                         onClick={() => copy(s)}
-                        className="rounded-md px-2 py-1 text-[11.5px] text-muted hover:bg-panel-2 hover:text-fg"
                       >
                         Chép
-                      </button>
+                      </SmallButton>
                     )}
                     <ConnToggle k={s.key} level={level} label={s.name} />
                   </>
                 }
               />
             )
-          })
-        )}
-      </div>
-    </>
-  )
-}
-
-function Line({
-  logo,
-  tone,
-  title,
-  badge,
-  line,
-  lineBad,
-  control,
-  onOpen
-}: {
-  logo?: ReactNode
-  tone: Tone
-  title: string
-  badge: ReactNode
-  line: string
-  lineBad?: boolean
-  control: ReactNode
-  onOpen?: () => void
-}): React.JSX.Element {
-  return (
-    <div
-      role={onOpen ? 'button' : undefined}
-      tabIndex={onOpen ? 0 : undefined}
-      onClick={onOpen}
-      onKeyDown={(e) => onOpen && e.key === 'Enter' && e.target === e.currentTarget && onOpen()}
-      className={`group flex items-center gap-3 px-4 py-3 ${onOpen ? 'cursor-pointer hover:bg-panel-2/60' : ''}`}
-    >
-      {logo ?? <span className={`h-2 w-2 shrink-0 rounded-full ${TONE[tone]}`} />}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          {logo && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE[tone]}`} />}
-          <span className="truncate font-medium">{title}</span>
-          {badge}
-        </div>
-        <div className={`mt-0.5 truncate font-mono text-[11.5px] ${lineBad ? 'text-red-300' : 'text-muted'}`}>{line}</div>
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5">{control}</div>
-      {onOpen && <span className="text-muted group-hover:text-fg">›</span>}
-    </div>
+          })}
+        </Tiles>
+      )}
+    </Group>
   )
 }
 
@@ -428,11 +390,7 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
   const [reauth, setReauth] = useState<'busy' | null>(null)
 
   if (!c) {
-    return (
-      <DetailHead onBack={onBack} title={id} sub={loaded ? 'Connector này đã bị gỡ.' : 'Đang tải…'}>
-        {null}
-      </DetailHead>
-    )
+    return <DetailHead onBack={onBack} backLabel="Tất cả connector" title={id} sub={loaded ? 'Connector này đã bị gỡ.' : 'Đang tải…'} />
   }
   const save = (patch: Partial<Connector>): void => {
     const next = { ...c, ...patch }
@@ -464,22 +422,25 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
   const toolNames = [...new Set([...c.tools.map((t) => t.name), ...Object.keys(c.toolPolicy)])]
 
   return (
-    <DetailHead
-      onBack={onBack}
-      logo={<ConnectorLogo slug={c.catalog?.slug} name={c.label || c.id} size={32} />}
-      title={c.label || c.id}
-      badge={<Badge>{c.transport === 'http' ? 'HTTP' : 'stdio'}</Badge>}
-      control={<ConnToggle k={c.id} level={lv} label={c.label || c.id} />}
-      sub={`Công tắc bên phải áp dụng cho ${lv.name} (đổi cấp ở trang danh sách). Sửa cấu hình áp dụng cho mọi nơi; phiên đang chạy giữ nguyên.`}
-    >
+    <>
+      <DetailHead
+        onBack={onBack}
+        backLabel="Tất cả connector"
+        logo={<ConnectorLogo slug={c.catalog?.slug} name={c.label || c.id} size={30} />}
+        title={c.label || c.id}
+        badge={<Badge>{c.transport === 'http' ? 'HTTP' : 'stdio'}</Badge>}
+        control={<ConnToggle k={c.id} level={lv} label={c.label || c.id} />}
+        sub={`Công tắc bên phải áp dụng cho ${lv.name} (đổi cấp ở đầu trang). Sửa cấu hình áp dụng cho mọi nơi; phiên đang chạy giữ nguyên.`}
+      />
       <ErrorBar error={error} />
       {(cat || c.oauth || c.urlSecret) && (
         <Group title="Dịch vụ">
           {cat && (
-            <Row label={cat.entry.name} desc={methodLabel(cat.entry, cat.method)}>
+            <Row label={cat.entry.name} sub={methodLabel(cat.entry, cat.method)}>
               {cat.entry.docsUrl && (
-                <a href={cat.entry.docsUrl} target="_blank" rel="noreferrer" className="text-[12px] text-accent hover:underline">
-                  Tài liệu ↗
+                <a href={cat.entry.docsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] text-accent hover:underline">
+                  Tài liệu
+                  <Icon name="ext" size="s" />
                 </a>
               )}
             </Row>
@@ -487,11 +448,8 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
           {c.oauth && (
             <Row
               label="Đăng nhập OAuth"
-              desc={
-                reauth
-                  ? 'Đang chờ bạn đăng nhập trong trình duyệt…'
-                  : 'Token cất ở Secrets, app tự làm mới trước mỗi phiên. Bị thu hồi / hết hạn hẳn thì đăng nhập lại. Phiên rất dài có thể gặp token hết hạn giữa chừng: mở phiên mới.'
-              }
+              desc="Token cất ở Kho bí mật, app tự làm mới trước mỗi phiên. Bị thu hồi / hết hạn hẳn thì đăng nhập lại. Phiên rất dài có thể gặp token hết hạn giữa chừng: mở phiên mới."
+              sub={reauth ? 'Đang chờ bạn đăng nhập trong trình duyệt…' : undefined}
             >
               {reauth ? (
                 <SmallButton onClick={() => void window.stag.connectors.cancelConnect()}>Huỷ</SmallButton>
@@ -500,7 +458,7 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
               )}
             </Row>
           )}
-          {c.urlSecret && <Row label="URL có token" desc={`URL đầy đủ cất ở bí mật ${c.urlSecret}; cài đặt chỉ giữ ${c.url}. Đổi URL: thay giá trị bí mật ở Secrets.`} />}
+          {c.urlSecret && <Row label="URL có token" desc={`URL đầy đủ cất ở bí mật ${c.urlSecret}; cài đặt chỉ giữ ${c.url}. Đổi URL: thay giá trị bí mật ở Kho bí mật.`} />}
         </Group>
       )}
       <Group title="Máy chủ">
@@ -559,25 +517,24 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
       <Group title="Thử kết nối">
         <Row
           label="Nối thử và lấy danh sách tool"
-          desc={
+          desc="Chạy máy chủ với cấu hình này (cả bí mật), hỏi danh sách tool rồi đóng. Không gọi tool nào."
+          sub={
             test === 'loading'
               ? 'Đang nối… (lần đầu chạy npx có thể phải tải gói)'
               : test
                 ? test.ok
                   ? `Được: ${test.server || 'máy chủ'} · ${test.tools.length} tool · ${(test.ms / 1000).toFixed(1)} s`
-                  : null
+                  : undefined
                 : c.testedAt
                   ? `Lần thử gần nhất ${new Date(c.testedAt).toLocaleString()}: ${c.tools.length} tool.`
-                  : 'Chạy máy chủ với cấu hình này (cả bí mật), hỏi danh sách tool rồi đóng. Không gọi tool nào.'
+                  : undefined
           }
         >
           <SmallButton onClick={doTest} disabled={test === 'loading'}>
             {test === 'loading' ? 'Đang thử…' : 'Thử kết nối'}
           </SmallButton>
         </Row>
-        {test && test !== 'loading' && !test.ok && (
-          <div className="whitespace-pre-wrap px-4 py-3 text-[12px] text-red-300">{test.error}</div>
-        )}
+        {test && test !== 'loading' && !test.ok && <div className="border-b border-line py-2.5 text-[12px] whitespace-pre-wrap text-danger">{test.error}</div>}
       </Group>
 
       <Group title="Tool">
@@ -596,13 +553,15 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
           />
         </Row>
         {toolNames.length === 0 ? (
-          <div className="px-4 py-3 text-[12px] text-muted">Bấm "Thử kết nối" để thấy tool và chọn mức cho từng tool.</div>
+          <div className="border-b border-line py-3 text-[12px] text-dim">Bấm "Thử kết nối" để thấy tool và chọn mức cho từng tool.</div>
         ) : (
           toolNames.map((name) => {
             const t = c.tools.find((x) => x.name === name)
             const own = c.toolPolicy[name]
+            const blocked = toolPolicy(c, name) === 'block'
             return (
-              <Row key={name} label={<span className="font-mono text-[12.5px]">{name}</span>} desc={t?.description || (t ? null : 'không thấy ở lần thử gần nhất')}>
+              <Row key={name} label={<span className="font-mono text-[12px]">{name}</span>} desc={t?.description || (t ? undefined : 'không thấy ở lần thử gần nhất')}>
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${blocked ? 'bg-danger' : 'bg-transparent'}`} data-tip={blocked ? 'Đang chặn' : undefined} />
                 <Select<ToolPolicy | 'default'>
                   label={`Mức của tool ${name}`}
                   value={own ?? 'default'}
@@ -619,7 +578,6 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
                     { value: 'block', label: 'Chặn' }
                   ]}
                 />
-                <span className={`w-2 text-center text-[11px] ${toolPolicy(c, name) === 'block' ? 'text-red-300' : 'text-transparent'}`}>●</span>
               </Row>
             )
           })
@@ -627,54 +585,22 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
       </Group>
 
       <Group title="Gỡ">
-        <Row label="Gỡ connector" desc={confirmRemove ? 'Bấm lần nữa để gỡ. Bí mật của nó vẫn giữ trong Secrets.' : 'Bỏ khỏi mọi phiên agent mở sau, cùng các bật / tắt riêng của nó.'}>
-          <button
-            type="button"
+        <Row
+          label="Gỡ connector"
+          desc="Bỏ khỏi mọi phiên agent mở sau, cùng các bật / tắt riêng của nó."
+          sub={confirmRemove ? 'Bấm lần nữa để gỡ. Bí mật của nó vẫn giữ trong Kho bí mật.' : undefined}
+        >
+          <SmallButton
+            variant={confirmRemove ? 'dangerSolid' : 'danger'}
             onClick={() => {
               if (!confirmRemove) return setConfirmRemove(true)
               run(window.stag.connectors.remove(c.id).then(onBack))
             }}
-            className="rounded-md border border-red-500/40 px-3 py-1.5 text-[12.5px] text-red-300 hover:bg-red-500/10"
           >
             {confirmRemove ? 'Gỡ thật' : 'Gỡ connector'}
-          </button>
+          </SmallButton>
         </Row>
       </Group>
-    </DetailHead>
-  )
-}
-
-function DetailHead({
-  logo,
-  title,
-  badge,
-  control,
-  sub,
-  onBack,
-  children
-}: {
-  logo?: ReactNode
-  title: string
-  badge?: ReactNode
-  control?: ReactNode
-  sub: ReactNode
-  onBack: () => void
-  children: ReactNode
-}): React.JSX.Element {
-  return (
-    <>
-      <button type="button" onClick={onBack} className="-ml-2 mb-3 rounded-md px-2 py-1 text-[12.5px] text-muted hover:bg-panel-2 hover:text-fg">
-        ← Tất cả connector
-      </button>
-      <div className="mb-1 flex items-center gap-2.5">
-        {logo ?? <PlugIcon className="h-5 w-5 text-muted" />}
-        <h1 className="text-[18px] font-semibold tracking-tight">{title}</h1>
-        {badge}
-        <div className="flex-1" />
-        {control}
-      </div>
-      <div className="mb-5 text-[12.5px] leading-relaxed text-muted">{sub}</div>
-      {children}
     </>
   )
 }
@@ -712,7 +638,7 @@ function TextField({
         if (e.key === 'Enter') commit()
         if (e.key === 'Escape') setText(value)
       }}
-      className={`${wide ? 'w-80' : 'w-56'} rounded-md border border-line bg-bg px-2 py-1.5 text-[12.5px] outline-none focus:border-accent ${mono ? 'font-mono' : ''}`}
+      className={`${wide ? 'w-80' : 'w-56'} ${mono ? INPUT_MONO : INPUT}`}
     />
   )
 }
@@ -760,11 +686,10 @@ function NewSecret({ suggest, onDone }: { suggest: string; onDone: (name: string
       .then(() => onDone(name))
       .catch((e) => setError(errText(e)))
   }
-  const input = 'rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-accent'
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex gap-1.5">
-        <input aria-label="Tên bí mật mới" value={name} onChange={(e) => setName(e.target.value)} className={`${input} w-40`} spellCheck={false} />
+        <input aria-label="Tên bí mật mới" value={name} onChange={(e) => setName(e.target.value)} className={`${INPUT_MONO} w-40`} spellCheck={false} />
         <input
           aria-label="Giá trị bí mật mới"
           type="password"
@@ -776,14 +701,14 @@ function NewSecret({ suggest, onDone }: { suggest: string; onDone: (name: string
             if (e.key === 'Enter') submit()
             if (e.key === 'Escape') onDone(null)
           }}
-          className={`${input} w-40`}
+          className={`${INPUT_MONO} w-40`}
         />
         <SmallButton onClick={submit} disabled={!ok}>
           Lưu
         </SmallButton>
         <SmallButton onClick={() => onDone(null)}>Huỷ</SmallButton>
       </div>
-      {error && <div className="text-[11.5px] text-red-300">{error}</div>}
+      {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   )
 }
@@ -835,12 +760,11 @@ function ValueRows({
     setRows(next)
     if (save) commit(next)
   }
-  const input = 'rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-accent'
 
   return (
     <Group title={title}>
       {rows.map((r, i) => (
-        <div key={i} className="flex items-center gap-2 px-4 py-2">
+        <div key={i} className="flex items-center gap-2 border-b border-line py-2">
           <input
             aria-label={`Tên ${i + 1}`}
             value={r.key}
@@ -848,7 +772,7 @@ function ValueRows({
             spellCheck={false}
             onChange={(e) => update(i, { key: e.target.value })}
             onBlur={() => commit(rows)}
-            className={`${input} w-48`}
+            className={`${INPUT_MONO} w-48`}
           />
           <Select
             label={`Loại giá trị ${i + 1}`}
@@ -869,30 +793,33 @@ function ValueRows({
                 spellCheck={false}
                 onChange={(e) => update(i, { value: e.target.value })}
                 onBlur={() => commit(rows)}
-                className={`${input} w-full`}
+                className={`${INPUT_MONO} w-full`}
               />
             )}
           </div>
           <button
             type="button"
             aria-label={`Xoá dòng ${i + 1}`}
+            data-tip="Xoá dòng"
             onClick={() => {
               const next = rows.filter((_, j) => j !== i)
               setRows(next)
               commit(next)
             }}
-            className="rounded px-1.5 text-muted hover:bg-panel-2 hover:text-red-300"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-danger"
           >
-            ×
+            <Icon name="x" size="s" />
           </button>
         </div>
       ))}
-      <div className="flex items-center gap-3 px-4 py-2">
-        <SmallButton onClick={() => setRows([...rows, { key: '', kind: 'value', value: '' }])}>+ Thêm dòng</SmallButton>
+      <div className="flex items-center gap-3 py-2">
+        <SmallButton icon="plus" onClick={() => setRows([...rows, { key: '', kind: 'value', value: '' }])}>
+          Thêm dòng
+        </SmallButton>
         {problem ? (
-          <span className="text-[12px] text-red-300">{problem}</span>
+          <span className="text-[12px] text-danger">{problem}</span>
         ) : (
-          <span className="text-[11.5px] text-muted">Token / key: chọn "Bí mật" — giá trị cất ở Secrets, không nằm trong cài đặt.</span>
+          <span className="text-[12px] text-dim">Token / key: chọn "Bí mật" — giá trị cất ở Kho bí mật, không nằm trong cài đặt.</span>
         )}
       </div>
     </Group>
@@ -977,17 +904,8 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
     }
   }
 
-  const tabBtn = (id: typeof tab, label: string): React.JSX.Element => (
-    <button
-      type="button"
-      onClick={() => setTab(id)}
-      aria-pressed={tab === id}
-      className={`rounded-md border px-2.5 py-1 text-[12.5px] ${tab === id ? 'border-fg/60 bg-panel-2 text-fg' : 'border-line text-muted hover:text-fg'}`}
-    >
-      {label}
-    </button>
-  )
-  const input = 'w-full rounded-md border border-line bg-bg px-2.5 py-1.5 font-mono text-[12.5px] outline-none focus:border-accent'
+  const field = `${INPUT_MONO} w-full`
+  const hint = 'mt-1.5 text-[12px] leading-relaxed text-dim'
 
   return (
     <Modal
@@ -1012,7 +930,7 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
       }
     >
       {result ? (
-        <div className="text-[12.5px] leading-relaxed">{importSummary(result)}</div>
+        <div className="text-[12px] leading-relaxed">{importSummary(result)}</div>
       ) : (
         <form
           onSubmit={(e) => {
@@ -1020,25 +938,30 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
             void create()
           }}
         >
-          <p className="mb-3 text-[12.5px] leading-relaxed text-muted">
+          <p className="mb-3 text-[12px] leading-relaxed text-dim">
             {lv.lvl === 'app' ? 'Connector mới bật cho mọi agent.' : `Connector mới chỉ bật cho ${lv.name} (mặc định của app: tắt).`} Sau khi thêm, bấm "Thử kết nối" ở
             trang của nó.
           </p>
-          <div className="mb-4 flex gap-2">
-            {tabBtn('custom', 'Tự cấu hình')}
-            {tabBtn('json', 'Dán JSON')}
-          </div>
+          <Seg
+            className="mb-4 self-start"
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'custom', label: 'Tự cấu hình' },
+              { value: 'json', label: 'Dán JSON' }
+            ]}
+          />
           {tab === 'custom' && (
             <>
-              <label className="mb-1.5 block text-[12.5px]" htmlFor="conn-new-name">
+              <label className="mb-1 block text-[12px] font-medium" htmlFor="conn-new-name">
                 Tên
               </label>
-              <input id="conn-new-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Linear" className={input} />
-              {name && <p className="mt-1 text-[11.5px] text-muted">Tên trong phiên: {freeId(slugify(name))}</p>}
-              <div className="mb-1.5 mt-3 flex gap-2">
+              <input id="conn-new-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Linear" className={`${INPUT} w-full`} />
+              {name && <p className={hint}>Tên trong phiên: {freeId(slugify(name))}</p>}
+              <div className="mt-3 mb-1.5 flex gap-4">
                 {(['stdio', 'http'] as const).map((t) => (
-                  <label key={t} className="flex items-center gap-1.5 text-[12.5px]">
-                    <input type="radio" checked={transport === t} onChange={() => setTransport(t)} />
+                  <label key={t} className="flex items-center gap-1.5 text-[13px]">
+                    <input type="radio" className="accent-accent" checked={transport === t} onChange={() => setTransport(t)} />
                     {t === 'stdio' ? 'Chương trình (stdio)' : 'Máy chủ HTTP'}
                   </label>
                 ))}
@@ -1049,9 +972,9 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
                 onChange={(e) => setTarget(e.target.value)}
                 placeholder={transport === 'stdio' ? 'npx -y @modelcontextprotocol/server-memory' : 'https://mcp.example.com/mcp'}
                 spellCheck={false}
-                className={input}
+                className={field}
               />
-              <p className="mt-1.5 text-[11.5px] text-muted">Biến môi trường, header, bí mật: thêm ở trang của connector sau khi tạo.</p>
+              <p className={hint}>Biến môi trường, header, bí mật: thêm ở trang của connector sau khi tạo.</p>
             </>
           )}
           {tab === 'json' && (
@@ -1064,65 +987,17 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
                 rows={10}
                 spellCheck={false}
                 placeholder={'{\n  "mcpServers": {\n    "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] }\n  }\n}'}
-                className={`${input} resize-y`}
+                className={`${TEXTAREA} w-full`}
               />
-              <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
+              <p className={hint}>
                 Dạng của Claude Code / Cursor / VS Code (<code>mcpServers</code> hoặc <code>servers</code>). Giá trị có tên giống token (KEY, TOKEN, SECRET…) và
                 header Authorization được tách thành bí mật, không lưu vào cài đặt.
               </p>
             </>
           )}
-          {error && <div className="mt-3 whitespace-pre-wrap rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{error}</div>}
+          {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-[12px] whitespace-pre-wrap text-danger">{error}</div>}
         </form>
       )}
     </Modal>
-  )
-}
-
-function SectionHead({ icon, children }: { icon: ReactNode; children: ReactNode }): React.JSX.Element {
-  return (
-    <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold">
-      {icon}
-      {children}
-    </div>
-  )
-}
-
-function PlugIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M9 2v6M15 2v6" />
-      <path d="M6 8h12v3a6 6 0 0 1-12 0V8z" />
-      <path d="M12 17v5" />
-    </svg>
-  )
-}
-
-function ServerIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <rect x="3" y="4" width="18" height="7" rx="1.5" />
-      <rect x="3" y="13" width="18" height="7" rx="1.5" />
-      <path d="M7 7.5h.01M7 16.5h.01" />
-    </svg>
-  )
-}
-
-function StoreIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M3 9l1.5-5h15L21 9" />
-      <path d="M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0V9z" />
-      <path d="M5 13v7h14v-7" />
-    </svg>
-  )
-}
-
-function ShieldIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z" />
-      <path d="M12 8v5M12 16h.01" />
-    </svg>
   )
 }

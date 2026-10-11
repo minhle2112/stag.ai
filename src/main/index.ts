@@ -33,6 +33,8 @@ import { GlobalVoice, KeySender, VoiceOverlay } from './voiceSystem'
 import { SONIOX_SECRET } from '@shared/voice'
 import { samePath } from './fsutil'
 import type { GeneralSettings } from '@shared/types'
+import { MemoryKeeper } from './workLog'
+import { resolveMemory } from '@shared/settings'
 
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
 // Phải đặt trước khi tạo các service vì chúng đọc đường dẫn userData lúc khởi tạo.
@@ -55,6 +57,9 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'stag-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
 ])
 
+/** Chiều cao thanh tiêu đề tự vẽ (px, ở thu phóng 100%): khớp `TitleBar` trong renderer. */
+const TITLE_BAR_HEIGHT = 36
+
 const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
 const board = new Board(
@@ -73,8 +78,11 @@ const board = new Board(
             data: e.kind === 'taskStarted' ? { title: e.title, scope: e.scope } : { title: e.title }
           }
     )
-  }
+  },
+  // Việc đóng → nhật ký việc trong vault + mục "Work done" của note agent (workLog.ts).
+  (ws, c) => void memory.taskClosed(ws, c).catch((e) => console.error('[memory]', e))
 )
+const memory = new MemoryKeeper((ws, agentId) => resolveMemory(settings.get(), ws.id, agentId))
 const send = (channel: string, ...args: unknown[]): void => {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...args)
 }
@@ -254,7 +262,7 @@ const pluginEvent = (type: PluginEvent['type'], a: { id: string; name: string; w
   agentName: a.name,
   data
 })
-const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals, skills)
+const agents = new AgentService(ptys, workspaces, board, browser, settings, activity, artifacts, adapters, external, secrets, oauth, approvals, skills, memory)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -286,7 +294,11 @@ function showWindow(): void {
 /** Áp các cài đặt "Chung" cần main làm: thu phóng, chạy cùng Windows, icon khay. */
 function applyGeneral(g: GeneralSettings): void {
   const factor = g.zoom / 100
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.setZoomFactor(factor)
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.setZoomFactor(factor)
+    // Thanh tiêu đề tự vẽ co giãn theo thu phóng: nút cửa sổ gốc phải cao bằng nó.
+    win.setTitleBarOverlay({ height: Math.round(TITLE_BAR_HEIGHT * factor) })
+  }
   browser.setZoom(factor)
   // Bản dev là electron.exe trần: đăng ký chạy cùng Windows sẽ mở Electron trống, nên chỉ làm ở bản cài.
   if (app.isPackaged && app.getLoginItemSettings().openAtLogin !== g.openAtLogin) app.setLoginItemSettings({ openAtLogin: g.openAtLogin })
@@ -341,9 +353,12 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    backgroundColor: '#0f1115',
+    backgroundColor: '#08090b',
     title: 'stag.ai',
     autoHideMenuBar: true,
+    // Thanh tiêu đề do giao diện tự vẽ (cao 36px); Windows chỉ vẽ đè ba nút thu nhỏ / phóng to / đóng.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#08090b', symbolColor: '#99a0aa', height: TITLE_BAR_HEIGHT },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -353,7 +368,11 @@ function createWindow(): void {
 
   win.once('ready-to-show', () => win.show())
   browser.attachWindow(win)
-  win.webContents.on('did-finish-load', () => win.webContents.setZoomFactor(settings.general().zoom / 100))
+  win.webContents.on('did-finish-load', () => {
+    const factor = settings.general().zoom / 100
+    win.webContents.setZoomFactor(factor)
+    win.setTitleBarOverlay({ height: Math.round(TITLE_BAR_HEIGHT * factor) })
+  })
 
   // Bấm ×: thu xuống khay (agent vẫn chạy) hoặc thoát hẳn (hỏi lại nếu còn phiên chạy).
   win.on('close', (e) => {

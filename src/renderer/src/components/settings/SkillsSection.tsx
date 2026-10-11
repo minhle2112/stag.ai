@@ -23,18 +23,19 @@ import { useSkills } from '../../store/skills'
 import { useUi } from '../../store/ui'
 import { useWorkspaces } from '../../store/workspaces'
 import { Button, Modal } from '../Modal'
+import { Seg } from '../ui/Seg'
 import { renderNote } from '../vault/markdown'
 import { noteHighlight, noteTheme } from '../vault/NoteEditor'
-import { Badge, errText } from './AdaptersSection'
-import { ErrorBar, SmallButton } from './controls'
-import { LevelPicker, LevelToggle, setAtLevel, useAgentLevel, useLevel, type Level, type LevelKey } from './levels'
+import { errText } from './AdaptersSection'
+import { Badge, Callout, DetailHead, Empty, ErrorBar, Group, INPUT_MONO, InfoTip, Row, SearchBox, SectionTitle, SmallButton, TEXTAREA_TEXT, Tile, Tiles } from './controls'
+import { LevelBar, LevelToggle, setAtLevel, useAgentLevel, useLevel, type Level, type LevelKey } from './levels'
 
 /**
  * Settings → Skill (bố cục theo trang Skills của Paperclip):
  * - Đã cài: thư viện của stag.ai (app đưa vào phiên Claude Code qua --add-dir, Codex / adapter ngoài qua luật phiên)
  *   + skill Claude Code / Codex tự nạp (chỉ tắt bớt cho phiên agent).
  * - Khám phá: danh mục kèm app (resources/skill-catalog).
- * Bật / tắt theo cấp app → workspace → agent.
+ * Bật / tắt theo cấp app → workspace → agent (công tắc cấp ở tiêu đề trang).
  */
 
 type Tab = 'installed' | 'discover'
@@ -137,6 +138,8 @@ export function SkillsSection(): React.JSX.Element {
   const [level, setLevel] = useState<LevelKey>(() => agentLevel(focus?.agentId))
   const [creating, setCreating] = useState(false)
   const [msg, setMsg] = useState('')
+  const [qInstalled, setQInstalled] = useState('')
+  const [qCatalog, setQCatalog] = useState('')
   const lv = useLevel(level)
   const { scans, busy, scan } = useSkillScans(lv.wsId ?? activeWs ?? undefined)
   /** Mở trang chi tiết; skill thư viện / có sẵn thuộc mục Đã cài. */
@@ -171,88 +174,86 @@ export function SkillsSection(): React.JSX.Element {
       .catch((e) => setMsg(errText(e)))
   }
 
-  const navItem = (id: Tab, label: string, icon: ReactNode, count?: number): React.JSX.Element => (
-    <button
-      type="button"
-      onClick={() => {
-        setTab(id)
-        setDetail(null)
-      }}
-      aria-current={tab === id && !detail}
-      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${tab === id ? 'bg-panel-2 font-medium text-fg' : 'text-muted hover:bg-panel-2 hover:text-fg'}`}
-    >
-      {icon}
-      <span className="flex-1">{label}</span>
-      {count ? <span className="rounded-full bg-line/70 px-1.5 text-[10.5px] tabular-nums text-muted">{count}</span> : null}
-    </button>
-  )
-
   return (
     <>
-      <div className="-mt-2 mb-4 flex items-center gap-2 border-b border-line pb-3">
-        <BookIcon className="h-4 w-4 text-muted" />
-        <span className="text-[12.5px] font-semibold uppercase tracking-wider">Skill</span>
-        <span className="rounded-full border border-line px-2 py-px text-[10.5px] text-muted">SKILL.md</span>
-      </div>
-      <div className="flex gap-6">
-        <nav className="w-40 shrink-0" aria-label="Skill">
-          {navItem('installed', 'Đã cài', <BookIcon className="h-4 w-4" />, library.length)}
-          {navItem('discover', 'Khám phá', <CompassIcon className="h-4 w-4" />, catalog.length)}
-          <div className="mt-4 border-t border-line px-2.5 pt-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted">Tự viết</div>
-          <p className="mt-1 px-2.5 text-[11.5px] leading-snug text-muted">Skill bạn tạo, sửa, nhập.</p>
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="mt-1.5 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted hover:bg-panel-2 hover:text-fg"
-          >
-            <PenIcon className="h-4 w-4" /> Tạo skill
-          </button>
-        </nav>
-        <div className="min-w-0 flex-1">
-          {detail ? (
-            <SkillDetail
-              key={detail.type === 'lib' ? `lib:${detail.name}` : detail.type === 'cli' ? `cli:${detail.skill.path}` : `cat:${detail.slug}`}
-              detail={detail}
-              level={lv}
-              claudeNames={claudeNames(scans.claude)}
-              onBack={() => setDetail(null)}
-              onOpen={open}
-              afterImport={afterImport}
-            />
-          ) : tab === 'installed' ? (
-            <InstalledView
-              level={level}
-              setLevel={setLevel}
-              lv={lv}
-              scans={scans}
-              busy={busy}
-              scan={scan}
-              msg={msg}
-              onOpen={open}
-              onCreate={() => setCreating(true)}
-              onImport={doImport}
-              onCopy={(s) => {
-                setMsg('')
-                window.stag.skills
-                  .copy(s.runtime, s.path)
-                  .then(afterImport)
-                  .catch((e) => setMsg(errText(e)))
-              }}
-            />
+      <SectionTitle
+        title="Skill"
+        desc="Skill = thư mục có SKILL.md: hướng dẫn agent tự mở khi việc khớp mô tả. Skill trong thư viện của stag.ai dùng được cho Claude Code, Codex và adapter ngoài; skill có sẵn của từng CLI chỉ tắt bớt được cho phiên agent."
+        right={<LevelBar level={level} setLevel={setLevel} field="skills" />}
+      />
+      {!detail && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Seg
+            value={tab}
+            onChange={(id) => {
+              setTab(id)
+              setDetail(null)
+            }}
+            options={[
+              { value: 'installed', label: `Đã cài${library.length ? ` · ${library.length}` : ''}`, tip: 'Thư viện của stag.ai và skill có sẵn trong CLI' },
+              { value: 'discover', label: `Khám phá${catalog.length ? ` · ${catalog.length}` : ''}`, tip: 'Danh mục skill kèm app' }
+            ]}
+          />
+          {tab === 'installed' ? (
+            <SearchBox className="min-w-[160px] flex-1" value={qInstalled} onChange={setQInstalled} placeholder="Tìm skill…" label="Tìm skill" />
           ) : (
-            <DiscoverView
-              onOpen={(slug) => setDetail({ type: 'catalog', slug })}
-              onInstall={(slug) =>
-                window.stag.skills
-                  .install(slug)
-                  .then(afterImport)
-                  .then((added) => added[0] && open({ type: 'lib', name: added[0] }))
-                  .catch((e) => setMsg(errText(e)))
-              }
-              msg={msg}
-            />
+            <SearchBox className="min-w-[160px] flex-1" value={qCatalog} onChange={setQCatalog} placeholder="Tìm trong danh mục…" label="Tìm trong danh mục" />
           )}
+          {tab === 'installed' && (
+            <>
+              <SmallButton icon="folder" onClick={() => doImport('folder')}>
+                Nhập thư mục…
+              </SmallButton>
+              <SmallButton onClick={() => doImport('zip')}>Nhập .zip…</SmallButton>
+            </>
+          )}
+          <SmallButton variant="primary" icon="plus" tip="Tạo một skill của riêng bạn" onClick={() => setCreating(true)}>
+            Tạo skill
+          </SmallButton>
         </div>
+      )}
+      <div className="min-w-0">
+        {detail ? (
+          <SkillDetail
+            key={detail.type === 'lib' ? `lib:${detail.name}` : detail.type === 'cli' ? `cli:${detail.skill.path}` : `cat:${detail.slug}`}
+            detail={detail}
+            level={lv}
+            claudeNames={claudeNames(scans.claude)}
+            onBack={() => setDetail(null)}
+            onOpen={open}
+            afterImport={afterImport}
+          />
+        ) : tab === 'installed' ? (
+          <InstalledView
+            lv={lv}
+            q={qInstalled}
+            scans={scans}
+            busy={busy}
+            scan={scan}
+            msg={msg}
+            onOpen={open}
+            onCopy={(s) => {
+              setMsg('')
+              window.stag.skills
+                .copy(s.runtime, s.path)
+                .then(afterImport)
+                .catch((e) => setMsg(errText(e)))
+            }}
+          />
+        ) : (
+          <DiscoverView
+            q={qCatalog}
+            onOpen={(slug) => setDetail({ type: 'catalog', slug })}
+            onInstall={(slug) =>
+              window.stag.skills
+                .install(slug)
+                .then(afterImport)
+                .then((added) => added[0] && open({ type: 'lib', name: added[0] }))
+                .catch((e) => setMsg(errText(e)))
+            }
+            msg={msg}
+          />
+        )}
       </div>
       {creating && (
         <CreateSkillDialog
@@ -273,85 +274,50 @@ const claudeNames = (scan?: SkillScan): Set<string> => new Set((scan?.skills ?? 
 // ---- Đã cài ----
 
 function InstalledView(p: {
-  level: LevelKey
-  setLevel: (l: LevelKey) => void
   lv: Level
+  q: string
   scans: Partial<Record<CliAdapterId, SkillScan>>
   busy: Partial<Record<CliAdapterId, boolean>>
   scan: (r: CliAdapterId) => void
   msg: string
   onOpen: (d: Detail) => void
-  onCreate: () => void
-  onImport: (kind: 'folder' | 'zip') => void
   onCopy: (s: InheritedSkill) => void
 }): React.JSX.Element {
   const library = useSkills((s) => s.library)
   const loaded = useSkills((s) => s.loaded)
   const count = useAgentCount()
-  const [q, setQ] = useState('')
+  const { q } = p
   const match = (name: string, desc: string): boolean => !q.trim() || `${name} ${desc}`.toLowerCase().includes(q.trim().toLowerCase())
   const claude = claudeNames(p.scans.claude)
   const lib = library.filter((s) => match(s.name, s.description))
 
   return (
     <>
-      <div className="mb-1 flex items-center gap-2.5">
-        <h1 className="text-[18px] font-semibold tracking-tight">Skill đã cài</h1>
-        <div className="flex-1" />
-        <SmallButton onClick={() => p.onImport('folder')}>Nhập thư mục…</SmallButton>
-        <SmallButton onClick={() => p.onImport('zip')}>Nhập .zip…</SmallButton>
-        <button
-          type="button"
-          onClick={p.onCreate}
-          className="flex items-center gap-1.5 rounded-md bg-fg px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90"
-        >
-          <span className="text-[15px] leading-none">+</span> Tạo skill
-        </button>
-      </div>
-      <p className="mb-4 text-[12.5px] leading-relaxed text-muted">
-        Skill = thư mục có <code>SKILL.md</code>: hướng dẫn agent tự mở khi việc khớp mô tả. Skill trong thư viện của stag.ai dùng được cho Claude Code, Codex và
-        adapter ngoài; skill có sẵn của từng CLI chỉ tắt bớt được cho phiên agent.
-      </p>
-      <LevelPicker level={p.level} setLevel={p.setLevel} field="skills" />
-      <div className="mb-4 flex items-center gap-2 rounded-md border border-line bg-panel px-3 py-1.5">
-        <SearchIcon className="h-4 w-4 text-muted" />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Tìm skill…"
-          aria-label="Tìm skill"
-          className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted"
-        />
-      </div>
-      {p.msg && <div className="mb-3 rounded-md border border-line bg-panel-2/60 px-3 py-2 text-[12px]">{p.msg}</div>}
+      {p.msg && <Callout className="mb-2">{p.msg}</Callout>}
 
-      <GroupHead icon={<BookIcon className="h-4 w-4 text-muted" />} count={library.length}>
-        Thư viện của stag.ai
-      </GroupHead>
-      {!loaded ? null : library.length === 0 ? (
-        <div className="mb-7 flex flex-col items-center rounded-lg border border-line bg-panel px-6 py-10 text-center">
-          <BookIcon className="mb-3 h-7 w-7 text-muted" />
-          <div className="text-[13px] font-medium">Chưa có skill nào</div>
-          <div className="mt-1 text-[12px] text-muted">Tạo mới, nhập thư mục / .zip, cài ở Khám phá, hoặc chép một skill có sẵn bên dưới.</div>
-        </div>
-      ) : (
-        <div className="mb-7 divide-y divide-line rounded-lg border border-line bg-panel">
-          {lib.length === 0 && <div className="px-4 py-4 text-[12.5px] text-muted">Không có skill nào khớp.</div>}
-          {lib.map((s) => (
-            <SkillRow
-              key={s.name}
-              name={s.name}
-              by={SOURCE[s.source.kind]}
-              description={s.description}
-              problem={s.problem}
-              warn={claude.has(s.name) ? 'Trùng tên skill có sẵn của Claude Code: phiên Claude dùng bản của Claude Code.' : undefined}
-              footer={[`${s.files} file`, s.problem ? 'không đưa vào phiên' : `bật cho ${count(s.name)} agent`]}
-              onOpen={() => p.onOpen({ type: 'lib', name: s.name })}
-              control={<LevelToggle k={s.name} level={p.lv} label={s.name} field="skills" setApp={skillSetApp(s.name)} />}
-            />
-          ))}
-        </div>
-      )}
+      <Group title={`Thư viện của stag.ai${library.length ? ` · ${library.length}` : ''}`} flush>
+        {!loaded ? null : library.length === 0 ? (
+          <Empty title="Chưa có skill nào">Tạo mới, nhập thư mục / .zip, cài ở Khám phá, hoặc chép một skill có sẵn bên dưới.</Empty>
+        ) : lib.length === 0 ? (
+          <div className="border-b border-line py-3 text-[12px] text-dim">Không có skill nào khớp.</div>
+        ) : (
+          <Tiles>
+            {lib.map((s) => (
+              <SkillTile
+                key={s.name}
+                name={s.name}
+                by={SOURCE[s.source.kind]}
+                description={s.description}
+                problem={s.problem}
+                warn={claude.has(s.name) ? 'Trùng tên skill có sẵn của Claude Code: phiên Claude dùng bản của Claude Code.' : undefined}
+                footer={[`${s.files} file`, s.problem ? 'không đưa vào phiên' : `bật cho ${count(s.name)} agent`]}
+                onOpen={() => p.onOpen({ type: 'lib', name: s.name })}
+                control={<LevelToggle k={s.name} level={p.lv} label={s.name} field="skills" setApp={skillSetApp(s.name)} />}
+              />
+            ))}
+          </Tiles>
+        )}
+      </Group>
 
       {(['claude', 'codex'] as const).map((r) => (
         <InheritedGroup key={r} runtime={r} lv={p.lv} scan={p.scans[r]} busy={!!p.busy[r]} rescan={() => p.scan(r)} match={match} onOpen={p.onOpen} onCopy={p.onCopy} />
@@ -379,154 +345,125 @@ function InheritedGroup(p: {
   for (const s of all) if (s.plugin) plugins.set(s.plugin, [...(plugins.get(s.plugin) ?? []), s])
   const pluginRows = [...plugins].filter(([id, list]) => p.match(id, list.map((s) => s.name).join(' ')))
 
+  const help =
+    p.runtime === 'claude'
+      ? '~/.claude/skills, skill đồng bộ từ claude.ai, .claude/skills của dự án, plugin đã bật. Skill của plugin chỉ tắt được cả plugin. Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.'
+      : '~/.codex/skills, ~/.agents/skills, .agents/skills của dự án, skill hệ thống của Codex (danh sách do chính Codex trả, không tốn quota). Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.'
+
   return (
-    <>
-      <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold">
-        <ServerIcon className="h-4 w-4 text-muted" />
-        Có sẵn trong {RUNTIME[p.runtime]}
-        {all.length > 0 && <span className="text-[11.5px] font-normal text-muted">{all.length}</span>}
-        <div className="flex-1" />
+    <Group
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Có sẵn trong {RUNTIME[p.runtime]}
+          {all.length > 0 && <span className="font-normal tracking-normal">· {all.length}</span>}
+          <InfoTip text={help} />
+        </span>
+      }
+      action={
         <SmallButton onClick={p.rescan} disabled={p.busy}>
           {p.busy ? 'Đang quét…' : 'Quét lại'}
         </SmallButton>
-      </div>
-      <div className="mb-2 text-[12px] leading-relaxed text-muted">
-        {p.runtime === 'claude' ? (
-          <>
-            <code>~/.claude/skills</code>, skill đồng bộ từ claude.ai, <code>.claude/skills</code> của dự án, plugin đã bật. Skill của plugin chỉ tắt được cả
-            plugin. Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.
-          </>
-        ) : (
-          <>
-            <code>~/.codex/skills</code>, <code>~/.agents/skills</code>, <code>.agents/skills</code> của dự án, skill hệ thống của Codex (danh sách do chính Codex
-            trả, không tốn quota). Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.
-          </>
-        )}
-      </div>
+      }
+    >
       {p.scan?.cwd && (
-        <div className="mb-2 truncate text-[11.5px] text-muted" title={p.scan.cwd}>
+        <div className="mb-2 truncate text-[11px] text-dim" data-tip={p.scan.cwd}>
           Quét lúc {new Date(p.scan.scannedAt).toLocaleTimeString()} ở {p.scan.cwd}
         </div>
       )}
       {p.scan?.error && <ErrorBar error={p.scan.error} />}
-      <div className="mb-7 divide-y divide-line rounded-lg border border-line bg-panel">
-        {own.length + pluginRows.length === 0 ? (
-          <div className="px-4 py-4 text-[12.5px] text-muted">{p.busy ? 'Đang quét…' : p.scan ? 'Không có skill nào.' : 'Chưa quét.'}</div>
-        ) : (
-          <>
-            {own.map((s) => (
-              <SkillRow
-                key={s.path || s.name}
-                name={s.name}
-                by={SCOPE[s.scope]}
-                description={s.description}
-                footer={[s.disabledInCli ? 'đã tắt trong config.toml của bạn' : `bật cho ${count(s.toggleKey)} agent`]}
-                onOpen={() => p.onOpen({ type: 'cli', skill: s })}
-                control={
-                  <>
-                    {!library.some((l) => l.name === s.name) && s.path && (
-                      <button
-                        type="button"
-                        title="Chép vào thư viện của stag.ai (dùng được cả với CLI khác / adapter ngoài)"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          p.onCopy(s)
-                        }}
-                        className="rounded-md px-2 py-1 text-[11.5px] text-muted hover:bg-panel-2 hover:text-fg"
-                      >
-                        Chép
-                      </button>
-                    )}
-                    <LevelToggle k={s.toggleKey} level={p.lv} label={s.name} field="skills" setApp={skillSetApp(s.toggleKey)} />
-                  </>
-                }
-              />
-            ))}
-            {pluginRows.map(([id, list]) => (
-              <SkillRow
-                key={id}
-                name={id.split('@')[0]}
-                by={`plugin · ${id.split('@')[1] ?? ''}`}
-                description={`${list.length} skill: ${list.map((s) => s.name.split(':').pop()).join(', ')}`}
-                footer={[`bật cho ${count(`claude-plugin:${id}`)} agent`, 'tắt = tắt cả plugin trong phiên']}
-                control={<LevelToggle k={`claude-plugin:${id}`} level={p.lv} label={`plugin ${id}`} field="skills" setApp={skillSetApp(`claude-plugin:${id}`)} />}
-              />
-            ))}
-          </>
-        )}
-      </div>
-    </>
+      {own.length + pluginRows.length === 0 ? (
+        <div className="border-b border-line py-3 text-[12px] text-dim">{p.busy ? 'Đang quét…' : p.scan ? 'Không có skill nào.' : 'Chưa quét.'}</div>
+      ) : (
+        <Tiles>
+          {own.map((s) => (
+            <SkillTile
+              key={s.path || s.name}
+              name={s.name}
+              by={SCOPE[s.scope]}
+              description={s.description}
+              footer={[s.disabledInCli ? 'đã tắt trong config.toml của bạn' : `bật cho ${count(s.toggleKey)} agent`]}
+              onOpen={() => p.onOpen({ type: 'cli', skill: s })}
+              control={
+                <>
+                  {!library.some((l) => l.name === s.name) && s.path && (
+                    <SmallButton
+                      variant="ghost"
+                      size="xs"
+                      tip="Chép vào thư viện của stag.ai (dùng được cả với CLI khác / adapter ngoài)"
+                      onClick={() => p.onCopy(s)}
+                    >
+                      Chép
+                    </SmallButton>
+                  )}
+                  <LevelToggle k={s.toggleKey} level={p.lv} label={s.name} field="skills" setApp={skillSetApp(s.toggleKey)} />
+                </>
+              }
+            />
+          ))}
+          {pluginRows.map(([id, list]) => (
+            <SkillTile
+              key={id}
+              name={id.split('@')[0]}
+              by={`plugin · ${id.split('@')[1] ?? ''}`}
+              description={`${list.length} skill: ${list.map((s) => s.name.split(':').pop()).join(', ')}`}
+              footer={[`bật cho ${count(`claude-plugin:${id}`)} agent`, 'tắt = tắt cả plugin trong phiên']}
+              control={<LevelToggle k={`claude-plugin:${id}`} level={p.lv} label={`plugin ${id}`} field="skills" setApp={skillSetApp(`claude-plugin:${id}`)} />}
+            />
+          ))}
+        </Tiles>
+      )}
+    </Group>
   )
 }
 
 // ---- Khám phá ----
 
-function DiscoverView({ onOpen, onInstall, msg }: { onOpen: (slug: string) => void; onInstall: (slug: string) => void; msg: string }): React.JSX.Element {
+function DiscoverView({ q, onOpen, onInstall, msg }: { q: string; onOpen: (slug: string) => void; onInstall: (slug: string) => void; msg: string }): React.JSX.Element {
   const catalog = useSkills((s) => s.catalog)
   const library = useSkills((s) => s.library)
-  const [q, setQ] = useState('')
   const list = catalog.filter((e) => !q.trim() || `${e.name} ${e.description} ${e.tags.join(' ')}`.toLowerCase().includes(q.trim().toLowerCase()))
   return (
     <>
-      <h1 className="mb-1 text-[18px] font-semibold tracking-tight">Khám phá skill</h1>
-      <p className="mb-4 text-[12.5px] leading-relaxed text-muted">
-        Skill dùng chung kèm app: phần lớn lấy từ danh mục skill của Paperclip (MIT), cộng skill riêng của stag.ai (vd. viết plugin). Cài = chép vào thư viện của
-        stag.ai để bật cho agent, sửa thoải mái.
-      </p>
-      <div className="mb-4 flex items-center gap-2 rounded-md border border-line bg-panel px-3 py-1.5">
-        <SearchIcon className="h-4 w-4 text-muted" />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Tìm trong danh mục…"
-          aria-label="Tìm trong danh mục"
-          className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted"
-        />
-      </div>
-      {msg && <div className="mb-3 rounded-md border border-line bg-panel-2/60 px-3 py-2 text-[12px]">{msg}</div>}
-      <div className="mb-2 text-[12px] text-muted">{list.length} skill</div>
-      <div className="divide-y divide-line rounded-lg border border-line bg-panel">
-        {list.map((e) => {
-          const installed = library.some((l) => l.name === e.name)
-          return (
-            <SkillRow
-              key={e.slug}
-              name={e.name}
-              by={e.source === 'stag.ai' ? 'Danh mục · stag.ai' : 'Danh mục · Paperclip'}
-              description={e.description}
-              footer={[`${e.files} file`, ...e.tags.slice(0, 3)]}
-              onOpen={() => onOpen(e.slug)}
-              control={
-                installed ? (
-                  <span className="rounded-full border border-emerald-500/40 px-2 py-0.5 text-[11px] text-emerald-300">Đã cài</span>
-                ) : (
-                  <InstallButton onClick={() => onInstall(e.slug)} />
-                )
-              }
-            />
-          )
-        })}
-      </div>
+      {msg && <Callout className="mb-2">{msg}</Callout>}
+      <Group
+        flush
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            {list.length} skill
+            <InfoTip text="Skill dùng chung kèm app: phần lớn lấy từ danh mục skill của Paperclip (MIT), cộng skill riêng của stag.ai (vd. viết plugin). Cài = chép vào thư viện của stag.ai để bật cho agent, sửa thoải mái." />
+          </span>
+        }
+      >
+        <Tiles>
+          {list.map((e) => {
+            const installed = library.some((l) => l.name === e.name)
+            return (
+              <SkillTile
+                key={e.slug}
+                name={e.name}
+                by={e.source === 'stag.ai' ? 'Danh mục · stag.ai' : 'Danh mục · Paperclip'}
+                description={e.description}
+                footer={[`${e.files} file`, ...e.tags.slice(0, 3)]}
+                onOpen={() => onOpen(e.slug)}
+                control={installed ? <Badge tone="ok">Đã cài</Badge> : <InstallButton onClick={() => onInstall(e.slug)} />}
+              />
+            )
+          })}
+        </Tiles>
+      </Group>
     </>
   )
 }
 
 function InstallButton({ onClick }: { onClick: () => void }): React.JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation()
-        onClick()
-      }}
-      className="rounded-md border border-line px-3 py-1 text-[12px] font-medium hover:bg-panel-2"
-    >
+    <SmallButton size="xs" onClick={onClick}>
       Cài
-    </button>
+    </SmallButton>
   )
 }
 
-// ---- dòng skill ----
+// ---- thẻ skill ----
 
 const AVATAR = ['#22c55e', '#f59e0b', '#60a5fa', '#c084fc', '#f87171', '#2dd4bf', '#f472b6', '#a3e635']
 
@@ -536,8 +473,8 @@ export function SkillAvatar({ name, size = 34 }: { name: string; size?: number }
   const letter = (name.split(':').pop() ?? name).replace(/[^a-z0-9]/gi, '').charAt(0).toUpperCase() || '?'
   return (
     <span
-      className="flex shrink-0 items-center justify-center rounded-md font-semibold text-black/80"
-      style={{ width: size, height: size, background: AVATAR[h % AVATAR.length], fontSize: size * 0.42 }}
+      className="flex shrink-0 items-center justify-center font-bold text-black/80"
+      style={{ width: size, height: size, background: AVATAR[h % AVATAR.length], fontSize: size * 0.42, borderRadius: size >= 28 ? 7 : 5 }}
       aria-hidden
     >
       {letter}
@@ -545,7 +482,8 @@ export function SkillAvatar({ name, size = 34 }: { name: string; size?: number }
   )
 }
 
-function SkillRow(p: {
+/** Thẻ skill: logo chữ cái, tên, một dòng mô tả; nguồn / số file / số agent bật nằm trong chú thích. */
+function SkillTile(p: {
   name: string
   by: string
   description: string
@@ -555,42 +493,25 @@ function SkillRow(p: {
   control: ReactNode
   onOpen?: () => void
 }): React.JSX.Element {
+  const tip = [p.description || '(không có mô tả)', [p.by, ...p.footer.filter(Boolean)].join(' · '), p.warn].filter(Boolean).join('\n')
   return (
-    <div
-      role={p.onOpen ? 'button' : undefined}
-      tabIndex={p.onOpen ? 0 : undefined}
-      onClick={p.onOpen}
-      onKeyDown={(e) => p.onOpen && e.key === 'Enter' && e.target === e.currentTarget && p.onOpen()}
-      className={`group flex items-start gap-3 px-4 py-3 ${p.onOpen ? 'cursor-pointer hover:bg-panel-2/60' : ''}`}
-    >
-      <SkillAvatar name={p.name} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="truncate font-mono text-[13px] font-medium">{p.name}</span>
-          <span className="shrink-0 text-[11.5px] text-muted">{p.by}</span>
-        </div>
-        <div className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted">{p.description || <i>(không có mô tả)</i>}</div>
-        {p.problem && <div className="mt-1 text-[11.5px] text-red-300">{p.problem}</div>}
-        {p.warn && <div className="mt-1 text-[11.5px] text-amber-300/90">{p.warn}</div>}
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {p.footer.filter(Boolean).map((f) => (
-            <Badge key={f}>{f}</Badge>
-          ))}
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5 self-center">{p.control}</div>
-      {p.onOpen && <span className="self-center text-muted group-hover:text-fg">›</span>}
-    </div>
-  )
-}
-
-function GroupHead({ icon, count, children }: { icon: ReactNode; count?: number; children: ReactNode }): React.JSX.Element {
-  return (
-    <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold">
-      {icon}
-      {children}
-      {count ? <span className="text-[11.5px] font-normal text-muted">{count}</span> : null}
-    </div>
+    <Tile
+      logo={<SkillAvatar name={p.name} size={30} />}
+      title={p.name}
+      mono
+      badge={
+        p.warn ? (
+          <span data-tip={p.warn} className="inline-flex">
+            <Badge>Trùng tên</Badge>
+          </span>
+        ) : undefined
+      }
+      sub={p.description || <i>(không có mô tả)</i>}
+      tip={tip}
+      alert={p.problem}
+      onOpen={p.onOpen}
+      control={p.control}
+    />
   )
 }
 
@@ -679,75 +600,72 @@ function SkillDetail(p: {
         ? `${RUNTIME[detail.skill.runtime]} · ${SCOPE[detail.skill.scope]}${detail.skill.plugin ? ` · ${detail.skill.plugin}` : ''}`
         : 'Danh mục kèm app · @paperclipai/skills-catalog (MIT)'
 
+  const tabs: Array<{ value: DetailTab; label: string }> = [
+    { value: 'content', label: 'Nội dung' },
+    { value: 'files', label: `File${doc ? ` (${doc.files.length})` : ''}` },
+    ...(toggleKey ? [{ value: 'agents' as const, label: 'Agent' }] : [])
+  ]
+
   return (
     <>
-      <button type="button" onClick={p.onBack} className="mb-3 text-[12.5px] text-muted hover:text-fg">
-        ← Tất cả skill
-      </button>
-      <div className="mb-4 flex items-start gap-3">
-        <SkillAvatar name={name} size={44} />
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate font-mono text-[18px] font-semibold">{name}</h1>
-          <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted">{description}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {toggleKey && !(detail.type === 'cli' && detail.skill.plugin) && (
-            <>
-              <span className="text-[11.5px] text-muted">{p.level.lvl === 'app' ? 'Mọi agent' : p.level.name}</span>
-              <LevelToggle k={toggleKey} level={p.level} label={name} field="skills" setApp={skillSetApp(toggleKey)} />
-            </>
-          )}
-          {detail.type === 'catalog' &&
-            (library.some((l) => l.name === name) ? (
-              <SmallButton onClick={() => p.onOpen({ type: 'lib', name })}>Mở bản đã cài</SmallButton>
-            ) : (
-              <InstallButton
-                onClick={() =>
-                  window.stag.skills
-                    .install(detail.slug)
-                    .then(p.afterImport)
-                    .then((added) => added[0] && p.onOpen({ type: 'lib', name: added[0] }))
-                    .catch((e) => setNote({ text: errText(e), bad: true }))
-                }
-              />
-            ))}
-        </div>
-      </div>
+      <DetailHead
+        onBack={p.onBack}
+        backLabel="Tất cả skill"
+        logo={<SkillAvatar name={name} size={30} />}
+        title={name}
+        mono
+        sub={description}
+        control={
+          <>
+            {toggleKey && !(detail.type === 'cli' && detail.skill.plugin) && (
+              <>
+                <span className="text-[12px] text-dim">{p.level.lvl === 'app' ? 'Mọi agent' : p.level.name}</span>
+                <LevelToggle k={toggleKey} level={p.level} label={name} field="skills" setApp={skillSetApp(toggleKey)} />
+              </>
+            )}
+            {detail.type === 'catalog' &&
+              (library.some((l) => l.name === name) ? (
+                <SmallButton onClick={() => p.onOpen({ type: 'lib', name })}>Mở bản đã cài</SmallButton>
+              ) : (
+                <SmallButton
+                  variant="primary"
+                  onClick={() =>
+                    window.stag.skills
+                      .install(detail.slug)
+                      .then(p.afterImport)
+                      .then((added) => added[0] && p.onOpen({ type: 'lib', name: added[0] }))
+                      .catch((e) => setNote({ text: errText(e), bad: true }))
+                  }
+                >
+                  Cài
+                </SmallButton>
+              ))}
+          </>
+        }
+      />
 
       <ErrorBar error={loadErr} />
       {lib?.problem && !editing && <ErrorBar error={`${lib.problem} Skill lỗi không được đưa vào phiên.`} />}
       {detail.type === 'lib' && p.claudeNames.has(detail.name) && (
-        <div className="mb-4 rounded-md border border-amber-400/30 bg-amber-400/[0.07] px-3 py-2 text-[12px] text-amber-200/90">
+        <Callout className="mb-3" icon="info">
           Claude Code đã có skill tên "{detail.name}" (của bạn / claude.ai / dự án): phiên Claude dùng bản đó, bản này chỉ vào phiên Codex / adapter ngoài. Đổi tên nếu
           muốn dùng bản này cho Claude.
-        </div>
+        </Callout>
       )}
       {note && (
-        <div className={`mb-4 rounded-md border px-3 py-2 text-[12px] ${note.bad ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-line bg-panel-2/60'}`}>{note.text}</div>
+        <Callout tone={note.bad ? 'danger' : 'info'} className="mb-3">
+          {note.text}
+        </Callout>
       )}
 
-      <div className="grid grid-cols-[minmax(0,1fr)_15rem] gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)_14rem] gap-6">
         <div className="min-w-0">
-          <div className="mb-3 flex items-center gap-1 border-b border-line">
-            {(
-              [
-                ['content', 'Nội dung'],
-                ['files', `File${doc ? ` (${doc.files.length})` : ''}`],
-                ...(toggleKey ? [['agents', 'Agent']] : [])
-              ] as Array<[DetailTab, string]>
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                className={`-mb-px whitespace-nowrap border-b-2 px-3 py-1.5 text-[12.5px] ${tab === id ? 'border-fg font-medium text-fg' : 'border-transparent text-muted hover:text-fg'}`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="mb-3 flex items-center gap-2">
+            <Seg value={tab} onChange={setTab} options={tabs.map((t) => ({ value: t.value, label: t.label }))} />
             <div className="flex-1" />
             {tab === 'content' && doc?.editable && !editing && (
               <SmallButton
+                icon="pen"
                 onClick={() => {
                   setDraft(doc.md)
                   setEditing(true)
@@ -760,7 +678,7 @@ function SkillDetail(p: {
           </div>
           {tab === 'content' && editing && (
             <div className="mb-2 flex items-center justify-end gap-1.5">
-              <span className="mr-auto text-[11.5px] text-muted">{dirty ? 'Chưa lưu · Ctrl+S để lưu' : 'Không có thay đổi'}</span>
+              <span className="mr-auto text-[12px] text-dim">{dirty ? 'Chưa lưu · Ctrl+S để lưu' : 'Không có thay đổi'}</span>
               <SmallButton
                 onClick={() => {
                   setEditing(false)
@@ -769,30 +687,25 @@ function SkillDetail(p: {
               >
                 Huỷ
               </SmallButton>
-              <button
-                type="button"
-                onClick={() => void save()}
-                disabled={saving || !dirty}
-                className="rounded-md bg-fg px-3 py-1.5 text-[12.5px] font-medium text-bg hover:opacity-90 disabled:opacity-40"
-              >
+              <SmallButton variant="primary" onClick={() => void save()} disabled={saving || !dirty}>
                 {saving ? 'Đang lưu…' : 'Lưu'}
-              </button>
+              </SmallButton>
             </div>
           )}
           {tab === 'content' &&
             (!doc ? (
-              <div className="text-[12.5px] text-muted">{loadErr ? '' : 'Đang đọc…'}</div>
+              <div className="text-[12px] text-dim">{loadErr ? '' : 'Đang đọc…'}</div>
             ) : editing ? (
               <SkillEditor value={draft} onChange={setDraft} onSave={() => void save()} />
             ) : (
               <MarkdownView md={doc.md} />
             ))}
           {tab === 'files' && doc && (
-            <div className="divide-y divide-line rounded-lg border border-line bg-panel">
+            <div>
               {doc.files.map((f) => (
-                <div key={f.path} className="flex items-center gap-3 px-4 py-2 text-[12.5px]">
+                <div key={f.path} className="flex items-center gap-3 border-b border-line py-2 text-[12px]">
                   <span className="min-w-0 flex-1 truncate font-mono">{f.path}</span>
-                  <span className="shrink-0 tabular-nums text-muted">{size(f.bytes)}</span>
+                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-dim">{size(f.bytes)}</span>
                 </div>
               ))}
             </div>
@@ -804,7 +717,7 @@ function SkillDetail(p: {
           <Side title="Nguồn">{source}</Side>
           {doc && (
             <Side title="Thư mục">
-              <div className="break-all font-mono text-[11.5px] text-muted">{doc.dir}</div>
+              <div className="font-mono text-[11px] break-all text-muted">{doc.dir}</div>
               <div className="mt-1.5 flex gap-1.5">
                 <SmallButton onClick={() => void navigator.clipboard.writeText(doc.dir)}>Chép đường dẫn</SmallButton>
                 <SmallButton onClick={() => void window.stag.skills.reveal(detail.type === 'lib' ? detail.name : `${doc.dir}/SKILL.md`).catch(() => {})}>Mở</SmallButton>
@@ -832,14 +745,9 @@ function SkillDetail(p: {
             </SmallButton>
           )}
           {detail.type === 'lib' && (
-            <button
-              type="button"
-              onClick={remove}
-              onBlur={() => setConfirmDel(false)}
-              className={`rounded-md px-3 py-1.5 text-[12.5px] ${confirmDel ? 'bg-red-500/90 text-white' : 'bg-panel-2 text-red-300 hover:bg-line'}`}
-            >
+            <SmallButton variant={confirmDel ? 'dangerSolid' : 'danger'} onClick={remove} onBlur={() => setConfirmDel(false)}>
               {confirmDel ? 'Bấm lần nữa để xoá' : 'Xoá skill'}
-            </button>
+            </SmallButton>
           )}
         </aside>
       </div>
@@ -850,7 +758,7 @@ function SkillDetail(p: {
 function Side({ title, children }: { title: string; children: ReactNode }): React.JSX.Element {
   return (
     <div>
-      <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted">{title}</div>
+      <div className="mb-1 text-[11px] font-semibold tracking-[0.07em] text-dim uppercase">{title}</div>
       <div className="leading-relaxed">{children}</div>
     </div>
   )
@@ -864,25 +772,28 @@ function AgentsTab({ k, label }: { k: string; label: string }): React.JSX.Elemen
   const byWs = useAgents((s) => s.byWs)
   const app: Level = { lvl: 'app', name: 'mọi agent' }
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 rounded-lg border border-line bg-panel px-4 py-2.5">
-        <span className="flex-1 text-[12.5px] font-medium">Mặc định cho mọi agent</span>
+    <div>
+      <Row label="Mặc định cho mọi agent">
         <LevelToggle k={k} level={app} label={label} field="skills" setApp={skillSetApp(k)} />
-      </div>
+      </Row>
       {workspaces.map((w) => {
         const agents = (byWs[w.id]?.agents ?? []).filter((a) => agentKind(a) !== 'terminal')
         return (
-          <div key={w.id} className="divide-y divide-line rounded-lg border border-line bg-panel">
-            <div className="flex items-center gap-3 px-4 py-2.5">
-              <span className="flex-1 text-[12.5px] font-medium">Workspace {w.name}</span>
+          <div key={w.id}>
+            <Row label={`Workspace ${w.name}`}>
               <LevelToggle k={k} level={{ lvl: 'ws', wsId: w.id, name: `workspace ${w.name}` }} label={label} field="skills" setApp={skillSetApp(k)} />
-            </div>
+            </Row>
             {agents.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 px-4 py-2 pl-8">
-                <span className="flex-1 text-[12.5px]">
-                  {a.name} <span className="text-muted">· {agentKind(a) === 'codex' ? 'Codex' : agentKind(a) === 'external' ? 'adapter ngoài' : 'Claude Code'}</span>
-                </span>
-                <LevelToggle k={k} level={{ lvl: 'agent', wsId: w.id, agentId: a.id, name: `agent ${a.name}` }} label={label} field="skills" setApp={skillSetApp(k)} />
+              <div key={a.id} className="pl-5">
+                <Row
+                  label={
+                    <span className="font-normal">
+                      {a.name} <span className="text-dim">· {agentKind(a) === 'codex' ? 'Codex' : agentKind(a) === 'external' ? 'adapter ngoài' : 'Claude Code'}</span>
+                    </span>
+                  }
+                >
+                  <LevelToggle k={k} level={{ lvl: 'agent', wsId: w.id, agentId: a.id, name: `agent ${a.name}` }} label={label} field="skills" setApp={skillSetApp(k)} />
+                </Row>
               </div>
             ))}
           </div>
@@ -937,7 +848,7 @@ function SkillEditor({ value, onChange, onSave }: { value: string; onChange: (v:
     return () => view.destroy()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  return <div ref={host} className="h-[60vh] overflow-hidden rounded-lg border border-line bg-panel" />
+  return <div ref={host} className="h-[60vh] overflow-hidden rounded-lg border border-line-2 bg-panel" />
 }
 
 // ---- tạo skill ----
@@ -973,73 +884,25 @@ function CreateSkillDialog({ onClose, onCreated }: { onClose: () => void; onCrea
         </>
       }
     >
-      <label className="mb-1 block text-[12.5px] font-medium">Tên</label>
+      <label className="mb-1 block text-[12px] font-medium">Tên</label>
       <input
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value.toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, ''))}
         placeholder="vd. review-pr"
-        className="w-full rounded-md border border-line bg-panel-2 px-3 py-1.5 font-mono text-[13px] outline-none focus:border-accent"
+        className={`${INPUT_MONO} w-full`}
       />
-      <p className="mb-3 mt-1 text-[11.5px] text-muted">Cũng là tên thư mục và tên gọi (Claude: /{name || 'tên'}). Chỉ a-z, 0-9, "-".</p>
-      <label className="mb-1 block text-[12.5px] font-medium">Mô tả</label>
+      <p className="mt-1 mb-3 text-[12px] text-dim">Cũng là tên thư mục và tên gọi (Claude: /{name || 'tên'}). Chỉ a-z, 0-9, "-".</p>
+      <label className="mb-1 block text-[12px] font-medium">Mô tả</label>
       <textarea
         value={desc}
         onChange={(e) => setDesc(e.target.value.slice(0, SKILL_DESC_MAX))}
         rows={4}
         placeholder="Làm gì, và khi nào agent nên dùng. vd. Review a pull request for bugs and style. Use when asked to review a PR or a diff."
-        className="w-full resize-none rounded-md border border-line bg-panel-2 px-3 py-2 text-[13px] outline-none focus:border-accent"
+        className={`${TEXTAREA_TEXT} w-full`}
       />
-      <p className="mt-1 text-[11.5px] text-muted">Agent chỉ thấy tên + mô tả cho tới khi cần, nên mô tả phải nói rõ lúc nào dùng. Viết tiếng Anh để mọi CLI hiểu tốt.</p>
-      {error && <div className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{error}</div>}
+      <p className="mt-1 text-[12px] text-dim">Agent chỉ thấy tên + mô tả cho tới khi cần, nên mô tả phải nói rõ lúc nào dùng. Viết tiếng Anh để mọi CLI hiểu tốt.</p>
+      {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
     </Modal>
-  )
-}
-
-// ---- biểu tượng ----
-
-function BookIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
-      <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
-    </svg>
-  )
-}
-
-function CompassIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="m15.5 8.5-2 5-5 2 2-5 5-2z" />
-    </svg>
-  )
-}
-
-function PenIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-    </svg>
-  )
-}
-
-function ServerIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <rect x="3" y="4" width="18" height="7" rx="1.5" />
-      <rect x="3" y="13" width="18" height="7" rx="1.5" />
-      <path d="M7 7.5h.01M7 16.5h.01" />
-    </svg>
-  )
-}
-
-function SearchIcon({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </svg>
   )
 }

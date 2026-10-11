@@ -1,0 +1,139 @@
+import { useEffect, useMemo, useRef } from 'react'
+import type { Agent, Workspace } from '@shared/types'
+import { useChat } from '../../store/chat'
+import { useHandoffFor } from '../../store/settings'
+import { Icon } from '../Icon'
+import { Button } from '../Modal'
+import { ChatList } from './ChatList'
+import { Composer } from './Composer'
+import { DEFAULT_CTX_LIMIT, EMPTY_ITEMS, firstPendingAsk, OFF_STATE } from './chatLogic'
+
+export interface ChatCellProps {
+  ws: Workspace
+  agent: Agent
+  /** Agent có phiên đang chạy. */
+  running: boolean
+  starting: boolean
+  /** Lỗi mở phiên. */
+  error?: string
+  /** Nút "Phiên mới" / "Tiếp tục phiên trước". */
+  onStart: (resume: boolean) => void
+}
+
+const EMPTY_QUEUE: string[] = []
+
+function Spinner(): React.JSX.Element {
+  return <span className="h-4 w-4 animate-spin rounded-full border-2 border-line-2 border-t-accent" />
+}
+
+/**
+ * Thân ô chat của một agent Claude Code: hội thoại vẽ từ dữ liệu có cấu trúc (thay cho TUI trong xterm) + ô soạn tin.
+ * Chiếm `absolute inset-0` trong vùng thân ô (dưới tiêu đề do AgentGrid vẽ).
+ */
+export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatCellProps): React.JSX.Element {
+  const slice = useChat((s) => s.byAgent[agent.id])
+  const ensure = useChat((s) => s.ensure)
+  const handoff = useHandoffFor(agent.id)
+  const focusRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    ensure(agent.id)
+  }, [agent.id, ensure])
+
+  const items = slice?.items ?? EMPTY_ITEMS
+  const state = slice?.state ?? OFF_STATE
+  const stopped = !running && !starting
+  const pending = useMemo(() => firstPendingAsk(items), [items])
+  // Ngưỡng đỏ của thanh context: ngưỡng tự bàn giao nếu đang bật, không thì 85%.
+  const ctxLimit = handoff.autoHandoff ? handoff.handoffPercent : DEFAULT_CTX_LIMIT
+  const booting = starting || (running && state.phase === 'starting')
+  const empty = items.length === 0
+
+  return (
+    <div className="@container/chat absolute inset-0 flex min-h-0 flex-col bg-panel text-[13px]">
+      {empty ? (
+        <div className="relative min-h-0 flex-1">
+          {!stopped && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 px-6 text-center text-dim">
+              {booting ? (
+                <>
+                  <Spinner />
+                  <div>Đang mở phiên…</div>
+                </>
+              ) : (
+                <>
+                  <Icon name="chat" size={22} />
+                  <div className="min-w-0 break-words">Gõ để nói chuyện với {agent.name}</div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <ChatList
+          items={items}
+          phase={state.phase}
+          agentId={agent.id}
+          root={ws.path}
+          primaryAsk={pending?.requestId ?? null}
+          onBlankClick={() => focusRef.current?.()}
+        />
+      )}
+
+      {/* Có lịch sử mà phiên đã dừng: thanh nhỏ phía trên ô soạn tin (ô soạn tin bị vô hiệu). */}
+      {stopped && !empty && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-panel-2 px-3 py-2">
+          {error ? (
+            <div className="min-w-0 flex-1 rounded-md border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-danger">{error}</div>
+          ) : (
+            <span className="min-w-0 flex-1 text-dim @max-[420px]/chat:basis-full">Phiên đã dừng.</span>
+          )}
+          <div className="flex min-w-0 max-w-full flex-wrap gap-2">
+            <Button primary onClick={() => onStart(false)}>
+              Phiên mới
+            </Button>
+            {agent.lastSessionId && <Button onClick={() => onStart(true)}>Tiếp tục phiên trước</Button>}
+          </div>
+        </div>
+      )}
+      {starting && !empty && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim">
+          <Spinner />
+          Đang mở phiên…
+        </div>
+      )}
+
+      {!(stopped && empty) && (
+        <Composer
+          agentId={agent.id}
+          agentName={agent.name}
+          enabled={running}
+          state={state}
+          pending={pending}
+          queued={slice?.queued ?? EMPTY_QUEUE}
+          error={slice?.error}
+          ctxLimit={ctxLimit}
+          offLabel={starting ? 'Đang mở phiên…' : undefined}
+          focusRef={focusRef}
+        />
+      )}
+
+      {/* Chưa có phiên và chưa có lịch sử: giống ô terminal — lời nhắc ở giữa + Phiên mới / Tiếp tục. */}
+      {stopped && empty && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-panel px-4">
+          {error ? (
+            <div className="max-w-md rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-center text-danger">{error}</div>
+          ) : (
+            <div className="text-dim">Phiên đã dừng.</div>
+          )}
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button primary onClick={() => onStart(false)}>
+              Phiên mới
+            </Button>
+            {agent.lastSessionId && <Button onClick={() => onStart(true)}>Tiếp tục phiên trước</Button>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

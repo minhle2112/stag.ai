@@ -1,15 +1,50 @@
 import { create } from 'zustand'
-import type { AdapterId, SplitDir } from '@shared/types'
+import type { AdapterId, AgentKind, SplitDir } from '@shared/types'
 
-/** 'vault' không còn là tab chính: mở bằng nút Vault ở góc phải thanh trên. */
-/** `plugin:<id>/<slot>` = trang riêng của plugin (slot page). */
-export type MainTab = 'kanban' | 'agents' | 'artifacts' | 'vault' | `plugin:${string}`
+/** Màn hình chính, chọn ở thanh icon bên trái. `plugin:<id>/<slot>` = trang riêng của plugin (slot page). */
+export type MainTab = 'kanban' | 'agents' | 'artifacts' | 'vault' | 'log' | `plugin:${string}`
+
+/**
+ * Thanh bên và pane trình duyệt nhớ bật / tắt riêng cho hai nhóm màn hình: "main" (Agent, Kanban: cần thấy agent)
+ * và "other" (Artifacts, Vault, Nhật ký, Cài đặt…: ưu tiên chỗ cho nội dung).
+ */
+export type ViewClass = 'main' | 'other'
+export const viewClassOf = (tab: MainTab, settingsOpen: boolean): ViewClass => (!settingsOpen && (tab === 'agents' || tab === 'kanban') ? 'main' : 'other')
+
+const PANES_KEY = 'stag.panes'
+interface PanePrefs {
+  sidebar: Record<ViewClass, boolean>
+  browser: Record<ViewClass, boolean>
+}
+const PANES_DEFAULT: PanePrefs = { sidebar: { main: true, other: false }, browser: { main: false, other: false } }
+
+function readPanes(): PanePrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(PANES_KEY) ?? 'null') as Partial<PanePrefs> | null
+    return {
+      sidebar: { ...PANES_DEFAULT.sidebar, ...(v?.sidebar ?? {}) },
+      browser: { ...PANES_DEFAULT.browser, ...(v?.browser ?? {}) }
+    }
+  } catch {
+    return PANES_DEFAULT
+  }
+}
+
+function writePanes(p: PanePrefs): void {
+  try {
+    localStorage.setItem(PANES_KEY, JSON.stringify(p))
+  } catch {
+    // Không lưu được thì lần sau về mặc định.
+  }
+}
 
 /** Hộp thoại tạo agent: ô mới đặt cạnh ô `agentId` theo hướng `dir`. */
 export interface NewAgentTarget {
   wsId: string
   agentId: string | null
   dir: SplitDir
+  /** Chọn sẵn loại ô trong hộp thoại (vd. 'terminal' từ menu của nút "+ Agent"). */
+  kind?: AgentKind
 }
 
 /** Các mục của trang Settings, theo thứ tự trên menu trái. */
@@ -52,31 +87,83 @@ interface UiState {
   openSettings: (section?: SettingsSection, focus?: SettingsFocus) => void
   closeSettings: () => void
   tab: MainTab
-  browserOpen: boolean
+  /** Bật / tắt thanh bên và pane trình duyệt theo nhóm màn hình đang xem. */
+  panes: PanePrefs
+  /** Bảng lệnh (Ctrl+K). */
+  palette: boolean
+  setPalette: (open: boolean) => void
+  /** Chế độ tập trung của lưới agent: mã ô đang phóng to theo workspace (null = hiện cả lưới). */
+  focusCell: Record<string, string | null>
+  setFocusCell: (wsId: string, key: string | null) => void
+  /** Note vault cần mở khi màn Vault hiện ra (từ Nhật ký, bảng lệnh…); Vault đọc xong thì xoá. */
+  vaultTarget: { wsId: string; rel: string } | null
+  openInVault: (wsId: string, rel: string) => void
+  clearVaultTarget: () => void
+  /** Hộp thoại Phát lệnh: id workspace đang phát (null = đóng). */
+  broadcast: string | null
+  setBroadcast: (wsId: string | null) => void
   /** Số hộp thoại đang mở. Browser là view gốc nằm trên HTML nên phải ẩn khi có hộp thoại. */
   modals: number
   newAgent: NewAgentTarget | null
   setNewAgent: (target: NewAgentTarget | null) => void
   setTab: (tab: MainTab) => void
+  toggleSidebar: () => void
   toggleBrowser: () => void
+  /** Mở / đóng pane trình duyệt ở nhóm màn hình đang xem. */
   setBrowserOpen: (open: boolean) => void
   modalOpened: () => void
   modalClosed: () => void
 }
 
-export const useUi = create<UiState>((set) => ({
+export const useUi = create<UiState>((set, get) => ({
   settings: null,
   settingsFocus: null,
   openSettings: (section = 'general', focus) => set({ settings: section, settingsFocus: focus ?? null }),
   closeSettings: () => set({ settings: null, settingsFocus: null }),
   tab: 'agents',
-  browserOpen: false,
+  panes: readPanes(),
+  palette: false,
+  setPalette: (palette) => set({ palette }),
+  focusCell: {},
+  setFocusCell: (wsId, key) => set((s) => ({ focusCell: { ...s.focusCell, [wsId]: key } })),
+  vaultTarget: null,
+  openInVault: (wsId, rel) => set({ tab: 'vault', settings: null, settingsFocus: null, vaultTarget: { wsId, rel } }),
+  clearVaultTarget: () => set({ vaultTarget: null }),
+  broadcast: null,
+  setBroadcast: (broadcast) => set({ broadcast }),
   modals: 0,
   newAgent: null,
   setNewAgent: (newAgent) => set({ newAgent }),
-  setTab: (tab) => set({ tab }),
-  toggleBrowser: () => set((s) => ({ browserOpen: !s.browserOpen })),
-  setBrowserOpen: (browserOpen) => set({ browserOpen }),
+  // Chọn màn hình thì đóng trang Cài đặt (Cài đặt là một màn hình trong vùng chính).
+  setTab: (tab) => set({ tab, settings: null, settingsFocus: null }),
+  toggleSidebar: () => {
+    const { tab, settings, panes } = get()
+    const k = viewClassOf(tab, settings !== null)
+    const next = { ...panes, sidebar: { ...panes.sidebar, [k]: !panes.sidebar[k] } }
+    writePanes(next)
+    set({ panes: next })
+  },
+  toggleBrowser: () => {
+    const { tab, settings, panes } = get()
+    get().setBrowserOpen(!panes.browser[viewClassOf(tab, settings !== null)])
+  },
+  setBrowserOpen: (open) => {
+    const { tab, settings, panes } = get()
+    const k = viewClassOf(tab, settings !== null)
+    const next = { ...panes, browser: { ...panes.browser, [k]: open } }
+    writePanes(next)
+    set({ panes: next })
+  },
   modalOpened: () => set((s) => ({ modals: s.modals + 1 })),
   modalClosed: () => set((s) => ({ modals: Math.max(0, s.modals - 1) }))
 }))
+
+/** Thanh bên đang bật ở màn hình hiện tại? */
+export function useSidebarOpen(): boolean {
+  return useUi((s) => s.panes.sidebar[viewClassOf(s.tab, s.settings !== null)])
+}
+
+/** Pane trình duyệt đang bật ở màn hình hiện tại? */
+export function useBrowserOpen(): boolean {
+  return useUi((s) => s.panes.browser[viewClassOf(s.tab, s.settings !== null)])
+}

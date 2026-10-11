@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { agentApiRules, handoffBody, handoffMessage, handoffOpening, permissionAbove } from './agentApi'
-import { normalizeAgentApi, normalizeOverrides, normalizeSettings, patchApp, resolveAgentApi } from './settings'
-import { DEFAULT_SETTINGS } from './types'
+import { normalizeAgentApi, normalizeMemory, normalizeOverrides, normalizeSettings, patchApp, resolveAgentApi, resolveMemory } from './settings'
+import { DEFAULT_MEMORY, DEFAULT_SETTINGS } from './types'
 
 describe('Cài đặt Agent API', () => {
   it('mặc định bật hết; giá trị sai → mặc định', () => {
-    expect(normalizeAgentApi({})).toEqual({ manage: true, message: true, confirmCreate: true })
-    expect(normalizeAgentApi({ manage: 'no', message: false })).toEqual({ manage: true, message: false, confirmCreate: true })
-    expect(normalizeSettings({ version: 2 }).app.agentApi).toEqual({ manage: true, message: true, confirmCreate: true })
+    expect(normalizeAgentApi({})).toEqual({ manage: true, message: true, confirmCreate: true, read: true })
+    expect(normalizeAgentApi({ manage: 'no', message: false })).toEqual({ manage: true, message: false, confirmCreate: true, read: true })
+    expect(normalizeSettings({ version: 2 }).app.agentApi).toEqual({ manage: true, message: true, confirmCreate: true, read: true })
   })
 
   it('ghi đè chỉ giữ khoá boolean; rỗng thì bỏ', () => {
@@ -22,17 +22,40 @@ describe('Cài đặt Agent API', () => {
       workspaces: { w1: { agentApi: { manage: false } } },
       agents: { a1: { agentApi: { manage: true, message: false } } }
     })
-    expect(resolveAgentApi(s, 'w1', 'a1')).toEqual({ manage: true, message: false, confirmCreate: false })
-    expect(resolveAgentApi(s, 'w1', 'a2')).toEqual({ manage: false, message: true, confirmCreate: false })
-    expect(resolveAgentApi(s, null, null)).toEqual({ manage: true, message: true, confirmCreate: false })
+    expect(resolveAgentApi(s, 'w1', 'a1')).toEqual({ manage: true, message: false, confirmCreate: false, read: true })
+    expect(resolveAgentApi(s, 'w1', 'a2')).toEqual({ manage: false, message: true, confirmCreate: false, read: true })
+    expect(resolveAgentApi(s, null, null)).toEqual({ manage: true, message: true, confirmCreate: false, read: true })
   })
 
   it('patchApp sửa từng khoá', () => {
-    expect(patchApp(DEFAULT_SETTINGS.app, { agentApi: { message: false } }).agentApi).toEqual({ manage: true, message: false, confirmCreate: true })
+    expect(patchApp(DEFAULT_SETTINGS.app, { agentApi: { message: false } }).agentApi).toEqual({ manage: true, message: false, confirmCreate: true, read: true })
+  })
+})
+
+describe('Cài đặt bộ nhớ (nhật ký việc, note agent)', () => {
+  it('mặc định, kẹp khoảng, ghi đè từng khoá agent → workspace → app', () => {
+    expect(normalizeSettings({ version: 2 }).app.memory).toEqual(DEFAULT_MEMORY)
+    expect(normalizeMemory({ noteBudgetKb: 1000, keepWorkDone: 0, workLog: 'x' })).toEqual({ ...DEFAULT_MEMORY, noteBudgetKb: 64, keepWorkDone: 3 })
+    expect(normalizeOverrides({ memory: { workLog: false, noteBudgetKb: 1, junk: 1 } })).toEqual({ memory: { workLog: false, noteBudgetKb: 2 } })
+    expect(normalizeOverrides({ memory: {} })).toBeNull()
+    const s = normalizeSettings({
+      version: 2,
+      app: { memory: { keepWorkDone: 20 } },
+      workspaces: { w1: { memory: { workLog: false } } },
+      agents: { a1: { memory: { workLog: true, noteBudgetKb: 4 } } }
+    })
+    expect(resolveMemory(s, 'w1', 'a1')).toEqual({ workLog: true, agentWorkDone: true, noteBudgetKb: 4, keepWorkDone: 20 })
+    expect(resolveMemory(s, 'w1', 'a2')).toEqual({ workLog: false, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 20 })
+    expect(patchApp(DEFAULT_SETTINGS.app, { memory: { agentWorkDone: false } }).memory).toEqual({ ...DEFAULT_MEMORY, agentWorkDone: false })
   })
 })
 
 describe('agentApiRules / permissionAbove', () => {
+  it('nhóm read: nói về agent_status / agent_log, tắt thì không', () => {
+    expect(agentApiRules({ manage: true, message: true })).toContain('agent_log(')
+    expect(agentApiRules({ manage: true, message: true, read: false })).not.toContain('agent_status')
+  })
+
   it('luật phiên theo nhóm bật', () => {
     const all = agentApiRules({ manage: true, message: true })
     expect(all).toContain('agent_create(')

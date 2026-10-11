@@ -6,10 +6,15 @@ import {
   DEFAULT_BROWSER,
   DEFAULT_GENERAL,
   DEFAULT_HANDOFF,
+  DEFAULT_MEMORY,
   DEFAULT_SCOPE,
   DEFAULT_VOICE,
   HANDOFF_MAX,
   HANDOFF_MIN,
+  KEEP_WORK_DONE_MAX,
+  KEEP_WORK_DONE_MIN,
+  NOTE_BUDGET_MAX,
+  NOTE_BUDGET_MIN,
   TERMINAL_FONT_MAX,
   TERMINAL_FONT_MIN,
   ZOOM_MAX,
@@ -25,6 +30,7 @@ import {
   type ExternalPagePolicy,
   type GeneralSettings,
   type HandoffSettings,
+  type MemorySettings,
   type ModelSettings,
   type PermissionMode,
   type ScopeLockSettings,
@@ -109,14 +115,40 @@ function normalizeHomePage(v: unknown): string {
 export function normalizeAgentApi(raw: unknown): AgentApiSettings {
   const r = obj(raw)
   const d = DEFAULT_AGENT_API
-  return { manage: bool(r.manage, d.manage), message: bool(r.message, d.message), confirmCreate: bool(r.confirmCreate, d.confirmCreate) }
+  return {
+    manage: bool(r.manage, d.manage),
+    message: bool(r.message, d.message),
+    confirmCreate: bool(r.confirmCreate, d.confirmCreate),
+    read: bool(r.read, d.read)
+  }
 }
 
 /** Phần ghi đè Agent API hợp lệ (chỉ khoá boolean có mặt); rỗng → undefined. */
 function partialAgentApi(raw: unknown): Partial<AgentApiSettings> | undefined {
   const r = obj(raw)
   const out: Partial<AgentApiSettings> = {}
-  for (const k of ['manage', 'message', 'confirmCreate'] as const) if (typeof r[k] === 'boolean') out[k] = r[k] as boolean
+  for (const k of ['manage', 'message', 'confirmCreate', 'read'] as const) if (typeof r[k] === 'boolean') out[k] = r[k] as boolean
+  return Object.keys(out).length ? out : undefined
+}
+
+export function normalizeMemory(raw: unknown): MemorySettings {
+  const r = obj(raw)
+  const d = DEFAULT_MEMORY
+  return {
+    workLog: bool(r.workLog, d.workLog),
+    agentWorkDone: bool(r.agentWorkDone, d.agentWorkDone),
+    noteBudgetKb: int(r.noteBudgetKb, d.noteBudgetKb, NOTE_BUDGET_MIN, NOTE_BUDGET_MAX),
+    keepWorkDone: int(r.keepWorkDone, d.keepWorkDone, KEEP_WORK_DONE_MIN, KEEP_WORK_DONE_MAX)
+  }
+}
+
+/** Phần ghi đè bộ nhớ hợp lệ (chỉ khoá có mặt, số bị kẹp vào khoảng cho phép); rỗng → undefined. */
+function partialMemory(raw: unknown): Partial<MemorySettings> | undefined {
+  const r = obj(raw)
+  const full = normalizeMemory(r)
+  const out: Partial<MemorySettings> = {}
+  for (const k of ['workLog', 'agentWorkDone'] as const) if (typeof r[k] === 'boolean') out[k] = full[k]
+  for (const k of ['noteBudgetKb', 'keepWorkDone'] as const) if (typeof r[k] === 'number' && Number.isFinite(r[k])) out[k] = full[k]
   return Object.keys(out).length ? out : undefined
 }
 
@@ -276,6 +308,8 @@ export function normalizeOverrides(raw: unknown): SettingsOverrides | null {
   if (agentApi) out.agentApi = agentApi
   const br = obj(obj(raw).browser)
   if (typeof br.agentTools === 'boolean') out.browser = { agentTools: br.agentTools }
+  const memory = partialMemory(obj(raw).memory)
+  if (memory) out.memory = memory
   return Object.keys(out).length ? out : null
 }
 
@@ -317,7 +351,8 @@ export function normalizeSettings(raw: unknown): Settings {
         scope: normalizeScope({}),
         agentApi: normalizeAgentApi({}),
         browser: normalizeBrowser({}),
-        voice: normalizeVoice({})
+        voice: normalizeVoice({}),
+        memory: normalizeMemory({})
       },
       workspaces: {},
       agents: {}
@@ -336,7 +371,8 @@ export function normalizeSettings(raw: unknown): Settings {
       scope: normalizeScope(app.scope),
       agentApi: normalizeAgentApi(app.agentApi),
       browser: normalizeBrowser(app.browser),
-      voice: normalizeVoice(app.voice)
+      voice: normalizeVoice(app.voice),
+      memory: normalizeMemory(app.memory)
     },
     workspaces: normalizeMap(r.workspaces),
     agents: normalizeMap(r.agents)
@@ -361,7 +397,8 @@ export function patchApp(app: AppSettings, patch: AppSettingsPatch): AppSettings
     scope: normalizeScope({ ...app.scope, ...patch.scope }),
     agentApi: normalizeAgentApi({ ...app.agentApi, ...patch.agentApi }),
     browser: normalizeBrowser({ ...app.browser, ...patch.browser }),
-    voice: normalizeVoice({ ...app.voice, ...patch.voice })
+    voice: normalizeVoice({ ...app.voice, ...patch.voice }),
+    memory: normalizeMemory({ ...app.memory, ...patch.memory })
   }
 }
 
@@ -410,6 +447,15 @@ export function resolveAgentApi(s: Settings, workspaceId: string | null | undefi
     ...s.app.agentApi,
     ...(workspaceId ? s.workspaces[workspaceId]?.agentApi : undefined),
     ...(agentId ? s.agents[agentId]?.agentApi : undefined)
+  }
+}
+
+/** Cài đặt bộ nhớ thực tế (nhật ký việc, note agent) của một agent: từng khoá agent → workspace → app. */
+export function resolveMemory(s: Settings, workspaceId: string | null | undefined, agentId: string | null | undefined): MemorySettings {
+  return {
+    ...s.app.memory,
+    ...(workspaceId ? s.workspaces[workspaceId]?.memory : undefined),
+    ...(agentId ? s.agents[agentId]?.memory : undefined)
   }
 }
 

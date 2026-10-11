@@ -172,7 +172,12 @@ export interface Agent {
   lastSessionId?: string
   /** kind = 'external': id adapter ngoài (stagAdapter.id). */
   adapterId?: string
+  /** Giao diện ô: 'cli' = terminal (mặc định), 'chat' = ô chat (chỉ Claude Code, xem shared/chat.ts). */
+  cell?: AgentCell
 }
+
+/** Giao diện của ô agent. */
+export type AgentCell = 'cli' | 'chat'
 
 export type SplitDir = 'row' | 'col'
 
@@ -192,8 +197,11 @@ export type LayoutCell = Exclude<LayoutNode, { type: 'split' }>
 export interface AgentRun {
   agentId: string
   sessionId: string
+  /** Ô chat: `chat:<sessionId>` (không có pty thật). */
   ptyId: string
   startedAt: string
+  /** Thiếu = 'cli'. */
+  mode?: AgentCell
 }
 
 export interface AgentsSnapshot {
@@ -210,6 +218,31 @@ export interface CreateAgentRequest {
   name: string
   role: string
   permissionMode: PermissionMode
+  /** Giao diện ô (mặc định 'cli'); 'chat' chỉ cho Claude Code. */
+  cell?: AgentCell
+  /** Model / mức suy nghĩ riêng của agent (ghi đè cấp agent ở Cài đặt → Adapter); bỏ trống = theo cài đặt. */
+  model?: string
+  effort?: string
+  /** Việc đầu tiên: thành lời mở của phiên đầu tiên (thay lời chào). */
+  firstTask?: string
+  /** Phạm vi làm việc dự kiến (thư mục / glob), kèm vào lời mở để agent dùng khi task_start. */
+  scope?: string
+}
+
+/** Người dùng phát một tin cho nhiều agent trong một workspace (gõ như người dùng gõ vào từng ô). */
+export interface BroadcastRequest {
+  workspaceId: string
+  agentIds: string[]
+  text: string
+}
+
+export interface BroadcastResult {
+  results: Array<{
+    agentId: string
+    name: string
+    /** 'sent' = đã gõ vào ô; 'queued' = agent đang bận, gõ khi nó rảnh; 'not-running' = chưa có phiên; 'invalid' = không gửi được. */
+    status: 'sent' | 'queued' | 'not-running' | 'invalid'
+  }>
 }
 
 export interface StartAgentRequest {
@@ -471,7 +504,29 @@ export interface AgentApiSettings {
   message: boolean
   /** Hỏi bạn trước khi agent tạo agent mới. Tắt: vẫn hỏi nếu agent mới có quyền cao hơn agent tạo nó. */
   confirmCreate: boolean
+  /** Đọc trạng thái và nhật ký phiên của agent khác (agent_status, agent_log). */
+  read: boolean
 }
+
+/**
+ * Bộ nhớ trong vault (Cài đặt → Vault & bộ nhớ): app tự ghi việc xong vào `40 Log/<ngày>.md` và mục "Work done" của note
+ * agent, rồi cất mục cũ sang `60 Agents/<tên> archive.md` khi note quá hạn mức. Ghi đè được theo workspace / agent.
+ */
+export interface MemorySettings {
+  /** Việc xong (task_done, agent_handoff, bạn đánh dấu xong) → một dòng trong `40 Log/<ngày>.md`, mục "Agent work (auto)". */
+  workLog: boolean
+  /** Việc xong → một dòng trong mục "Work done" của note agent. */
+  agentWorkDone: boolean
+  /** Hạn mức note agent (KB). Quá thì cất mục "Work done" cũ; vẫn quá thì nhắc agent tự viết gọn ở phiên sau. */
+  noteBudgetKb: number
+  /** Số dòng "Work done" mới nhất giữ lại trong note khi cất (phần cũ hơn sang archive). */
+  keepWorkDone: number
+}
+
+export const NOTE_BUDGET_MIN = 2
+export const NOTE_BUDGET_MAX = 64
+export const KEEP_WORK_DONE_MIN = 3
+export const KEEP_WORK_DONE_MAX = 100
 
 /** Cài đặt cấp app. */
 export interface AppSettings {
@@ -485,6 +540,7 @@ export interface AppSettings {
   agentApi: AgentApiSettings
   browser: BrowserSettings
   voice: VoiceSettings
+  memory: MemorySettings
 }
 
 export interface PluginsSettings {
@@ -516,6 +572,7 @@ export interface SettingsOverrides {
   agentApi?: Partial<AgentApiSettings>
   /** Trình duyệt: chỉ bật / tắt tool trình duyệt của agent. */
   browser?: { agentTools?: boolean }
+  memory?: Partial<MemorySettings>
 }
 
 /** Sửa ghi đè: khoá có mặt thay cả mục đó, `null` = bỏ mục đó (theo cấp trên). Khoá vắng mặt giữ nguyên. */
@@ -548,13 +605,15 @@ export interface AppSettingsPatch {
   agentApi?: Partial<AgentApiSettings>
   browser?: Partial<BrowserSettings>
   voice?: Partial<VoiceSettings>
+  memory?: Partial<MemorySettings>
 }
 
 export type OverrideLevel = 'workspace' | 'agent'
 
 export const DEFAULT_HANDOFF: HandoffSettings = { autoHandoff: true, handoffPercent: 80 }
 export const DEFAULT_SCOPE: ScopeLockSettings = { mode: 'ask', guessShell: true, exempt: [] }
-export const DEFAULT_AGENT_API: AgentApiSettings = { manage: true, message: true, confirmCreate: true }
+export const DEFAULT_AGENT_API: AgentApiSettings = { manage: true, message: true, confirmCreate: true, read: true }
+export const DEFAULT_MEMORY: MemorySettings = { workLog: true, agentWorkDone: true, noteBudgetKb: 8, keepWorkDone: 15 }
 export const DEFAULT_BROWSER: BrowserSettings = { homePage: '', searchEngine: 'google', agentTools: true, externalPages: 'ask', allowedOrigins: [], keepCookies: false }
 export const VOICE_UNLOAD_MAX = 120
 export const DEFAULT_VOICE: VoiceSettings = { enabled: true, engine: 'local', hotkey: 'ctrl+space', micId: '', preview: true, unloadMinutes: 5, hotwords: [], workspaceVocab: true, replacements: [], commands: true, aiFix: false, sendCommand: false, global: false, globalHotkey: 'ctrl+shift+space' }
@@ -578,7 +637,7 @@ export const DEFAULT_ADAPTERS: AdaptersSettings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 2,
-  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, agentApi: DEFAULT_AGENT_API, browser: DEFAULT_BROWSER, voice: DEFAULT_VOICE },
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, agentApi: DEFAULT_AGENT_API, browser: DEFAULT_BROWSER, voice: DEFAULT_VOICE, memory: DEFAULT_MEMORY },
   workspaces: {},
   agents: {}
 }
@@ -616,6 +675,8 @@ export interface Task {
   createdAt: string
   doneAt?: string
   summary?: string
+  /** Một dòng tiếng Anh agent viết cho nhật ký việc trong vault (task_done `log`). */
+  log?: string
   /** Người dùng đánh dấu xong/bỏ bằng tay (không phải agent báo). */
   manual?: boolean
   /** File agent đã sửa trong lúc việc mở (tương đối so với dự án, '/'), cũng thuộc vùng khoá của việc (xem scope.ts). */

@@ -195,6 +195,25 @@ describe('Board: việc (task)', () => {
     expect((await fresh.snapshot(ws)).tasks).toEqual([done])
   })
 
+  it('việc đóng → báo cho nhật ký việc: task_done (kèm log), bàn giao, người dùng đánh dấu xong; bỏ thì không', async () => {
+    const closed = vi.fn()
+    const board = new Board(() => {}, () => {}, closed)
+    const a = agent('a')
+    const b = agent('b')
+    await board.startTask(ws, a, 's', 'Một', 'src/')
+    await board.finishTask(ws, 'a', 'xong', '  Added X  ')
+    expect(closed).toHaveBeenLastCalledWith(ws, { task: expect.objectContaining({ title: 'Một', log: 'Added X', status: 'done' }), how: 'done' })
+    await board.startTask(ws, a, 's', 'Hai', '')
+    await board.transferTask(ws, 'a', b, 's2', 'Done: x')
+    expect(closed).toHaveBeenLastCalledWith(ws, { task: expect.objectContaining({ title: 'Hai', agentId: 'a' }), how: 'handoff', to: 'Agent b' })
+    const open = await board.openTask(ws, 'b')
+    await board.closeTask(ws, open!.id, 'done')
+    expect(closed).toHaveBeenLastCalledWith(ws, { task: expect.objectContaining({ agentId: 'b', manual: true }), how: 'manual' })
+    await board.startTask(ws, a, 's', 'Ba', '')
+    await board.closeTask(ws, (await board.openTask(ws, 'a'))!.id, 'dropped')
+    expect(closed).toHaveBeenCalledTimes(3)
+  })
+
   it('task_start khi còn việc mở → lỗi; task_done/task_update khi chưa có việc → lỗi', async () => {
     const board = new Board(() => {})
     const a = agent('a')

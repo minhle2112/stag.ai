@@ -1,3 +1,4 @@
+import type { ChatEvent, ChatPermissionAnswer, ChatSendRequest, ChatSnapshot } from '@shared/chat'
 import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJobRun, PluginScaffoldRequest } from '@shared/plugins'
 import type { VoiceAiInfo, VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
@@ -5,8 +6,11 @@ import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/i
 import type { AgentApiEvent, AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
 import type {
   Agent,
+  AgentCell,
   AgentRun,
   AgentsSnapshot,
+  BroadcastRequest,
+  BroadcastResult,
   AdapterInstallRequest,
   AdapterStatus,
   ExternalAdapterStatus,
@@ -88,9 +92,22 @@ const api = {
       return () => ipcRenderer.removeListener(IPC.ptyExit, fn)
     }
   },
+  chat: {
+    snapshot: (agentId: string): Promise<ChatSnapshot> => ipcRenderer.invoke(IPC.chatSnapshot, agentId),
+    send: (req: ChatSendRequest): Promise<void> => ipcRenderer.invoke(IPC.chatSend, req),
+    interrupt: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.chatInterrupt, agentId),
+    permission: (answer: ChatPermissionAnswer): Promise<void> => ipcRenderer.invoke(IPC.chatPermission, answer),
+    onEvent(cb: (e: ChatEvent) => void): () => void {
+      const fn = (_e: IpcRendererEvent, e: ChatEvent): void => cb(e)
+      ipcRenderer.on(IPC.chatEvent, fn)
+      return () => ipcRenderer.removeListener(IPC.chatEvent, fn)
+    }
+  },
   agent: {
     snapshot: (workspaceId: string): Promise<AgentsSnapshot> => ipcRenderer.invoke(IPC.agentSnapshot, workspaceId),
     create: (req: CreateAgentRequest): Promise<Agent> => ipcRenderer.invoke(IPC.agentCreate, req),
+    broadcast: (req: BroadcastRequest): Promise<BroadcastResult> => ipcRenderer.invoke(IPC.agentBroadcast, req),
+    setCell: (agentId: string, cell: AgentCell): Promise<Agent> => ipcRenderer.invoke(IPC.agentSetCell, agentId, cell),
     start: (req: StartAgentRequest): Promise<AgentRun> => ipcRenderer.invoke(IPC.agentStart, req),
     stop: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentStop, agentId),
     remove: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentRemove, agentId),

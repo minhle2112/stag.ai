@@ -5,7 +5,8 @@ import type { VoiceEngine, VoiceGlobalHotkey, VoiceReplacement, VoiceSettings } 
 import { useSettings } from '../../store/settings'
 import { useVoice } from '../../store/voice'
 import { useWorkspaces } from '../../store/workspaces'
-import { ErrorBar, Group, Row, SectionTitle, Select, SmallButton, Switch, useSaveError } from './controls'
+import { ErrorBar, Group, INPUT_MONO, Row, RowBlock, SectionTitle, Select, SmallButton, Switch, TEXTAREA, useSaveError } from './controls'
+import { LevelBar } from './levels'
 
 const UNLOAD: Array<{ value: number; label: string }> = [
   { value: 1, label: 'Sau 1 phút không dùng' },
@@ -29,6 +30,7 @@ export function VoiceSection(): React.JSX.Element {
       <SectionTitle
         title="Giọng nói"
         desc={`Giữ ${VOICE_HOTKEYS[v.hotkey]} trong một ô agent để nói tiếng Việt (lẫn từ tiếng Anh), thả ra để chuyển thành chữ. ${v.engine === 'soniox' ? 'Đang dùng máy đám mây Soniox: âm thanh được gửi tới Soniox để nhận dạng, app không lưu lại.' : 'Nhận dạng chạy hoàn toàn trên máy bạn, âm thanh không gửi đi đâu và không lưu lại.'}`}
+        right={<LevelBar appOnly />}
       />
       <ErrorBar error={error} />
 
@@ -122,7 +124,7 @@ function CloudRows(): React.JSX.Element {
       />
       <Row
         label="Chi phí"
-        desc={`Soniox tính khoảng ${SONIOX_USD_PER_HOUR} USD mỗi giờ âm thanh (thời gian bạn giữ phím). Tháng này: ${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)} phút ≈ ${((minutes / 60) * SONIOX_USD_PER_HOUR).toFixed(2)} USD (app tự đếm, hoá đơn thật xem ở console.soniox.com).`}
+        sub={`Soniox tính khoảng ${SONIOX_USD_PER_HOUR} USD mỗi giờ âm thanh (thời gian bạn giữ phím). Tháng này: ${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)} phút ≈ ${((minutes / 60) * SONIOX_USD_PER_HOUR).toFixed(2)} USD (app tự đếm, hoá đơn thật xem ở console.soniox.com).`}
       />
     </>
   )
@@ -167,13 +169,8 @@ function GlobalRows({ v, set }: { v: VoiceSettings; set: (p: Partial<VoiceSettin
     <>
       <Row
         label="Gõ vào ứng dụng khác"
-        desc={
-          err ? (
-            <span className="text-red-300">{err}</span>
-          ) : (
-            `Khi stag.ai không ở trên cùng: bấm ${VOICE_GLOBAL_HOTKEYS[v.globalHotkey].label} để nói, bấm lần nữa để dừng (Windows không báo nhả phím cho phím tắt toàn hệ thống), Esc để huỷ. Chữ được dán vào ô đang gõ của ứng dụng đó (clipboard được trả lại như cũ), không xem trước, không tự nhấn Enter. Không gõ được vào cửa sổ chạy quyền quản trị.`
-          )
-        }
+        desc={`Khi stag.ai không ở trên cùng: bấm ${VOICE_GLOBAL_HOTKEYS[v.globalHotkey].label} để nói, bấm lần nữa để dừng (Windows không báo nhả phím cho phím tắt toàn hệ thống), Esc để huỷ. Chữ được dán vào ô đang gõ của ứng dụng đó (clipboard được trả lại như cũ), không xem trước, không tự nhấn Enter. Không gõ được vào cửa sổ chạy quyền quản trị.`}
+        sub={err ? <span className="text-danger">{err}</span> : undefined}
       >
         <Switch label="Gõ vào ứng dụng khác" checked={v.global} onChange={(global) => set({ global })} />
       </Row>
@@ -230,18 +227,16 @@ function KeyRow({
       setKey('')
       await test()
     }, 'Đã lưu và thử key: dùng được.')
-  const input = 'w-56 rounded-md border border-line bg-bg px-2 py-1 font-mono text-[12px] outline-none focus:border-accent'
   return (
     <Row
       label={label}
-      desc={
+      desc={help}
+      sub={
         msg ? (
-          <span className={msg.ok ? 'text-emerald-300' : 'text-red-300'}>{msg.text}</span>
+          <span className={msg.ok ? 'text-work' : 'text-danger'}>{msg.text}</span>
         ) : hasKey ? (
           `Đã lưu (mã hoá trong bí mật ${secret}, app không hiện lại). Dán key mới để thay.`
-        ) : (
-          help
-        )
+        ) : undefined
       }
     >
       <input
@@ -251,7 +246,7 @@ function KeyRow({
         onKeyDown={(e) => e.key === 'Enter' && key.trim() && !busy && void save()}
         placeholder={hasKey ? '•••••••• (đã lưu)' : 'Dán API key'}
         aria-label={label}
-        className={input}
+        className={`w-56 ${INPUT_MONO}`}
       />
       <SmallButton onClick={() => void save()} disabled={!key.trim() || busy}>
         Lưu
@@ -283,10 +278,12 @@ function ModelGroup({ cloud }: { cloud: boolean }): React.JSX.Element {
     case 'downloading':
       desc = (
         <span className="flex items-center gap-2">
-          <span className="h-1.5 w-40 overflow-hidden rounded bg-line">
+          <span className="h-1.5 w-40 overflow-hidden rounded bg-panel-3">
             <span className="block h-full bg-accent" style={{ width: `${pct}%` }} />
           </span>
-          {formatMb(status.received ?? 0)} / {formatMb(status.total ?? VOICE_MODEL.bytes)} ({pct}%)
+          <span className="font-mono text-[11px]">
+            {formatMb(status.received ?? 0)} / {formatMb(status.total ?? VOICE_MODEL.bytes)} ({pct}%)
+          </span>
         </span>
       )
       action = <SmallButton onClick={() => void window.stag.voice.cancel()}>Huỷ</SmallButton>
@@ -298,7 +295,7 @@ function ModelGroup({ cloud }: { cloud: boolean }): React.JSX.Element {
       desc = 'Đang giải nén (khoảng một phút)…'
       break
     case 'error':
-      desc = <span className="text-red-300">{status.error}</span>
+      desc = <span className="text-danger">{status.error}</span>
       action = <SmallButton onClick={() => void window.stag.voice.download()}>Thử lại</SmallButton>
       break
     default:
@@ -306,8 +303,8 @@ function ModelGroup({ cloud }: { cloud: boolean }): React.JSX.Element {
       action = <SmallButton onClick={() => void window.stag.voice.download()}>Tải model</SmallButton>
   }
   return (
-    <Group title={cloud ? "Model trên máy (dự phòng, không bắt buộc)" : "Model nhận dạng"}>
-      <Row label={VOICE_MODEL.label} desc={desc}>
+    <Group title={cloud ? 'Model trên máy (dự phòng, không bắt buộc)' : 'Model nhận dạng'}>
+      <Row label={VOICE_MODEL.label} sub={desc}>
         {action}
       </Row>
     </Group>
@@ -323,7 +320,7 @@ function EngineRow(): React.JSX.Element {
         ? 'Đang nạp model…'
         : 'Không chạy, không tốn RAM.'
   return (
-    <Row label="Tiến trình nhận dạng" desc={status.error && status.model === 'ready' ? <span className="text-red-300">{status.error}</span> : text}>
+    <Row label="Tiến trình nhận dạng" sub={status.error && status.model === 'ready' ? <span className="text-danger">{status.error}</span> : text}>
       {status.engine !== 'off' && <SmallButton onClick={() => void window.stag.voice.unload()}>Giải phóng ngay</SmallButton>}
     </Row>
   )
@@ -359,7 +356,7 @@ function MicGroup({ micId, onChange }: { micId: string; onChange: (id: string) =
   if (micId && !mics.some((m) => m.deviceId === micId)) options.push({ value: micId, label: 'Micro đã chọn (đang không cắm)' })
   return (
     <Group title="Micro">
-      <Row label="Micro" desc={err ? <span className="text-red-300">{err}</span> : named ? undefined : 'Bấm "Hiện tên micro" để thấy tên từng micro.'}>
+      <Row label="Micro" sub={err ? <span className="text-danger">{err}</span> : named ? undefined : 'Bấm "Hiện tên micro" để thấy tên từng micro.'}>
         {!named && mics.length > 0 && <SmallButton onClick={() => void allow()}>Hiện tên micro</SmallButton>}
         <Select label="Micro" value={micId} onChange={onChange} options={options} />
       </Row>
@@ -403,12 +400,13 @@ function HotwordsGroup({
         <Switch label="Tự gợi ý từ trong workspace" checked={auto} onChange={onAuto} />
       </Row>
       {auto && <WorkspaceTerms />}
-      <div className="px-4 py-3">
-        <p className="mb-2 text-[12px] leading-relaxed text-muted">
-          Từ bạn tự thêm (luôn được ưu tiên): tên riêng, tên hàm, thư viện bạn hay nói (vd. <span className="font-mono">handleClick</span>,{' '}
-          <span className="font-mono">zustand</span>) — mỗi dòng một mục, viết đúng chính tả muốn ra. Tên agent được thêm tự động.
-        </p>
+      <RowBlock
+        label="Từ bạn tự thêm"
+        htmlFor="voice-hotwords"
+        desc="Luôn được ưu tiên: tên riêng, tên hàm, thư viện bạn hay nói (vd. handleClick, zustand) — mỗi dòng một mục, viết đúng chính tả muốn ra. Tên agent được thêm tự động."
+      >
         <textarea
+          id="voice-hotwords"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onBlur={commit}
@@ -416,9 +414,9 @@ function HotwordsGroup({
           spellCheck={false}
           aria-label="Từ gợi ý"
           placeholder={'handleClick\nzustand\nnpm install'}
-          className="w-full resize-y rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-accent"
+          className={`${TEXTAREA} w-full`}
         />
-      </div>
+      </RowBlock>
     </Group>
   )
 }
@@ -440,7 +438,8 @@ function WorkspaceTerms(): React.JSX.Element | null {
   return (
     <Row
       label={`Từ của workspace "${ws.name}"`}
-      desc={
+      desc="Mỗi lần nói, app chọn khoảng 60 từ hợp nhất: từ bạn thêm, tên agent, từ đang hiện trong ô, rồi đến từ của workspace."
+      sub={
         open ? (
           terms === null ? (
             'Đang quét…'
@@ -452,9 +451,7 @@ function WorkspaceTerms(): React.JSX.Element | null {
           ) : (
             'Không tìm thấy từ nào (thư mục trống hoặc không đọc được).'
           )
-        ) : (
-          'Mỗi lần nói, app chọn khoảng 60 từ hợp nhất: từ bạn thêm, tên agent, từ đang hiện trong ô, rồi đến từ của workspace.'
-        )
+        ) : undefined
       }
     >
       {!open && <SmallButton onClick={show}>Xem</SmallButton>}
@@ -489,12 +486,13 @@ function FixGroup({
       >
         <Switch label="Lệnh xuống dòng" checked={commands} onChange={onCommands} />
       </Row>
-      <div className="px-4 py-3">
-        <p className="mb-2 text-[12px] leading-relaxed text-muted">
-          Luật thay từ cho những chỗ máy hay nghe sai — mỗi dòng <span className="font-mono">chữ máy ra → chữ bạn muốn</span>, khớp trọn cụm, không phân biệt hoa
-          thường. Tên hàm bị tách (<span className="font-mono">handle click</span>) hay sai hoa thường thì app tự sửa theo từ gợi ý, không cần luật.
-        </p>
+      <RowBlock
+        label="Luật thay từ"
+        htmlFor="voice-rules"
+        desc="Cho những chỗ máy hay nghe sai — mỗi dòng “chữ máy ra → chữ bạn muốn”, khớp trọn cụm, không phân biệt hoa thường. Tên hàm bị tách (handle click) hay sai hoa thường thì app tự sửa theo từ gợi ý, không cần luật."
+      >
         <textarea
+          id="voice-rules"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onBlur={commit}
@@ -502,9 +500,9 @@ function FixGroup({
           spellCheck={false}
           aria-label="Luật thay từ"
           placeholder={'hen đồ click → handleClick\nsu tan → zustand'}
-          className="w-full resize-y rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-accent"
+          className={`${TEXTAREA} w-full`}
         />
-      </div>
+      </RowBlock>
     </Group>
   )
 }

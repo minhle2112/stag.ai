@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stag.ai · Thiết kế v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; grid-template-rows: 48px 1fr; background: #0e0f12; color: #e8e9eb; font: 13px Inter, system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 6px; padding: 0 16px; border-bottom: 1px solid #1f2126; }
+  header b { margin-right: 18px; font-weight: 600; }
+  header button { font: inherit; color: #9aa0aa; background: none; border: 0; padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+  header button:hover { color: #fff; }
+  header button.on { background: #1f2126; color: #fff; }
+  header small { margin-left: auto; color: #6b7079; }
+  iframe { width: 100%; height: 100%; border: 0; display: block; }
+</style>
+</head>
+<body>
+  <header>
+    <b>stag.ai · v2</b>
+    <button class="on" data-src="1-xuong.html">1 · Xưởng</button>
+    <button data-src="2-studio.html">2 · Studio</button>
+    <button data-src="3-dai-chi-huy.html">3 · Đài chỉ huy</button>
+    <small id="note"></small>
+  </header>
+  <iframe id="f" src="1-xuong.html"></iframe>
+<script>
+  const notes = {
+    '1-xuong.html': 'Tối, dày, phím tắt là chính — lưới ô CLI là trung tâm (kiểu Warp / Zed)',
+    '2-studio.html': 'Sáng, ấm, chat là chính — agent như đồng nghiệp (kiểu Claude Desktop)',
+    '3-dai-chi-huy.html': 'Tổng quan là chính — bảng bento, ai đang làm gì, ai chờ bạn'
+  };
+  const note = document.getElementById('note');
+  note.textContent = notes['1-xuong.html'];
+  document.querySelectorAll('header button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('header button').forEach(x => x.classList.toggle('on', x === b));
+    document.getElementById('f').src = b.dataset.src;
+    note.textContent = notes[b.dataset.src];
+  }));
+</script>
+</body>
+</html>

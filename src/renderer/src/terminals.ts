@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { composerFor } from './store/chat'
 
 /**
  * Terminal của từng agent sống ngoài React: khi lưới chia lại ô, phần tử DOM của terminal
@@ -28,14 +29,14 @@ const exitListeners = new Set<(agentId: string, ptyId: string) => void>()
 let busStarted = false
 
 const theme = {
-  background: '#0f1115',
-  foreground: '#e6e8ee',
-  cursor: '#6ea8fe',
+  background: '#101215',
+  foreground: '#dde1e6',
+  cursor: '#2de2c0',
   selectionBackground: '#2f3b52',
   scrollbarSliderBackground: 'rgba(139, 147, 167, 0.2)',
   scrollbarSliderHoverBackground: 'rgba(139, 147, 167, 0.35)',
   scrollbarSliderActiveBackground: 'rgba(139, 147, 167, 0.5)',
-  overviewRulerBorder: '#0f1115'
+  overviewRulerBorder: '#101215'
 }
 
 export function startTerminalBus(): void {
@@ -87,7 +88,8 @@ function entry(agentId: string): Entry {
     el.style.width = '100%'
     el.style.height = '100%'
     const term = new Terminal({
-      fontFamily: getComputedStyle(document.body).getPropertyValue('--font-mono') || 'Consolas, monospace',
+      // Phông riêng cho terminal (không theo --font-mono của giao diện): TUI của Claude / Codex vẽ khung bằng ký tự Unicode.
+      fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, monospace",
       fontSize,
       cursorBlink: true,
       allowProposedApi: true,
@@ -162,8 +164,11 @@ export function bindPty(agentId: string, ptyId: string): void {
  * Dán chữ vào terminal của agent như người dùng dán (gõ bằng giọng nói): xterm tự bọc bracketed paste nếu chương trình
  * bật (Claude Code, Codex) nên xuống dòng không gửi tin giữa chừng. Chỉ nhấn Enter khi `submit` (người dùng nói "gửi").
  * false = ô không có phiên đang chạy.
+ * Ô chat (store/chat.ts): chữ đi vào ô soạn tin của ô đó, "gửi" = gửi tin.
  */
 export function pasteIntoTerminal(agentId: string, text: string, submit = false): boolean {
+  const composer = composerFor(agentId)
+  if (composer) return composer.insert(text, submit)
   const e = entries.get(agentId)
   if (!e?.ptyId) return false
   const ptyId = e.ptyId
@@ -183,6 +188,17 @@ export function terminalText(agentId: string, lines = 200): string {
   const out: string[] = []
   for (let i = Math.max(0, b.length - lines); i < b.length; i++) out.push(b.getLine(i)?.translateToString(true) ?? '')
   return out.join('\n')
+}
+
+/** Dòng cuối có chữ của terminal (xem trước ở dải ô nhỏ của chế độ tập trung). */
+export function terminalLastLine(agentId: string): string {
+  const b = entries.get(agentId)?.term.buffer.active
+  if (!b) return ''
+  for (let i = b.length - 1; i >= Math.max(0, b.length - 40); i--) {
+    const t = b.getLine(i)?.translateToString(true).trim()
+    if (t) return t
+  }
+  return ''
 }
 
 export function focusTerminal(agentId: string): void {

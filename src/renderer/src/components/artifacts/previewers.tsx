@@ -3,6 +3,8 @@
 // app) hoặc iframe sandbox (HTML), và CSP của app chặn mọi script nội tuyến.
 import { useEffect, useRef, useState } from 'react'
 import type { Workspace } from '@shared/types'
+import { Icon } from '../Icon'
+import { Seg } from '../ui/Seg'
 import { extOf, fileUrl, formatSize } from './stacks'
 
 // ---------- tiện ích chung ----------
@@ -78,6 +80,29 @@ function Loading(): React.JSX.Element {
   return <Note>Đang mở…</Note>
 }
 
+// ---------- ảnh ----------
+
+/** Ảnh trên nền ô vuông tối (thấy rõ phần trong suốt), kèm kích thước thật của ảnh. */
+export function ImageView({ ws, rel, version, onError }: { ws: Workspace; rel: string; version: string; onError: () => void }): React.JSX.Element {
+  const [dim, setDim] = useState<string | null>(null)
+  return (
+    <div className="flex min-h-full flex-col items-center justify-center gap-2.5 bg-[repeating-conic-gradient(#14171a_0%_25%,#101215_0%_50%)] bg-[length:16px_16px] p-6">
+      <img
+        src={fileUrl(ws.id, rel, version)}
+        draggable={false}
+        onError={onError}
+        onLoad={(e) => setDim(`${e.currentTarget.naturalWidth} × ${e.currentTarget.naturalHeight}`)}
+        className="max-h-full max-w-full rounded-[4px] object-contain shadow-[0_8px_30px_rgba(0,0,0,.5)]"
+      />
+      {dim && (
+        <div className="font-mono text-[11px] text-dim">
+          {dim} · {extOf(rel).toUpperCase() || 'ẢNH'}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---------- PDF (pdf.js) ----------
 
 type PdfJs = typeof import('pdfjs-dist')
@@ -132,7 +157,7 @@ export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; vers
           const scale = width / base.width
           const vp = page.getViewport({ scale })
           const box = document.createElement('div') as HTMLDivElement & { draw?: () => void }
-          Object.assign(box.style, { width: `${vp.width}px`, height: `${vp.height}px`, margin: '0 auto 16px', background: '#fff', boxShadow: '0 2px 10px rgba(0,0,0,.4)' })
+          Object.assign(box.style, { width: `${vp.width}px`, height: `${vp.height}px`, margin: '0 auto 16px', background: '#fff', boxShadow: '0 6px 30px rgba(0,0,0,.5)' })
           box.draw = () => {
             box.draw = undefined
             const canvas = document.createElement('canvas')
@@ -159,13 +184,12 @@ export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; vers
   if (loading) return <Loading />
   if (error || failed) return <Note>{error ?? `Không đọc được file PDF: ${failed}`}</Note>
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-line px-4 py-1.5 text-[12px] text-muted">
-        <span>{pages ? `${pages} trang` : ''}</span>
-        <div className="flex-1" />
+    <div className="flex h-full flex-col bg-[#24282d]">
+      <div className="flex shrink-0 items-center justify-center gap-1 py-1.5 text-[12px] text-muted">
+        <span className="mr-1 font-mono text-[11px]">{pages ? `${pages} trang` : ''}</span>
         <ZoomButtons zoom={zoom} setZoom={setZoom} />
       </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-[#2a2e37] py-4">
+      <div className="min-h-0 flex-1 overflow-auto pb-5">
         <div ref={host} />
       </div>
     </div>
@@ -173,19 +197,33 @@ export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; vers
 }
 
 function ZoomButtons({ zoom, setZoom }: { zoom: number; setZoom: (z: number) => void }): React.JSX.Element {
-  const btn = 'rounded bg-panel-2 px-2 py-0.5 text-fg hover:bg-line disabled:opacity-40'
+  const btn = 'inline-grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-fg disabled:opacity-40'
   return (
     <>
-      <button className={btn} disabled={zoom <= 0.5} onClick={() => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}>
-        −
+      <button type="button" className={btn} disabled={zoom <= 0.5} data-tip="Thu nhỏ" onClick={() => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}>
+        <MinusIcon />
       </button>
-      <button className={btn} onClick={() => setZoom(1)} title="Vừa khung">
+      <button
+        type="button"
+        className="h-6 rounded-md px-1.5 font-mono text-[11px] text-muted hover:bg-panel-3 hover:text-fg"
+        onClick={() => setZoom(1)}
+        data-tip="Vừa khung"
+      >
         {Math.round(zoom * 100)}%
       </button>
-      <button className={btn} disabled={zoom >= 3} onClick={() => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))}>
-        +
+      <button type="button" className={btn} disabled={zoom >= 3} data-tip="Phóng to" onClick={() => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))}>
+        <Icon name="plus" size="s" />
       </button>
     </>
+  )
+}
+
+/** Dấu trừ cùng nét 1.5px với bộ icon của app (bộ icon chưa có "minus"). */
+function MinusIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" aria-hidden="true">
+      <path d="M5 12h14" />
+    </svg>
   )
 }
 
@@ -258,7 +296,7 @@ export function DocxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
         const w = body.querySelector<HTMLElement>('.docx-wrapper')
         const host = ref.current
         if (!w || !host) return
-        Object.assign(w.style, { background: '#2a2e37', padding: '16px' })
+        Object.assign(w.style, { background: '#24282d', padding: '16px' })
         const pageWidth = Math.max(...Array.from(w.querySelectorAll<HTMLElement>(':scope > section')).map((s) => s.offsetWidth), 1)
         const fit = (): void => {
           w.style.zoom = String(Math.min(1, (host.clientWidth - 32) / pageWidth))
@@ -277,7 +315,7 @@ export function DocxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
 
   if (loading) return <Loading />
   if (error || failed) return <Note>{error ?? `Không đọc được file Word: ${failed}`}</Note>
-  return <div ref={ref} className="min-h-full bg-[#2a2e37] select-text" />
+  return <div ref={ref} className="min-h-full bg-[#24282d] select-text" />
 }
 
 // ---------- Bảng tính (SheetJS) ----------
@@ -287,12 +325,12 @@ const SHEET_ROWS = 2000
 
 const SHEET_CSS = `
   :host { display: block; }
-  table { border-collapse: collapse; font: 12px 'Segoe UI', system-ui, sans-serif; color: #e6e8ee; }
-  td, th { border: 1px solid #2a2f3a; padding: 3px 8px; white-space: pre; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
-  tr:first-child td { background: #1d212a; font-weight: 600; position: sticky; top: 0; }
+  table { border-collapse: collapse; font: 12px 'Inter Variable', 'Segoe UI', system-ui, sans-serif; color: #dde1e6; }
+  td, th { border: 1px solid #2a2f36; padding: 3px 8px; white-space: pre; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+  tr:first-child td { background: #1d2126; font-weight: 600; position: sticky; top: 0; }
   tr:nth-child(even) td { background: rgba(255,255,255,.02); }
-  td.n { color: #8b93a7; text-align: right; background: #161920 !important; position: sticky; left: 0; font-weight: 400; }
-  a { color: #6ea8fe; }
+  td.n { color: #69717b; text-align: right; background: #16191d !important; position: sticky; left: 0; font-weight: 400; font-family: 'JetBrains Mono Variable', Consolas, monospace; font-size: 11px; }
+  a { color: #6aa9ff; }
 `
 
 export function SheetView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
@@ -367,8 +405,9 @@ export function SheetView({ ws, rel, version }: { ws: Workspace; rel: string; ve
           {book.names.map((n, i) => (
             <button
               key={n}
+              type="button"
               onClick={() => setSheet(i)}
-              className={`shrink-0 rounded px-2.5 py-0.5 text-[12px] ${i === sheet ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
+              className={`shrink-0 rounded px-2.5 py-0.5 text-[12px] ${i === sheet ? 'bg-panel-3 text-fg' : 'text-muted hover:text-fg'}`}
             >
               {n}
             </button>
@@ -377,7 +416,7 @@ export function SheetView({ ws, rel, version }: { ws: Workspace; rel: string; ve
       )}
       <div className="min-h-0 flex-1 overflow-auto select-text">
         <div ref={ref} />
-        {current?.cut && <Note>Chỉ hiện {SHEET_ROWS} dòng đầu. Bấm “Mở” để xem cả file.</Note>}
+        {current?.cut && <Note>Chỉ hiện {SHEET_ROWS} dòng đầu. Mở bằng ứng dụng ngoài (nút ở đầu khung) để xem cả file.</Note>}
         {current && !current.rows && <Note>Sheet trống.</Note>}
       </div>
     </div>
@@ -425,7 +464,7 @@ export function PptxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
           Object.assign(outer.style, { margin: '0 auto 6px', overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,.4)', position: 'relative' })
           outer.appendChild(slide)
           const label = document.createElement('div')
-          Object.assign(label.style, { textAlign: 'center', color: '#8b93a7', font: "11px 'Segoe UI', sans-serif", margin: '0 0 14px' })
+          Object.assign(label.style, { textAlign: 'center', color: '#69717b', font: "11px 'JetBrains Mono Variable', Consolas, monospace", margin: '0 0 14px' })
           label.textContent = `Slide ${i + 1} / ${deck.count}`
           list.append(outer, label)
           frames.push({ outer, slide })
@@ -447,8 +486,8 @@ export function PptxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
   if (loading) return <Loading />
   if (error || failed) return <Note>{error ?? `Không đọc được file PowerPoint: ${failed}`}</Note>
   return (
-    <div className="min-h-full bg-[#2a2e37] select-text">
-      {info && <div className="px-4 pt-3 text-[12px] text-muted">{info.count} slide · bản xem trước gần đúng (biểu đồ, SmartArt, hiệu ứng chưa vẽ)</div>}
+    <div className="min-h-full bg-[#24282d] select-text">
+      {info && <div className="px-4 pt-3 text-center text-[11px] text-dim">{info.count} slide · bản xem trước gần đúng (biểu đồ, SmartArt, hiệu ứng chưa vẽ)</div>}
       <div ref={ref} className="px-4 py-3" />
     </div>
   )
@@ -551,6 +590,7 @@ export function HtmlView({ ws, rel, version, onRun }: { ws: Workspace; rel: stri
   const [srcdoc, setSrcdoc] = useState<string | null>(null)
   const [hasScript, setHasScript] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
+  const [device, setDevice] = useState<'desktop' | 'phone'>('desktop')
   useEffect(() => {
     let alive = true
     setSrcdoc(null)
@@ -570,16 +610,35 @@ export function HtmlView({ ws, rel, version, onRun }: { ws: Workspace; rel: stri
   if (failed) return <Note>{failed}</Note>
   if (srcdoc == null) return <Loading />
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col bg-[#24282d]">
       {hasScript && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-amber-400/10 px-4 py-1.5 text-[12px] text-amber-200">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-1.5 text-[12px] text-muted">
+          <Icon name="info" size="s" className="text-dim" />
           Trang có JavaScript — bản xem trước ở đây không chạy script.
-          <button onClick={onRun} className="ml-auto rounded bg-panel-2 px-2 py-0.5 text-fg hover:bg-line">
+          <button type="button" onClick={onRun} className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-panel-2 px-2 py-0.5 text-fg hover:bg-panel-3">
+            <Icon name="globe" size="s" />
             Chạy trong Browser
           </button>
         </div>
       )}
-      <iframe sandbox="" srcDoc={srcdoc} className="min-h-0 w-full flex-1 bg-white" title={rel} />
+      <div className="flex shrink-0 justify-center py-2">
+        <Seg
+          value={device}
+          onChange={setDevice}
+          options={[
+            { value: 'desktop', label: 'Máy tính' },
+            { value: 'phone', label: 'Điện thoại' }
+          ]}
+        />
+      </div>
+      <div className="flex min-h-0 flex-1 justify-center px-5 pb-5">
+        <iframe
+          sandbox=""
+          srcDoc={srcdoc}
+          title={rel}
+          className={`h-full rounded-md bg-white ${device === 'phone' ? 'w-[390px] max-w-full' : 'w-full'}`}
+        />
+      </div>
     </div>
   )
 }
@@ -617,8 +676,8 @@ export function ZipView({ ws, rel, version }: { ws: Workspace; rel: string; vers
       <ul className="font-mono">
         {entries.slice(0, 3000).map((e) => (
           <li key={e.name} className="flex gap-3 py-0.5">
-            <span className={`truncate ${e.dir ? 'text-muted' : ''}`}>{e.name}</span>
-            {!e.dir && <span className="ml-auto shrink-0 text-muted">{formatSize(e.size)}</span>}
+            <span className={`truncate ${e.dir ? 'text-dim' : ''}`}>{e.name}</span>
+            {!e.dir && <span className="ml-auto shrink-0 text-dim">{formatSize(e.size)}</span>}
           </li>
         ))}
       </ul>
@@ -684,10 +743,10 @@ export function OtherView({ ws, rel, version, reason }: { ws: Workspace; rel: st
       {thumb ? (
         <img src={thumb} className="max-h-[420px] max-w-full rounded border border-line" draggable={false} />
       ) : thumb === null ? (
-        <span className="rounded-md border border-line px-4 py-2 font-mono text-[18px] uppercase text-muted">{extOf(rel) || 'file'}</span>
+        <span className="rounded-md border border-line-2 px-4 py-2 font-mono text-[18px] text-muted uppercase">{extOf(rel) || 'file'}</span>
       ) : null}
       <div className="max-w-[420px] text-[12px] text-muted">
-        {reason ?? 'App chưa có cách xem nội dung loại file này.'} Bấm “Mở” để mở bằng ứng dụng mặc định của Windows.
+        {reason ?? 'App chưa có cách xem nội dung loại file này.'} Dùng nút mở bằng ứng dụng mặc định ở đầu khung.
       </div>
     </div>
   )

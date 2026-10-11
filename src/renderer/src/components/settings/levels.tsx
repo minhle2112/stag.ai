@@ -1,15 +1,16 @@
 import { connectorOn } from '@shared/connectors'
 import { skillOn } from '@shared/skills'
 import { pluginOn } from '@shared/settings'
-import { agentKind, type Settings } from '@shared/types'
+import { agentKind, type Agent, type Settings, type SettingsOverrides } from '@shared/types'
 import { useAgents } from '../../store/agents'
 import { useSettings } from '../../store/settings'
 import { useWorkspaces } from '../../store/workspaces'
-import { Group, Row, Select, Switch, useSaveError } from './controls'
+import { Seg } from '../ui/Seg'
+import { OverrideSwitch, Select, Switch, useSaveError } from './controls'
 
 /**
- * Cấp áp dụng bật / tắt (Connector, Skill): mặc định cho mọi agent → workspace → agent.
- * Cấp app: công tắc; cấp dưới: theo cấp trên / bật / tắt.
+ * Cấp áp dụng bật / tắt (Connector, Skill, Plugin…): mặc định cho mọi agent → workspace → agent.
+ * Cấp app: công tắc; cấp dưới: công tắc hiện giá trị đang có hiệu lực, chấm teal = đã ghi đè ở cấp đó (bấm để theo cấp trên).
  */
 
 /** 'app' | `ws:<id>` | `agent:<wsId>:<agentId>` */
@@ -49,31 +50,98 @@ export function isOn(field: ToggleField, s: Settings, k: string, workspaceId?: s
   return field === 'connectors' ? connectorOn(s, k, workspaceId, agentId) : field === 'skills' ? skillOn(s, k, workspaceId, agentId) : pluginOn(s, k, workspaceId, agentId)
 }
 
-export function LevelPicker({ level, setLevel, field }: { level: LevelKey; setLevel: (l: LevelKey) => void; field: ToggleField }): React.JSX.Element {
+const LEVEL_OPTIONS = [
+  { value: 'app' as const, label: 'App', tip: 'Mặc định cho mọi workspace và agent' },
+  { value: 'ws' as const, label: 'Workspace', tip: 'Chỉ một workspace (ghi đè cấp App)' },
+  { value: 'agent' as const, label: 'Agent', tip: 'Chỉ một agent (ghi đè cấp Workspace)' }
+]
+
+/**
+ * Công tắc cấp ở bên phải tiêu đề trang: [● ghi đè] [ô chọn workspace / agent] [App | Workspace | Agent].
+ * Ô chọn luôn giữ chỗ (ẩn ở cấp App) nên bố cục không nhảy. `appOnly` = mục chỉ đặt ở cấp App (công tắc mờ, không bấm được).
+ */
+export function LevelBar({
+  level = 'app',
+  setLevel,
+  field,
+  has,
+  agentFilter,
+  appOnly
+}: {
+  level?: LevelKey
+  setLevel?: (l: LevelKey) => void
+  /** Mục bật / tắt (dùng để đánh dấu • ở workspace / agent đang có ghi đè). */
+  field?: ToggleField
+  /** Cách khác để biết workspace / agent có ghi đè mục này không. */
+  has?: (o: SettingsOverrides | undefined) => boolean
+  /** Chỉ cho chọn một số agent (vd. chỉ agent Claude Code khi sửa model của Claude). */
+  agentFilter?: (a: Agent) => boolean
+  appOnly?: boolean
+}): React.JSX.Element {
   const settings = useSettings((s) => s.value)
   const workspaces = useWorkspaces((s) => s.items)
+  const activeWs = useWorkspaces((s) => s.activeId)
   const byWs = useAgents((s) => s.byWs)
   const cur = useLevel(level)
-  const has = (o?: { connectors?: Record<string, boolean>; skills?: Record<string, boolean>; plugins?: Record<string, boolean> }): string => (o?.[field] ? ' •' : '')
-  const options = [
-    { value: 'app', label: 'Mặc định cho mọi agent' },
-    ...workspaces.flatMap((w) => [
-      { value: `ws:${w.id}`, label: `Workspace: ${w.name}${has(settings.workspaces[w.id])}` },
-      ...(byWs[w.id]?.agents ?? [])
-        .filter((a) => agentKind(a) !== 'terminal')
-        .map((a) => ({ value: `agent:${w.id}:${a.id}`, label: `↳ Agent: ${a.name}${has(settings.agents[a.id])}` }))
-    ])
-  ]
-  return (
-    <Group title="Áp dụng cho">
-      <Row
-        label="Cấp"
-        desc="Workspace ghi đè mặc định của app; agent ghi đè workspace của nó. Dấu • = có bật / tắt riêng. Phiên đang chạy giữ nguyên, phiên mở sau mới nhận thay đổi."
-      >
-        <Select label={`Cấp áp dụng ${field === 'connectors' ? 'connector' : field === 'skills' ? 'skill' : 'plugin'}`} value={cur.lvl === 'app' ? 'app' : level} onChange={setLevel} options={options} />
-      </Row>
-    </Group>
+
+  if (appOnly || !setLevel) {
+    return (
+      <span data-tip="Mục này chỉ đặt ở cấp App · áp dụng mọi workspace" className="inline-flex shrink-0">
+        <Seg className="pointer-events-none opacity-45" value="app" onChange={() => {}} options={LEVEL_OPTIONS.map(({ value, label }) => ({ value, label }))} />
+      </span>
+    )
+  }
+
+  const marked = (o?: SettingsOverrides): boolean => (has ? has(o) : field ? !!o?.[field] : false)
+  const agentsOf = (wsId: string): Agent[] => (byWs[wsId]?.agents ?? []).filter((a) => agentKind(a) !== 'terminal' && (!agentFilter || agentFilter(a)))
+  const multi = workspaces.length > 1
+  const wsOptions = workspaces.map((w) => ({ value: `ws:${w.id}`, label: `${w.name}${marked(settings.workspaces[w.id]) ? ' •' : ''}` }))
+  const agentOptions = workspaces.flatMap((w) =>
+    agentsOf(w.id).map((a) => ({ value: `agent:${w.id}:${a.id}`, label: `${a.name}${multi ? ` · ${w.name}` : ''}${marked(settings.agents[a.id]) ? ' •' : ''}` }))
   )
+
+  const pick = (k: 'app' | 'ws' | 'agent'): void => {
+    if (k === 'app') return setLevel('app')
+    const wsId = cur.wsId ?? (workspaces.some((w) => w.id === activeWs) ? activeWs! : workspaces[0]?.id)
+    if (!wsId) return
+    if (k === 'ws') return setLevel(`ws:${wsId}`)
+    const here = agentsOf(wsId)
+    const a = here.find((x) => x.id === cur.agentId) ?? here[0]
+    if (a) return setLevel(`agent:${wsId}:${a.id}`)
+    const other = workspaces.flatMap((w) => agentsOf(w.id).map((x) => [w.id, x.id] as const))[0]
+    if (other) setLevel(`agent:${other[0]}:${other[1]}`)
+  }
+
+  const value = cur.lvl === 'ws' ? `ws:${cur.wsId}` : cur.lvl === 'agent' ? `agent:${cur.wsId}:${cur.agentId}` : ''
+  return (
+    <span className="flex shrink-0 items-center gap-2 text-[12px] font-normal">
+      <span
+        data-tip="● = đã ghi đè ở cấp này"
+        className={`inline-flex cursor-help items-center gap-1 text-[11px] text-dim ${cur.lvl === 'app' ? 'invisible' : ''}`}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+        ghi đè
+      </span>
+      <span className={cur.lvl === 'app' ? 'invisible' : ''}>
+        <Select
+          compact
+          className="w-36"
+          label={cur.lvl === 'agent' ? 'Chọn agent' : 'Chọn workspace'}
+          value={value}
+          onChange={setLevel}
+          options={cur.lvl === 'agent' ? agentOptions : wsOptions}
+        />
+      </span>
+      <span data-tip="Cấp dưới ghi đè cấp trên · ● = đã ghi đè ở cấp này">
+        <Seg value={cur.lvl} onChange={pick} options={LEVEL_OPTIONS} />
+      </span>
+    </span>
+  )
+}
+
+/** Giữ tên cũ: chọn cấp áp dụng cho một mục bật / tắt. Đặt vào `right` của SectionTitle. */
+export function LevelPicker({ level, setLevel, field }: { level: LevelKey; setLevel: (l: LevelKey) => void; field: ToggleField }): React.JSX.Element {
+  return <LevelBar level={level} setLevel={setLevel} field={field} />
 }
 
 /** Công tắc bật / tắt một mục ở cấp đang chọn. `setApp` = cách lưu ở cấp app (connector của stag.ai lưu trong chính nó). */
@@ -102,11 +170,10 @@ export function LevelToggle({
   }
   const own = (level.lvl === 'ws' ? settings.workspaces[level.wsId!] : settings.agents[level.agentId!])?.[field] ?? {}
   const parent = level.lvl === 'agent' ? isOn(field, settings, k, level.wsId) : isOn(field, settings, k)
-  const value = k in own ? (own[k] ? 'on' : 'off') : 'inherit'
-  const set = (v: 'inherit' | 'on' | 'off'): void => {
+  const set = (v: boolean | undefined): void => {
     const next = { ...own }
-    if (v === 'inherit') delete next[k]
-    else next[k] = v === 'on'
+    if (v === undefined) delete next[k]
+    else next[k] = v
     const empty = Object.keys(next).length === 0
     run(
       useSettings
@@ -114,20 +181,7 @@ export function LevelToggle({
         .saveOverrides(level.lvl === 'ws' ? 'workspace' : 'agent', level.lvl === 'ws' ? level.wsId! : level.agentId!, { [field]: empty ? null : next })
     )
   }
-  return (
-    <span onClick={(e) => e.stopPropagation()}>
-      <Select
-        label={`${label} cho ${level.name}`}
-        value={value}
-        onChange={set}
-        options={[
-          { value: 'inherit', label: `Theo cấp trên (${parent ? 'bật' : 'tắt'})` },
-          { value: 'on', label: 'Bật' },
-          { value: 'off', label: 'Tắt' }
-        ]}
-      />
-    </span>
-  )
+  return <OverrideSwitch own={k in own ? own[k] : undefined} inherited={parent} onChange={set} label={`${label} cho ${level.name}`} />
 }
 
 /** Đặt bật / tắt ở cấp workspace / agent (giữ các khoá khác). */

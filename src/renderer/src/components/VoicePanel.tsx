@@ -4,6 +4,7 @@ import { useSettings } from '../store/settings'
 import { useUi } from '../store/ui'
 import { beginVoice, cancelVoice, endVoice, insertVoice, undoAiFix, useVoice, useVoiceFor, voiceTargetFor } from '../store/voice'
 import { useWorkspaces } from '../store/workspaces'
+import { Icon } from './Icon'
 
 /**
  * Phím tắt nói (giữ để nói, thả để dừng) cho cả app + thông báo khi không có ô đích. Bắt ở pha capture để terminal
@@ -77,7 +78,7 @@ export function VoiceHotkeys(): React.JSX.Element | null {
   )
 }
 
-/** Nút micro trên thanh của ô: bấm để nói, bấm lần nữa để dừng (thay cho giữ phím). */
+/** Nút micro trên tiêu đề ô: bấm để nói, bấm lần nữa để dừng (thay cho giữ phím). Chỉ hiện khi rê chuột vào ô, trừ lúc đang nói. */
 export function MicButton({ wsId, agentId }: { wsId: string; agentId: string }): React.JSX.Element | null {
   const enabled = useSettings((s) => s.value.app.voice.enabled)
   const hotkey = useSettings((s) => s.value.app.voice.hotkey)
@@ -85,9 +86,11 @@ export function MicButton({ wsId, agentId }: { wsId: string; agentId: string }):
   const phase = useVoice((s) => s.phase)
   if (!enabled) return null
   const live = mine && (phase === 'opening' || phase === 'listening')
+  const tip = live ? 'Dừng nói' : `Nói để gõ (hoặc giữ ${VOICE_HOTKEYS[hotkey]})`
   return (
     <button
-      title={live ? 'Dừng nói' : `Nói để gõ (hoặc giữ ${VOICE_HOTKEYS[hotkey]})`}
+      type="button"
+      data-tip={tip}
       aria-label={live ? 'Dừng nói' : 'Nói để gõ'}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => {
@@ -95,19 +98,12 @@ export function MicButton({ wsId, agentId }: { wsId: string; agentId: string }):
         if (live) void endVoice()
         else void beginVoice({ wsId, agentId })
       }}
-      className={`rounded px-1.5 py-0.5 ${live ? 'bg-red-500/20 text-red-300' : 'text-muted hover:bg-panel-2 hover:text-fg'}`}
+      className={`h-[22px] w-[22px] place-items-center rounded-md ${
+        live ? 'inline-grid animate-pulse bg-danger/20 text-danger' : 'hidden text-muted group-hover/cell:inline-grid hover:bg-panel-3 hover:text-fg'
+      }`}
     >
-      <MicIcon />
+      <Icon name="mic" />
     </button>
-  )
-}
-
-function MicIcon(): React.JSX.Element {
-  return (
-    <svg width="12" height="14" viewBox="0 0 12 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden className="inline-block">
-      <rect x="3.5" y="0.75" width="5" height="8" rx="2.5" />
-      <path d="M1 6.5a5 5 0 0 0 10 0M6 11.5V13.5" strokeLinecap="round" />
-    </svg>
   )
 }
 
@@ -130,17 +126,17 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
   const key = VOICE_HOTKEYS[hotkey]
   return (
     <div
-      className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-line bg-panel/95 px-3 py-2 shadow-lg"
+      className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-line-2 bg-panel-2/95 px-3 py-2 shadow-[0_10px_30px_rgba(0,0,0,.5)]"
       // Không để ô / terminal bên dưới giành focus khi bấm vào khung.
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
       {(phase === 'opening' || phase === 'listening') && (
         <div className="flex items-center gap-3">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${phase === 'listening' ? 'animate-pulse bg-red-500' : 'bg-muted'}`} />
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${phase === 'listening' ? 'animate-pulse bg-danger' : 'bg-muted'}`} />
           <span className="shrink-0 text-[13px]">{phase === 'opening' ? 'Đang mở micro…' : 'Đang nghe…'}</span>
           <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded bg-line">
-            <div className="h-full bg-emerald-400 transition-[width] duration-75" style={{ width: `${Math.round(level * 100)}%` }} />
+            <div className="h-full bg-work transition-[width] duration-75" style={{ width: `${Math.round(level * 100)}%` }} />
           </div>
           <span className="shrink-0 text-[12px] text-muted">
             {status.engine === 'loading' ? 'đang nạp model · ' : ''}thả {key} (hoặc bấm nút micro) để dừng · Esc huỷ
@@ -159,7 +155,7 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
           {live} <span className="text-muted">{livePartial}</span>
         </p>
       )}
-      {phase === 'preview' && notice && <p className="mb-1.5 text-[12px] text-amber-300">{notice}</p>}
+      {phase === 'preview' && notice && <p className="mb-1.5 text-[12px] text-wait">{notice}</p>}
       {phase === 'preview' && (
         <div className="flex flex-col gap-2">
           <textarea
@@ -187,7 +183,7 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
                 Đang sửa bằng AI…
               </span>
             ) : aiBefore ? (
-              <span className="flex items-center gap-1.5 text-emerald-300">
+              <span className="flex items-center gap-1.5 text-work">
                 Đã sửa bằng AI
                 <button onClick={undoAiFix} className="rounded px-1.5 py-0.5 text-muted underline hover:text-fg">
                   Hoàn tác
@@ -198,7 +194,7 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
             <button onClick={cancelVoice} className="rounded-md bg-panel-2 px-2.5 py-1 text-fg hover:bg-line">
               Bỏ (Esc)
             </button>
-            <button onClick={() => insertVoice()} className="rounded-md bg-accent px-2.5 py-1 font-medium text-[#0b1220] hover:brightness-110">
+            <button onClick={() => insertVoice()} className="rounded-md bg-accent px-2.5 py-1 font-medium text-accent-on hover:brightness-110">
               Chèn (Enter)
             </button>
           </div>
@@ -206,14 +202,14 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
       )}
       {phase === 'error' && (
         <div className="flex items-center gap-3 text-[13px]">
-          <span className="flex-1 text-red-300">{error}</span>
+          <span className="flex-1 text-danger">{error}</span>
           {needsModel && (
             <button
               onClick={() => {
                 cancelVoice()
                 useUi.getState().openSettings('voice')
               }}
-              className="rounded-md bg-accent px-2.5 py-1 font-medium text-[#0b1220] hover:brightness-110"
+              className="rounded-md bg-accent px-2.5 py-1 font-medium text-accent-on hover:brightness-110"
             >
               Mở Cài đặt → Giọng nói
             </button>

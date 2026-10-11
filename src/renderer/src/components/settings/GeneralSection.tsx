@@ -3,6 +3,7 @@ import { TERMINAL_FONT_MAX, TERMINAL_FONT_MIN, type AppMeta, type GeneralSetting
 import { useSettings } from '../../store/settings'
 import { useUi } from '../../store/ui'
 import { ErrorBar, Group, Row, SectionTitle, Select, SmallButton, Stepper, Switch, useSaveError } from './controls'
+import { LevelBar } from './levels'
 
 const ZOOMS = [70, 80, 90, 100, 110, 125, 150]
 
@@ -27,7 +28,7 @@ export function GeneralSection(): React.JSX.Element {
 
   return (
     <>
-      <SectionTitle title="Chung" desc="Các cài đặt áp dụng cho cả app. Thay đổi được lưu ngay." />
+      <SectionTitle title="Chung" desc="Các cài đặt áp dụng cho cả app. Thay đổi được lưu ngay." right={<LevelBar appOnly />} />
       <ErrorBar error={error} />
 
       <Group title="Giao diện">
@@ -67,7 +68,8 @@ export function GeneralSection(): React.JSX.Element {
       <Group title="Khởi động">
         <Row
           label="Chạy cùng Windows"
-          desc={meta && !meta.packaged ? 'Chỉ có tác dụng ở bản cài đặt (bạn đang chạy bản dev).' : 'Mở stag.ai khi đăng nhập Windows.'}
+          desc="Mở stag.ai khi đăng nhập Windows."
+          sub={meta && !meta.packaged ? 'Chỉ có tác dụng ở bản cài đặt (bạn đang chạy bản dev).' : undefined}
         >
           <Switch label="Chạy cùng Windows" checked={g.openAtLogin} onChange={(openAtLogin) => set({ openAtLogin })} />
         </Row>
@@ -79,9 +81,9 @@ export function GeneralSection(): React.JSX.Element {
       <Group title="Dự án">
         <Row
           label="Thư mục mặc định"
-          desc={
+          sub={
             g.projectsDir ? (
-              <span className="select-text break-all font-mono text-[11.5px]">{g.projectsDir}</span>
+              <span className="break-all font-mono text-[11px]">{g.projectsDir}</span>
             ) : (
               'Chưa đặt: hộp thoại chọn thư mục mở ở chỗ Windows tự chọn.'
             )
@@ -118,7 +120,11 @@ export function GeneralSection(): React.JSX.Element {
         <Row label="Âm thanh">
           <Switch label="Âm thanh thông báo" checked={g.notifySound} onChange={(notifySound) => set({ notifySound })} />
         </Row>
-        <Row label="Thử thông báo" desc={tested ? 'Đã gửi. Không thấy thì kiểm tra Cài đặt Windows → Hệ thống → Thông báo.' : 'Bấm thông báo của agent sẽ mở đúng agent đó.'}>
+        <Row
+          label="Thử thông báo"
+          desc="Bấm thông báo của agent sẽ mở đúng agent đó."
+          sub={tested ? 'Đã gửi. Không thấy thì kiểm tra Cài đặt Windows → Hệ thống → Thông báo.' : undefined}
+        >
           <SmallButton
             onClick={() => {
               setTested(true)

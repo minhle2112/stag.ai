@@ -69,7 +69,7 @@ export function CreateWorkspaceDialog({ inspection, onClose, onCreated }: Props)
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-md border border-line bg-bg px-2 py-1.5 outline-none focus:border-accent"
+          className="w-full rounded-md border border-line-2 bg-bg px-2 py-1.5 outline-none focus:border-accent"
         />
       </Field>
 
@@ -124,7 +124,7 @@ export function CreateWorkspaceDialog({ inspection, onClose, onCreated }: Props)
         App cũng đảm bảo có CLAUDE.md (quy tắc recall vault) và cache auto memory của Claude Code. File đã có sẽ không bị ghi đè.
       </div>
 
-      {error && <div className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
+      {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}
     </Modal>
   )
 }
@@ -154,6 +154,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Tag({ tone, children }: { tone: 'ok' | 'warn' | 'muted'; children: React.ReactNode }): React.JSX.Element {
-  const cls = { ok: 'bg-emerald-500/15 text-emerald-300', warn: 'bg-amber-500/15 text-amber-300', muted: 'bg-panel-2 text-muted' }[tone]
+  const cls = { ok: 'bg-work/15 text-work', warn: 'bg-wait/15 text-wait', muted: 'bg-panel-2 text-muted' }[tone]
   return <span className={`rounded px-1.5 py-0.5 ${cls}`}>{children}</span>
 }

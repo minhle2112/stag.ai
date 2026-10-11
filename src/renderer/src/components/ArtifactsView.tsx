@@ -1,57 +1,78 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { ArtifactEvent, ArtifactStat, ArtifactText, Workspace } from '@shared/types'
 import { ago } from '../status'
 import { useArtifacts } from '../store/artifacts'
 import { useUi } from '../store/ui'
+import { CodeView } from './artifacts/CodeView'
+import { splitLines } from './artifacts/code'
 import {
   buildStacks,
   CATEGORIES,
-  extOf,
   fileUrl,
   filterStacks,
   formatSize,
+  groupRows,
   kindLabel,
+  markerOf,
   previewKind,
+  rowTime,
   type ArtifactCategory,
+  type ArtifactGroup,
+  type ArtifactGroupMode,
+  type ArtifactRow,
   type ArtifactStack
 } from './artifacts/stacks'
-import {
-  cleanError,
-  docxSnippet,
-  DocxView,
-  FontView,
-  HtmlView,
-  Note,
-  OtherView,
-  PdfView,
-  pdfThumb,
-  PptxView,
-  pptxThumbInto,
-  sheetSnippet,
-  SheetView,
-  staticHtml,
-  useVisible,
-  ZipView
-} from './artifacts/previewers'
-import { agentColor } from './vault/activity'
+import { cleanError, DocxView, FontView, HtmlView, ImageView, Note, OtherView, PdfView, PptxView, SheetView, ZipView } from './artifacts/previewers'
+import { Icon } from './Icon'
+import { IconButton } from './shell/IconButton'
+import { AgentAvatar } from './ui/AgentAvatar'
+import { Seg } from './ui/Seg'
 import { renderNote } from './vault/markdown'
 
-/** Số thẻ tối đa hiện một lúc (danh sách dài thì lọc / tìm để thu hẹp). */
-const MAX_CARDS = 400
+/** Số dòng tối đa của danh sách một lúc (danh sách dài thì lọc / tìm để thu hẹp). */
+const MAX_ROWS = 400
 
-/** Tab Artifacts: mọi file agent của workspace đã tạo / sửa / xoá trong dự án. */
+/** Cách gom đã chọn nhớ theo máy (chỉ là tiện lợi của người xem, không quan trọng nếu mất). */
+const GROUP_KEY = 'stag.artifacts.group'
+function readGroup(): ArtifactGroupMode {
+  try {
+    const v = localStorage.getItem(GROUP_KEY)
+    if (v === 'dir' || v === 'agent' || v === 'time') return v
+  } catch {
+    // Không đọc được storage (cửa sổ riêng tư…): dùng mặc định.
+  }
+  // Mặc định giữ đúng thứ tự cũ của tab: mới nhất lên đầu.
+  return 'time'
+}
+
+/** Dấu đầu dòng của danh sách: + tạo mới (xanh lá), ~ đã sửa (xanh dương), - đã xoá (đỏ). */
+const MARK = {
+  add: { ch: '+', cls: 'text-work', tip: 'Tạo mới' },
+  mod: { ch: '~', cls: 'text-info', tip: 'Đã sửa' },
+  del: { ch: '-', cls: 'text-danger', tip: 'Đã xoá' }
+} as const
+
+interface Selection {
+  key: string
+  /** Chế độ không gom: lần tạo / sửa cụ thể đang chọn. */
+  at?: string
+}
+
+/** Tab Artifacts: mọi file agent của workspace đã tạo / sửa / xoá trong dự án. Danh sách bên trái, xem trước bên phải. */
 export function ArtifactsView({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const events = useArtifacts((s) => s.byWs[workspace.id])
   const load = useArtifacts((s) => s.load)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<ArtifactCategory | 'all'>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
+  const [group, setGroup] = useState<ArtifactGroupMode>(readGroup)
   const [stacked, setStacked] = useState(true)
-  const [wide, setWide] = useState(false)
-  const [selected, setSelected] = useState<{ key: string; at?: string } | null>(null)
+  const [listOpen, setListOpen] = useState(true)
+  const [selected, setSelected] = useState<Selection | null>(null)
   const [stats, setStats] = useState<Record<string, ArtifactStat | null>>({})
-  // Cập nhật nhãn "x phút" theo thời gian.
-  const [, setNow] = useState(0)
+  // Cập nhật nhãn "x phút" và tên nhóm giờ theo thời gian.
+  const [now, setNow] = useState(() => Date.now())
+  const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     load(workspace.id)
@@ -74,24 +95,30 @@ export function ArtifactsView({ workspace }: { workspace: Workspace }): React.JS
     }
     return c
   }, [stacks, query, agentId])
-  /** Chế độ không gom: mỗi lần tạo / sửa là một thẻ. */
-  const flat = useMemo(
+  /** Mỗi file một dòng (đã gom) hoặc mỗi lần tạo / sửa một dòng (chế độ không gom). */
+  const rows = useMemo<ArtifactRow[]>(
     () =>
       stacked
-        ? []
+        ? shown.map((stack) => ({ stack }))
         : shown
-            .flatMap((s) => s.events.filter((e) => !agentId || e.agentId === agentId).map((e) => ({ stack: s, event: e })))
+            .flatMap((s) => s.events.filter((e) => !agentId || e.agentId === agentId).map((event) => ({ stack: s, event })))
             .sort((a, b) => b.event.at.localeCompare(a.event.at)),
     [stacked, shown, agentId]
   )
+  const groups = useMemo(
+    () => groupRows(rows.slice(0, MAX_ROWS), group, { now: new Date(now), onlyAgent: agentId }),
+    [rows, group, now, agentId]
+  )
+  /** Thứ tự các dòng như đang hiện (để chuyển chọn bằng phím mũi tên). */
+  const order = useMemo(() => groups.flatMap((g) => g.rows), [groups])
 
   // Kích thước / giờ sửa trên đĩa của các file đang hiện (đọc lại khi danh sách đổi).
   const statKey = shown
-    .slice(0, MAX_CARDS)
+    .slice(0, MAX_ROWS)
     .map((s) => `${s.rel}@${s.last}`)
     .join('|')
   useEffect(() => {
-    const rels = shown.slice(0, MAX_CARDS).map((s) => s.rel)
+    const rels = shown.slice(0, MAX_ROWS).map((s) => s.rel)
     if (!rels.length) return
     let alive = true
     window.stag.artifacts.stat(workspace.id, rels).then((r) => alive && setStats((prev) => ({ ...prev, ...r })))
@@ -113,321 +140,275 @@ export function ArtifactsView({ workspace }: { workspace: Workspace }): React.JS
   }, [current])
 
   const empty = !(events ?? []).length
+  const agentName = agentId ? agents.find((a) => a.id === agentId)?.name ?? '' : ''
+  const showList = listOpen || !current
+
+  const isActive = (r: ArtifactRow): boolean => {
+    if (!selected || r.stack.key !== selected.key) return false
+    if (!r.event) return true
+    return selected.at ? r.event.at === selected.at : r.event === r.stack.events[0]
+  }
+  const select = (r: ArtifactRow): void => setSelected({ key: r.stack.key, at: r.event?.at })
+  const sig = (r: ArtifactRow): string => `${r.stack.key}|${r.event?.at ?? ''}`
+
+  const onListKey = (e: React.KeyboardEvent): void => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    e.preventDefault()
+    const dir = e.key === 'ArrowDown' ? 1 : -1
+    const cur = order.findIndex(isActive)
+    let i = cur < 0 ? (dir > 0 ? 0 : order.length - 1) : cur + dir
+    // Cùng một file có thể hiện ở nhiều nhóm (gom theo agent): bỏ qua bản trùng liền kề.
+    while (cur >= 0 && i >= 0 && i < order.length && sig(order[i]) === sig(order[cur])) i += dir
+    if (i < 0 || i >= order.length) return
+    select(order[i])
+    requestAnimationFrame(() => listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }))
+  }
+
+  const changeGroup = (g: ArtifactGroupMode): void => {
+    setGroup(g)
+    try {
+      localStorage.setItem(GROUP_KEY, g)
+    } catch {
+      // Bỏ qua: chỉ là nhớ lựa chọn.
+    }
+  }
+
+  if (events !== undefined && empty)
+    return (
+      <div className="flex h-full items-center justify-center bg-panel">
+        <EmptyState title="Chưa có artifact nào." hint="File agent tạo hoặc sửa trong dự án (ảnh, video, tài liệu, code…) sẽ tự hiện ở đây." />
+      </div>
+    )
 
   return (
-    <div className="flex h-full">
-      <div className={`min-w-0 flex-1 flex-col ${current && wide ? 'hidden' : 'flex'}`}>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-3">
-          <div className="relative w-[340px] max-w-full">
-            <SearchIcon />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Tìm artifact…"
-              className="w-full rounded-lg border border-line bg-panel py-1.5 pl-8 pr-3 outline-none placeholder:text-muted focus:border-accent/60"
-            />
+    <div
+      className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)]"
+      style={{ gridTemplateColumns: showList ? 'clamp(220px, 34%, 330px) minmax(0, 1fr)' : 'minmax(0, 1fr)' }}
+    >
+      {showList && (
+        <aside className="flex min-h-0 min-w-0 flex-col border-r border-line bg-bg">
+          <div className="flex shrink-0 flex-col gap-2 border-b border-line p-2">
+            <label className="flex h-7 items-center gap-1.5 rounded-md border border-line-2 bg-bg0 pr-1 pl-2 text-dim focus-within:border-accent/40">
+              <Icon name="search" size="s" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Tìm tệp, thư mục, agent"
+                className="min-w-0 flex-1 bg-transparent py-1 text-[13px] text-fg outline-none placeholder:text-dim"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  data-tip="Xoá chữ tìm"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded text-dim hover:bg-panel-3 hover:text-fg"
+                >
+                  <Icon name="x" size="s" />
+                </button>
+              )}
+            </label>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <Seg
+                value={group}
+                onChange={changeGroup}
+                options={[
+                  { value: 'dir', label: 'Thư mục', tip: 'Nhóm theo thư mục' },
+                  { value: 'agent', label: 'Agent', tip: 'Nhóm theo agent · bấm tên agent để chỉ hiện việc của agent đó' },
+                  { value: 'time', label: 'Giờ', tip: 'Nhóm theo giờ, mới nhất trước' }
+                ]}
+              />
+              <span className="flex-1" />
+              <span className="font-mono text-[11px] text-dim">{stacked ? `${shown.length} tệp` : `${rows.length} lần`}</span>
+              <IconButton
+                icon="hist"
+                tip={stacked ? 'Đang gom theo file — bấm để hiện từng lần tạo / sửa' : 'Đang hiện từng lần tạo / sửa — bấm để gom theo file'}
+                on={!stacked}
+                onClick={() => setStacked(!stacked)}
+              />
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {CATEGORIES.filter((c) => c.id === 'all' || c.id === category || counts[c.id]).map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setCategory(c.id)}
+                  className={`flex h-5 items-center gap-1 rounded px-2 text-[11px] ${category === c.id ? 'bg-panel-3 text-fg' : 'text-muted hover:text-fg'}`}
+                >
+                  {c.label}
+                  {counts[c.id] ? <span className="font-mono text-dim">{counts[c.id]}</span> : null}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex-1" />
-          {agents.length > 1 && (
-            <select
-              value={agentId ?? ''}
-              onChange={(e) => setAgentId(e.target.value || null)}
-              className="rounded-md border border-line bg-panel px-2 py-1 text-[12px] outline-none"
-            >
-              <option value="">Mọi agent</option>
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+
+          {agentId && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-line bg-panel py-1.5 pr-2 pl-3 text-[12px]">
+              <span className="inline-flex h-[22px] items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 pr-0.5 pl-[3px]">
+                <AgentAvatar name={agentName} size={16} />
+                {agentName}
+                <button
+                  type="button"
+                  onClick={() => setAgentId(null)}
+                  data-tip="Bỏ lọc"
+                  className="grid h-[18px] w-[18px] place-items-center rounded-full text-muted hover:bg-panel-3 hover:text-fg"
+                >
+                  <Icon name="x" size="s" />
+                </button>
+              </span>
+            </div>
           )}
-          <button
-            onClick={() => setStacked(!stacked)}
-            title={stacked ? 'Đang gom theo file — bấm để hiện từng lần tạo / sửa' : 'Đang hiện từng lần tạo / sửa — bấm để gom theo file'}
-            className={`flex h-8 w-8 items-center justify-center rounded-md border ${stacked ? 'border-line bg-panel-2 text-fg' : 'border-transparent text-muted hover:text-fg'}`}
+
+          <div
+            ref={listRef}
+            role="listbox"
+            aria-label="Artifact"
+            tabIndex={0}
+            onKeyDown={onListKey}
+            className="min-h-0 flex-1 overflow-y-auto pb-2 outline-none"
           >
-            <StackIcon size={16} />
-          </button>
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setCategory(c.id)}
-              className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${category === c.id ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
-            >
-              {c.label}
-              {!empty && counts[c.id] ? <span className="ml-1 text-muted">{counts[c.id]}</span> : null}
-            </button>
-          ))}
-        </div>
+            {events === undefined ? null : !groups.length ? (
+              <div className="px-3 py-4 text-[12px] text-dim">Không có tệp khớp. Thử bỏ bớt bộ lọc hoặc đổi chữ tìm.</div>
+            ) : (
+              groups.map((g) => (
+                <Fragment key={g.key}>
+                  <GroupHeader g={g} mode={group} agentId={agentId} onAgent={setAgentId} />
+                  {g.rows.map((r) => (
+                    <ArtifactRowItem
+                      key={`${g.key}|${r.stack.key}|${r.event ? `${r.event.at}|${r.event.agentId}|${r.event.kind}` : ''}`}
+                      row={r}
+                      mode={group}
+                      agentId={g.agent?.id}
+                      active={isActive(r)}
+                      gone={r.event ? r.event.kind === 'delete' : r.stack.deleted || stats[r.stack.rel] === null}
+                      onSelect={() => select(r)}
+                    />
+                  ))}
+                </Fragment>
+              ))
+            )}
+            {rows.length > MAX_ROWS && (
+              <div className="px-3 py-3 text-center text-[11px] text-dim">Đang hiện {MAX_ROWS} mục mới nhất — tìm hoặc lọc để xem mục cũ hơn.</div>
+            )}
+          </div>
+        </aside>
+      )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {events === undefined ? null : empty ? (
-            <EmptyState title="Chưa có artifact nào." hint="File agent tạo hoặc sửa trong dự án (ảnh, video, tài liệu, code…) sẽ tự hiện ở đây." />
-          ) : !shown.length ? (
-            <EmptyState title="Không có artifact khớp." hint="Thử bỏ bớt bộ lọc hoặc đổi chữ tìm." />
-          ) : stacked ? (
-            <CardGrid>
-              {shown.slice(0, MAX_CARDS).map((s) => (
-                <ArtifactCard
-                  key={s.key}
-                  ws={workspace}
-                  stack={s}
-                  stat={stats[s.rel]}
-                  active={selected?.key === s.key}
-                  onClick={() => setSelected({ key: s.key })}
-                />
-              ))}
-            </CardGrid>
-          ) : (
-            <CardGrid>
-              {flat.slice(0, MAX_CARDS).map(({ stack, event }) => (
-                <ArtifactCard
-                  key={`${stack.key}@${event.at}@${event.agentId}@${event.kind}`}
-                  ws={workspace}
-                  stack={stack}
-                  event={event}
-                  stat={stats[stack.rel]}
-                  active={selected?.key === stack.key && selected.at === event.at}
-                  onClick={() => setSelected({ key: stack.key, at: event.at })}
-                />
-              ))}
-            </CardGrid>
-          )}
-          {(stacked ? shown.length : flat.length) > MAX_CARDS && (
-            <div className="mt-4 text-center text-[12px] text-muted">Đang hiện {MAX_CARDS} mục mới nhất — tìm hoặc lọc để xem mục cũ hơn.</div>
-          )}
-        </div>
-      </div>
-
-      {current && (
+      {current ? (
         <ArtifactPreview
           key={current.key}
           ws={workspace}
           stack={current}
           stat={stats[current.rel]}
           focusAt={selected?.at}
-          wide={wide}
-          onWide={() => setWide(!wide)}
-          onClose={() => setSelected(null)}
+          listOpen={listOpen}
+          onToggleList={() => setListOpen(!listOpen)}
           onForget={async () => {
             setSelected(null)
             await window.stag.artifacts.forget(workspace.id, current.rel)
           }}
         />
+      ) : (
+        <section className="flex min-h-0 min-w-0 flex-col items-center justify-center gap-2 bg-panel text-dim">
+          <Icon name="fdiff" size="l" />
+          <span className="text-[12px]">Chọn một tệp ở bên trái để xem</span>
+        </section>
       )}
     </div>
   )
 }
 
-function CardGrid({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-4 gap-y-5">{children}</div>
+function GroupHeader({
+  g,
+  mode,
+  agentId,
+  onAgent
+}: {
+  g: ArtifactGroup
+  mode: ArtifactGroupMode
+  agentId: string | null
+  onAgent: (id: string | null) => void
+}): React.JSX.Element | null {
+  const head = 'flex min-h-[30px] items-center gap-1.5 px-3 pt-2.5 pb-1'
+  if (mode === 'agent' && g.agent) {
+    // Đang lọc theo agent này: chip ở trên đã nói rõ, không lặp lại tiêu đề nhóm.
+    if (agentId === g.agent.id) return null
+    const id = g.agent.id
+    return (
+      <div className={`${head} text-[12px] text-muted`}>
+        <AgentAvatar name={g.agent.name} size={16} />
+        <button
+          type="button"
+          onClick={() => onAgent(id)}
+          data-tip={`Chỉ hiện thay đổi của ${g.agent.name}`}
+          className="min-w-0 truncate font-medium hover:text-fg"
+        >
+          {g.agent.name}
+        </button>
+        <span className="font-mono text-[11px] text-dim">{g.rows.length}</span>
+      </div>
+    )
+  }
+  return (
+    <div className={`${head} text-[11px] text-dim`}>
+      <Icon name={mode === 'dir' ? 'folder' : 'hist'} size="s" />
+      <span className="min-w-0 flex-1 truncate font-mono" data-tip={g.label}>
+        {g.label}
+      </span>
+      <span className="font-mono">{g.rows.length}</span>
+    </div>
+  )
 }
 
-function ArtifactCard({
-  ws,
-  stack,
-  event,
-  stat,
+function ArtifactRowItem({
+  row,
+  mode,
+  agentId,
   active,
-  onClick
+  gone,
+  onSelect
 }: {
-  ws: Workspace
-  stack: ArtifactStack
-  /** Chế độ không gom: thẻ của một lần tạo / sửa. */
-  event?: ArtifactEvent
-  stat: ArtifactStat | null | undefined
+  row: ArtifactRow
+  mode: ArtifactGroupMode
+  /** Nhóm theo agent: agent của nhóm chứa dòng này (dấu + giờ tính riêng cho agent đó). */
+  agentId?: string
   active: boolean
-  onClick: () => void
+  /** File đã bị xoá / không còn trên đĩa. */
+  gone: boolean
+  onSelect: () => void
 }): React.JSX.Element {
-  const layers = event ? 0 : Math.min(stack.events.length - 1, 2)
-  const gone = stat === null || stack.deleted
+  const { stack, event } = row
+  const mk = MARK[markerOf(row, agentId)]
   const who = event ? [{ id: event.agentId, name: event.agentName }] : stack.agents
   return (
-    <button onClick={onClick} className="group relative text-left" style={{ paddingBottom: layers * 4 }}>
-      {/* Các lớp phía sau = file đã được tạo / sửa nhiều lần (một "chồng" artifact). */}
-      {layers >= 2 && <div className="absolute inset-x-3 bottom-0 top-2 rounded-lg border border-line bg-panel/60" />}
-      {layers >= 1 && <div className="absolute inset-x-1.5 top-1 rounded-lg border border-line bg-panel" style={{ bottom: layers >= 2 ? 4 : 0 }} />}
-      <div
-        className={`relative overflow-hidden rounded-lg border bg-panel transition-colors ${
-          active ? 'border-accent' : 'border-line group-hover:border-accent/50'
-        }`}
-      >
-        <div className="relative aspect-[4/3] overflow-hidden bg-panel-2">
-          <Thumb ws={ws} rel={stack.rel} version={stat?.mtime ?? stack.last} gone={gone} />
-          {gone && event?.kind !== 'delete' && (
-            <span className="absolute left-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-red-300">{stack.deleted ? 'Đã xoá' : 'Không còn file'}</span>
-          )}
-          {!event && stack.events.length > 1 && (
-            <span className="absolute right-2 top-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-fg" title={`${stack.events.length} lần tạo / sửa`}>
-              <StackIcon size={11} />
-              {stack.events.length}
-            </span>
-          )}
-          {event && (
-            <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-fg">{kindLabel(event.kind)}</span>
-          )}
-        </div>
-        <div className="px-2.5 py-2">
-          <div className="truncate font-medium" title={stack.rel}>
-            {stack.name}
-          </div>
-          <div className="truncate text-[11px] text-muted">{stack.dir || '(thư mục gốc)'}</div>
-          <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted">
-            <AgentDots agents={who} />
-            <span className="truncate">{who.map((a) => a.name).join(', ')}</span>
-            <span className="ml-auto shrink-0">{ago(event?.at ?? stack.last)}</span>
-          </div>
-        </div>
-      </div>
-    </button>
+    <div
+      role="option"
+      aria-selected={active}
+      onClick={onSelect}
+      data-tip={stack.rel}
+      data-tip-side="right"
+      className={`flex min-w-0 cursor-pointer items-center gap-2 px-3 py-[5px] text-[13px] ${active ? 'bg-accent/10' : 'hover:bg-panel-2'}`}
+    >
+      <span className={`w-3 shrink-0 text-center font-mono text-[12px] font-bold ${mk.cls}`}>{mk.ch}</span>
+      <span className="min-w-0 flex-1 truncate">
+        <span className={gone ? 'text-dim line-through' : ''}>{stack.name}</span>
+        {mode !== 'dir' && stack.dir && <small className="ml-[5px] text-[11px] text-dim">{stack.dir}</small>}
+      </span>
+      {mode !== 'agent' && <Avatars who={who} size={16} />}
+      <time className="shrink-0 font-mono text-[11px] text-dim">{ago(rowTime(row, agentId))}</time>
+    </div>
   )
 }
 
-function AgentDots({ agents }: { agents: Array<{ id: string; name: string }> }): React.JSX.Element {
+/** Avatar của (tối đa 3) agent, chồng lên nhau; tên đầy đủ trong chú thích. */
+function Avatars({ who, size }: { who: Array<{ id: string; name: string }>; size: number }): React.JSX.Element {
   return (
-    <span className="flex shrink-0 -space-x-1">
-      {agents.slice(0, 3).map((a) => (
-        <span key={a.id} className="h-2.5 w-2.5 rounded-full ring-2 ring-panel" style={{ background: agentColor(a.id) }} title={a.name} />
+    <span className="inline-flex shrink-0 -space-x-1.5" data-tip={who.map((a) => a.name).join(', ')}>
+      {who.slice(0, 3).map((a) => (
+        <span key={a.id} className="inline-flex rounded-[5px] ring-2 ring-bg">
+          <AgentAvatar name={a.name} size={size} />
+        </span>
       ))}
     </span>
-  )
-}
-
-/**
- * Ảnh thu nhỏ của thẻ: ảnh / khung đầu video; trang đầu PDF; slide đầu PowerPoint; trang HTML thu nhỏ; vài dòng đầu
- * của file chữ; file Office có ảnh nhúng hoặc file Windows tạo được ảnh thu nhỏ; còn lại là nhãn đuôi file.
- * Chỉ tải khi thẻ lọt vào màn hình.
- */
-function Thumb({ ws, rel, version, gone }: { ws: Workspace; rel: string; version: string; gone: boolean }): React.JSX.Element {
-  const kind = previewKind(rel)
-  const [ref, visible] = useVisible<HTMLDivElement>()
-  const [failed, setFailed] = useState(false)
-  /** Ảnh (data URL) từ pdf.js / file Office / Windows. */
-  const [picture, setPicture] = useState<string | null>(null)
-  const [snippet, setSnippet] = useState<string | null>(null)
-  const [html, setHtml] = useState<string | null>(null)
-  const slideHost = useRef<HTMLDivElement>(null)
-  const [slide, setSlide] = useState(false)
-  /** Word không có ảnh nhúng: vài đoạn đầu; bảng tính: vài ô đầu. */
-  const [paper, setPaper] = useState<string[] | null>(null)
-  const [cells, setCells] = useState<string[][] | null>(null)
-
-  useEffect(() => {
-    setFailed(false)
-    setPicture(null)
-    setSnippet(null)
-    setHtml(null)
-    setSlide(false)
-    setPaper(null)
-    setCells(null)
-    if (!visible || gone || kind === 'image' || kind === 'video') return
-    let alive = true
-    let ro: ResizeObserver | null = null
-    const fail = (): void => {
-      if (alive) setFailed(true)
-    }
-    if (kind === 'text' || kind === 'markdown')
-      window.stag.artifacts
-        .text(ws.id, rel, 2048)
-        .then((r) => alive && setSnippet(r.status === 'ok' ? r.text : null))
-        .catch(fail)
-    else if (kind === 'pdf') pdfThumb(ws, rel, version).then((u) => alive && (u ? setPicture(u) : setFailed(true)))
-    else if (kind === 'html')
-      window.stag.artifacts
-        .text(ws.id, rel)
-        .then(async (t) => (t.status === 'ok' ? staticHtml(ws, rel, t.text) : null))
-        .then((h) => alive && setHtml(h))
-        .catch(fail)
-    else
-      window.stag.artifacts
-        .thumb(ws.id, rel)
-        .then(async (u) => {
-          if (!alive) return
-          if (u) return setPicture(u)
-          // Không có ảnh nhúng (vd. file tạo bằng thư viện, không qua Office): tự vẽ phần đầu.
-          const host = slideHost.current
-          if (kind === 'pptx' && host) {
-            setSlide(true)
-            const fit = await pptxThumbInto(ws, rel, host)
-            if (!fit) return fail()
-            if (!alive) return
-            ro = new ResizeObserver(fit)
-            ro.observe(host)
-          } else if (kind === 'docx') {
-            const t = await docxSnippet(ws, rel)
-            if (alive) (t?.length ? setPaper(t) : fail())
-          } else if (kind === 'sheet') {
-            const c = await sheetSnippet(ws, rel)
-            if (alive) (c?.length ? setCells(c) : fail())
-          } else fail()
-        })
-        .catch(fail)
-    return () => {
-      alive = false
-      ro?.disconnect()
-    }
-  }, [ws, rel, version, kind, gone, visible])
-
-  let body: React.ReactNode = null
-  if (!gone && !failed && kind === 'image')
-    body = <img src={fileUrl(ws.id, rel, version)} loading="lazy" draggable={false} onError={() => setFailed(true)} className="h-full w-full object-cover" />
-  else if (!gone && !failed && kind === 'video')
-    body = <video src={`${fileUrl(ws.id, rel, version)}#t=0.1`} preload="metadata" muted onError={() => setFailed(true)} className="h-full w-full object-cover" />
-  else if (picture) body = <img src={picture} draggable={false} className="h-full w-full bg-white object-cover object-top" />
-  else if (html != null)
-    body = (
-      <div className="h-full w-full overflow-hidden bg-white">
-        <iframe
-          sandbox=""
-          srcDoc={html}
-          tabIndex={-1}
-          className="pointer-events-none origin-top-left border-0"
-          style={{ width: '400%', height: '400%', transform: 'scale(0.25)' }}
-        />
-      </div>
-    )
-  else if (paper)
-    body = (
-      <div className="h-full overflow-hidden bg-[#2a2e37] px-5 pt-3">
-        <div className="h-full overflow-hidden bg-white px-3 py-2.5 text-[7.5px] leading-[1.5] text-[#1f2937]">
-          {paper.map((p, i) => (
-            <p key={i} className={i === 0 ? 'mb-1 text-[10px] font-semibold' : 'mb-1'}>
-              {p}
-            </p>
-          ))}
-        </div>
-      </div>
-    )
-  else if (cells)
-    body = (
-      <table className="w-full table-fixed border-collapse text-[9px]">
-        <tbody>
-          {cells.map((r, i) => (
-            <tr key={i} className={i === 0 ? 'bg-panel font-semibold text-fg' : 'text-muted'}>
-              {r.map((c, j) => (
-                <td key={j} className="truncate border border-line px-1 py-[2px]">
-                  {c}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    )
-  else if (snippet)
-    body = <pre className="h-full overflow-hidden whitespace-pre-wrap break-all p-2.5 font-mono text-[9.5px] leading-[1.45] text-muted">{snippet.slice(0, 900)}</pre>
-  else if (!slide || failed)
-    body = (
-      <div className="flex h-full items-center justify-center">
-        <span className="rounded-md border border-line px-2.5 py-1 font-mono text-[13px] uppercase text-muted">{extOf(rel) || 'file'}</span>
-      </div>
-    )
-  return (
-    <div ref={ref} className="relative h-full w-full">
-      {kind === 'pptx' && <div ref={slideHost} className={`absolute inset-0 overflow-hidden bg-[#2a2e37] ${slide && !failed ? '' : 'hidden'}`} />}
-      {body}
-    </div>
   )
 }
 
@@ -436,19 +417,17 @@ function ArtifactPreview({
   stack,
   stat,
   focusAt,
-  wide,
-  onWide,
-  onClose,
+  listOpen,
+  onToggleList,
   onForget
 }: {
   ws: Workspace
   stack: ArtifactStack
   stat: ArtifactStat | null | undefined
   focusAt?: string
-  /** Khung xem trước chiếm cả vùng (ẩn lưới thẻ). */
-  wide: boolean
-  onWide: () => void
-  onClose: () => void
+  /** Danh sách bên trái đang hiện (nút ở đầu khung ẩn / hiện nó để xem rộng hơn). */
+  listOpen: boolean
+  onToggleList: () => void
   onForget: () => void
 }): React.JSX.Element {
   const kind = previewKind(stack.rel)
@@ -476,6 +455,7 @@ function ArtifactPreview({
     () => (kind === 'markdown' && text?.status === 'ok' && !source ? renderNote(text.text, { current: stack.rel, notes: null }).html : ''),
     [kind, text, source, stack.rel]
   )
+  const lineCount = useMemo(() => (text?.status === 'ok' && !text.truncated ? splitLines(text.text).length : null), [text])
 
   const act = (p: Promise<unknown>): void => {
     setError(null)
@@ -490,15 +470,17 @@ function ArtifactPreview({
 
   const missing = stat === null || text?.status === 'missing'
   const props = { ws, rel: stack.rel, version }
+  const mk = MARK[markerOf({ stack })]
+  const meta = stat
+    ? [formatSize(stat.size), lineCount != null ? `${lineCount} dòng` : null, editedAgo(stat.mtime)].filter(Boolean).join(' · ')
+    : stat === null
+      ? 'Không còn file trên đĩa'
+      : ''
 
   let content: React.ReactNode = null
   if (missing) content = <Note>{stack.deleted ? 'File đã bị agent xoá.' : 'Không còn file này trên đĩa (đã xoá hoặc đổi tên).'}</Note>
-  else if (kind === 'image')
-    content = (
-      <div className="flex min-h-full items-center justify-center bg-[repeating-conic-gradient(#1d212a_0%_25%,#161920_0%_50%)] bg-[length:16px_16px] p-4">
-        <img src={fileUrl(ws.id, stack.rel, version)} className="max-h-full max-w-full object-contain" draggable={false} />
-      </div>
-    )
+  else if (kind === 'image' && mediaFailed) content = <OtherView {...props} reason="Trình xem trong app không đọc được ảnh này." />
+  else if (kind === 'image') content = <ImageView {...props} onError={() => setMediaFailed(true)} />
   else if ((kind === 'video' || kind === 'audio') && mediaFailed)
     content = <OtherView {...props} reason="Trình phát trong app không đọc được định dạng / codec của file này." />
   else if (kind === 'video')
@@ -522,100 +504,84 @@ function ArtifactPreview({
   else if (kind === 'font') content = <FontView {...props} />
   else if (kind === 'other' || text?.status === 'binary') content = <OtherView {...props} />
   else if (text?.status === 'ok')
-    content = (
-      <>
-        {html ? (
-          <div className="md-body select-text px-5 py-4" onClick={onMdClick} dangerouslySetInnerHTML={{ __html: html }} />
-        ) : (
-          <CodeText text={text.text} />
-        )}
-        {text.truncated && <Note>Chỉ hiện 512 KB đầu. Bấm “Mở” để xem cả file.</Note>}
-      </>
+    content = html ? (
+      <div className="md-body mx-auto max-w-[820px] px-6 py-5 select-text @[700px]:px-10" onClick={onMdClick} dangerouslySetInnerHTML={{ __html: html }} />
+    ) : (
+      <CodeView text={text.text} rel={stack.rel} />
     )
 
   return (
-    <aside className={`flex shrink-0 flex-col border-l border-line bg-panel ${wide ? 'w-full' : 'w-[46%] min-w-[360px] max-w-[760px]'}`}>
-      <div className="flex items-start gap-2 border-b border-line px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-semibold select-text" title={stack.rel}>
-            {stack.name}
-          </div>
-          <div className="truncate text-[12px] text-muted select-text">{stack.rel}</div>
-        </div>
-        <button
-          onClick={onWide}
-          className="rounded-md px-2 py-0.5 text-[14px] leading-none text-muted hover:bg-panel-2 hover:text-fg"
-          title={wide ? 'Thu nhỏ khung xem trước' : 'Phóng to khung xem trước'}
-        >
-          {wide ? '⇥' : '⇤'}
-        </button>
-        <button onClick={onClose} className="rounded-md px-2 py-0.5 text-[16px] leading-none text-muted hover:bg-panel-2 hover:text-fg" title="Đóng (Esc)">
-          ×
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-2 text-[12px]">
-        <ToolButton disabled={missing} onClick={() => act(window.stag.artifacts.open(ws.id, stack.rel))}>
-          Mở
-        </ToolButton>
-        <ToolButton disabled={missing} onClick={() => act(window.stag.artifacts.reveal(ws.id, stack.rel))}>
-          Hiện trong thư mục
-        </ToolButton>
-        {kind === 'markdown' && text?.status === 'ok' && <ToolButton onClick={() => setSource(!source)}>{source ? 'Xem' : 'Mã nguồn'}</ToolButton>}
-        {kind === 'html' && !missing && <ToolButton onClick={runInBrowser}>Chạy trong Browser</ToolButton>}
-        <div className="flex-1" />
-        <span className="text-muted">
-          {stat ? `${formatSize(stat.size)} · ${editedAgo(stat.mtime)}` : stat === null ? 'Không còn file trên đĩa' : ''}
+    <section className="@container flex min-h-0 min-w-0 flex-col bg-panel">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
+        <span className={`w-3 shrink-0 text-center font-mono text-[12px] font-bold ${mk.cls}`} data-tip={mk.tip}>
+          {mk.ch}
         </span>
-        <ToolButton onClick={onForget} title="Bỏ khỏi danh sách artifact (không xoá file)">
-          Ẩn
-        </ToolButton>
+        <span className="min-w-0 truncate font-mono text-[12px] select-text" title={stack.rel}>
+          {stack.dir && <span className="text-dim">{stack.dir}/</span>}
+          {stack.name}
+        </span>
+        {meta && <span className="hidden shrink-0 font-mono text-[11px] text-dim @[680px]:inline">{meta}</span>}
+        <span className="flex-1" />
+        {kind === 'markdown' && text?.status === 'ok' && (
+          <Seg
+            value={source ? 'source' : 'view'}
+            onChange={(v) => setSource(v === 'source')}
+            options={[
+              { value: 'view', label: 'Xem' },
+              { value: 'source', label: 'Mã nguồn' }
+            ]}
+          />
+        )}
+        <Avatars who={stack.agents} size={18} />
+        {kind === 'html' && !missing && <IconButton icon="globe" tip="Chạy trang trong Browser của app (có JavaScript)" onClick={runInBrowser} />}
+        {!missing && <IconButton icon="ext" tip="Mở bằng ứng dụng mặc định" onClick={() => act(window.stag.artifacts.open(ws.id, stack.rel))} />}
+        {!missing && <IconButton icon="folder" tip="Hiện trong thư mục" onClick={() => act(window.stag.artifacts.reveal(ws.id, stack.rel))} />}
+        <IconButton icon="archive" tip="Ẩn khỏi danh sách artifact (không xoá file)" onClick={onForget} />
+        <IconButton icon="side" tip={listOpen ? 'Ẩn danh sách để xem rộng hơn' : 'Hiện danh sách'} on={!listOpen} onClick={onToggleList} />
       </div>
-      {error && <div className="border-b border-line bg-red-500/10 px-4 py-1.5 text-[12px] text-red-300">{error}</div>}
+      {error && <div className="shrink-0 border-b border-line bg-danger/10 px-3 py-1.5 text-[12px] text-danger">{error}</div>}
+      {text?.status === 'ok' && text.truncated && (
+        <div className="shrink-0 border-b border-line bg-panel-2 px-3 py-1.5 text-[12px] text-muted">
+          Chỉ hiện 512 KB đầu — mở bằng ứng dụng mặc định để xem cả file.
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-auto">{content}</div>
 
-      <div className={`shrink-0 overflow-y-auto border-t border-line px-4 ${history ? 'max-h-[28%] py-3' : 'py-2'}`}>
-        <button onClick={() => setHistory(!history)} className="flex w-full items-center gap-1 text-[11px] uppercase tracking-wider text-muted hover:text-fg">
-          <span className="w-3">{history ? '▾' : '▸'}</span>
-          Lịch sử ({stack.events.length})
+      <div className={`shrink-0 overflow-y-auto border-t border-line px-3 ${history ? 'max-h-[28%] py-2' : 'py-1.5'}`}>
+        <button
+          type="button"
+          onClick={() => setHistory(!history)}
+          className="flex w-full items-center gap-1 text-[11px] font-semibold tracking-[0.07em] text-dim hover:text-fg"
+        >
+          <Icon name={history ? 'cd' : 'cr'} size="s" />
+          LỊCH SỬ · {stack.events.length}
         </button>
         {history && (
-          <ul className="mt-2 space-y-1">
+          <ul className="mt-1.5 space-y-0.5">
             {stack.events.map((e, i) => (
-              <li key={`${e.at}-${i}`} className={`flex items-center gap-2 rounded px-1.5 py-1 text-[12px] ${focusAt === e.at ? 'bg-panel-2' : ''}`}>
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: agentColor(e.agentId) }} />
-                <span className="truncate font-medium">{e.agentName}</span>
-                <span className={e.kind === 'delete' ? 'text-red-300' : 'text-muted'}>{kindLabel(e.kind)}</span>
-                <span className="truncate text-muted" title={e.rel}>
-                  {e.rel !== stack.rel ? e.rel : ''}
-                </span>
-                <span className="ml-auto shrink-0 text-muted" title={new Date(e.at).toLocaleString('vi-VN')}>
-                  {e.tool} · {ago(e.at)}
-                </span>
-              </li>
+              <HistoryRow key={`${e.at}-${i}`} e={e} stack={stack} focus={focusAt === e.at} />
             ))}
           </ul>
         )}
       </div>
-    </aside>
+    </section>
   )
 }
 
-/** Code / văn bản thường, có số dòng. */
-function CodeText({ text }: { text: string }): React.JSX.Element {
-  const lines = useMemo(() => {
-    const ls = text.split('\n')
-    if (ls.length > 1 && ls[ls.length - 1] === '') ls.pop()
-    return ls.length
-  }, [text])
+function HistoryRow({ e, stack, focus }: { e: ArtifactEvent; stack: ArtifactStack; focus: boolean }): React.JSX.Element {
   return (
-    <div className="flex min-w-max font-mono text-[12px] leading-[1.55]">
-      <pre className="sticky left-0 shrink-0 border-r border-line bg-panel py-3 pl-3 pr-2 text-right text-muted select-none">
-        {Array.from({ length: lines }, (_, i) => `${i + 1}\n`).join('')}
-      </pre>
-      <pre className="select-text whitespace-pre py-3 pl-3 pr-4">{text}</pre>
-    </div>
+    <li className={`flex items-center gap-2 rounded px-1.5 py-1 text-[12px] ${focus ? 'bg-panel-3' : ''}`}>
+      <AgentAvatar name={e.agentName} size={16} />
+      <span className="truncate font-medium">{e.agentName}</span>
+      <span className={e.kind === 'delete' ? 'text-danger' : 'text-muted'}>{kindLabel(e.kind)}</span>
+      <span className="truncate font-mono text-[11px] text-dim" title={e.rel}>
+        {e.rel !== stack.rel ? e.rel : ''}
+      </span>
+      <span className="ml-auto shrink-0 font-mono text-[11px] text-dim" title={new Date(e.at).toLocaleString('vi-VN')}>
+        {e.tool} · {ago(e.at)}
+      </span>
+    </li>
   )
 }
 
@@ -634,60 +600,14 @@ function onMdClick(e: React.MouseEvent): void {
   if (/^https?:/i.test(href)) window.open(href)
 }
 
-function ToolButton({
-  children,
-  onClick,
-  disabled,
-  title
-}: {
-  children: React.ReactNode
-  onClick: () => void
-  disabled?: boolean
-  title?: string
-}): React.JSX.Element {
-  return (
-    <button onClick={onClick} disabled={disabled} title={title} className="rounded-md bg-panel-2 px-2.5 py-1 hover:bg-line disabled:opacity-40">
-      {children}
-    </button>
-  )
-}
-
 function EmptyState({ title, hint }: { title: string; hint: string }): React.JSX.Element {
   return (
-    <div className="flex flex-col items-center pt-16 text-center">
-      <div className="flex h-[72px] w-[72px] items-center justify-center rounded-md bg-panel-2 text-muted">
-        <StackIcon size={34} />
+    <div className="flex flex-col items-center text-center">
+      <div className="flex h-[56px] w-[56px] items-center justify-center rounded-lg bg-panel-2 text-dim">
+        <Icon name="fdiff" size={26} />
       </div>
-      <div className="mt-4 font-semibold">{title}</div>
+      <div className="mt-4 text-[13px] font-semibold">{title}</div>
       <div className="mt-1 max-w-[380px] text-[12px] text-muted">{hint}</div>
     </div>
-  )
-}
-
-function StackIcon({ size }: { size: number }): React.JSX.Element {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round">
-      <path d="M12 3 3 7.5l9 4.5 9-4.5L12 3Z" />
-      <path d="m3 12 9 4.5 9-4.5" />
-      <path d="m3 16.5 9 4.5 9-4.5" />
-    </svg>
-  )
-}
-
-function SearchIcon(): React.JSX.Element {
-  return (
-    <svg
-      className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    >
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </svg>
   )
 }

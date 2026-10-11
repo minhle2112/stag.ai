@@ -1,11 +1,9 @@
 import { useState } from 'react'
 import { resolveAgentApi } from '@shared/settings'
-import { agentKind, type AgentApiSettings } from '@shared/types'
-import { useAgents } from '../../store/agents'
+import { type AgentApiSettings } from '@shared/types'
 import { useSettings } from '../../store/settings'
-import { useWorkspaces } from '../../store/workspaces'
-import { useLevel, type LevelKey } from './levels'
-import { ErrorBar, Group, Row, SectionTitle, Select, Switch, useSaveError } from './controls'
+import { LevelBar, useLevel, type LevelKey } from './levels'
+import { ErrorBar, Group, Note, Row, SectionTitle, Switch, useSaveError } from './controls'
 
 const ITEMS: Array<{ key: keyof AgentApiSettings; label: string; desc: string }> = [
   {
@@ -17,6 +15,11 @@ const ITEMS: Array<{ key: keyof AgentApiSettings; label: string; desc: string }>
     key: 'message',
     label: 'Cho agent nhắn agent khác',
     desc: 'agent_send: app gõ tin vào ô của agent nhận khi nó rảnh và bạn không đang gõ ở đó; tin ghi rõ là từ agent, không phải từ bạn. Có giới hạn số tin để hai agent không nhắn qua lại mãi. Gồm cả agent_handoff: giao việc đang làm cho agent khác (thẻ việc + phạm vi chuyển sang agent nhận, bản bàn giao gõ vào ô của nó; agent nhận chưa chạy thì mở phiên mới, việc này cần thêm quyền quản lý agent).'
+  },
+  {
+    key: 'read',
+    label: 'Cho agent đọc trạng thái và nhật ký phiên của agent khác',
+    desc: 'agent_status: agent kia đang làm gì, % context, việc đang mở, việc xong gần nhất. agent_log: các lượt mới nhất trong phiên của agent kia (lời bạn, lời agent, lỗi, tuỳ chọn cả tool đã gọi), đã che key / token; không đọc đầu ra thô của terminal. Chỉ trong cùng workspace.'
   },
   {
     key: 'confirmCreate',
@@ -33,31 +36,18 @@ export function AgentApiSection(): React.JSX.Element {
   const settings = useSettings((s) => s.value)
   const save = useSettings((s) => s.save)
   const saveOverrides = useSettings((s) => s.saveOverrides)
-  const workspaces = useWorkspaces((s) => s.items)
-  const byWs = useAgents((s) => s.byWs)
   const [key, setKey] = useState<LevelKey>('app')
   const [error, run] = useSaveError()
   const level = useLevel(key)
-
-  const mark = (o?: { agentApi?: Partial<AgentApiSettings> }): string => (o?.agentApi ? ' •' : '')
-  const options = [
-    { value: 'app', label: 'Mặc định cho mọi agent' },
-    ...workspaces.flatMap((w) => [
-      { value: `ws:${w.id}`, label: `Workspace: ${w.name}${mark(settings.workspaces[w.id])}` },
-      ...(byWs[w.id]?.agents ?? [])
-        .filter((a) => agentKind(a) !== 'terminal')
-        .map((a) => ({ value: `agent:${w.id}:${a.id}`, label: `↳ Agent: ${a.name}${mark(settings.agents[a.id])}` }))
-    ])
-  ]
 
   const own: Partial<AgentApiSettings> =
     level.lvl === 'ws' ? (settings.workspaces[level.wsId!]?.agentApi ?? {}) : level.lvl === 'agent' ? (settings.agents[level.agentId!]?.agentApi ?? {}) : {}
   const parent = level.lvl === 'agent' ? resolveAgentApi(settings, level.wsId, null) : settings.app.agentApi
 
-  function setOwn(k: keyof AgentApiSettings, v: 'inherit' | 'on' | 'off'): void {
+  function setOwn(k: keyof AgentApiSettings, v: boolean | undefined): void {
     const next = { ...own }
-    if (v === 'inherit') delete next[k]
-    else next[k] = v === 'on'
+    if (v === undefined) delete next[k]
+    else next[k] = v
     run(
       saveOverrides(level.lvl === 'ws' ? 'workspace' : 'agent', level.lvl === 'ws' ? level.wsId! : level.agentId!, {
         agentApi: Object.keys(next).length ? next : null
@@ -70,37 +60,31 @@ export function AgentApiSection(): React.JSX.Element {
       <SectionTitle
         title="Agent API"
         desc="Agent dùng app thay bạn qua các tool agent_* của máy chủ MCP stag. Agent luôn xem được danh sách agent và các loại / model có trên máy (agent_list, adapter_models). Chỉ nên đồng ý những gì chính bạn đã nhờ agent làm."
+        right={<LevelBar level={key} setLevel={setKey} has={(o) => !!o?.agentApi} />}
       />
       <ErrorBar error={error} />
-      <Group title="Áp dụng cho">
-        <Row label="Cấp" desc="Workspace ghi đè mặc định của app; agent ghi đè workspace của nó (theo agent đang gọi tool). Dấu • = có cài đặt riêng.">
-          <Select label="Cấp cài đặt Agent API" value={level.lvl === 'app' ? 'app' : key} onChange={setKey} options={options} />
-        </Row>
-      </Group>
-      <Group title="Agent được làm gì">
+      <Group>
         {ITEMS.map((it) => (
-          <Row key={it.key} label={it.label} desc={it.desc}>
+          <Row
+            key={it.key}
+            label={it.label}
+            desc={it.desc}
+            override={
+              level.lvl === 'app' ? undefined : { on: own[it.key] !== undefined, onReset: () => setOwn(it.key, undefined), parent: parent[it.key] ? 'bật' : 'tắt' }
+            }
+          >
             {level.lvl === 'app' ? (
               <Switch label={it.label} checked={settings.app.agentApi[it.key]} onChange={(v) => run(save({ agentApi: { [it.key]: v } }))} />
             ) : (
-              <Select
-                label={`${it.label} — ${level.name}`}
-                value={own[it.key] === undefined ? 'inherit' : own[it.key] ? 'on' : 'off'}
-                onChange={(v) => setOwn(it.key, v)}
-                options={[
-                  { value: 'inherit', label: `Theo cấp trên (${parent[it.key] ? 'bật' : 'tắt'})` },
-                  { value: 'on', label: 'Bật' },
-                  { value: 'off', label: 'Tắt' }
-                ]}
-              />
+              <Switch label={`${it.label} — ${level.name}`} checked={own[it.key] ?? parent[it.key]} onChange={(v) => setOwn(it.key, v)} />
             )}
           </Row>
         ))}
       </Group>
-      <p className="mt-3 px-1 text-[12px] leading-relaxed text-muted">
+      <Note>
         Tắt một nhóm: phiên mở sau không thấy các tool đó; phiên đang chạy gọi tới thì bị từ chối ngay. Agent biết có các tool này qua luật phiên, cập nhật từ
         phiên mới tiếp theo.
-      </p>
+      </Note>
     </>
   )
 }

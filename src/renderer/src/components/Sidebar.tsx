@@ -1,35 +1,29 @@
 import { useEffect, useState } from 'react'
-import { agentKind, type Agent, type CreateWorkspaceResult, type Workspace, type WorkspaceInspection } from '@shared/types'
+import { agentKind, type Agent, type Workspace } from '@shared/types'
 import { leaves } from '../layout'
 import { openAgent, useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { useWorkspaces } from '../store/workspaces'
-import { statusView } from '../status'
-import { CreateReport, CreateWorkspaceDialog } from './CreateWorkspaceDialog'
-import { ContextBadge, handoffNow } from './ContextBadge'
-import { RenameAgentDialog } from './RenameAgentDialog'
+import { startNewWorkspace } from '../store/workspaceFlow'
+import { useHandoffFor } from '../store/settings'
+import { contextView, statusView } from '../status'
+import { AgentMenuPanel, MenuItem } from './AgentMenu'
+import { Icon } from './Icon'
 import { SidebarPluginLinks } from './PluginSlots'
-import { runSlot, slotsOf, usePlugins } from '../store/plugins'
-import { useSettings } from '../store/settings'
+import { RenameAgentDialog } from './RenameAgentDialog'
 
+/**
+ * Thanh bên: mọi workspace xếp một cột, bấm tên để chuyển, mũi tên để mở / thu danh sách agent của nó
+ * (giống BridgeMind). Mỗi agent chỉ có dấu trạng thái + tên + % context; chi tiết ở chú thích.
+ */
 export function Sidebar(): React.JSX.Element {
-  const { items, setActive, add, remove } = useWorkspaces()
-  const [inspection, setInspection] = useState<WorkspaceInspection | null>(null)
-  const [report, setReport] = useState<CreateWorkspaceResult | null>(null)
-  const [collapsed, setCollapsed] = useState<string[]>([])
-  const openSettings = useUi((s) => s.openSettings)
-
-  async function newWorkspace(): Promise<void> {
-    const path = await window.stag.workspace.pick()
-    if (!path) return
-    const info = await window.stag.workspace.inspect(path)
-    if (info.existing) {
-      setActive(info.existing.id)
-      return
-    }
-    setInspection(info)
-  }
+  const { items, activeId, remove } = useWorkspaces()
+  // Workspace đang xem luôn mở; workspace khác chỉ mở khi người dùng bấm mũi tên.
+  const [opened, setOpened] = useState<string[]>([])
+  useEffect(() => {
+    if (activeId) setOpened((o) => (o.includes(activeId) ? o : [...o, activeId]))
+  }, [activeId])
 
   async function removeWorkspace(id: string, name: string): Promise<void> {
     if (
@@ -42,77 +36,62 @@ export function Sidebar(): React.JSX.Element {
   }
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-panel">
-      <div className="px-4 py-3 text-[15px] font-semibold tracking-tight">stag.ai</div>
-      <div className="px-4 pb-1 text-[11px] uppercase tracking-wider text-muted">Workspaces</div>
+    <aside className="flex w-56 shrink-0 flex-col overflow-hidden border-r border-line bg-bg">
+      <div className="flex shrink-0 items-center gap-1.5 px-3 pt-3 pb-1 text-[11px] font-semibold tracking-[0.08em] text-dim">
+        WORKSPACE
+        <button
+          onClick={() => void startNewWorkspace()}
+          data-tip="Workspace mới"
+          aria-label="Workspace mới"
+          className="-mr-1 ml-auto grid h-5 w-5 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-fg"
+        >
+          <Icon name="plus" size="s" />
+        </button>
+      </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
         {items.map((w) => (
           <WorkspaceGroup
             key={w.id}
             ws={w}
-            open={!collapsed.includes(w.id)}
-            onToggle={() => setCollapsed((c) => (c.includes(w.id) ? c.filter((x) => x !== w.id) : [...c, w.id]))}
-            onRemove={() => removeWorkspace(w.id, w.name)}
+            open={opened.includes(w.id)}
+            onToggle={() => setOpened((o) => (o.includes(w.id) ? o.filter((x) => x !== w.id) : [...o, w.id]))}
+            onRemove={() => void removeWorkspace(w.id, w.name)}
           />
         ))}
-        <button onClick={newWorkspace} className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-muted hover:bg-panel-2 hover:text-fg">
-          + Workspace
-        </button>
+        {items.length === 0 && (
+          <button
+            onClick={() => void startNewWorkspace()}
+            className="mx-3 mt-2 w-[calc(100%-1.5rem)] rounded-md border border-dashed border-line-2 px-3 py-3 text-left text-[12px] text-muted hover:border-line-3 hover:text-fg"
+          >
+            + Chọn thư mục dự án để tạo workspace
+          </button>
+        )}
       </div>
-
       <SidebarPluginLinks />
-      <button
-        onClick={() => openSettings()}
-        className="m-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg"
-        title="Cài đặt (Ctrl+,). Chỉnh template vault: Cài đặt → Vault & mẫu"
-      >
-        Cài đặt…
-      </button>
-
-      {inspection && (
-        <CreateWorkspaceDialog
-          inspection={inspection}
-          onClose={() => setInspection(null)}
-          onCreated={(r) => {
-            add(r.workspace)
-            setInspection(null)
-            setReport(r)
-          }}
-        />
-      )}
-      {report && <CreateReport result={report} onClose={() => setReport(null)} />}
     </aside>
   )
 }
 
-/** Một workspace và danh sách agent của nó (giống danh sách phiên của Claude Code). */
-function WorkspaceGroup({
-  ws,
-  open,
-  onToggle,
-  onRemove
-}: {
-  ws: Workspace
-  open: boolean
-  onToggle: () => void
-  onRemove: () => void
-}): React.JSX.Element {
-  const active = useWorkspaces((s) => s.activeId === ws.id)
+/** Một workspace và danh sách agent của nó. */
+function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open: boolean; onToggle: () => void; onRemove: () => void }): React.JSX.Element {
+  const current = useWorkspaces((s) => s.activeId === ws.id)
   const setActive = useWorkspaces((s) => s.setActive)
   const state = useAgents((s) => s.byWs[ws.id])
+  const statuses = useBoard((s) => s.byWs[ws.id]?.statuses)
   const loadAgents = useAgents((s) => s.load)
   const loadBoard = useBoard((s) => s.load)
   const setNewAgent = useUi((s) => s.setNewAgent)
   const setTab = useUi((s) => s.setTab)
   const moveAgent = useAgents((s) => s.moveAgent)
+  const [menu, setMenu] = useState(false)
   /** Chỗ sẽ chèn agent đang kéo: trước dòng thứ `dropAt` (= số dòng: cuối danh sách). */
   const [dropAt, setDropAt] = useState<number | null>(null)
   const count = state?.agents.length ?? 0
-  const markFor = (i: number): 'before' | 'after' | null =>
-    dropAt === i ? 'before' : dropAt === count && i === count - 1 ? 'after' : null
+  const waiting = state && statuses ? statuses.filter((st) => st.activity === 'waiting' && state.running[st.agentId]).length : 0
+  const markFor = (i: number): 'before' | 'after' | null => (dropAt === i ? 'before' : dropAt === count && i === count - 1 ? 'after' : null)
 
-  // Nạp agent + trạng thái để thanh bên có chấm trạng thái cho mọi workspace, kể cả chưa mở.
+  // Nạp agent + trạng thái để thanh bên có dấu trạng thái cho mọi workspace, kể cả chưa mở.
   useEffect(() => {
     if (!useAgents.getState().byWs[ws.id]) loadAgents(ws.id)
     if (!useBoard.getState().byWs[ws.id]) loadBoard(ws.id)
@@ -125,39 +104,86 @@ function WorkspaceGroup({
   }
 
   return (
-    <div className="mb-1">
+    <div className={`mt-px ${open ? 'pb-1' : ''}`}>
       <div
         onClick={() => {
           setActive(ws.id)
           if (!open) onToggle()
         }}
-        title={ws.path}
-        className={`group flex cursor-pointer items-center gap-1 rounded-md py-1.5 pr-1 pl-1 ${
-          active ? 'bg-panel-2 text-fg' : 'text-muted hover:bg-panel-2/60 hover:text-fg'
+        data-tip={`${ws.path}${current ? '' : '\nBấm để chuyển sang workspace này'}`}
+        data-tip-side="right"
+        className={`group relative mx-1.5 flex h-7 cursor-pointer items-center gap-1.5 rounded-md pr-[3px] pl-2.5 font-medium whitespace-nowrap hover:bg-panel-2 hover:text-fg ${
+          current ? 'bg-panel-2 font-semibold text-fg' : 'text-muted'
         }`}
       >
+        <span className="min-w-0 truncate">{ws.name}</span>
+        <span className="flex-1" />
+        {waiting > 0 && !open && (
+          <span className="shrink-0 rounded-full bg-wait px-1.5 font-mono text-[11px] leading-4 font-semibold text-[#1a1300]" data-tip={`${waiting} agent chờ bạn`}>
+            {waiting}
+          </span>
+        )}
+        <span className="min-w-5 shrink-0 rounded-full bg-panel-3 px-1.5 text-center font-mono text-[11px] leading-4 text-dim">{count}</span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setMenu(!menu)
+          }}
+          data-tip="Thao tác"
+          className={`h-5 w-5 shrink-0 place-items-center rounded text-dim hover:bg-panel-3 hover:text-fg ${menu ? 'grid' : 'hidden group-hover:grid'}`}
+        >
+          <Icon name="more" size="s" />
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation()
             onToggle()
           }}
-          className="w-4 shrink-0 text-[10px] text-muted hover:text-fg"
-          title={open ? 'Thu gọn' : 'Mở rộng'}
+          data-tip={open ? 'Thu gọn' : 'Mở rộng'}
+          className="grid h-5 w-5 shrink-0 place-items-center rounded text-dim hover:bg-panel-3 hover:text-fg"
         >
-          {open ? '▾' : '▸'}
+          <Icon name="cd" size="s" className={`transition-transform ${open ? '' : '-rotate-90'}`} />
         </button>
-        <span className="min-w-0 flex-1 truncate font-medium">{ws.name}</span>
-        <HoverBtn title="Thêm agent" onClick={newAgent}>
-          +
-        </HoverBtn>
-        <HoverBtn title="Bỏ workspace khỏi app" onClick={onRemove}>
-          ×
-        </HoverBtn>
+        {menu && (
+          <>
+            <div
+              className="fixed inset-0 z-10"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenu(false)
+              }}
+            />
+            <div className="absolute top-full right-0 z-20 mt-1 w-52 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 text-[13px] font-normal text-fg shadow-[0_14px_40px_rgba(0,0,0,.6)]">
+              <MenuItem
+                label="Thêm agent"
+                onClick={() => {
+                  setMenu(false)
+                  newAgent()
+                }}
+              />
+              <MenuItem
+                label="Mở thư mục dự án"
+                onClick={() => {
+                  setMenu(false)
+                  void window.stag.openFolder(ws.path)
+                }}
+              />
+              <div className="my-1 border-t border-line-2" />
+              <MenuItem
+                label="Bỏ workspace khỏi app…"
+                danger
+                onClick={() => {
+                  setMenu(false)
+                  onRemove()
+                }}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {open && state && (
         <div
-          className="mt-0.5 ml-3 border-l border-line pl-1.5"
           onDragLeave={(e) => {
             if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null)
           }}
@@ -185,7 +211,7 @@ function WorkspaceGroup({
             />
           ))}
           {!state.agents.length && (
-            <button onClick={newAgent} className="w-full rounded-md px-2 py-1 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg">
+            <button onClick={newAgent} className="mr-1.5 ml-3.5 block w-[calc(100%-1.25rem)] rounded-md px-2.5 py-1 text-left text-[12px] text-muted hover:bg-panel-2 hover:text-fg">
               + Tạo agent
             </button>
           )}
@@ -216,16 +242,13 @@ function AgentRow({
   onDragDone: () => void
 }): React.JSX.Element {
   const state = useAgents((s) => s.byWs[ws.id])!
-  const { start, stop, hide, remove } = useAgents()
   const status = useBoard((s) => s.byWs[ws.id]?.statuses.find((x) => x.agentId === agent.id))
   const wsActive = useWorkspaces((s) => s.activeId === ws.id)
-  const onAgentsTab = useUi((s) => s.tab === 'agents')
-  const openSettings = useUi((s) => s.openSettings)
+  const onAgentsTab = useUi((s) => s.tab === 'agents' && s.settings === null)
   const selected = wsActive && onAgentsTab && state.focused === agent.id
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(false)
-  const pluginItems = usePlugins((s) => s.items)
-  const settingsValue = useSettings((s) => s.value)
+  const handoff = useHandoffFor(agent.id)
   const [dragging, setDragging] = useState(false)
 
   const running = !!state.running[agent.id]
@@ -234,41 +257,11 @@ function AgentRow({
   const terminal = agentKind(agent) === 'terminal'
   const external = agentKind(agent) === 'external'
   const view = statusView(running, starting, status, agentKind(agent))
+  const ctx = running && !terminal ? contextView(status, handoff) : null
 
-  /** Mở ô rồi mới mở phiên, để terminal đã có kích thước thật. */
-  function openAndStart(resume: boolean): void {
-    openAgent(ws.id, agent.id)
-    requestAnimationFrame(() => requestAnimationFrame(() => start(ws.id, agent.id, resume)))
-  }
-
-  async function removeAgent(): Promise<void> {
-    const msg = terminal
-      ? `Xoá terminal "${agent.name}"? Terminal đang mở sẽ bị đóng.`
-      : `Xoá agent "${agent.name}"?\n\n` +
-        `• Dừng phiên nếu đang chạy\n` +
-        `• Chuyển note 60 Agents/${agent.name}.md trong vault vào Thùng rác (khôi phục được)\n` +
-        `• Bỏ thẻ việc đang dở trên kanban\n\n` +
-        `Lịch sử việc đã xong trên kanban được giữ.`
-    if (!window.confirm(msg)) return
-    try {
-      await remove(ws.id, agent.id)
-    } catch (e) {
-      window.alert(String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
-    }
-  }
-
-  const item = (label: string, fn: () => void, danger = false): React.JSX.Element => (
-    <button
-      onClick={(e) => {
-        e.stopPropagation()
-        setMenu(false)
-        fn()
-      }}
-      className={`block w-full px-3 py-1.5 text-left hover:bg-panel-2 ${danger ? 'text-red-300' : ''}`}
-    >
-      {label}
-    </button>
-  )
+  const tip =
+    `${agent.name}${agent.role ? ` · ${agent.role}` : ''}\n${view.label}${ctx ? ` · ctx ${ctx.text}` : ''}` +
+    `${shown ? '' : '\nÔ đang đóng · bấm để mở'}\nKéo để sắp xếp · bấm đúp để đổi tên`
 
   return (
     <div
@@ -286,7 +279,7 @@ function AgentRow({
         onDropRow()
       }}
     >
-      {mark && <div className={`pointer-events-none absolute right-1 left-0 z-10 h-0.5 rounded bg-accent ${mark === 'before' ? '-top-px' : '-bottom-px'}`} />}
+      {mark && <div className={`pointer-events-none absolute right-1.5 left-3.5 z-10 h-0.5 rounded bg-accent ${mark === 'before' ? '-top-px' : '-bottom-px'}`} />}
       <div
         draggable
         onDragStart={(e) => {
@@ -303,69 +296,36 @@ function AgentRow({
         }}
         onClick={() => openAgent(ws.id, agent.id)}
         onDoubleClick={() => setRenaming(true)}
-        title={`${agent.name}${agent.role ? ` · ${agent.role}` : ''} — ${view.label}${shown ? '' : ' (ô đang đóng)'}\nKéo để sắp xếp · double-click để đổi tên`}
-        className={`group flex cursor-pointer items-center gap-2 rounded-md py-1 pr-1 pl-2 ${dragging ? 'opacity-40' : ''} ${
-          selected ? 'bg-panel-2 text-fg' : shown || running ? 'text-fg/85 hover:bg-panel-2/60' : 'text-muted hover:bg-panel-2/60 hover:text-fg'
+        data-tip={tip}
+        data-tip-side="right"
+        className={`group mr-1.5 ml-3.5 flex h-7 cursor-pointer items-center gap-2 rounded-md pr-1 pl-2.5 hover:bg-panel-2 ${dragging ? 'opacity-40' : ''} ${
+          selected ? 'bg-panel-3' : ''
         }`}
       >
-        <span className={`h-2 w-2 shrink-0 rounded-full ${view.dot}`} />
-        <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-        {terminal && <span className="shrink-0 font-mono text-[10px] text-muted">&gt;_</span>}
-        {view.waiting && <span className="shrink-0 text-[11px] text-amber-300 group-hover:hidden">chờ bạn</span>}
-        {running && !view.waiting && <ContextBadge status={status} className="group-hover:hidden" />}
+        <span className={`sdot ${view.mark}`} />
+        <span className={`min-w-0 flex-1 truncate font-medium ${shown || running ? '' : 'text-dim'}`}>{agent.name}</span>
+        {ctx && (
+          <span className={`shrink-0 font-mono text-[11px] tabular-nums group-hover:hidden ${ctx.tone === 'full' ? 'text-danger' : 'text-dim'}`}>{ctx.text}</span>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation()
             setMenu(!menu)
           }}
-          className={`shrink-0 rounded px-1 text-muted hover:bg-line hover:text-fg ${menu ? '' : 'hidden group-hover:block'}`}
-          title="Thao tác"
+          data-tip="Thao tác"
+          className={`h-5 w-5 shrink-0 place-items-center rounded text-dim hover:bg-panel-3 hover:text-fg ${menu ? 'grid' : 'hidden group-hover:grid'}`}
         >
-          ⋯
+          <Icon name="more" size="s" />
         </button>
       </div>
 
       {menu && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
-          <div className="absolute top-full right-1 z-20 w-48 overflow-hidden rounded-md border border-line bg-panel py-0.5 shadow-lg">
-            {!shown && item('Mở ô', () => openAgent(ws.id, agent.id))}
-            {!running && !starting && item(terminal ? 'Mở terminal' : 'Phiên mới', () => openAndStart(false))}
-            {!terminal && !running && !starting && agent.lastSessionId && item('Tiếp tục phiên trước', () => openAndStart(true))}
-            {!terminal && !external && running && item('Bàn giao sang phiên mới', () => void handoffNow(agent.id))}
-            {running && item(terminal ? 'Đóng terminal' : 'Dừng phiên', () => stop(agent.id))}
-            {shown && item('Đóng ô', () => hide(ws.id, agent.id))}
-            {item('Đổi tên…', () => setRenaming(true))}
-            {external
-              ? item('Cài đặt adapter…', () => openSettings('adapters', { external: agent.adapterId }))
-              : !terminal && item('Model & effort…', () => openSettings('adapters', { adapter: agentKind(agent) as 'claude' | 'codex', agentId: agent.id }))}
-            {!terminal && item('Connector (MCP)…', () => openSettings('connectors', { agentId: agent.id }))}
-            {!terminal && item('Skill…', () => openSettings('skills', { agentId: agent.id }))}
-            {!terminal &&
-              slotsOf(pluginItems, settingsValue, 'agentMenu', ws.id, agent.id).map(({ plugin, slot }) => (
-                <span key={`${plugin.manifest.id}:${slot.id}`}>{item(slot.displayName, () => void runSlot(plugin, slot, ws.id, agent.id))}</span>
-              ))}
-            <div className="my-0.5 border-t border-line" />
-            {item(terminal ? 'Xoá terminal…' : 'Xoá agent…', removeAgent, true)}
-          </div>
+          <AgentMenuPanel ws={ws} agent={agent} onClose={() => setMenu(false)} onRename={() => setRenaming(true)} className="absolute top-full right-1.5" />
         </>
       )}
       {renaming && <RenameAgentDialog wsId={ws.id} agentId={agent.id} onClose={() => setRenaming(false)} />}
     </div>
-  )
-}
-
-function HoverBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }): React.JSX.Element {
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation()
-        onClick()
-      }}
-      className="hidden shrink-0 rounded px-1 text-muted hover:bg-line hover:text-fg group-hover:block"
-      title={title}
-    >
-      {children}
-    </button>
   )
 }

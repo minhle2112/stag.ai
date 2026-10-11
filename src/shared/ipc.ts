@@ -43,6 +43,16 @@ export const IPC = {
   browserAsk: 'browser:ask',
   browserAnswer: 'browser:answer',
   agentRename: 'agent:rename',
+  /** Phát một tin cho nhiều agent (BroadcastRequest → BroadcastResult). */
+  agentBroadcast: 'agent:broadcast',
+  /** Đổi giao diện ô của agent (CLI ↔ chat); chỉ khi không có phiên chạy. */
+  agentSetCell: 'agent:set-cell',
+  /** Ô chat (shared/chat.ts): lấy danh sách + trạng thái, gửi tin, ngắt lượt, trả lời xin quyền; main → renderer: chatEvent. */
+  chatSnapshot: 'chat:snapshot',
+  chatSend: 'chat:send',
+  chatInterrupt: 'chat:interrupt',
+  chatPermission: 'chat:permission',
+  chatEvent: 'chat:event',
   agentReorder: 'agent:reorder',
   browserDevTools: 'browser:devtools',
   vaultIndex: 'vault:index',

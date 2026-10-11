@@ -8,21 +8,21 @@ import { errorLogOnce, loadStatusText, statusSlotClickable, STATUS_BAR_CHANNEL, 
 const errors = errorLogOnce()
 
 /**
- * Thanh trạng thái dưới cùng cửa sổ: mỗi slot `statusBarItem` của plugin đang chạy và bật cho workspace đang xem là
- * một mục. Không có mục nào thì không hiện thanh.
+ * Các mục plugin của thanh trạng thái (`StatusBar`): mỗi slot `statusBarItem` của plugin đang chạy và bật cho
+ * workspace đang xem là một mục. Không có mục nào thì không hiện gì.
  */
-export function PluginStatusBar(): React.JSX.Element | null {
+export function PluginStatusItems(): React.JSX.Element | null {
   const items = usePlugins((s) => s.items)
   const settings = useSettings((s) => s.value)
   const ws = useActiveWorkspace()
   const slots = slotsOf(items, settings, 'statusBarItem', ws?.id)
   if (!slots.length) return null
   return (
-    <footer className="flex h-[22px] shrink-0 items-stretch overflow-hidden border-t border-line bg-panel px-1 text-[11px]">
+    <>
       {slots.map(({ plugin, slot }) => (
         <StatusItem key={`${plugin.manifest.id}:${slot.id}`} plugin={plugin} slot={slot} workspaceId={ws?.id} />
       ))}
-    </footer>
+    </>
   )
 }
 
@@ -74,7 +74,7 @@ function StatusItem({ plugin, slot, workspaceId }: { plugin: InstalledPlugin; sl
       <span className="truncate">{value.text}</span>
     </>
   )
-  const cls = `flex max-w-[280px] items-center gap-1.5 px-2 ${tone.text}`
+  const cls = `flex h-[22px] max-w-[280px] items-center gap-1.5 rounded px-2 ${tone.text}`
   if (!statusSlotClickable(slot))
     return (
       <span className={`${cls} cursor-default`} title={title}>

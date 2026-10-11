@@ -1,4 +1,5 @@
 import type { VaultSearchHit } from '@shared/types'
+import { Icon } from '../Icon'
 import { highlight } from './highlight'
 
 function Marked({ text, query }: { text: string; query: string }): React.JSX.Element {
@@ -29,28 +30,39 @@ export function SearchResults({
   selected: string | null
   onOpen: (rel: string, line?: number) => void
 }): React.JSX.Element {
-  if (!hits) return <div className="px-3 text-muted">Đang tìm…</div>
-  if (!hits.length) return <div className="px-3 text-muted">Không thấy note nào.</div>
+  if (!hits) return <div className="px-3 py-1 text-dim">Đang tìm…</div>
+  if (!hits.length) return <div className="px-3 py-1 text-dim">Không thấy note nào.</div>
   return (
-    <div className="space-y-1">
+    <div>
+      <div className="flex min-h-[30px] items-center px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-dim">KẾT QUẢ · {hits.length}</div>
       {hits.map((h) => {
         const i = h.rel.lastIndexOf('/')
         const name = h.rel.slice(i + 1).replace(/\.md$/i, '')
         const dir = i === -1 ? '' : h.rel.slice(0, i)
         return (
-          <div key={h.rel} className={`px-3 py-1 ${selected === h.rel ? 'bg-panel-2' : ''}`}>
-            <div className="cursor-pointer truncate text-fg hover:text-accent" onClick={() => onOpen(h.rel)} title={h.rel}>
-              <Marked text={name} query={query} />
+          <div key={h.rel} className={`pb-1 ${selected === h.rel ? 'bg-panel-3' : ''}`}>
+            <div
+              className="flex min-w-0 cursor-pointer items-center gap-1.5 px-2.5 py-[3px] text-muted hover:bg-panel-2 hover:text-fg"
+              onClick={() => onOpen(h.rel)}
+              data-tip={h.rel}
+              data-tip-side="right"
+            >
+              <Icon name="file" className="text-dim" />
+              <span className="min-w-0 flex-1 truncate">
+                <Marked text={name} query={query} />
+                {dir && <small className="ml-1.5 text-[11px] text-dim">{dir}</small>}
+              </span>
             </div>
-            {dir && <div className="truncate text-[11px] text-muted">{dir}</div>}
             {h.matches.map((m) => (
               <div
                 key={m.line}
                 onClick={() => onOpen(h.rel, m.line)}
-                className="mt-0.5 cursor-pointer rounded px-1 py-0.5 text-[12px] leading-snug break-words text-muted hover:bg-panel-2 hover:text-fg"
+                className="flex cursor-pointer gap-1.5 py-0.5 pr-2.5 pl-[34px] text-[12px] leading-snug break-words text-dim hover:bg-panel-2 hover:text-muted"
               >
-                <span className="mr-1 text-[10px] opacity-60">{m.line}</span>
-                <Marked text={m.text} query={query} />
+                <span className="w-5 shrink-0 text-right font-mono text-[11px] opacity-70">{m.line}</span>
+                <span className="min-w-0">
+                  <Marked text={m.text} query={query} />
+                </span>
               </div>
             ))}
           </div>

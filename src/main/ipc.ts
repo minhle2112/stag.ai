@@ -13,7 +13,8 @@ import { connectFromCatalog } from './connect'
 import { readSkillDir, scanSkills, type SkillLibrary } from './skills'
 import type { PluginCallContext, PluginHost } from './plugins'
 import type { PluginInstallRequest, PluginScaffoldRequest } from '@shared/plugins'
-import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
+import type { ChatPermissionAnswer, ChatSendRequest } from '@shared/chat'
+import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, BroadcastRequest, CreateAgentRequest, CreateWorkspaceRequest, LayoutNode, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
 import type { ExternalAdapterStore } from './externalAdapters'
@@ -82,6 +83,12 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.agentSnapshot, (_e, workspaceId: string) => agents.snapshot(workspaceId))
   ipcMain.handle(IPC.agentCreate, (_e, req: CreateAgentRequest) => agents.create(req))
   ipcMain.handle(IPC.agentStart, (e, req: StartAgentRequest) => agents.start(e.sender, req))
+  ipcMain.handle(IPC.agentBroadcast, (_e, req: BroadcastRequest) => agents.broadcast(req))
+  ipcMain.handle(IPC.agentSetCell, (_e, agentId: string, cell: 'cli' | 'chat') => agents.setCell(agentId, cell))
+  ipcMain.handle(IPC.chatSnapshot, (_e, agentId: string) => agents.chatSnapshot(agentId))
+  ipcMain.handle(IPC.chatSend, (_e, req: ChatSendRequest) => agents.chatSend(req))
+  ipcMain.handle(IPC.chatInterrupt, (_e, agentId: string) => agents.chatInterrupt(agentId))
+  ipcMain.handle(IPC.chatPermission, (_e, a: ChatPermissionAnswer) => agents.chatPermission(a))
   ipcMain.handle(IPC.agentStop, (_e, agentId: string) => agents.stop(agentId))
   ipcMain.handle(IPC.agentRemove, async (_e, agentId: string) => {
     await agents.remove(agentId)

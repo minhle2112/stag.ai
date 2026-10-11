@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { ALWAYS_SHARED, parseScope, projectRel } from '@shared/scope'
 import { resolveScope } from '@shared/settings'
-import { agentKind, type ScopeLockSettings, type ScopeMode } from '@shared/types'
-import { useAgents } from '../../store/agents'
+import { type ScopeLockSettings, type ScopeMode } from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { useWorkspaces } from '../../store/workspaces'
-import { useLevel, type LevelKey } from './levels'
-import { ErrorBar, Group, Row, SectionTitle, Select, SmallButton, Switch, useSaveError } from './controls'
+import { Icon } from '../Icon'
+import { Seg } from '../ui/Seg'
+import { LevelBar, useLevel, type LevelKey } from './levels'
+import { ErrorBar, Group, INPUT_MONO, InfoTip, Row, SectionTitle, SmallButton, Switch, useSaveError } from './controls'
 
 const MODES: Array<{ value: ScopeMode; label: string; desc: string }> = [
   {
@@ -26,7 +27,6 @@ export function ScopeSection(): React.JSX.Element {
   const save = useSettings((s) => s.save)
   const saveOverrides = useSettings((s) => s.saveOverrides)
   const workspaces = useWorkspaces((s) => s.items)
-  const byWs = useAgents((s) => s.byWs)
   const [level, setLevel] = useState<LevelKey>('app')
   const [error, run] = useSaveError()
   const cur = useLevel(level)
@@ -49,91 +49,63 @@ export function ScopeSection(): React.JSX.Element {
     run(saveOverrides(cur.lvl === 'ws' ? 'workspace' : 'agent', cur.lvl === 'ws' ? cur.wsId! : cur.agentId!, { scope: Object.keys(next).length ? next : null }))
   }
 
-  const has = (o?: { scope?: Partial<ScopeLockSettings> }): string => (o?.scope ? ' •' : '')
-  const options = [
-    { value: 'app', label: 'Mặc định cho mọi agent' },
-    ...workspaces.flatMap((w) => [
-      { value: `ws:${w.id}`, label: `Workspace: ${w.name}${has(settings.workspaces[w.id])}` },
-      ...(byWs[w.id]?.agents ?? [])
-        .filter((a) => agentKind(a) !== 'terminal')
-        .map((a) => ({ value: `agent:${w.id}:${a.id}`, label: `↳ Agent: ${a.name}${has(settings.agents[a.id])}` }))
-    ])
-  ]
-
-  const modeValue: ScopeMode | 'inherit' = cur.lvl !== 'app' && !own.mode ? 'inherit' : effective.mode
   const shellOn = effective.guessShell
+  const off = effective.mode === 'off'
 
   return (
     <>
       <SectionTitle
         title="Khoá phạm vi"
         desc="Mỗi việc đang mở trên kanban giữ một vùng code: phạm vi agent khai khi nhận việc (task_start) cộng các file agent đó đã sửa. Agent khác định sửa vào vùng đó thì app làm theo chế độ dưới đây; việc xong hoặc bị bỏ thì nhả khoá. Thay đổi có tác dụng ngay, cả với phiên đang chạy."
+        right={<LevelBar level={level} setLevel={setLevel} has={(o) => !!o?.scope} />}
       />
       <ErrorBar error={error} />
 
-      <Group title="Áp dụng cho">
+      <Group>
         <Row
-          label="Cấp"
-          desc="Workspace ghi đè mặc định của app; agent ghi đè workspace của nó (chỉ chế độ). Chế độ tính theo agent đang định sửa; dấu ⚠ trên kanban theo cấp workspace. Dấu • = đang có giá trị riêng."
+          label="Khi agent định sửa vào phạm vi của agent khác"
+          desc="Chế độ tính theo agent đang định sửa; dấu ⚠ trên kanban theo cấp workspace. Rê chuột vào từng chế độ để xem nghĩa."
+          override={
+            cur.lvl === 'app' ? undefined : { on: !!own.mode, onReset: () => setField('mode', undefined), parent: modeLabel(parent.mode) }
+          }
         >
-          <Select label="Cấp cài đặt khoá phạm vi" value={cur.lvl === 'app' ? 'app' : level} onChange={setLevel} options={options} />
-        </Row>
-      </Group>
-
-      <Group title="Khi agent định sửa vào phạm vi của agent khác">
-        {cur.lvl !== 'app' && (
-          <ModeOption
-            checked={modeValue === 'inherit'}
-            onChange={() => setField('mode', undefined)}
-            label={`Theo ${parentName} (${modeLabel(parent.mode)})`}
+          <Seg
+            value={effective.mode}
+            onChange={(mode) => setField('mode', mode)}
+            options={MODES.map((m) => ({ value: m.value, label: m.label, tip: m.desc }))}
           />
-        )}
-        {MODES.map((m) => (
-          <ModeOption key={m.value} checked={modeValue === m.value} onChange={() => setField('mode', m.value)} label={m.label} desc={m.desc} />
-        ))}
-      </Group>
-
-      <Group title="Lệnh shell">
+        </Row>
         <Row
           label="Đoán lệnh shell"
-          desc={
-            <>
-              Lệnh Bash / PowerShell (Codex: exec_command) có dấu hiệu ghi (<code>&gt;</code>, rm, mv, cp, Set-Content, sed -i, git checkout…) và nhắc tới
-              đường dẫn đang bị khoá thì coi như sửa chỗ đó. Chỉ là đoán: bỏ sót script hoặc lệnh không ghi rõ đường dẫn, đôi khi hỏi thừa lệnh chỉ đọc file
-              bị khoá. Tắt thì chỉ xét tool sửa file (Edit / Write, apply_patch).
-              {cur.lvl === 'agent' && ` Đang theo ${parentName}.`}
-            </>
+          desc={`Lệnh Bash / PowerShell (Codex: exec_command) có dấu hiệu ghi (>, rm, mv, cp, Set-Content, sed -i, git checkout…) và nhắc tới đường dẫn đang bị khoá thì coi như sửa chỗ đó. Chỉ là đoán: bỏ sót script hoặc lệnh không ghi rõ đường dẫn, đôi khi hỏi thừa lệnh chỉ đọc file bị khoá. Tắt thì chỉ xét tool sửa file (Edit / Write, apply_patch).${cur.lvl === 'agent' ? ` Cấp agent theo ${parentName}.` : ''}`}
+          disabled={off}
+          override={
+            cur.lvl === 'ws'
+              ? { on: 'guessShell' in own, onReset: () => setField('guessShell', undefined), parent: parent.guessShell ? 'bật' : 'tắt' }
+              : undefined
           }
-          disabled={effective.mode === 'off'}
         >
-          {cur.lvl === 'app' ? (
-            <Switch label="Đoán lệnh shell" checked={shellOn} disabled={effective.mode === 'off'} onChange={(v) => setField('guessShell', v)} />
-          ) : cur.lvl === 'ws' ? (
-            <Select
-              label={`Đoán lệnh shell cho ${cur.name}`}
-              value={'guessShell' in own ? (own.guessShell ? 'on' : 'off') : 'inherit'}
-              disabled={effective.mode === 'off'}
-              onChange={(v) => setField('guessShell', v === 'inherit' ? undefined : v === 'on')}
-              options={[
-                { value: 'inherit', label: `Theo ${parentName} (${parent.guessShell ? 'bật' : 'tắt'})` },
-                { value: 'on', label: 'Bật' },
-                { value: 'off', label: 'Tắt' }
-              ]}
-            />
-          ) : (
-            <span className="text-[12.5px] text-muted">{shellOn ? 'Bật' : 'Tắt'}</span>
-          )}
+          <Switch
+            label={cur.lvl === 'app' ? 'Đoán lệnh shell' : `Đoán lệnh shell cho ${cur.name}`}
+            checked={shellOn}
+            disabled={off || cur.lvl === 'agent'}
+            onChange={(v) => setField('guessShell', v)}
+          />
         </Row>
       </Group>
 
-      <Group title="Không bao giờ khoá">
-        <div className={`px-4 py-3 ${effective.mode === 'off' ? 'opacity-50' : ''}`}>
-          <div className="text-[12px] leading-relaxed text-muted">
-            Agent luôn sửa được các chỗ này, phạm vi trùng ở đây cũng không bị cảnh báo. Mẫu viết như phạm vi việc, tương đối so với thư mục dự án, không
-            phân biệt hoa thường: <code>docs/</code>, <code>package-lock.json</code>, <code>**/*.snap</code> (mọi thư mục), <code>*.md</code> (chỉ ở gốc dự án).
-            {cur.lvl === 'ws' && ' Cộng thêm với danh sách của app.'}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+      <Group
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Không bao giờ khoá
+            <InfoTip
+              text={`Agent luôn sửa được các chỗ này, phạm vi trùng ở đây cũng không bị cảnh báo. Mẫu viết như phạm vi việc, tương đối so với thư mục dự án, không phân biệt hoa thường: docs/, package-lock.json, **/*.snap (mọi thư mục), *.md (chỉ ở gốc dự án).${cur.lvl === 'ws' ? ' Cộng thêm với danh sách của app.' : ''}`}
+            />
+          </span>
+        }
+      >
+        <div className={`border-b border-line py-2.5 ${off ? 'opacity-50' : ''}`}>
+          <div className="flex flex-wrap gap-1">
             <Chip title="Bộ nhớ chung: agent nào cũng ghi log / index">{ws ? vaultLabel(ws.path, ws.vaultPath) : 'vault của workspace'}</Chip>
             {ALWAYS_SHARED.map((p) => (
               <Chip key={p} title="Dữ liệu của app / git">
@@ -154,7 +126,7 @@ export function ScopeSection(): React.JSX.Element {
               ))}
           </div>
           {cur.lvl === 'agent' ? (
-            <div className="mt-2 text-[12px] text-muted">Danh sách miễn khoá đặt ở cấp app và workspace.</div>
+            <div className="mt-2 text-[12px] text-dim">Danh sách miễn khoá đặt ở cấp app và workspace.</div>
           ) : (
             <ExemptEditor
               items={(cur.lvl === 'app' ? settings.app.scope.exempt : own.exempt) ?? []}
@@ -169,22 +141,10 @@ export function ScopeSection(): React.JSX.Element {
   )
 }
 
-/** Một lựa chọn chế độ trong nhóm (dòng có nút tròn và một dòng giải thích). */
-function ModeOption({ checked, onChange, label, desc }: { checked: boolean; onChange: () => void; label: string; desc?: string }): React.JSX.Element {
-  return (
-    <label className={`flex cursor-pointer gap-2.5 px-4 py-2.5 ${checked ? 'bg-accent/10' : 'hover:bg-panel-2/60'}`}>
-      <input type="radio" name="scope-mode" checked={checked} onChange={onChange} className="mt-0.5" />
-      <span className="min-w-0 flex-1">
-        <span className="block text-[13px]">{label}</span>
-        {desc && <span className="mt-0.5 block text-[12px] leading-snug text-muted">{desc}</span>}
-      </span>
-    </label>
-  )
-}
-
+/** Mẫu miễn khoá (kiểu thẻ nhỏ chữ đơn cách của bản thiết kế). */
 function Chip({ children, title }: { children: React.ReactNode; title?: string }): React.JSX.Element {
   return (
-    <span title={title} className="rounded-full border border-line px-2 py-px font-mono text-[11px] text-muted">
+    <span data-tip={title} className="inline-flex h-[22px] items-center rounded border border-line-2 bg-bg px-2 font-mono text-[11px] text-muted">
       {children}
     </span>
   )
@@ -211,7 +171,6 @@ function ExemptEditor({
 }): React.JSX.Element {
   const [text, setText] = useState('')
   const [problem, setProblem] = useState('')
-  const input = 'rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12px] outline-none focus:border-accent'
   const add = (): void => {
     const t = text.trim()
     if (!t) return
@@ -225,17 +184,18 @@ function ExemptEditor({
     setProblem('')
   }
   return (
-    <div className="mt-3">
+    <div className="mt-2">
       {items.map((p) => (
-        <div key={p} className="flex items-center gap-2 border-t border-line py-1.5">
+        <div key={p} className="flex items-center gap-2 border-t border-line py-1">
           <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{p}</span>
           <button
             type="button"
             aria-label={`Bỏ ${p}`}
+            data-tip="Bỏ mẫu này"
             onClick={() => onChange(items.filter((x) => x !== p))}
-            className="rounded px-1.5 text-muted hover:bg-line hover:text-fg"
+            className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-fg"
           >
-            ✕
+            <Icon name="x" size="s" />
           </button>
         </div>
       ))}
@@ -250,13 +210,13 @@ function ExemptEditor({
             setProblem('')
           }}
           onKeyDown={(e) => e.key === 'Enter' && add()}
-          className={`${input} flex-1`}
+          className={`${INPUT_MONO} min-w-0 flex-1`}
         />
-        <SmallButton onClick={add} disabled={!text.trim()}>
+        <SmallButton icon="plus" onClick={add} disabled={!text.trim()}>
           Thêm
         </SmallButton>
       </div>
-      {problem && <div className="mt-1 text-[11.5px] text-red-300">{problem}</div>}
+      {problem && <div className="mt-1 text-[12px] text-danger">{problem}</div>}
     </div>
   )
 }

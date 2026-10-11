@@ -4,8 +4,8 @@ import { contextView } from '../status'
 
 const TONE = {
   normal: 'text-muted',
-  warn: 'text-amber-300',
-  full: 'text-red-300'
+  warn: 'text-wait',
+  full: 'text-danger'
 } as const
 
 /** % context của phiên (hoặc số token khi chưa biết kích thước cửa sổ). Chưa có số thì không hiện gì. */
@@ -16,7 +16,7 @@ export function ContextBadge({ status, className = '' }: { status: AgentStatus |
   return (
     <span className={`shrink-0 font-mono text-[11px] tabular-nums ${TONE[v.tone]} ${className}`} title={v.title}>
       ctx {v.text}
-      {v.failed && <span className="ml-0.5 text-red-300">!</span>}
+      {v.failed && <span className="ml-0.5 text-danger">!</span>}
     </span>
   )
 }

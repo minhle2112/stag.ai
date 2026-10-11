@@ -1,9 +1,18 @@
 import type { VaultActivity } from '@shared/types'
 
+// Huy hiệu agent trong Vault dùng đúng màu avatar (ui/AgentAvatar, khoá theo tên): một danh tính cho mỗi agent.
+export { agentColor as avatarColor } from '../ui/AgentAvatar'
+
 /** Hoạt động trong khoảng này được coi là "gần đây" (chấm trên cây, quầng trên graph). */
 export const RECENT_MS = 15 * 60_000
 
-/** Màu riêng của mỗi agent (băm id → sắc độ), dùng chung cho cây, note và graph. */
+/** Hoạt động trong khoảng này được coi là "đang diễn ra" (huy hiệu agent có vòng đập nhịp). */
+export const LIVE_MS = 90_000
+
+/** Chữ cái đại diện của agent trên huy hiệu. */
+export const agentInitial = (name: string): string => name.trim().charAt(0).toUpperCase() || '?'
+
+/** Màu theo id agent (băm → sắc độ). Cũ: Vault đã chuyển sang `avatarColor(tên)`; chỗ khác (Artifacts) còn dùng. */
 export function agentColor(agentId: string): string {
   let h = 2166136261
   for (let i = 0; i < agentId.length; i++) h = Math.imul(h ^ agentId.charCodeAt(i), 16777619)

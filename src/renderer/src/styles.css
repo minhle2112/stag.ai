@@ -1,15 +1,35 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-bg: #0f1115;
-  --color-panel: #161920;
-  --color-panel-2: #1d212a;
-  --color-line: #2a2f3a;
-  --color-fg: #e6e8ee;
-  --color-muted: #8b93a7;
-  --color-accent: #6ea8fe;
-  --font-sans: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
+  /* Bảng màu "Xưởng" (design/v2/1-xuong.html). Tên cũ (bg / panel / panel-2 / line / fg / muted / accent)
+     giữ nguyên để mọi component tự đổi màu; thêm các bậc và màu ngữ nghĩa mới. */
+  --color-bg0: #08090b; /* thanh tiêu đề, thanh icon trái, thanh trạng thái */
+  --color-bg: #0c0e10; /* vùng làm việc, thanh bên */
+  --color-panel: #101215; /* ô, hộp thoại, cột, thẻ */
+  --color-panel-2: #16191d; /* rê chuột, nút phụ */
+  --color-panel-3: #1d2126; /* đang chọn */
+  --color-line: #1e2227; /* vạch ngăn */
+  --color-line-2: #2a2f36; /* viền ô nhập, nút */
+  --color-line-3: #3a4048;
+  --color-fg: #dde1e6;
+  --color-muted: #99a0aa;
+  --color-dim: #69717b;
+  /* Teal = điểm nhấn · xanh lá = đang chạy · hổ phách = chờ bạn · đỏ = nguy hiểm · xanh dương = bàn giao */
+  --color-accent: #2de2c0;
+  --color-accent-on: #03201a;
+  --color-work: #3ddc84;
+  --color-wait: #f4b544;
+  --color-danger: #f26a5f;
+  --color-info: #6aa9ff;
+  --color-neutral: #7c8590;
+  --font-sans: 'Inter Variable', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+/* Thanh cuộn mảnh như bản thiết kế. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #262b31 transparent;
 }
 
 html,
@@ -35,7 +55,7 @@ body {
 .xterm,
 .xterm .xterm-viewport {
   height: 100%;
-  background-color: var(--color-bg) !important;
+  background-color: var(--color-panel) !important;
 }
 
 /* xterm 6 tự vẽ thanh cuộn; ẩn thanh cuộn gốc của Chromium trên viewport. */
@@ -244,4 +264,88 @@ body {
   100% {
     background: transparent;
   }
+}
+
+/* Icon nét cố định 1.5px dù co giãn (như bản thiết kế). */
+.ic * {
+  vector-effect: non-scaling-stroke;
+}
+
+/* Vùng kéo cửa sổ của thanh tiêu đề tự vẽ (Windows). */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Dấu trạng thái agent kiểu Claude desktop (thanh bên, danh sách): vòng xoay = đang chạy, chấm hổ phách = cần bạn. */
+.sdot {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+}
+.sdot.ok,
+.sdot.in {
+  border: 2px solid rgba(61, 220, 132, 0.2);
+  border-top-color: var(--color-work);
+  border-right-color: var(--color-work);
+  animation: sdot-spin 0.9s linear infinite;
+}
+.sdot.in {
+  border-color: rgba(106, 169, 255, 0.2);
+  border-top-color: var(--color-info);
+  border-right-color: var(--color-info);
+}
+.sdot.wa,
+.sdot.off,
+.sdot.tm {
+  width: 8px;
+  height: 8px;
+  margin: 1px;
+}
+.sdot.wa {
+  background: var(--color-wait);
+  animation: sdot-pulse 1.6s infinite;
+}
+.sdot.off {
+  background: var(--color-dim);
+  opacity: 0.55;
+}
+.sdot.tm {
+  background: var(--color-info);
+  opacity: 0.6;
+}
+@keyframes sdot-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes sdot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 181, 68, 0.7);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px rgba(244, 181, 68, 0);
+  }
+}
+
+/* Lưới ô của workspace không hiện vẫn giữ nguyên kích thước (terminal không bị fit lại). Thanh cuộn của xterm tự đặt
+   visibility inline nên .invisible của Tailwind không ẩn được chúng: ép cả cây con. */
+.view-hidden,
+.view-hidden * {
+  visibility: hidden !important;
+}
+
+/* JetBrains Mono ghép === thành một vạch ba: code cần đọc từng ký tự. */
+.font-mono,
+code,
+pre,
+.cm-editor {
+  font-variant-ligatures: none;
+  font-feature-settings: 'calt' 0;
 }

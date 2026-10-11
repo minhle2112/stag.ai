@@ -5,16 +5,20 @@ import { agentKind, type Agent, type AgentStatus, type Task, type Workspace } fr
 import { openAgent, useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
 import { useSettings } from '../store/settings'
+import { useUi } from '../store/ui'
 import { ago, localDay, statusView } from '../status'
 import { ContextBadge } from './ContextBadge'
+import { Icon, type IconName } from './Icon'
+import { AgentAvatar } from './ui/AgentAvatar'
+import { Seg } from './ui/Seg'
 
 type ColumnId = 'asking' | 'doing' | 'waiting' | 'done'
 
-const COLUMNS: Array<{ id: ColumnId; label: string; hint: string }> = [
-  { id: 'asking', label: 'Đang hỏi việc', hint: 'Agent đang chạy, chưa nhận việc' },
-  { id: 'doing', label: 'Đang làm', hint: 'Agent đang làm việc đã nhận' },
-  { id: 'waiting', label: 'Chờ bạn', hint: 'Agent cần bạn trả lời, duyệt quyền, hoặc phiên đã dừng giữa chừng' },
-  { id: 'done', label: 'Xong', hint: 'Việc agent đã báo xong' }
+const COLUMNS: Array<{ id: ColumnId; label: string; hint: string; dot: string }> = [
+  { id: 'asking', label: 'Đang hỏi việc', hint: 'Agent đang chạy, chưa nhận việc', dot: 'bg-neutral' },
+  { id: 'doing', label: 'Đang làm', hint: 'Agent đang làm việc đã nhận', dot: 'bg-work' },
+  { id: 'waiting', label: 'Chờ bạn', hint: 'Agent cần bạn trả lời, duyệt quyền, hoặc phiên đã dừng giữa chừng', dot: 'bg-wait' },
+  { id: 'done', label: 'Xong', hint: 'Việc agent đã báo xong', dot: 'bg-line-3' }
 ]
 
 interface AgentCardData {
@@ -51,7 +55,9 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
   const loadBoard = useBoard((s) => s.load)
   const loadAgents = useAgents((s) => s.load)
   const settings = useSettings((s) => s.value)
+  const setNewAgent = useUi((s) => s.setNewAgent)
   const [showOld, setShowOld] = useState(false)
+  const [onlyWaiting, setOnlyWaiting] = useState(false)
   const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
@@ -103,21 +109,55 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
     if (agentsState.agents.some((a) => a.id === agentId)) openAgent(wsId, agentId)
   }
 
+  const waitingCount = cards.waiting.length
+
   return (
     <div className="absolute inset-0 flex flex-col">
-      <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
+      <div className="flex h-[38px] shrink-0 items-center gap-1.5 border-b border-line px-2.5">
+        <Seg
+          value={onlyWaiting ? 'wait' : 'all'}
+          onChange={(v) => setOnlyWaiting(v === 'wait')}
+          options={[
+            { value: 'all', label: 'Tất cả' },
+            {
+              value: 'wait',
+              label: (
+                <>
+                  Chờ bạn
+                  {waitingCount > 0 && <span className="font-mono text-[11px] text-wait">{waitingCount}</span>}
+                </>
+              ),
+              tip: 'Làm mờ các cột khác, chỉ giữ việc đang chờ bạn'
+            }
+          ]}
+        />
+        <div className="flex-1" />
+        <button
+          onClick={() => setNewAgent({ wsId, agentId: agentsState.focused, dir: 'row' })}
+          className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-accent bg-accent px-2.5 text-[12px] font-semibold text-accent-on hover:brightness-110"
+          data-tip="Tạo agent mới"
+        >
+          <Icon name="plus" size="s" />
+          Agent
+        </button>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-4 gap-2.5 overflow-x-auto p-3">
         {COLUMNS.map((col) => {
           const count = col.id === 'done' ? doneToday.length : cards[col.id].length
+          const dim = onlyWaiting && col.id !== 'waiting'
           return (
-            <section key={col.id} className="flex min-w-[240px] flex-1 flex-col rounded-lg border border-line bg-panel">
-              <header className="flex items-center gap-2 border-b border-line px-3 py-2" title={col.hint}>
-                <span className="font-medium">{col.label}</span>
-                <span className={`rounded px-1.5 text-[12px] ${col.id === 'waiting' && count ? 'bg-amber-400/15 text-amber-300' : 'bg-panel-2 text-muted'}`}>
-                  {count}
-                </span>
-                {col.id === 'done' && <span className="text-[12px] text-muted">{showOld ? 'tất cả' : 'hôm nay'}</span>}
+            <section
+              key={col.id}
+              className={`flex min-h-0 min-w-[220px] flex-col rounded-lg border border-line bg-panel transition-opacity ${dim ? 'opacity-35' : ''}`}
+            >
+              <header className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2.5 font-semibold" data-tip={col.hint}>
+                <span className={`h-[7px] w-[7px] rounded-full ${col.dot}`} />
+                {col.label}
+                <span className={`font-mono text-[11px] font-normal ${col.id === 'waiting' && count ? 'text-wait' : 'text-dim'}`}>{count}</span>
+                {col.id === 'done' && <span className="ml-auto text-[11px] font-normal text-dim">{showOld ? 'tất cả' : 'hôm nay'}</span>}
               </header>
-              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
                 {col.id === 'done' ? (
                   <>
                     {doneShown.map((t) => (
@@ -145,10 +185,16 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
       </div>
 
       {idle.length > 0 && (
-        <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-3 py-2 text-[12px] text-muted">
+        <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-3 py-2 text-[12px] text-dim">
           <span>Không chạy:</span>
           {idle.map((a) => (
-            <button key={a.id} onClick={() => jump(a.id)} className="rounded-md bg-panel-2 px-2 py-0.5 hover:text-fg" title="Mở ô của agent">
+            <button
+              key={a.id}
+              onClick={() => jump(a.id)}
+              className="inline-flex items-center gap-1.5 rounded-md bg-panel-2 px-2 py-0.5 text-muted hover:text-fg"
+              data-tip="Mở ô của agent"
+            >
+              <AgentAvatar agent={a} size={14} />
               {a.name}
             </button>
           ))}
@@ -159,12 +205,21 @@ export function Kanban({ workspace }: { workspace: Workspace }): React.JSX.Eleme
 }
 
 function emptyText(col: ColumnId, agentCount: number): string {
-  if (!agentCount) return col === 'asking' ? 'Chưa có agent. Tạo agent ở tab Agents.' : ''
+  if (!agentCount) return col === 'asking' ? 'Chưa có agent. Tạo agent ở màn Agent.' : ''
   return { asking: 'Không agent nào đang chờ giao việc.', doing: 'Không agent nào đang làm.', waiting: 'Không có gì chờ bạn.', done: '' }[col]
 }
 
 function Empty({ text }: { text: string }): React.JSX.Element | null {
-  return text ? <div className="px-1 py-2 text-[12px] text-muted">{text}</div> : null
+  return text ? <div className="px-1 py-2 text-[12px] text-dim">{text}</div> : null
+}
+
+/** Biểu tượng + chữ của dòng "đang chờ gì" trên thẻ. */
+function stateLine(data: AgentCardData, label: string): { icon: IconName; tone: string; text: string } | null {
+  const { status, running, starting } = data
+  if (!running && !starting) return { icon: 'stop', tone: 'text-dim', text: 'Phiên đã dừng' }
+  if (status?.handoff === 'asking' || status?.handoff === 'restarting') return { icon: 'handoff', tone: 'text-info', text: label }
+  if (status?.activity === 'waiting') return { icon: status.reason === 'permission' ? 'shield' : 'ask', tone: 'text-wait', text: label }
+  return label ? { icon: 'spark', tone: 'text-muted', text: label } : null
 }
 
 function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCardData; now: number; onClick: () => void }): React.JSX.Element {
@@ -173,71 +228,94 @@ function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCard
   const stopped = !running && !starting
   const [menu, setMenu] = useState(false)
   const { completeTask, dropTask } = useBoard()
+  const line = stateLine(data, view.label)
+  const since = status && !stopped ? ago(status.since, now) : null
 
   return (
     <div
       onClick={onClick}
-      className={`group relative cursor-pointer rounded-md border bg-panel-2 px-3 py-2 hover:border-accent/50 ${
-        view.waiting ? 'border-amber-400/40' : 'border-line'
-      }`}
+      className={`group relative cursor-pointer rounded-lg border bg-panel-2 p-2.5 hover:border-line-3 ${view.waiting ? 'border-wait/40' : 'border-line-2'}`}
     >
-      <div className="flex items-center gap-2">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${view.dot}`} />
-        <span className="truncate font-medium">{agent.name}</span>
-        {agent.role && <span className="truncate text-[12px] text-muted">{agent.role}</span>}
-        <div className="flex-1" />
+      <div className="mb-2 flex items-baseline gap-2 leading-snug font-medium">
+        <span className={`min-w-0 flex-1 ${task ? '' : 'font-normal text-dim'}`}>{task ? task.title : 'Chưa nhận việc'}</span>
+        {task && !view.waiting && since && <time className="shrink-0 font-mono text-[11px] font-normal text-dim">{since}</time>}
+      </div>
+
+      <div className="flex items-center gap-2.5 text-[12px] text-muted">
+        <span className="flex max-w-[45%] shrink-0 items-center gap-1.5">
+          <AgentAvatar agent={agent} size={16} />
+          <span className="truncate">{agent.name}</span>
+        </span>
+        {task?.scope && (
+          <code className="min-w-0 truncate rounded bg-panel-3 px-1 font-mono text-[11px]" data-tip={task.scope}>
+            {task.scope}
+          </code>
+        )}
+        {!!task?.files?.length && (
+          <span className="shrink-0" data-tip={`File đã sửa (cũng bị khoá cho agent khác):\n${task.files.join('\n')}`}>
+            {task.files.length} tệp
+          </span>
+        )}
+        <span className="flex-1" />
+        {!stopped && <ContextBadge status={status} />}
         {task && (
           <button
             onClick={(e) => {
               e.stopPropagation()
               setMenu(!menu)
             }}
-            className="rounded px-1 text-muted opacity-0 hover:bg-line hover:text-fg group-hover:opacity-100"
-            title="Thao tác"
+            className="hidden h-5 w-5 shrink-0 place-items-center rounded text-dim group-hover:grid hover:bg-panel-3 hover:text-fg"
+            data-tip="Thao tác"
           >
-            ⋯
+            <Icon name="more" size="s" />
           </button>
         )}
       </div>
 
-      {task ? (
-        <>
-          <div className="mt-1 text-fg">{task.title}</div>
-          {task.scope && <div className="mt-0.5 truncate font-mono text-[11px] text-muted" title={task.scope}>{task.scope}</div>}
-          {!!task.files?.length && (
-            <div className="mt-0.5 text-[11px] text-muted" title={`File đã sửa (cũng bị khoá cho agent khác):\n${task.files.join('\n')}`}>
-              + {task.files.length} file đã sửa ngoài phạm vi
-            </div>
-          )}
-          {overlaps.map((o) => (
-            <div
-              key={o.other.id}
-              className="mt-1 rounded bg-amber-400/10 px-1.5 py-0.5 text-[11px] text-amber-300"
-              title={`Việc "${o.other.title}" của ${o.other.agentName} (phạm vi: ${o.other.scope}). ${overlapNote}`}
-            >
-              ⚠ Trùng phạm vi với {o.other.agentName}: <span className="font-mono">{o.labels.join(', ')}</span>
-            </div>
-          ))}
-        </>
-      ) : (
-        <div className="mt-1 text-[12px] text-muted">Chưa nhận việc</div>
+      {overlaps.map((o) => (
+        <div
+          key={o.other.id}
+          className="mt-2 flex items-start gap-1.5 rounded bg-wait/10 px-1.5 py-1 text-[11px] text-wait"
+          data-tip={`Việc "${o.other.title}" của ${o.other.agentName} (phạm vi: ${o.other.scope}). ${overlapNote}`}
+        >
+          <Icon name="lock" size="s" className="mt-px" />
+          <span className="min-w-0">
+            Trùng phạm vi với {o.other.agentName}: <span className="font-mono">{o.labels.join(', ')}</span>
+          </span>
+        </div>
+      ))}
+
+      {line && (
+        <div className={`mt-2 flex min-h-[22px] items-center gap-1.5 text-[12px] ${line.tone}`}>
+          <Icon name={line.icon} size="s" />
+          <span className="min-w-0 flex-1 truncate">{line.text}</span>
+        </div>
       )}
 
-      <div className={`mt-1.5 flex items-center gap-1 text-[12px] ${view.waiting ? 'text-amber-300' : 'text-muted'}`}>
-        {stopped ? (
-          <span className="rounded bg-line px-1.5 text-fg/80">Phiên đã dừng</span>
-        ) : (
-          <span className="truncate">{view.label}</span>
-        )}
-        {status && !stopped && <span className="text-muted">· {ago(status.since, now)}</span>}
-        {!stopped && <ContextBadge status={status} className="ml-auto" />}
-      </div>
+      {view.waiting && (
+        <div className="mt-1.5 box-content flex h-[22px] items-center gap-1.5 border-t border-line-2 pt-1.5">
+          <time className="font-mono text-[11px] text-dim" data-tip={since ? `Đã chờ bạn ${since}` : undefined}>
+            chờ {since ?? '…'}
+          </time>
+          <span className="flex-1" />
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onClick()
+            }}
+            className="inline-flex h-[22px] items-center rounded-md border border-line-2 bg-panel-3 px-2 text-[12px] font-medium hover:border-line-3"
+            data-tip="Mở ô của agent trong lưới"
+          >
+            Mở ô
+          </button>
+        </div>
+      )}
 
       {menu && task && (
         <div
           onClick={(e) => e.stopPropagation()}
           onMouseLeave={() => setMenu(false)}
-          className="absolute right-2 top-7 z-10 w-40 overflow-hidden rounded-md border border-line bg-panel shadow-lg"
+          className="absolute top-8 right-2 z-10 w-40 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 shadow-[0_14px_40px_rgba(0,0,0,.6)]"
         >
           <MenuItem
             onClick={() => {
@@ -263,7 +341,7 @@ function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCard
 
 function MenuItem({ onClick, children }: { onClick: () => void; children: React.ReactNode }): React.JSX.Element {
   return (
-    <button onClick={onClick} className="block w-full px-3 py-1.5 text-left hover:bg-panel-2">
+    <button onClick={onClick} className="block w-full rounded-md px-2.5 py-1.5 text-left hover:bg-panel-3">
       {children}
     </button>
   )
@@ -272,12 +350,27 @@ function MenuItem({ onClick, children }: { onClick: () => void; children: React.
 function DoneCard({ task, now, showDay, onClick }: { task: Task; now: number; showDay: boolean; onClick: () => void }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   return (
-    <div onClick={onClick} className="cursor-pointer rounded-md border border-line bg-panel-2 px-3 py-2 hover:border-accent/50">
-      <div className="text-fg">{task.title}</div>
-      <div className="mt-0.5 flex items-center gap-1 text-[12px] text-muted">
-        <span className="truncate">{task.agentName}</span>
-        <span>· {showDay ? localDay(task.doneAt!) : ago(task.doneAt!, now)}</span>
-        {task.manual && <span className="rounded bg-line px-1">đánh dấu tay</span>}
+    <div onClick={onClick} className="cursor-pointer rounded-lg border border-line-2 bg-panel-2 p-2.5 hover:border-line-3">
+      <div className="mb-2 flex items-baseline gap-2 leading-snug font-medium">
+        <span className="min-w-0 flex-1">{task.title}</span>
+        <time className="shrink-0 font-mono text-[11px] font-normal text-dim">{showDay ? localDay(task.doneAt!) : ago(task.doneAt!, now)}</time>
+      </div>
+      <div className="flex items-center gap-2.5 text-[12px] text-muted">
+        <span className="flex max-w-[45%] shrink-0 items-center gap-1.5">
+          <AgentAvatar name={task.agentName} size={16} />
+          <span className="truncate">{task.agentName}</span>
+        </span>
+        {task.scope && (
+          <code className="min-w-0 truncate rounded bg-panel-3 px-1 font-mono text-[11px]" data-tip={task.scope}>
+            {task.scope}
+          </code>
+        )}
+        {!!task.files?.length && <span className="shrink-0">{task.files.length} tệp</span>}
+        {task.manual && (
+          <span className="shrink-0 rounded bg-panel-3 px-1 text-[11px]" data-tip="Bạn đánh dấu xong bằng tay">
+            tay
+          </span>
+        )}
       </div>
       {task.summary && (
         <div
@@ -285,8 +378,8 @@ function DoneCard({ task, now, showDay, onClick }: { task: Task; now: number; sh
             e.stopPropagation()
             setOpen(!open)
           }}
-          className={`mt-1 whitespace-pre-wrap text-[12px] text-fg/75 ${open ? '' : 'line-clamp-3'}`}
-          title={open ? 'Thu gọn' : 'Xem đủ'}
+          className={`mt-2 text-[12px] whitespace-pre-wrap text-muted ${open ? '' : 'line-clamp-3'}`}
+          data-tip={open ? 'Thu gọn' : 'Xem đủ'}
         >
           {task.summary}
         </div>

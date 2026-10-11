@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, HandoffState, ScopeAsk, Task, WaitReason, Workspace } from '@shared/types'
 import { readText } from './fsutil'
+import type { ClosedTask } from './workLog'
 import { ensureIgnored } from './workspace'
 
 interface TasksFile {
@@ -78,7 +79,9 @@ export class Board {
 
   constructor(
     private notify: (workspaceId: string) => void,
-    private events: (e: BoardEvent) => void = () => {}
+    private events: (e: BoardEvent) => void = () => {},
+    /** Việc vừa đóng (xong / bàn giao / người dùng đánh dấu xong) → nhật ký việc trong vault (workLog.ts). */
+    private closed: (ws: Workspace, c: ClosedTask) => void = () => {}
   ) {}
 
   // ---- hoạt động của agent ----
@@ -357,14 +360,16 @@ export class Board {
   }
 
   /** Agent báo xong việc đang mở của mình. */
-  async finishTask(ws: Workspace, agentId: string, summary: string): Promise<Task> {
+  async finishTask(ws: Workspace, agentId: string, summary: string, log?: string): Promise<Task> {
     const task = await this.openTask(ws, agentId)
     if (!task) throw new Error('You have no open task. Call task_start when you take a new task.')
     task.status = 'done'
     task.doneAt = new Date().toISOString()
     task.summary = summary.trim()
+    if (log?.trim()) task.log = log.trim()
     await this.save(ws)
     this.events({ kind: 'taskDone', workspaceId: ws.id, agentId, agentName: task.agentName, title: task.title })
+    this.closed(ws, { task: { ...task }, how: 'done' })
     return task
   }
 
@@ -397,6 +402,7 @@ export class Board {
     await this.save(ws)
     this.events({ kind: 'taskDone', workspaceId: ws.id, agentId: fromId, agentName: from.agentName, title: from.title })
     this.events({ kind: 'taskStarted', workspaceId: ws.id, agentId: to.id, agentName: to.name, title: task.title, scope: task.scope })
+    this.closed(ws, { task: { ...from }, how: 'handoff', to: to.name })
     return task
   }
 
@@ -408,6 +414,7 @@ export class Board {
     task.doneAt = new Date().toISOString()
     task.manual = true
     await this.save(ws)
+    if (status === 'done') this.closed(ws, { task: { ...task }, how: 'manual' })
     return task
   }
 

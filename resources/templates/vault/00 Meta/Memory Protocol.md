@@ -31,6 +31,8 @@ Back to: [[_INDEX]]
 
 After recording: update the auto memory cache if needed (pointers only, do not copy content).
 
+**Written by stag.ai itself:** when an agent's task closes, the app adds one line to `40 Log/<YYYY-MM-DD>.md` (section "Agent work (auto)") and to the "Work done" list of that agent's note; when an agent note grows past its budget, old "Work done" items move to `60 Agents/<agent name> archive.md`. Agents do not write those lines by hand.
+
 ## Language
 - **All vault content is written in English**: file and folder names, frontmatter, headings, body.
 - Chat with the user may be in another language. UI strings or the user's exact words may be quoted verbatim with an English gloss.

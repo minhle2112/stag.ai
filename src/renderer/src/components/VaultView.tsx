@@ -2,14 +2,21 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { VaultActivity, VaultNode, VaultSearchHit, Workspace } from '@shared/types'
 import { resolveNote } from '@shared/wikilink'
 import { ago } from '../status'
+import { useUi } from '../store/ui'
 import { useVaultActivity } from '../store/vaultActivity'
 import { useVaultIndex } from '../vaultIndex'
+import { Icon } from './Icon'
 import { Button, Modal } from './Modal'
-import { agentColor, RECENT_MS, touchesByNote, type NoteTouch } from './vault/activity'
+import { IconButton } from './shell/IconButton'
+import { AgentAvatar } from './ui/AgentAvatar'
+import { Seg } from './ui/Seg'
+import { RECENT_MS, touchesByNote, type NoteTouch } from './vault/activity'
 import { Backlinks } from './vault/Backlinks'
 import { GraphView } from './vault/GraphView'
+import { kindLabel, LiveBadges } from './vault/LiveBadge'
 import { renderNote } from './vault/markdown'
-import { NoteEditor } from './vault/NoteEditor'
+import { NoteEditor, type EditorStatus } from './vault/NoteEditor'
+import { NOTE_PROSE } from './vault/noteProse'
 import { scrollToTarget, type ScrollTarget } from './vault/scroll'
 import { SearchResults } from './vault/SearchResults'
 
@@ -25,8 +32,21 @@ interface Doc {
   text: string | null
 }
 
+/** Bề rộng khung tối thiểu để tự hiện cột cây (232px) / cột liên kết (250px): phần note còn ≥ ~420 / ~500px. */
+const TREE_MIN = 640
+const LINKS_MIN = 980
+
+/** Giờ lưu lần cuối: hôm nay chỉ giờ, ngày khác thêm ngày. */
+function savedAt(ms: number): { short: string; full: string } {
+  const d = new Date(ms)
+  const hm = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+  const today = new Date().toDateString() === d.toDateString()
+  return { short: today ? hm : `${d.getDate()}/${d.getMonth() + 1} ${hm}`, full: d.toLocaleString('vi-VN') }
+}
+
 export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const { vaultPath } = workspace
+  const vaultName = vaultPath.split(/[\\/]/).filter(Boolean).pop() ?? vaultPath
   const [tree, setTree] = useState<VaultNode[]>([])
   const [registered, setRegistered] = useState<boolean | null>(null)
   const [guide, setGuide] = useState(false)
@@ -49,9 +69,25 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
 
   /** Chế độ sửa (giữ nguyên khi chuyển note, như Obsidian). */
   const [editing, setEditing] = useState(false)
+  const [editStatus, setEditStatus] = useState<EditorStatus | null>(null)
   const [newNote, setNewNote] = useState(false)
+  /** Hộp thuộc tính (frontmatter) của note đang mở có mở không. */
+  const [propsOpen, setPropsOpen] = useState(false)
   /** Cột trái: cây note hay nhật ký agent đọc/ghi. */
   const [side, setSide] = useState<'tree' | 'activity'>('tree')
+  /** Cột cây / cột liên kết: null = tự theo bề rộng khung, true/false = người dùng chọn. */
+  const [treeOpen, setTreeOpen] = useState<boolean | null>(null)
+  const [linksOpen, setLinksOpen] = useState<boolean | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(1200)
+  useLayoutEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    setWidth(el.clientWidth)
+    const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // Agent đọc / ghi note nào (từ hook); "gần đây" mờ dần theo đồng hồ.
   const events = useVaultActivity((s) => s.byWs[workspace.id])
@@ -119,21 +155,37 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
     [hist]
   )
 
-  // Lùi/Tiến: Alt+←/→ và nút chuột 4/5.
+  // Lùi/Tiến: Alt+←/→ và nút chuột 4/5. Ctrl+E: Xem ↔ Sửa. Ctrl+G: Note ↔ Đồ thị.
   const goRef = useRef(go)
   goRef.current = go
-  const canEdit = view === 'note' && !!doc && doc.text !== null && doc.rel === current
+  const docReady = !!doc && doc.text !== null && doc.rel === current
+  const canEdit = view === 'note' && docReady
   const toggleEditRef = useRef(() => {})
   toggleEditRef.current = () => {
+    if (view === 'graph') {
+      // Từ đồ thị: về note rồi vào chế độ sửa (như bản thiết kế).
+      if (docReady) {
+        setView('note')
+        setEditing(true)
+      }
+      return
+    }
     if (canEdit || editing) setEditing(!editing)
   }
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      // Ctrl+E: đổi Xem ↔ Sửa (như Obsidian).
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'e') {
-        e.preventDefault()
-        toggleEditRef.current()
-        return
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        const key = e.key.toLowerCase()
+        if (key === 'e') {
+          e.preventDefault()
+          toggleEditRef.current()
+          return
+        }
+        if (key === 'g') {
+          e.preventDefault()
+          setView((v) => (v === 'graph' ? 'note' : 'graph'))
+          return
+        }
       }
       if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) return
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -157,8 +209,16 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
 
   // Mặc định mở _INDEX.md.
   useEffect(() => {
-    if (!current && tree.some((n) => n.rel === '_INDEX.md')) open('_INDEX.md')
+    if (!current && !useUi.getState().vaultTarget && tree.some((n) => n.rel === '_INDEX.md')) open('_INDEX.md')
   }, [tree, current, open])
+
+  // Nơi khác (Nhật ký…) yêu cầu mở một note cụ thể.
+  const vaultTarget = useUi((s) => s.vaultTarget)
+  useEffect(() => {
+    if (!vaultTarget || vaultTarget.wsId !== workspace.id) return
+    open(vaultTarget.rel)
+    useUi.getState().clearVaultTarget()
+  }, [vaultTarget, workspace.id, open])
 
   // Đọc note đang mở; vault đổi (tick) thì đọc lại và giữ vị trí cuộn.
   useEffect(() => {
@@ -179,8 +239,11 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
   }, [vaultPath, current, changed])
 
   const html = useMemo(
-    () => (doc?.text != null ? renderNote(doc.text, { current: doc.rel, notes: index?.notes ?? null }).html : ''),
-    [doc, index]
+    () =>
+      doc?.text != null
+        ? renderNote(doc.text, { current: doc.rel, notes: index?.notes ?? null, propsBox: propsOpen ? 'open' : 'closed' }).html
+        : '',
+    [doc, index, propsOpen]
   )
 
   // Note mới hiện ra (hoặc vừa đọc lại) → cuộn tới chỗ đã hẹn.
@@ -211,9 +274,15 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
     }
   }, [vaultPath, query, changed])
 
-  /** Bấm trong note: chặn mọi điều hướng mặc định, tự xử lý link. */
+  /** Bấm trong note: chặn mọi điều hướng mặc định, tự xử lý link và hộp thuộc tính. */
   function onBodyClick(e: React.MouseEvent): void {
-    const a = (e.target as HTMLElement).closest('a')
+    const el = e.target as HTMLElement
+    if (el.closest('summary')) {
+      e.preventDefault()
+      setPropsOpen((o) => !o)
+      return
+    }
+    const a = el.closest('a')
     if (!a) return
     e.preventDefault()
     const href = a.dataset.href
@@ -235,138 +304,226 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
     if (r.status === 'needs-register') setGuide(true)
   }
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
-        <div className="flex shrink-0">
-          <NavButton label="←" title="Lùi (Alt+←)" disabled={hist.pos <= 0} onClick={() => go(-1)} />
-          <NavButton label="→" title="Tiến (Alt+→)" disabled={hist.pos >= hist.entries.length - 1} onClick={() => go(1)} />
-        </div>
-        <span className="min-w-0 truncate text-muted" title={vaultPath}>
-          {vaultPath}
-        </span>
-        {registered !== null && (
-          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${registered ? 'bg-emerald-500/15 text-emerald-300' : 'bg-panel-2 text-muted'}`}>
-            {registered ? 'đã đăng ký Obsidian' : 'chưa đăng ký Obsidian'}
-          </span>
-        )}
-        <div className="flex-1" />
-        <div className="flex shrink-0 overflow-hidden rounded-md border border-line">
-          {(['note', 'graph'] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`px-2.5 py-1 text-[12px] ${view === v ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
-            >
-              {v === 'note' ? 'Note' : 'Graph'}
-            </button>
-          ))}
-        </div>
-        <div className="flex shrink-0 gap-2">
-          {view === 'note' && (
-            <Button onClick={() => toggleEditRef.current()} disabled={!canEdit && !editing}>
-              <span title="Ctrl+E">{editing ? 'Xem' : 'Sửa'}</span>
-            </Button>
-          )}
-          <Button onClick={() => setNewNote(true)}>Note mới</Button>
-          <Button
-            onClick={() => {
-              setReload((n) => n + 1)
-              checkRegistered()
-            }}
-          >
-            Làm mới
-          </Button>
-          <Button onClick={() => window.stag.openFolder(vaultPath)}>Mở thư mục</Button>
-          <Button primary onClick={openObsidian}>
-            Mở trong Obsidian
-          </Button>
-        </div>
-      </div>
+  const searching = query.trim() !== ''
+  // Khung hẹp (vd. mở trình duyệt bên phải): tự ẩn cột liên kết (< LINKS_MIN) rồi cột cây (< TREE_MIN) cho phần note còn
+  // đủ rộng; có nút bật lại.
+  const treeShown = searching || (treeOpen ?? width >= TREE_MIN)
+  const linksShown = linksOpen ?? width >= LINKS_MIN
+  const noteInfo = doc ? index?.notes.find((n) => n.rel === doc.rel) : undefined
+  const saved = noteInfo ? savedAt(noteInfo.mtime) : null
+  const docTouches = current ? (allTouches.get(current.toLowerCase()) ?? []) : []
 
-      <div className="flex min-h-0 flex-1">
-        <nav className="flex w-64 shrink-0 flex-col border-r border-line">
-          <div className="shrink-0 p-2">
+  return (
+    <>
+      <div ref={rootRef} className="flex h-full min-h-0 flex-col bg-bg">
+        <div className="flex h-[38px] shrink-0 items-center gap-1.5 overflow-hidden border-b border-line px-2.5 whitespace-nowrap">
+          <h1 className="mr-1.5 flex min-w-0 shrink items-center gap-2 text-[13px] font-semibold" data-tip={vaultPath}>
+            <Icon name="vault" className="text-dim" />
+            <span className="truncate">{vaultName}</span>
+          </h1>
+          <IconButton icon="al" tip="Lùi · Alt+←" onClick={() => go(-1)} className={hist.pos <= 0 ? 'pointer-events-none opacity-30' : ''} />
+          <IconButton
+            icon="ar"
+            tip="Tiến · Alt+→"
+            onClick={() => go(1)}
+            className={hist.pos >= hist.entries.length - 1 ? 'pointer-events-none opacity-30' : ''}
+          />
+          <Seg
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'note', label: <Icon name="file" />, tip: 'Note' },
+              { value: 'graph', label: <Icon name="graph" />, tip: 'Đồ thị liên kết · Ctrl+G' }
+            ]}
+          />
+          <div className="ml-1.5 flex h-7 max-w-[230px] min-w-24 flex-1 items-center gap-1.5 rounded-md border border-line-2 bg-bg0 pr-1 pl-2 focus-within:border-accent/40">
+            <Icon name="search" size="s" className="text-dim" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') setQuery('')
               }}
-              placeholder="Tìm trong vault…"
+              placeholder="Tìm trong vault"
               spellCheck={false}
-              className="w-full rounded-md border border-line bg-panel px-2 py-1 text-[12px] outline-none placeholder:text-muted focus:border-accent"
+              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-dim"
             />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                data-tip="Xoá · Esc"
+                aria-label="Xoá"
+                className="grid h-5 w-5 shrink-0 place-items-center rounded text-dim hover:bg-panel-3 hover:text-fg"
+              >
+                <Icon name="x" size="s" />
+              </button>
+            )}
           </div>
-          {!query.trim() && (
-            <div className="flex shrink-0 gap-1 px-2 pb-1.5 text-[12px]">
-              {(['tree', 'activity'] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setSide(s)}
-                  className={`rounded px-2 py-0.5 ${side === s ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
-                >
-                  {s === 'tree' ? 'Note' : `Agent đọc/ghi${recent.size ? ` (${recent.size})` : ''}`}
-                </button>
-              ))}
-            </div>
+          <div className="min-w-0 flex-1" />
+          <IconButton icon="plus" tip="Note mới" onClick={() => setNewNote(true)} />
+          <IconButton
+            icon="ref"
+            tip="Làm mới cây note và chỉ mục"
+            onClick={() => {
+              setReload((n) => n + 1)
+              checkRegistered()
+            }}
+          />
+          <IconButton icon="folder" tip="Mở thư mục vault" onClick={() => window.stag.openFolder(vaultPath)} />
+          <IconButton
+            icon="pen"
+            tip={editing && view === 'note' ? 'Xong sửa · Ctrl+E' : 'Sửa · Ctrl+E'}
+            on={editing && view === 'note'}
+            onClick={() => toggleEditRef.current()}
+            className={!canEdit && !editing && !(view === 'graph' && docReady) ? 'opacity-40' : ''}
+          />
+          <IconButton
+            icon="ext"
+            tip={registered === false ? 'Mở trong Obsidian · vault chưa đăng ký, sẽ có hướng dẫn' : 'Mở trong Obsidian'}
+            onClick={openObsidian}
+          />
+          {(width < TREE_MIN || treeOpen === false) && (
+            <IconButton
+              icon="side"
+              tip={treeShown ? 'Ẩn cột note' : 'Hiện cột note'}
+              on={treeShown}
+              onClick={() => setTreeOpen(!treeShown)}
+            />
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-            {query.trim() ? (
-              <SearchResults hits={hits} query={query.trim()} selected={current} onOpen={openAt} />
-            ) : side === 'activity' ? (
-              <ActivityList
-                events={events ?? []}
-                now={now}
-                selected={current}
-                onOpen={(rel) => open(index?.notes.find((n) => n.rel.toLowerCase() === rel.toLowerCase())?.rel ?? rel)}
-              />
-            ) : (
-              <>
-                {tree.length === 0 && <div className="px-3 text-muted">Vault trống hoặc không tồn tại.</div>}
-                <Tree nodes={tree} depth={0} selected={current} onSelect={open} recent={recent} now={now} />
-              </>
-            )}
-            {error && <div className="mt-2 px-3 text-[11px] text-red-400">Không đọc được chỉ mục: {error}</div>}
-          </div>
-        </nav>
-        {view === 'graph' ? (
-          <div className="relative min-w-0 flex-1">
-            {index ? (
-              <GraphView index={index} current={current} onOpen={(rel) => open(rel)} activity={recent} />
-            ) : (
-              <div className="p-4 text-muted">Đang đọc vault…</div>
-            )}
-          </div>
-        ) : editing && doc && doc.rel === current ? (
-          <div className="flex min-w-0 flex-1 flex-col">
-            <NoteTouches touches={allTouches.get(doc.rel.toLowerCase())} now={now} className="border-b border-line px-6 py-1.5" />
-            <div className="min-h-0 flex-1">
-              <NoteEditor key={doc.rel} vaultPath={vaultPath} rel={doc.rel} disk={doc.text} notes={index?.notes ?? null} />
-            </div>
-          </div>
-        ) : (
-          <article ref={scrollerRef} className="min-w-0 flex-1 overflow-y-auto px-6 py-4 select-text">
-            {!current ? (
-              <div className="text-muted">Chọn một note bên trái.</div>
-            ) : doc ? (
-              <div className="mx-auto max-w-3xl">
-                <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
-                  <span>{doc.rel}</span>
-                  <NoteTouches touches={allTouches.get(doc.rel.toLowerCase())} now={now} />
-                </div>
-                {doc.text === null ? (
-                  <div className="rounded-md border border-line bg-panel px-3 py-2 text-muted">Note đã bị xoá hoặc đổi tên.</div>
-                ) : (
-                  <div ref={bodyRef} className="md-body" onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: html }} />
-                )}
-                {index && doc.text !== null && <Backlinks index={index} current={doc.rel} onOpen={openAt} />}
+          {(width < LINKS_MIN || linksOpen === false) && (
+            <button
+              type="button"
+              onClick={() => setLinksOpen(!linksShown)}
+              data-tip={linksShown ? 'Ẩn liên kết ngược / ra' : 'Hiện liên kết ngược / ra'}
+              aria-label="Liên kết ngược / ra"
+              aria-pressed={linksShown}
+              className={`no-drag inline-grid h-6 w-6 shrink-0 place-items-center rounded-md hover:bg-panel-3 hover:text-fg ${linksShown ? 'text-accent' : 'text-muted'}`}
+            >
+              <Icon name="side" className="-scale-x-100" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex min-h-0 flex-1">
+          <nav className={`${treeShown ? 'flex' : 'hidden'} w-[232px] shrink-0 flex-col border-r border-line bg-bg`}>
+            {searching ? (
+              <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+                <SearchResults hits={hits} query={query.trim()} selected={current} onOpen={openAt} />
               </div>
             ) : (
-              <div className="text-muted">Đang mở…</div>
+              <>
+                <div className="flex h-[34px] shrink-0 items-center gap-2 border-b border-line px-2">
+                  <Seg
+                    value={side}
+                    onChange={setSide}
+                    options={[
+                      { value: 'tree', label: <Icon name="folder" size="s" />, tip: 'Cây note' },
+                      {
+                        value: 'activity',
+                        label: (
+                          <>
+                            <Icon name="hist" size="s" />
+                            {recent.size > 0 && <span className="font-mono text-[11px]">{recent.size}</span>}
+                          </>
+                        ),
+                        tip: recent.size ? `Agent đọc / ghi note · ${recent.size} note gần đây` : 'Agent đọc / ghi note'
+                      }
+                    ]}
+                  />
+                  {index && <span className="ml-auto font-mono text-[11px] text-dim">{index.notes.length} note</span>}
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
+                  {side === 'activity' ? (
+                    <ActivityList
+                      events={events ?? []}
+                      now={now}
+                      selected={current}
+                      onOpen={(rel) => open(index?.notes.find((n) => n.rel.toLowerCase() === rel.toLowerCase())?.rel ?? rel)}
+                    />
+                  ) : (
+                    <>
+                      {tree.length === 0 && <div className="px-3 text-dim">Vault trống hoặc không tồn tại.</div>}
+                      <Tree nodes={tree} depth={0} selected={current} onSelect={open} recent={recent} now={now} />
+                    </>
+                  )}
+                  {error && <div className="mt-2 px-3 text-[11px] text-danger">Không đọc được chỉ mục: {error}</div>}
+                </div>
+              </>
             )}
-          </article>
-        )}
+          </nav>
+
+          <section className="flex min-w-0 flex-1 flex-col bg-panel">
+            {view === 'graph' ? (
+              index ? (
+                <GraphView index={index} current={current} onOpen={(rel) => open(rel)} activity={recent} />
+              ) : (
+                <div className="p-4 text-muted">Đang đọc vault…</div>
+              )
+            ) : (
+              <>
+                <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
+                  {current && (
+                    <>
+                      <span className="min-w-0 truncate font-mono text-[12px] text-dim" data-tip={current}>
+                        {current}
+                      </span>
+                      <LiveBadges touches={docTouches} now={now} max={3} />
+                      {editing && editStatus && <SaveBadge status={editStatus} />}
+                    </>
+                  )}
+                  <div className="min-w-0 flex-1" />
+                  {current &&
+                    (editing ? (
+                      <span className="shrink-0 text-[11px] text-dim">Markdown</span>
+                    ) : (
+                      saved && (
+                        <span className="shrink-0 font-mono text-[11px] text-dim" data-tip={`Lưu lần cuối · ${saved.full}`}>
+                          {saved.short}
+                        </span>
+                      )
+                    ))}
+                </div>
+                {editing && doc && doc.rel === current && doc.text !== null ? (
+                  <div className="min-h-0 flex-1">
+                    <NoteEditor
+                      key={doc.rel}
+                      vaultPath={vaultPath}
+                      rel={doc.rel}
+                      disk={doc.text}
+                      notes={index?.notes ?? null}
+                      onStatus={setEditStatus}
+                    />
+                  </div>
+                ) : (
+                  <article ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto select-text">
+                    {!current ? (
+                      <div className="p-6 text-dim">Chọn một note bên trái.</div>
+                    ) : doc ? (
+                      <div className="max-w-[800px] px-10 pt-6 pb-[60px]">
+                        {doc.text === null ? (
+                          <div className="rounded-md border border-line bg-bg px-3 py-2 text-muted">Note đã bị xoá hoặc đổi tên.</div>
+                        ) : (
+                          <div ref={bodyRef} className={NOTE_PROSE} onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: html }} />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-6 text-dim">Đang mở…</div>
+                    )}
+                  </article>
+                )}
+              </>
+            )}
+          </section>
+
+          <aside className={`${linksShown ? 'flex' : 'hidden'} w-[250px] shrink-0 flex-col overflow-y-auto border-l border-line bg-bg py-1`}>
+            {index ? (
+              <Backlinks index={index} current={current} vaultPath={vaultPath} changed={changed} onOpen={openAt} />
+            ) : (
+              <div className="px-3 py-2 text-dim">Đang đọc vault…</div>
+            )}
+          </aside>
+        </div>
       </div>
 
       {guide && (
@@ -404,10 +561,10 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
               Ở mục <b>Open folder as vault</b>, bấm <b>Open</b>.
             </li>
             <li>
-              Dán đường dẫn (<kbd>Ctrl</kbd>+<kbd>V</kbd>) vào ô địa chỉ của hộp chọn thư mục → <b>Select Folder</b>.
+              Dán đường dẫn (<kbd className="font-mono">Ctrl</kbd>+<kbd className="font-mono">V</kbd>) vào ô địa chỉ của hộp chọn thư mục → <b>Select Folder</b>.
             </li>
           </ol>
-          <div className="mt-3 rounded-md bg-panel-2 px-2 py-1.5 font-mono text-[12px] break-all">{vaultPath}</div>
+          <div className="mt-3 rounded-md bg-panel-2 px-2 py-1.5 font-mono text-[12px] break-all select-text">{vaultPath}</div>
           {registered === false && <p className="mt-3 text-[12px] text-muted">Chưa thấy vault trong danh sách của Obsidian.</p>}
         </Modal>
       )}
@@ -426,7 +583,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
           }}
         />
       )}
-    </div>
+    </>
   )
 }
 
@@ -472,9 +629,12 @@ function NewNoteDialog({
       setBusy(false)
     }
   }
+  const field =
+    'h-7 w-full rounded-md border border-line-2 bg-bg0 px-2.5 text-[13px] outline-none focus:border-accent/40'
   return (
     <Modal
       title="Note mới"
+      width="w-[440px]"
       onClose={busy ? undefined : onCancel}
       footer={
         <>
@@ -493,58 +653,48 @@ function NewNoteDialog({
           submit()
         }}
       >
-        <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">Tên note</div>
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.07em] text-dim">
+          TÊN NOTE
+          <span data-tip="Vault viết bằng tiếng Anh (quy ước của dự án): tên và nội dung note nên là tiếng Anh." className="inline-flex cursor-help">
+            <Icon name="info" size="s" />
+          </span>
+        </div>
         <input
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="vd. Login flow"
-          className="mb-4 w-full rounded-md border border-line bg-bg px-2 py-1.5 outline-none focus:border-accent"
+          className={`mb-4 ${field}`}
         />
-        <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">Thư mục</div>
-        <select
-          value={folder}
-          onChange={(e) => setFolder(e.target.value)}
-          className="w-full rounded-md border border-line bg-bg px-2 py-1.5 outline-none focus:border-accent"
-        >
+        <div className="mb-1.5 text-[11px] font-semibold tracking-[0.07em] text-dim">THƯ MỤC</div>
+        <select value={folder} onChange={(e) => setFolder(e.target.value)} className={field}>
           {folders.map((f) => (
             <option key={f} value={f}>
               {f || '(gốc vault)'}
             </option>
           ))}
         </select>
-        <p className="mt-3 text-[12px] text-muted">Vault viết bằng tiếng Anh (quy ước của dự án): tên và nội dung note nên là tiếng Anh.</p>
-        {error && <div className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
+        {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}
       </form>
     </Modal>
   )
 }
 
-const kindLabel = (k: 'read' | 'write'): string => (k === 'write' ? 'ghi' : 'đọc')
-
-/** Chấm màu của agent: ghi = chấm đặc, đọc = vòng rỗng. */
-function TouchDot({ touch }: { touch: NoteTouch }): React.JSX.Element {
-  const c = agentColor(touch.agentId)
+/** Trạng thái lưu của trình soạn (cạnh đường dẫn): chấm + chữ; hổ phách chỉ khi đang chờ bạn chọn bản. */
+function SaveBadge({ status }: { status: EditorStatus }): React.JSX.Element {
+  const { state, conflict } = status
+  const [label, tone, dot] = conflict
+    ? ['Chờ bạn chọn bản', 'text-wait', 'bg-wait']
+    : state === 'error'
+      ? ['Lỗi lưu', 'text-danger', 'bg-danger']
+      : state === 'saved'
+        ? ['Đã lưu', 'text-dim', '']
+        : [state === 'saving' ? 'Đang lưu…' : 'Chưa lưu', 'text-fg', 'bg-fg']
   return (
-    <span
-      className="inline-block h-2 w-2 shrink-0 rounded-full"
-      style={touch.kind === 'write' ? { backgroundColor: c } : { border: `1.5px solid ${c}` }}
-    />
-  )
-}
-
-/** "● Coder ghi · 2 phút" cho note đang xem (từ lúc mở app). */
-function NoteTouches({ touches, now, className = '' }: { touches?: NoteTouch[]; now: number; className?: string }): React.JSX.Element | null {
-  if (!touches?.length) return null
-  return (
-    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted ${className}`}>
-      {touches.map((t) => (
-        <span key={t.agentId} className="flex items-center gap-1" title={`${t.agentName} ${kindLabel(t.kind)} note này lúc ${new Date(t.at).toLocaleTimeString()}`}>
-          <TouchDot touch={t} />
-          <span className="text-fg/80">{t.agentName}</span> {kindLabel(t.kind)} · {ago(t.at, now)}
-        </span>
-      ))}
-    </div>
+    <span data-tip="Ctrl+S lưu · Ctrl+E xong · gõ [[ để chèn link" className={`inline-flex shrink-0 items-center gap-1.5 text-[12px] ${tone}`}>
+      {dot && <span className={`h-[7px] w-[7px] rounded-full ${dot}`} />}
+      {label}
+    </span>
   )
 }
 
@@ -561,7 +711,7 @@ function ActivityList({
   onOpen: (rel: string) => void
 }): React.JSX.Element {
   if (!events.length)
-    return <div className="px-3 text-[12px] text-muted">Chưa có agent nào đọc/ghi note từ lúc mở app. Hoạt động hiện ở đây khi agent làm việc.</div>
+    return <div className="px-3 text-[12px] text-dim">Chưa có agent nào đọc/ghi note từ lúc mở app. Hoạt động hiện ở đây khi agent làm việc.</div>
   return (
     <>
       {[...events]
@@ -573,33 +723,21 @@ function ActivityList({
             <div
               key={`${e.at}-${i}`}
               onClick={() => onOpen(e.rel)}
-              title={e.rel}
-              className={`cursor-pointer px-3 py-1 ${selected?.toLowerCase() === e.rel.toLowerCase() ? 'bg-panel-2' : 'hover:bg-panel-2/60'}`}
+              data-tip={e.rel}
+              data-tip-side="right"
+              className={`cursor-pointer px-3 py-1 ${selected?.toLowerCase() === e.rel.toLowerCase() ? 'bg-panel-3' : 'hover:bg-panel-2'}`}
             >
               <div className="flex items-center gap-1.5 text-[12px]">
-                <TouchDot touch={e} />
-                <span className="text-fg/90">{e.agentName}</span>
-                <span className="text-muted">{kindLabel(e.kind)}</span>
-                <span className="ml-auto shrink-0 text-[11px] text-muted">{ago(e.at, now)}</span>
+                <AgentAvatar name={e.agentName} size={16} />
+                <span className="min-w-0 truncate text-fg">{e.agentName}</span>
+                <span className={e.kind === 'write' ? 'text-muted' : 'text-dim'}>{kindLabel(e.kind)}</span>
+                <span className="ml-auto shrink-0 font-mono text-[11px] text-dim">{ago(e.at, now)}</span>
               </div>
-              <div className="truncate pl-3.5 text-[12px] text-muted">{name.slice(name.lastIndexOf('/') + 1)}</div>
+              <div className="truncate pl-[22px] text-[12px] text-dim">{name.slice(name.lastIndexOf('/') + 1)}</div>
             </div>
           )
         })}
     </>
-  )
-}
-
-function NavButton({ label, title, disabled, onClick }: { label: string; title: string; disabled: boolean; onClick: () => void }): React.JSX.Element {
-  return (
-    <button
-      title={title}
-      disabled={disabled}
-      onClick={onClick}
-      className="rounded px-1.5 py-0.5 text-[14px] text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted"
-    >
-      {label}
-    </button>
   )
 }
 
@@ -613,6 +751,9 @@ interface TreeProps {
   now: number
 }
 
+/** Lề trái của một hàng: thư mục theo bậc; note trong thư mục thẳng hàng với icon thư mục cha. */
+const indent = (depth: number, dir: boolean): number => (dir || depth === 0 ? 10 + depth * 18 : 12 + depth * 18)
+
 function Tree({ nodes, depth, selected, onSelect, recent, now }: TreeProps): React.JSX.Element {
   return (
     <>
@@ -623,12 +764,14 @@ function Tree({ nodes, depth, selected, onSelect, recent, now }: TreeProps): Rea
           <div
             key={n.rel}
             onClick={() => onSelect(n.rel)}
-            style={{ paddingLeft: 12 + depth * 14 }}
-            title={touchTitle(recent.get(n.rel.toLowerCase()), now)}
-            className={`flex cursor-pointer items-center gap-1.5 py-1 pr-2 ${selected === n.rel ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'}`}
+            style={{ paddingLeft: indent(depth, false) }}
+            data-tip={n.name.length > 22 ? n.name : undefined}
+            data-tip-side="right"
+            className={`flex min-w-0 cursor-pointer items-center gap-1.5 py-[3px] pr-2.5 ${selected === n.rel ? 'bg-panel-3 text-fg' : 'text-muted hover:bg-panel-2'}`}
           >
+            <Icon name="file" className="text-dim" />
             <span className="min-w-0 flex-1 truncate">{n.name}</span>
-            {recent.get(n.rel.toLowerCase())?.slice(0, 3).map((t) => <TouchDot key={t.agentId} touch={t} />)}
+            <LiveBadges touches={recent.get(n.rel.toLowerCase()) ?? []} now={now} max={2} />
           </div>
         )
       )}
@@ -640,15 +783,16 @@ function Folder({ node, depth, selected, onSelect, recent, now }: Omit<TreeProps
   const [open, setOpen] = useState(true)
   return (
     <>
-      <div onClick={() => setOpen(!open)} style={{ paddingLeft: 12 + depth * 14 }} className="cursor-pointer truncate py-1 pr-2 text-fg">
-        <span className="inline-block w-3 text-muted">{open ? '▾' : '▸'}</span>
-        {node.name}
+      <div
+        onClick={() => setOpen(!open)}
+        style={{ paddingLeft: indent(depth, true) }}
+        className="flex min-w-0 cursor-pointer items-center gap-1.5 py-[3px] pr-2.5 text-muted hover:bg-panel-2"
+      >
+        <Icon name={open ? 'cd' : 'cr'} size="s" className="text-dim" />
+        <Icon name="folder" className="text-dim" />
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
       </div>
       {open && node.children && <Tree nodes={node.children} depth={depth + 1} selected={selected} onSelect={onSelect} recent={recent} now={now} />}
     </>
   )
-}
-
-function touchTitle(touches: NoteTouch[] | undefined, now: number): string | undefined {
-  return touches?.map((t) => `${t.agentName} ${kindLabel(t.kind)} · ${ago(t.at, now)}`).join('\n')
 }

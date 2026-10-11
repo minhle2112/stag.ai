@@ -13,7 +13,8 @@ import { permissionModes } from '../../permissionModes'
 import { useAgents } from '../../store/agents'
 import { useSettings } from '../../store/settings'
 import { useWorkspaces } from '../../store/workspaces'
-import { ErrorBar, Group, Row, Select, SmallButton, Switch, useSaveError } from './controls'
+import { Badge, ErrorBar, Group, INPUT_MONO, Note, Row, RowBlock, Select, SmallButton, Switch, TEXTAREA, useSaveError } from './controls'
+import { LevelBar } from './levels'
 
 export const LABEL: Record<AdapterId, string> = { claude: 'Claude Code', codex: 'Codex', terminal: 'Terminal' }
 const LOGIN_CMD: Record<CliAdapterId, string> = { claude: 'claude auth login', codex: 'codex login' }
@@ -30,6 +31,8 @@ const EFFORT_LABEL: Record<string, string> = {
   ultra: 'Ultra'
 }
 const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+const MONO = 'break-all font-mono text-[11px]'
 
 /** Khả năng của từng adapter trong stag.ai (Connector / Skill là việc của S2 / S3). */
 export const FEATURES: Array<{ label: string; claude: string; codex: string; terminal: string }> = [
@@ -82,12 +85,12 @@ export function CliDetail({
       <Group title="Trên máy này">
         <Row
           label="File chạy"
-          desc={
+          sub={
             st?.error ? (
-              <span className="text-red-300">{st.error}</span>
+              <span className="text-danger">{st.error}</span>
             ) : st?.path ? (
               <>
-                <code className="break-all">{st.path}</code> {a.path ? '(bạn chọn)' : '(tự tìm trong PATH)'}
+                <span className={MONO}>{st.path}</span> {a.path ? '(bạn chọn)' : '(tự tìm trong PATH)'}
               </>
             ) : (
               'Đang tìm…'
@@ -104,39 +107,37 @@ export function CliDetail({
               Tự tìm
             </SmallButton>
           )}
-          <SmallButton onClick={pickExe}>Chọn file…</SmallButton>
+          <SmallButton icon="folder" onClick={pickExe}>
+            Chọn file…
+          </SmallButton>
         </Row>
         {st && !st.path && (
-          <Row label="Cài đặt" desc={<>Chạy trong một ô Terminal rồi bấm Kiểm tra lại:</>}>
-            <code className="rounded bg-panel-2 px-2 py-1 text-[12px]">{INSTALL_CMD[id]}</code>
+          <Row label="Cài đặt" sub="Chạy trong một ô Terminal rồi bấm Kiểm tra lại:">
+            <code className="rounded border border-line-2 bg-bg px-2 py-1 font-mono text-[11px]">{INSTALL_CMD[id]}</code>
           </Row>
         )}
-        <Row label="Phiên bản" desc={st?.version ?? (status === 'loading' ? 'Đang kiểm tra…' : '—')} />
+        <Row label="Phiên bản" sub={st?.version ?? (status === 'loading' ? 'Đang kiểm tra…' : '—')} />
         <Row
           label="Đăng nhập"
-          desc={
+          sub={
             !st || st.error ? (
               '—'
             ) : st.login.state === 'in' ? (
               st.login.detail
             ) : (
               <>
-                {st.login.detail}. Mở một ô Terminal, chạy <code>{LOGIN_CMD[id]}</code> rồi bấm Kiểm tra lại.
+                {st.login.detail}. Mở một ô Terminal, chạy <code className="font-mono text-[11px]">{LOGIN_CMD[id]}</code> rồi bấm Kiểm tra lại.
               </>
             )
           }
         >
           {st && !st.error && (
-            <span
-              className={`rounded px-2 py-0.5 text-[12px] ${
-                st.login.state === 'in' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'
-              }`}
-            >
+            <Badge tone={st.login.state === 'in' ? 'ok' : 'warn'}>
               {st.login.state === 'in' ? 'Đã đăng nhập' : st.login.state === 'out' ? 'Chưa đăng nhập' : 'Không rõ'}
-            </span>
+            </Badge>
           )}
         </Row>
-        <Row label="Kiểm tra" desc={st ? `Lần cuối: ${new Date(st.checkedAt).toLocaleTimeString('vi-VN')}` : undefined}>
+        <Row label="Kiểm tra" sub={st ? `Lần cuối: ${new Date(st.checkedAt).toLocaleTimeString('vi-VN')}` : undefined}>
           <SmallButton onClick={recheck} disabled={status === 'loading'}>
             {status === 'loading' ? 'Đang kiểm tra…' : 'Kiểm tra lại'}
           </SmallButton>
@@ -162,16 +163,11 @@ export function CliDetail({
       <AdvancedGroup id={id} />
 
       <Group title="Khả năng trong stag.ai">
-        <table className="w-full text-[12.5px]">
-          <tbody className="divide-y divide-line">
-            {FEATURES.map((f) => (
-              <tr key={f.label}>
-                <td className="px-4 py-2">{f.label}</td>
-                <td className={`px-4 py-2 text-right ${f[id].startsWith('✓') ? 'text-emerald-300' : 'text-muted'}`}>{f[id]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {FEATURES.map((f) => (
+          <Row key={f.label} label={<span className="font-normal">{f.label}</span>}>
+            <span className={`font-mono text-[12px] ${f[id].startsWith('✓') ? 'text-work' : 'text-dim'}`}>{f[id]}</span>
+          </Row>
+        ))}
       </Group>
     </>
   )
@@ -204,9 +200,7 @@ function ModelGroup({ id, status, focusAgentId }: { id: CliAdapterId; status: Ad
   const own: Partial<ModelSettings> =
     lvl === 'ws' ? (settings.workspaces[ws!.id]?.models?.[id] ?? {}) : lvl === 'agent' ? (settings.agents[agent!.id]?.models?.[id] ?? {}) : appValue
   const parent: ModelSettings = lvl === 'agent' ? resolveModel(settings, id, ws!.id, null) : appValue
-  const parentName = lvl === 'agent' ? `workspace ${ws!.name}` : 'mặc định của adapter'
   const effective: ModelSettings = { ...parent, ...own }
-  const inherits = (key: keyof ModelSettings): boolean => lvl !== 'app' && !(key in own)
 
   function setField(key: keyof ModelSettings, value: string | undefined): void {
     if (lvl === 'app') {
@@ -222,16 +216,6 @@ function ModelGroup({ id, status, focusAgentId }: { id: CliAdapterId; status: Ad
     run(saveOverrides(lvl === 'ws' ? 'workspace' : 'agent', lvl === 'ws' ? ws!.id : agent!.id, { models: Object.keys(models).length ? models : null }))
   }
 
-  const options = [
-    { value: 'app', label: `Mặc định cho mọi agent ${LABEL[id]}` },
-    ...workspaces.flatMap((w) => [
-      { value: `ws:${w.id}`, label: `Workspace: ${w.name}${settings.workspaces[w.id]?.models?.[id] ? ' •' : ''}` },
-      ...(byWs[w.id]?.agents ?? [])
-        .filter((x) => agentKind(x) === id)
-        .map((x) => ({ value: `agent:${w.id}:${x.id}`, label: `↳ Agent: ${x.name}${settings.agents[x.id]?.models?.[id] ? ' •' : ''}` }))
-    ])
-  ]
-
   const models = status?.models ?? []
   const modelInfo = models.find((m) => m.id === (effective.model || status?.configModel))
   const efforts = modelInfo?.efforts.length ? modelInfo.efforts : models.length ? [...new Set(models.flatMap((m) => m.efforts))] : FALLBACK_EFFORTS
@@ -241,51 +225,35 @@ function ModelGroup({ id, status, focusAgentId }: { id: CliAdapterId; status: Ad
     ...(effective.effort && !efforts.includes(effective.effort) ? [{ value: effective.effort, label: `${effective.effort} (model này không có)` }] : [])
   ]
 
-  const overrideToggle = (key: keyof ModelSettings): React.JSX.Element | null =>
-    lvl === 'app' ? null : (
-      <label className="mr-2 flex items-center gap-1.5 text-[12px] text-muted">
-        <input type="checkbox" checked={key in own} onChange={(e) => setField(key, e.target.checked ? effective[key] : undefined)} />
-        Riêng
-      </label>
-    )
+  /** Dòng đang ghi đè ở cấp workspace / agent: chấm teal, bấm để theo cấp trên. */
+  const override = (key: keyof ModelSettings): { on: boolean; onReset: () => void; parent: string } | undefined =>
+    lvl === 'app' ? undefined : { on: key in own, onReset: () => setField(key, undefined), parent: parent[key] || 'mặc định' }
   const configNote = status?.configModel ? `Trống = theo ${CONFIG_FILE[id]} (hiện là ${status.configModel}).` : `Trống = theo cấu hình ${LABEL[id]} của bạn.`
 
   return (
-    <section className="mb-6">
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Model</div>
+    <Group
+      title="Model"
+      action={<LevelBar level={level} setLevel={setLevel} has={(o) => !!o?.models?.[id]} agentFilter={(x) => agentKind(x) === id} />}
+    >
       <ErrorBar error={error} />
-      <div className="divide-y divide-line rounded-lg border border-line bg-panel">
-        <Row label="Áp dụng cho" desc="Workspace ghi đè mặc định; agent ghi đè workspace của nó. Dấu • = đang có giá trị riêng.">
-          <Select label={`Cấp cài đặt model ${LABEL[id]}`} value={lvl === 'app' ? 'app' : level} onChange={setLevel} options={options} />
-        </Row>
-        <Row label="Model" desc={inherits('model') ? `Đang theo ${parentName}.` : configNote} disabled={inherits('model')}>
-          {overrideToggle('model')}
-          <ModelInput
-            key={`${level}:${effective.model}`}
-            name={LABEL[id]}
-            listId={`models-${id}`}
-            value={effective.model}
-            disabled={inherits('model')}
-            suggestions={models.map((m) => ({ value: m.id, label: m.label }))}
-            onCommit={(v) => setField('model', v)}
-          />
-        </Row>
-        <Row
-          label="Mức suy nghĩ"
-          desc={inherits('effort') ? `Đang theo ${parentName}.` : id === 'claude' ? 'Cờ --effort của Claude Code.' : 'model_reasoning_effort của Codex.'}
-          disabled={inherits('effort')}
-        >
-          {overrideToggle('effort')}
-          <Select
-            label={`Mức suy nghĩ ${LABEL[id]}`}
-            value={effective.effort}
-            disabled={inherits('effort')}
-            onChange={(v) => setField('effort', v)}
-            options={effortOptions}
-          />
-        </Row>
-      </div>
-    </section>
+      <Row label="Model" desc={configNote} override={override('model')}>
+        <ModelInput
+          key={`${level}:${effective.model}`}
+          name={LABEL[id]}
+          listId={`models-${id}`}
+          value={effective.model}
+          suggestions={models.map((m) => ({ value: m.id, label: m.label }))}
+          onCommit={(v) => setField('model', v)}
+        />
+      </Row>
+      <Row
+        label="Mức suy nghĩ"
+        desc={id === 'claude' ? 'Cờ --effort của Claude Code.' : 'model_reasoning_effort của Codex.'}
+        override={override('effort')}
+      >
+        <Select label={`Mức suy nghĩ ${LABEL[id]}`} value={effective.effort} onChange={(v) => setField('effort', v)} options={effortOptions} />
+      </Row>
+    </Group>
   )
 }
 
@@ -322,9 +290,7 @@ export function ModelInput({
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => e.key === 'Enter' && commit()}
-        className={`w-56 rounded-md border bg-bg px-2 py-1.5 font-mono text-[12.5px] outline-none focus:border-accent disabled:cursor-not-allowed ${
-          bad ? 'border-red-500/60' : 'border-line'
-        }`}
+        className={`w-56 ${INPUT_MONO} ${bad ? 'border-danger/60!' : ''}`}
       />
       <datalist id={listId}>
         {suggestions.map((s) => (
@@ -333,7 +299,7 @@ export function ModelInput({
           </option>
         ))}
       </datalist>
-      {bad && <div className="mt-1 text-[11.5px] text-red-300">Chỉ dùng chữ, số và . _ : - / [ ] @</div>}
+      {bad && <div className="mt-1 text-[12px] text-danger">Chỉ dùng chữ, số và . _ : - / [ ] @</div>}
     </div>
   )
 }
@@ -385,64 +351,61 @@ export function AdvancedFields({
   const parsedArgs = splitArgs(args)
 
   return (
-    <section className="mb-6">
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Nâng cao</div>
+    <Group title="Nâng cao">
       <ErrorBar error={error} />
-      <div className="divide-y divide-line rounded-lg border border-line bg-panel">
-        <div className="px-4 py-3">
-          <label htmlFor={`args-${fieldId}`} className="block text-[13px]">
-            Tham số thêm
-          </label>
-          <div className="mt-0.5 text-[12px] text-muted">
-            Thêm vào lệnh mỗi phiên {name}, cách nhau bằng dấu cách; dùng "…" cho giá trị có dấu cách. {argsExample}
+      <RowBlock
+        label="Tham số thêm"
+        htmlFor={`args-${fieldId}`}
+        desc={`Thêm vào lệnh mỗi phiên ${name}, cách nhau bằng dấu cách; dùng "…" cho giá trị có dấu cách. ${argsExample}`}
+      >
+        <input
+          id={`args-${fieldId}`}
+          value={args}
+          onChange={(e) => setArgs(e.target.value)}
+          onBlur={() => args !== extraArgs && run(onSave({ extraArgs: args }))}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+          spellCheck={false}
+          className={`${INPUT_MONO} w-full`}
+        />
+        {parsedArgs.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {parsedArgs.map((p, i) => (
+              <code key={i} className="rounded border border-line-2 bg-bg px-1.5 font-mono text-[11px] leading-5">
+                {p || '""'}
+              </code>
+            ))}
           </div>
-          <input
-            id={`args-${fieldId}`}
-            value={args}
-            onChange={(e) => setArgs(e.target.value)}
-            onBlur={() => args !== extraArgs && run(onSave({ extraArgs: args }))}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-            spellCheck={false}
-            className="mt-2 w-full rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12.5px] outline-none focus:border-accent"
-          />
-          {parsedArgs.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {parsedArgs.map((p, i) => (
-                <code key={i} className="rounded bg-panel-2 px-1.5 py-0.5 text-[11.5px]">
-                  {p || '""'}
-                </code>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="px-4 py-3">
-          <label htmlFor={`env-${fieldId}`} className="block text-[13px]">
-            Biến môi trường
-          </label>
-          <div className="mt-0.5 text-[12px] text-muted">
-            Mỗi dòng TÊN=giá trị, dòng # là ghi chú. Lưu không mã hoá trong {storedIn}, nên{' '}
-            <span className="text-amber-300">đừng để API key hay mật khẩu ở đây</span> (mục Secrets sẽ lo việc đó).
+        )}
+      </RowBlock>
+      <RowBlock
+        label="Biến môi trường"
+        htmlFor={`env-${fieldId}`}
+        desc="Mỗi dòng TÊN=giá trị, dòng # là ghi chú."
+        sub={
+          <>
+            Lưu không mã hoá trong {storedIn}, nên <span className="font-medium text-muted">đừng để API key hay mật khẩu ở đây</span> (mục Kho bí mật sẽ lo việc đó).
+          </>
+        }
+      >
+        <textarea
+          id={`env-${fieldId}`}
+          value={env}
+          rows={3}
+          onChange={(e) => setEnv(e.target.value)}
+          onBlur={() => env !== savedEnv && run(onSave({ env }))}
+          spellCheck={false}
+          placeholder={envExample}
+          className={`${TEXTAREA} w-full`}
+        />
+        {envCheck.errors.length > 0 && (
+          <div className="mt-1 space-y-0.5 text-[12px] text-danger">
+            {envCheck.errors.map((e) => (
+              <div key={e}>{e} — dòng này bị bỏ qua.</div>
+            ))}
           </div>
-          <textarea
-            id={`env-${fieldId}`}
-            value={env}
-            rows={3}
-            onChange={(e) => setEnv(e.target.value)}
-            onBlur={() => env !== savedEnv && run(onSave({ env }))}
-            spellCheck={false}
-            placeholder={envExample}
-            className="mt-2 w-full resize-y rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12.5px] outline-none focus:border-accent"
-          />
-          {envCheck.errors.length > 0 && (
-            <div className="mt-1 space-y-0.5 text-[11.5px] text-red-300">
-              {envCheck.errors.map((e) => (
-                <div key={e}>{e} — dòng này bị bỏ qua.</div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
+        )}
+      </RowBlock>
+    </Group>
   )
 }
 
@@ -465,11 +428,8 @@ export function TerminalDetail(): React.JSX.Element {
         </Row>
         <Row
           label="Shell"
-          desc={
-            missing
-              ? 'Shell đã chọn không còn trên máy, ô Terminal sẽ dùng Windows PowerShell.'
-              : 'Áp dụng cho ô Terminal mở sau khi đổi. Ô agent Claude / Codex không bị ảnh hưởng.'
-          }
+          desc="Áp dụng cho ô Terminal mở sau khi đổi. Ô agent Claude / Codex không bị ảnh hưởng."
+          sub={missing ? 'Shell đã chọn không còn trên máy, ô Terminal sẽ dùng Windows PowerShell.' : undefined}
         >
           <Select
             label="Shell cho ô Terminal"
@@ -488,13 +448,13 @@ export function TerminalDetail(): React.JSX.Element {
       </Group>
       <Group title="Shell tìm thấy trên máy">
         {(shells ?? []).map((s) => (
-          <Row key={s.id} label={s.label} desc={<code className="break-all">{[s.path, ...s.args].join(' ')}</code>} />
+          <Row key={s.id} label={s.label} sub={<span className={MONO}>{[s.path, ...s.args].join(' ')}</span>} />
         ))}
       </Group>
-      <p className="text-[12px] leading-relaxed text-muted">
-        Ô Terminal không có luật phiên, bộ nhớ hay kanban. Chạy <code>claude</code> / <code>codex</code> bên trong vẫn là một phiên độc lập
-        (app bỏ biến môi trường "phiên con" trước khi mở shell).
-      </p>
+      <Note>
+        Ô Terminal không có luật phiên, bộ nhớ hay kanban. Chạy <code>claude</code> / <code>codex</code> bên trong vẫn là một phiên độc lập (app bỏ biến môi
+        trường "phiên con" trước khi mở shell).
+      </Note>
     </>
   )
 }

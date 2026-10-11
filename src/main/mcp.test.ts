@@ -90,11 +90,13 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
       if (i.name === 'Busy') throw new Error('"Busy" still has an open task')
       return `handoff ${i.name}`
     }),
-    remove: vi.fn(async (i: { name: string }) => `remove ${i.name}`)
+    remove: vi.fn(async (i: { name: string }) => `remove ${i.name}`),
+    status: vi.fn(async (i: { name: string }) => `status ${i.name}`),
+    log: vi.fn(async (i: { name: string; last?: number }) => `log ${i.name} ${i.last ?? ''}`)
   }
 
   const sync = vi.fn(async () => {})
-  async function client(withTeam: boolean, agentApi?: { manage: boolean; message: boolean }): Promise<Client> {
+  async function client(withTeam: boolean, agentApi?: { manage: boolean; message: boolean; read?: boolean }): Promise<Client> {
     const server = createStagMcp({
       agentApi,
       agent,
@@ -193,6 +195,21 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     const off = await client(true, { manage: true, message: false })
     expect(await names(off)).not.toContain('agent_handoff')
     expect(text(await off.callTool({ name: 'agent_handoff', arguments: { name: 'Tester', summary: 's' } }))).toBe(AGENT_API_OFF.message)
+  })
+
+  it('agent_status / agent_log: chuyển tham số; nhóm read tắt thì ẩn và báo lỗi', async () => {
+    const c = await client(true)
+    expect(text(await c.callTool({ name: 'agent_status', arguments: { name: 'Tester' } }))).toBe('status Tester')
+    expect(text(await c.callTool({ name: 'agent_log', arguments: { name: 'Tester', last: 5, include_tools: true, query: 'lỗi' } }))).toBe('log Tester 5')
+    expect(team.log).toHaveBeenCalledWith({ name: 'Tester', last: 5, include_tools: true, query: 'lỗi' })
+    const big = await c.callTool({ name: 'agent_log', arguments: { name: 'Tester', last: 500 } })
+    expect(big.isError).toBe(true)
+    const off = await client(true, { manage: true, message: true, read: false })
+    const list = await names(off)
+    expect(list).not.toContain('agent_status')
+    expect(list).not.toContain('agent_log')
+    expect(list).toContain('agent_send')
+    expect(text(await off.callTool({ name: 'agent_log', arguments: { name: 'Tester' } }))).toBe(AGENT_API_OFF.read)
   })
 
   it('không có team API → lỗi rõ ràng', async () => {

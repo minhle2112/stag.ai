@@ -1,15 +1,15 @@
 /* Màu + kiểu cơ bản của stag.ai cho trang plugin: <link rel="stylesheet" href="/__stag/ui.css" /> */
 :root {
-  --stag-bg: #0f1115;
-  --stag-panel: #161920;
-  --stag-panel-2: #1d212a;
-  --stag-line: #2a2f3a;
-  --stag-fg: #e6e8ee;
-  --stag-muted: #8b93a7;
-  --stag-accent: #6ea8fe;
-  --stag-ok: #6ee7b7;
-  --stag-warn: #fcd34d;
-  --stag-bad: #fca5a5;
+  --stag-bg: #0c0e10;
+  --stag-panel: #101215;
+  --stag-panel-2: #16191d;
+  --stag-line: #2a2f36;
+  --stag-fg: #dde1e6;
+  --stag-muted: #99a0aa;
+  --stag-accent: #2de2c0;
+  --stag-ok: #3ddc84;
+  --stag-warn: #f4b544;
+  --stag-bad: #f26a5f;
   --stag-font: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   --stag-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
   color-scheme: dark;

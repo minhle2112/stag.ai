@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ForceGraph from 'force-graph'
 import type { VaultIndex } from '@shared/types'
+import { AgentAvatar } from '../ui/AgentAvatar'
+import { Seg } from '../ui/Seg'
+import { IconButton } from '../shell/IconButton'
 import {
-  GHOST_COLOR,
   buildGraph,
   filterGraph,
   neighborMap,
@@ -14,7 +16,7 @@ import {
   type GNode,
   type VaultGraph
 } from './graphData'
-import { agentColor, type NoteTouch } from './activity'
+import { agentInitial, avatarColor, LIVE_MS, type NoteTouch } from './activity'
 
 export interface GraphViewProps {
   index: VaultIndex
@@ -50,6 +52,8 @@ interface Settings {
   hidden: string[]
   showGhosts: boolean
   hideOrphans: boolean
+  /** Tô node theo loại note (mặc định xám như bản thiết kế; chỉ node đang mở = teal, agent = viền màu). */
+  colorByType: boolean
 }
 
 /**
@@ -68,7 +72,7 @@ function savedFor(vaultPath: string): Saved {
     s = {
       pool: new Map(),
       view: null,
-      settings: { mode: 'global', depth: 1, hidden: [], showGhosts: true, hideOrphans: false }
+      settings: { mode: 'global', depth: 1, hidden: [], showGhosts: true, hideOrphans: false, colorByType: false }
     }
     saved.set(vaultPath, s)
   }
@@ -76,17 +80,25 @@ function savedFor(vaultPath: string): Saved {
 }
 
 /** Màu giao diện đọc từ biến CSS của theme (styles.css). */
-function themeColors(): Record<'bg' | 'fg' | 'muted' | 'accent' | 'font', string> {
+function themeColors(): Record<'fg' | 'muted' | 'accent' | 'line2' | 'line3' | 'font', string> {
   const s = getComputedStyle(document.documentElement)
   const v = (name: string, d: string): string => s.getPropertyValue(name).trim() || d
   return {
-    bg: v('--color-bg', '#0f1115'),
-    fg: v('--color-fg', '#e6e8ee'),
-    muted: v('--color-muted', '#8b93a7'),
-    accent: v('--color-accent', '#6ea8fe'),
+    fg: v('--color-fg', '#dde1e6'),
+    muted: v('--color-muted', '#99a0aa'),
+    accent: v('--color-accent', '#2de2c0'),
+    line2: v('--color-line-2', '#2a2f36'),
+    line3: v('--color-line-3', '#3a4048'),
     font: v('--font-sans', 'system-ui, sans-serif')
   }
 }
+
+/** Nền sân khấu (như bản thiết kế): tối dần ra mép. */
+const STAGE_BG = 'radial-gradient(circle at 50% 45%, #12161a, #0c0e10)'
+/** Node note thường; viền nền quanh chữ nhãn; màu cạnh. */
+const NODE_GREY = '#8a929c'
+const LABEL_HALO = '#0e1114'
+const LINK_GREY = '#2c3239'
 
 const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`)
 const idOf = (x: string | SimNode): string => (typeof x === 'string' ? x : x.id)
@@ -148,6 +160,8 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
   currentRef.current = current
   const activityRef = useRef(activity)
   activityRef.current = activity
+  const colorByTypeRef = useRef(settings.colorByType)
+  colorByTypeRef.current = settings.colorByType
   const onOpenRef = useRef(onOpen)
   onOpenRef.current = onOpen
   /** Trạng thái hover (đọc trong hàm vẽ, không qua React để khỏi render lại). */
@@ -168,7 +182,7 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
       const old = store.pool.get(n.id)
       const sim: SimNode = old ? Object.assign(old, n) : { ...n, r: 0, color: '' }
       sim.r = nodeRadius(n.degree)
-      sim.color = n.ghost ? GHOST_COLOR : typeColor(n.type)
+      sim.color = typeColor(n.type)
       store.pool.set(n.id, sim)
       return sim
     })
@@ -192,24 +206,36 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
   const stats = useMemo(() => typeStats(graph), [graph])
   const ghostCount = useMemo(() => graph.nodes.filter((n) => n.ghost).length, [graph])
 
-  // Hoạt động agent đổi → vẽ lại khung hình (không cần chạy lại mô phỏng).
+  // Hoạt động agent / tô màu theo loại đổi → vẽ lại khung hình (không cần chạy lại mô phỏng).
   useEffect(() => {
     fgRef.current?.nodeRelSize(1)
+  }, [activity, settings.colorByType])
+
+  // Có agent vừa làm việc → vòng đập nhịp quanh node: vẽ lại ~15 khung/giây (chỉ khi graph không quá lớn).
+  const hasLive = useMemo(() => {
+    const t = Date.now()
+    for (const list of activity?.values() ?? []) if (list.some((x) => t - Date.parse(x.at) < LIVE_MS)) return true
+    return false
   }, [activity])
+  useEffect(() => {
+    if (!hasLive || display.nodes.length > 600) return
+    const timer = setInterval(() => fgRef.current?.nodeRelSize(1), 66)
+    return () => clearInterval(timer)
+  }, [hasLive, display.nodes.length])
 
   // Tạo graph một lần khi mount, dọn khi unmount.
   useEffect(() => {
     const host = hostRef.current!
     const t = themeColors()
-    const linkColor = withAlpha(t.muted, 0.3)
-    const linkDim = withAlpha(t.muted, 0.06)
+    const linkColor = LINK_GREY
+    const linkDim = withAlpha(LINK_GREY, 0.25)
     const linkHl = withAlpha(t.accent, 0.85)
     const touches = (l: SimLink, id: string): boolean => idOf(l.source) === id || idOf(l.target) === id
 
     const fg = new ForceGraph<SimNode, SimLink>(host)
       .width(host.clientWidth)
       .height(host.clientHeight)
-      .backgroundColor(t.bg)
+      .backgroundColor(STAGE_BG)
       .nodeId('id')
       .nodeRelSize(1)
       .nodeVal((n) => n.r * n.r) // vùng bấm/hover = hình tròn bán kính r
@@ -225,45 +251,58 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
         const h = hover.current
         const x = n.x ?? 0
         const y = n.y ?? 0
-        ctx.globalAlpha = h.id && n.id !== h.id && !h.near?.has(n.id) ? 0.12 : 1
-        // Quầng hoạt động: mỗi agent vừa đụng tới note một vòng màu riêng (ghi = vòng liền, đọc = vòng đứt).
-        const touches = !n.ghost ? activityRef.current?.get(n.id.toLowerCase()) : undefined
-        touches?.slice(0, 3).forEach((tc, i) => {
-          const c = agentColor(tc.agentId)
+        const baseAlpha = h.id && n.id !== h.id && !h.near?.has(n.id) ? 0.12 : 1
+        ctx.globalAlpha = baseAlpha
+        // Agent vừa đụng tới note: mỗi agent một vòng màu avatar (ghi = vòng liền + nền mờ, đọc = vòng đứt);
+        // agent đang làm (LIVE_MS) có thêm vòng toả ra; huy hiệu chữ cái ở góc trên phải (vẽ sau node).
+        const touches = !n.ghost ? activityRef.current?.get(n.id.toLowerCase())?.slice(0, 3) : undefined
+        const nowMs = Date.now()
+        touches?.forEach((tc, i) => {
+          const c = avatarColor(tc.agentName)
+          if (i === 0 && nowMs - Date.parse(tc.at) < LIVE_MS) {
+            const ph = (nowMs % 1500) / 1500
+            ctx.beginPath()
+            ctx.arc(x, y, n.r + (3 + 5 * ph) / k, 0, 2 * Math.PI)
+            ctx.globalAlpha = baseAlpha * 0.9 * (1 - ph)
+            ctx.lineWidth = 1 / k
+            ctx.strokeStyle = c
+            ctx.stroke()
+            ctx.globalAlpha = baseAlpha
+          }
           ctx.beginPath()
-          ctx.arc(x, y, n.r + (3 + i * 3) / k, 0, 2 * Math.PI)
+          ctx.arc(x, y, n.r + (2.5 + i * 3.5) / k, 0, 2 * Math.PI)
           if (tc.kind === 'write' && i === 0) {
-            ctx.fillStyle = c.replace('hsl(', 'hsla(').replace(')', ', 0.22)')
+            ctx.fillStyle = withAlpha(c, 0.2)
             ctx.fill()
           }
           ctx.setLineDash(tc.kind === 'read' ? [3 / k, 2 / k] : [])
-          ctx.lineWidth = 1.6 / k
+          ctx.lineWidth = 1.5 / k
           ctx.strokeStyle = c
           ctx.stroke()
           ctx.setLineDash([])
         })
         if (n.id === currentRef.current) {
-          // Vòng sáng cho note đang mở.
+          // Vòng sáng teal cho note đang mở.
           ctx.beginPath()
           ctx.arc(x, y, n.r + 5 / k, 0, 2 * Math.PI)
-          ctx.fillStyle = withAlpha(t.accent, 0.25)
+          ctx.fillStyle = withAlpha(t.accent, 0.16)
           ctx.fill()
-          ctx.lineWidth = 1.5 / k
-          ctx.strokeStyle = t.accent
+          ctx.lineWidth = 1.2 / k
+          ctx.strokeStyle = withAlpha(t.accent, 0.7)
           ctx.stroke()
         }
         ctx.beginPath()
         ctx.arc(x, y, n.r, 0, 2 * Math.PI)
         if (n.ghost) {
-          ctx.fillStyle = t.bg
+          ctx.fillStyle = t.line2
           ctx.fill()
           ctx.setLineDash([n.r * 0.55, n.r * 0.4])
           ctx.lineWidth = Math.min(n.r * 0.35, 1.2 / k)
-          ctx.strokeStyle = GHOST_COLOR
+          ctx.strokeStyle = t.line3
           ctx.stroke()
           ctx.setLineDash([])
         } else {
-          ctx.fillStyle = n.color
+          ctx.fillStyle = n.id === currentRef.current ? t.accent : colorByTypeRef.current ? n.color : NODE_GREY
           ctx.fill()
         }
         if (n.id === h.id) {
@@ -271,10 +310,24 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
           ctx.strokeStyle = t.fg
           ctx.stroke()
         }
+        touches?.forEach((tc, i) => {
+          const size = 14 / k
+          const bx = x + n.r + (2 + i * 15) / k
+          const by = y - n.r - 16 / k
+          ctx.beginPath()
+          ctx.roundRect(bx, by, size, size, 3 / k)
+          ctx.fillStyle = avatarColor(tc.agentName)
+          ctx.fill()
+          ctx.fillStyle = '#0b0d10'
+          ctx.font = `700 ${11 / k}px ${t.font}`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(agentInitial(tc.agentName), bx + size / 2, by + size / 2 + 0.5 / k)
+        })
         ctx.globalAlpha = 1
       })
       .onRenderFramePost((ctx, k) => {
-        // Nhãn tên vẽ sau cùng để không bị node khác che. Chỉ vẽ nhãn trong khung nhìn.
+        // Nhãn tên vẽ sau cùng để không bị node khác che, có viền tối quanh chữ. Chỉ vẽ nhãn trong khung nhìn.
         const h = hover.current
         const cur = currentRef.current
         const fade = Math.max(0, Math.min(1, (k - LABEL_ZOOM) / 0.6))
@@ -282,10 +335,20 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
         const p0 = inv.transformPoint({ x: 0, y: 0 })
         const p1 = inv.transformPoint({ x: ctx.canvas.width, y: ctx.canvas.height })
         const pad = 200 / k
-        ctx.font = `${11 / k}px ${t.font}`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'top'
         ctx.lineJoin = 'round'
+        ctx.lineWidth = 4 / k
+        ctx.strokeStyle = LABEL_HALO
+        const label = (n: SimNode, text: string, alpha: number, strong: boolean): void => {
+          const lx = n.x ?? 0
+          const ly = (n.y ?? 0) + n.r + 2 / k
+          ctx.font = `${strong ? 600 : 400} ${11 / k}px ${t.font}`
+          ctx.globalAlpha = alpha
+          ctx.strokeText(text, lx, ly)
+          ctx.fillStyle = strong ? t.fg : t.muted
+          ctx.fillText(text, lx, ly)
+        }
         const special: SimNode[] = []
         for (const n of fg.graphData().nodes) {
           if (n.id === h.id || n.id === cur) {
@@ -296,22 +359,13 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
           const x = n.x ?? 0
           const y = n.y ?? 0
           if (x < p0.x - pad || x > p1.x + pad || y < p0.y - pad || y > p1.y + pad) continue
-          const a = fade * (h.id && !h.near?.has(n.id) ? 0.12 : n.ghost ? 0.55 : 0.85)
+          const a = fade * (h.id && !h.near?.has(n.id) ? 0.12 : n.ghost ? 0.55 : 0.9)
           if (a < 0.02) continue
-          ctx.globalAlpha = a
-          ctx.fillStyle = t.fg
-          ctx.fillText(shortName(n.name), x, y + n.r + 2 / k)
+          label(n, shortName(n.name), a, false)
         }
-        // Node đang hover và note đang mở: luôn có nhãn, có viền nền cho dễ đọc.
+        // Node đang hover và note đang mở: luôn có nhãn.
+        for (const n of special) label(n, n.ghost ? `${shortName(n.name)} (chưa có)` : shortName(n.name), 1, true)
         ctx.globalAlpha = 1
-        ctx.lineWidth = 3 / k
-        ctx.strokeStyle = t.bg
-        for (const n of special) {
-          const label = n.ghost ? `${shortName(n.name)} (chưa có)` : shortName(n.name)
-          ctx.strokeText(label, n.x ?? 0, (n.y ?? 0) + n.r + 2 / k)
-          ctx.fillStyle = t.fg
-          ctx.fillText(label, n.x ?? 0, (n.y ?? 0) + n.r + 2 / k)
-        }
       })
       .onNodeHover((n) => {
         hover.current = { id: n?.id ?? null, near: n ? (neighbors.current.get(n.id) ?? null) : null }
@@ -438,101 +492,134 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
   const hidden = new Set(settings.hidden)
   const toggleType = (key: string): void =>
     setSettings({ hidden: hidden.has(key) ? settings.hidden.filter((k) => k !== key) : [...settings.hidden, key] })
-  const btn = (on: boolean): string =>
-    `px-2 py-0.5 text-[12px] ${on ? 'bg-panel-2 text-fg' : 'text-muted hover:text-fg'} disabled:cursor-default disabled:opacity-40 disabled:hover:text-muted`
+  const chip = (on: boolean): string =>
+    `h-[22px] shrink-0 items-center gap-1.5 rounded-md border px-2 text-[12px] ${
+      on ? 'border-line-3 bg-panel-3 text-fg' : 'border-line-2 text-muted hover:text-fg'
+    }`
+
+  // Agent đang đọc / ghi trong phần graph đang hiện (cho chú thích ở thanh đầu).
+  const liveAgents = useMemo(() => {
+    const names = new Map<string, NoteTouch>()
+    for (const n of display.nodes) {
+      for (const t of activity?.get(n.id.toLowerCase()) ?? []) if (!names.has(t.agentName)) names.set(t.agentName, t)
+    }
+    return [...names.keys()].slice(0, 4)
+  }, [display.nodes, activity])
 
   return (
-    <div className="absolute inset-0 overflow-hidden">
-      <div ref={hostRef} className="absolute inset-0" />
-
-      {display.nodes.length === 0 && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-muted">
-          {graph.nodes.length === 0 ? 'Vault chưa có note.' : 'Không có note nào khớp bộ lọc.'}
+    <div className="@container flex h-full min-h-0 w-full flex-col">
+      <div className="flex h-10 shrink-0 items-center gap-2 overflow-hidden border-b border-line px-3 whitespace-nowrap">
+        <span className="hidden shrink-0 text-[12px] text-dim @min-[460px]:inline">
+          {display.nodes.length} note · {display.links.length} liên kết
+        </span>
+        <Seg
+          value={local ? 'local' : 'global'}
+          onChange={(m) => {
+            if (m === 'local' && !canLocal) return
+            setSettings({ mode: m })
+          }}
+          options={[
+            { value: 'global', label: 'Toàn vault', tip: 'Cả vault' },
+            { value: 'local', label: 'Cục bộ', tip: canLocal ? 'Chỉ phần quanh note đang mở' : 'Mở một note để xem graph cục bộ' }
+          ]}
+        />
+        {local && (
+          <Seg
+            value={String(settings.depth) as '1' | '2'}
+            onChange={(d) => setSettings({ depth: d === '2' ? 2 : 1 })}
+            options={[
+              { value: '1', label: '1 bước', tip: 'Chỉ note link trực tiếp' },
+              { value: '2', label: '2 bước', tip: 'Cả note cách 2 link' }
+            ]}
+          />
+        )}
+        <button
+          type="button"
+          aria-pressed={settings.showGhosts}
+          data-tip="Hiện link tới note chưa có (node mờ)"
+          className={`inline-flex ${chip(settings.showGhosts)}`}
+          onClick={() => setSettings({ showGhosts: !settings.showGhosts })}
+        >
+          Chưa có note
+          {ghostCount > 0 && <span className="font-mono text-[11px] text-dim">{ghostCount}</span>}
+        </button>
+        <button
+          type="button"
+          aria-pressed={settings.hideOrphans}
+          data-tip="Ẩn note không có link nào"
+          className={`hidden @min-[520px]:inline-flex ${chip(settings.hideOrphans)}`}
+          onClick={() => setSettings({ hideOrphans: !settings.hideOrphans })}
+        >
+          Ẩn mồ côi
+        </button>
+        <IconButton
+          icon="focus"
+          tip="Vừa khung"
+          onClick={() => {
+            fitPending.current = false
+            if (fgRef.current) fitView(fgRef.current, 400)
+          }}
+        />
+        <div className="min-w-0 flex-1" />
+        <div className="hidden shrink-0 items-center gap-3 text-[11px] text-muted @min-[760px]:flex" data-tip="Vòng liền = agent ghi · vòng đứt = agent đọc">
+          {liveAgents.map((name) => (
+            <span key={name} className="flex items-center gap-1.5">
+              <AgentAvatar name={name} size={14} />
+              {name}
+            </span>
+          ))}
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-line-2" />
+            chưa có note
+          </span>
         </div>
-      )}
+      </div>
 
-      <div className="pointer-events-none absolute inset-x-2 top-2 flex items-start gap-2">
-        <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-line bg-panel/90 px-2 py-1.5 shadow">
-          <div className="flex overflow-hidden rounded border border-line">
-            <button className={btn(!local)} onClick={() => setSettings({ mode: 'global' })}>
-              Toàn vault
-            </button>
-            <button
-              className={btn(local)}
-              disabled={!canLocal}
-              title={canLocal ?'Graph quanh note đang mở' : 'Mở một note để xem graph cục bộ'}
-              onClick={() => setSettings({ mode: 'local' })}
-            >
-              Cục bộ
-            </button>
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div ref={hostRef} className="absolute inset-0" />
+
+        {display.nodes.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-muted">
+            {graph.nodes.length === 0 ? 'Vault chưa có note.' : 'Không có note nào khớp bộ lọc.'}
           </div>
-          {local && (
-            <div className="flex items-center gap-1 text-[12px] text-muted">
-              Độ sâu
-              <div className="flex overflow-hidden rounded border border-line">
-                {([1, 2] as const).map((d) => (
-                  <button key={d} className={btn(settings.depth === d)} onClick={() => setSettings({ depth: d })}>
-                    {d}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <label className="flex cursor-pointer items-center gap-1 text-[12px] text-muted hover:text-fg">
-            <input
-              type="checkbox"
-              className="accent-accent"
-              checked={settings.showGhosts}
-              onChange={(e) => setSettings({ showGhosts: e.target.checked })}
-            />
-            Hiện note chưa có{ghostCount ? ` (${ghostCount})` : ''}
-          </label>
-          <label className="flex cursor-pointer items-center gap-1 text-[12px] text-muted hover:text-fg">
-            <input
-              type="checkbox"
-              className="accent-accent"
-              checked={settings.hideOrphans}
-              onChange={(e) => setSettings({ hideOrphans: e.target.checked })}
-            />
-            Ẩn note mồ côi
-          </label>
-          <button
-            className="rounded border border-line px-2 py-0.5 text-[12px] text-muted hover:text-fg"
-            onClick={() => {
-              fitPending.current = false
-              if (fgRef.current) fitView(fgRef.current, 400)
-            }}
-          >
-            Vừa khung
-          </button>
-        </div>
-
-        <div className="flex-1" />
+        )}
 
         {stats.length > 0 && (
-          <div className="pointer-events-auto max-h-[60vh] min-w-36 overflow-y-auto rounded-md border border-line bg-panel/90 py-1 shadow">
+          <div className="pointer-events-auto absolute top-2 right-2 max-h-[60%] min-w-36 overflow-y-auto rounded-lg border border-line-2 bg-panel/90 py-1">
+            <div className="flex items-center gap-2 px-2.5 pt-0.5 pb-1">
+              <span className="text-[11px] font-semibold tracking-[0.07em] text-dim">LOẠI NOTE</span>
+              <button
+                type="button"
+                aria-pressed={settings.colorByType}
+                data-tip="Tô màu node theo loại note"
+                onClick={() => setSettings({ colorByType: !settings.colorByType })}
+                className={`ml-auto h-[18px] rounded border px-1.5 text-[11px] ${
+                  settings.colorByType ? 'border-line-3 bg-panel-3 text-fg' : 'border-line-2 text-muted hover:text-fg'
+                }`}
+              >
+                Tô màu
+              </button>
+            </div>
             {stats.map(({ key, count }) => {
               const off = hidden.has(key)
               return (
                 <button
                   key={key}
                   onClick={() => toggleType(key)}
-                  title={off ? 'Bấm để hiện loại này' : 'Bấm để ẩn loại này'}
-                  className={`flex w-full items-center gap-2 px-2.5 py-0.5 text-left text-[12px] hover:bg-panel-2 ${off ? 'text-muted line-through opacity-50' : 'text-fg'}`}
+                  data-tip={off ? 'Bấm để hiện loại này' : 'Bấm để ẩn loại này'}
+                  className={`flex w-full items-center gap-2 px-2.5 py-0.5 text-left text-[12px] hover:bg-panel-2 ${off ? 'text-dim line-through opacity-60' : 'text-fg'}`}
                 >
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: typeColor(key || null) }} />
-                  <span className="flex-1 truncate">{key || 'không loại'}</span>
-                  <span className="text-muted">{count}</span>
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: settings.colorByType ? typeColor(key || null) : NODE_GREY }}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{key || 'không loại'}</span>
+                  <span className="font-mono text-[11px] text-dim">{count}</span>
                 </button>
               )
             })}
           </div>
         )}
-      </div>
-
-      <div className="pointer-events-none absolute bottom-2 left-2 text-[11px] text-muted">
-        {display.nodes.length} node · {display.links.length} link
-        {local && ' · cục bộ'}
       </div>
     </div>
   )

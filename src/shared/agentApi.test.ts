@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkCreateInput, parseKind } from './agentApi'
+import { checkCreateInput, parseKind, userFirstTaskOpening } from './agentApi'
 
 const defaults = (): 'acceptEdits' => 'acceptEdits'
 
@@ -40,5 +40,21 @@ describe('checkCreateInput', () => {
     expect(checkCreateInput({ name: 'A', kind: 'claude', effort: 'very-high' }, defaults)).toHaveProperty('error')
     expect(checkCreateInput({ name: 'A', kind: 'external:aider', model: 'x' }, defaults)).toHaveProperty('error')
     expect(checkCreateInput({ name: 'A', kind: 'claude', role: 'x'.repeat(301) }, defaults)).toHaveProperty('error')
+  })
+})
+
+describe('userFirstTaskOpening', () => {
+  it('có việc đầu tiên: bắt đầu ngay và nhắc phạm vi', () => {
+    const t = userFirstTaskOpening('Thêm phí ship quốc tế', 'src/orders/')
+    expect(t).toContain('Thêm phí ship quốc tế')
+    expect(t).toContain('src/orders/')
+    expect(t).toContain('task_start')
+    expect(t).toContain('right away')
+  })
+  it('chỉ có phạm vi: chào rồi hỏi, không tự bắt đầu', () => {
+    const t = userFirstTaskOpening('', 'src/**/*.ts')
+    expect(t).toContain('src/**/*.ts')
+    expect(t).toContain('ask what they want')
+    expect(t).not.toContain('right away')
   })
 })

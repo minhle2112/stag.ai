@@ -3,12 +3,18 @@
 import MarkdownIt from 'markdown-it'
 import type { StateCore, StateInline, Token } from 'markdown-it'
 import { isAttachment, resolveNote, splitFrontmatter, splitWikilink, type NoteRef } from '@shared/wikilink'
+import { ICONS } from '../icons'
 
 export interface NoteRenderCtx {
   /** `rel` của note đang hiện, để phân giải link (cùng thư mục, `./`, `[[#heading]]`). */
   current: string
   /** Note trong vault; null = chưa có chỉ mục → chưa đánh dấu link "ma". */
   notes: readonly NoteRef[] | null
+  /**
+   * Cách hiện frontmatter. Bỏ trống = bảng phẳng (Artifacts, Skills). 'closed' / 'open' = hộp thu gọn kiểu
+   * "Properties" của Obsidian (`<details>`; một dòng tóm tắt, mở ra mới thấy bảng) — Vault dùng.
+   */
+  propsBox?: 'closed' | 'open'
 }
 
 export interface NoteProp {
@@ -271,6 +277,27 @@ export function parseProps(frontmatter: string | null): NoteProp[] {
   return props
 }
 
+/** Giá trị thuộc tính để xem lướt: `[[Note|bí danh]]` → chữ hiện, bỏ ngoặc. */
+function plainValue(v: string): string {
+  return v.replace(/\[\[([^\]]+)\]\]/g, (_m, inner: string) => {
+    const w = splitWikilink(inner)
+    return w.alias ?? (w.target || w.heading || inner)
+  })
+}
+
+/** Hộp thuộc tính thu gọn: một dòng "› Thuộc tính  type: index · updated: …", bấm để mở bảng. */
+function propsBox(props: NoteProp[], rows: string, open: boolean): string {
+  const peek = props.map((p) => (p.value ? `${p.key}: ${plainValue(p.value)}` : p.key)).join(' · ')
+  const chevron = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="ic shrink-0 transition-transform group-open:rotate-90">${ICONS.cr}</svg>`
+  return (
+    `<details class="md-propsbox group mb-4 rounded-md border border-line font-mono text-[12px] text-muted" data-line="1"${open ? ' open' : ''}>` +
+    `<summary class="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-dim select-none hover:text-muted [&::-webkit-details-marker]:hidden">` +
+    `${chevron}<span class="shrink-0 font-sans">Thuộc tính</span>` +
+    `<span class="min-w-0 flex-1 truncate group-open:invisible">${esc(peek)}</span></summary>` +
+    `<div class="px-2.5"><table class="md-props"><tbody>${rows}</tbody></table></div></details>\n`
+  )
+}
+
 /** Hiện note thành HTML: bảng thuộc tính (frontmatter) rồi phần thân. */
 export function renderNote(source: string, ctx: NoteRenderCtx): RenderedNote {
   const { frontmatter, body, bodyLine } = splitFrontmatter(source)
@@ -281,7 +308,9 @@ export function renderNote(source: string, ctx: NoteRenderCtx): RenderedNote {
     const rows = props
       .map((p) => `<tr><th>${esc(p.key)}</th><td>${p.value ? md.renderInline(p.value, env) : ''}</td></tr>`)
       .join('')
-    html += `<table class="md-props" data-line="1"><tbody>${rows}</tbody></table>\n`
+    html += ctx.propsBox
+      ? propsBox(props, rows, ctx.propsBox === 'open')
+      : `<table class="md-props" data-line="1"><tbody>${rows}</tbody></table>\n`
   }
   html += md.render(body, env)
   return { html, props }

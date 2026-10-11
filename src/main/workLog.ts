@@ -1,0 +1,358 @@
+import { promises as fs } from 'node:fs'
+import { dirname, join } from 'node:path'
+import type { MemorySettings, Task, Workspace } from '@shared/types'
+import { exists } from './fsutil'
+
+/**
+ * Bộ nhớ trong vault do app tự ghi (xem vault "Memory and work log"):
+ * - việc xong → một dòng trong `40 Log/<ngày>.md`, mục "Agent work (auto)" (nhật ký chung của workspace);
+ * - việc xong → một dòng trong mục "Work done" của note agent `60 Agents/<tên>.md`;
+ * - note agent quá hạn mức → cất các dòng "Work done" cũ sang `60 Agents/<tên> archive.md`; vẫn quá thì luật phiên
+ *   sau nhắc agent tự viết gọn.
+ * Agent cũng sửa các note này: app chỉ chèn dòng, đọc lại và so thời điểm sửa file ngay trước khi ghi (đổi thì làm lại),
+ * không bao giờ ghi đè cả file bằng bản cũ.
+ */
+
+export const LOG_SECTION = 'Agent work (auto)'
+export const WORK_DONE_SECTION = 'Work done'
+
+/** Một việc vừa đóng. */
+export interface ClosedTask {
+  task: Task
+  /** done = agent gọi task_done; handoff = agent_handoff sang agent khác; manual = người dùng đánh dấu xong trên kanban. */
+  how: 'done' | 'handoff' | 'manual'
+  /** Tên agent nhận (how = handoff). */
+  to?: string
+}
+
+const pad = (n: number): string => String(n).padStart(2, '0')
+
+/** Ngày địa phương YYYY-MM-DD của một thời điểm ISO. */
+export function localDate(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function localTime(iso: string): string {
+  const d = new Date(iso)
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** Một dòng gọn: bỏ xuống dòng, khoảng trắng thừa, cắt độ dài. */
+export function oneLine(s: string | undefined, max: number): string {
+  const t = (s ?? '').replace(/\s+/g, ' ').trim()
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t
+}
+
+/** Dòng tóm tắt việc cho nhật ký: `log` của agent; bàn giao thì dòng đầu bản bàn giao. */
+function noteOf(c: ClosedTask): string {
+  if (c.task.log) return oneLine(c.task.log, 300)
+  if (c.how === 'handoff') {
+    const body = (c.task.summary ?? '').replace(/^Handed off to [^:\n]*:\s*/, '')
+    return oneLine(body.split(/\r?\n/).find((l) => l.trim()), 160)
+  }
+  return ''
+}
+
+/** Dòng trong `40 Log/<ngày>.md`. Tên việc giữ nguyên văn (có thể không phải tiếng Anh) trong ngoặc kép. */
+export function logLine(c: ClosedTask): string {
+  const t = c.task
+  const at = localTime(t.doneAt ?? new Date().toISOString())
+  const status =
+    c.how === 'handoff' ? `handed off to [[${c.to ?? '?'}]] ${at}` : c.how === 'manual' ? `marked done by the user ${at}` : `done ${at}`
+  const note = noteOf(c)
+  const files = t.files?.length ? ` + ${t.files.slice(0, 3).join(', ')}${t.files.length > 3 ? ` (+${t.files.length - 3})` : ''}` : ''
+  const scope = t.scope ? ` · scope: ${oneLine(t.scope, 120)}${files}` : files ? ` · files:${files.slice(2)}` : ''
+  return `- [x] "${oneLine(t.title, 120)}" — [[${t.agentName}]] — ${status}${note ? ` — ${note}` : ''}${scope}`
+}
+
+/** Dòng trong mục "Work done" của note agent. */
+export function workDoneLine(c: ClosedTask): string {
+  const t = c.task
+  const what = c.how === 'handoff' ? `handed off to [[${c.to ?? '?'}]]` : c.how === 'manual' ? 'marked done by the user' : ''
+  const note = noteOf(c)
+  return `- ${localDate(t.doneAt ?? new Date().toISOString())} — "${oneLine(t.title, 120)}"${[what, note].filter(Boolean).map((x) => ` — ${x}`).join('')}`
+}
+
+const HEADING_RE = /^(#{1,6})\s+(.*?)\s*#*\s*$/
+
+/**
+ * Chèn `lines` vào cuối mục `## <section>` (sau dòng không trống cuối cùng của mục, trước tiêu đề cùng cấp / cấp cao hơn
+ * kế tiếp). Chưa có mục thì thêm mục ở cuối file. Giữ kiểu xuống dòng của file.
+ */
+export function insertInSection(text: string, section: string, lines: string[]): string {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const all = text.split(/\r?\n/)
+  const start = all.findIndex((l) => {
+    const m = HEADING_RE.exec(l)
+    return !!m && m[1].length === 2 && m[2].toLowerCase() === section.toLowerCase()
+  })
+  if (start < 0) {
+    while (all.length && all[all.length - 1].trim() === '') all.pop()
+    const head = all.length ? [...all, ''] : []
+    return [...head, `## ${section}`, ...lines, ''].join(eol)
+  }
+  let end = all.length
+  for (let i = start + 1; i < all.length; i++) {
+    const m = HEADING_RE.exec(all[i])
+    if (m && m[1].length <= 2) {
+      end = i
+      break
+    }
+  }
+  let at = end
+  while (at > start + 1 && all[at - 1].trim() === '') at--
+  all.splice(at, 0, ...lines)
+  return all.join(eol)
+}
+
+/** Note nhật ký ngày mới (theo mẫu `40 Log/<ngày>.md` của vault stag.ai). */
+export function newDailyLog(date: string, lines: string[]): string {
+  return ['---', 'type: log', `date: ${date}`, '---', `# Log ${date}`, '', 'Back to: [[_INDEX]]', '', `## ${LOG_SECTION}`, ...lines, ''].join('\n')
+}
+
+/** Đổi `updated:` trong frontmatter (nếu có). */
+export function touchUpdated(text: string, date: string): string {
+  const fm = /^---\r?\n[\s\S]*?\r?\n---/.exec(text)?.[0]
+  if (!fm || !/^updated:/m.test(fm)) return text
+  return fm.replace(/^updated:.*$/m, `updated: ${date}`) + text.slice(fm.length)
+}
+
+/** Tên note cất của agent (không đuôi .md). */
+export const archiveName = (agent: string): string => `${agent} archive`
+
+interface Section {
+  /** Chỉ số dòng tiêu đề và dòng đầu sau mục. */
+  start: number
+  end: number
+}
+
+function findSection(all: string[], section: string): Section | null {
+  const start = all.findIndex((l) => {
+    const m = HEADING_RE.exec(l)
+    return !!m && m[1].length === 2 && m[2].toLowerCase() === section.toLowerCase()
+  })
+  if (start < 0) return null
+  let end = all.length
+  for (let i = start + 1; i < all.length; i++) {
+    const m = HEADING_RE.exec(all[i])
+    if (m && m[1].length <= 2) {
+      end = i
+      break
+    }
+  }
+  return { start, end }
+}
+
+/**
+ * Cất các dòng "Work done" cũ: giữ `keep` mục mới nhất (mục = dòng `- ` ở đầu dòng cùng các dòng tiếp theo thụt vào),
+ * trả về note mới + các mục đã lấy ra (cũ trước). Thêm một dòng trỏ tới note cất ngay dưới tiêu đề nếu chưa có.
+ */
+export function splitWorkDone(text: string, keep: number, archive: string): { note: string; moved: string[] } {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const all = text.split(/\r?\n/)
+  const sec = findSection(all, WORK_DONE_SECTION)
+  if (!sec) return { note: text, moved: [] }
+  const body = all.slice(sec.start + 1, sec.end)
+  const items: string[][] = []
+  const other: string[] = []
+  for (const l of body) {
+    if (/^[-*] /.test(l)) items.push([l])
+    else if (items.length && l.trim() && /^\s/.test(l)) items[items.length - 1].push(l)
+    else if (l.trim()) other.push(l)
+  }
+  if (items.length <= keep) return { note: text, moved: [] }
+  const moved = items.slice(0, items.length - keep)
+  const kept = items.slice(items.length - keep)
+  const link = `Older items: [[${archive}]]`
+  const pointer = other.some((l) => l.includes(`[[${archive}]]`)) ? [] : [link]
+  const next = [...pointer, ...other, ...kept.flat()]
+  const tail = all.slice(sec.end)
+  const out = [...all.slice(0, sec.start + 1), ...next, '', ...tail]
+  // Mục ở cuối file: file chỉ kết thúc bằng một lần xuống dòng như cũ.
+  if (!tail.length && all[all.length - 1] !== '') out.pop()
+  return { note: out.join(eol), moved: moved.map((m) => m.join(eol)) }
+}
+
+/** Note cất mới của agent. */
+export function newArchive(agent: string, date: string): string {
+  return [
+    '---',
+    'type: agent',
+    `updated: ${date}`,
+    '---',
+    `# ${archiveName(agent)}`,
+    '',
+    `Back to: [[${agent}]]`,
+    '',
+    `Older "${WORK_DONE_SECTION}" items of agent ${agent}, moved here by stag.ai when its memory note grew past its budget (oldest first).`,
+    '',
+    `## ${WORK_DONE_SECTION}`,
+    ''
+  ].join('\n')
+}
+
+/** Độ dài note tính bằng KB (UTF-8), một chữ số thập phân. */
+export const sizeKb = (text: string): number => Math.round((Buffer.byteLength(text, 'utf8') / 1024) * 10) / 10
+
+/**
+ * Câu trong luật phiên (mục MEMORY): app tự ghi gì, hạn mức note, và — khi note vẫn quá hạn mức sau khi đã cất —
+ * nhờ agent viết gọn.
+ */
+export function memoryRules(cfg: MemorySettings, note: { kb: number; archive: string } | null): string {
+  const lines: string[] = []
+  const auto = [
+    cfg.workLog ? 'a line in the vault work log (`40 Log/<date>.md`, section "Agent work (auto)")' : '',
+    cfg.agentWorkDone ? `a line in the "${WORK_DONE_SECTION}" list of your memory note` : ''
+  ].filter(Boolean)
+  if (auto.length)
+    lines.push(
+      `- When your task closes (task_done, agent_handoff, or the user marks it done), stag.ai itself writes ${auto.join(' and ')}. Do not write those lines yourself; record only non-obvious things (decisions, gotchas, learnings) per the Memory Protocol. Give task_done a one-line English \`log\` for that entry.`
+    )
+  lines.push(
+    `- Keep your memory note under ${cfg.noteBudgetKb} KB. stag.ai moves old "${WORK_DONE_SECTION}" items to [[${note?.archive ?? 'archive'}]] when it grows past that.`
+  )
+  if (note && note.kb > cfg.noteBudgetKb)
+    lines.push(
+      `- Your memory note is ${note.kb} KB now, over its ${cfg.noteBudgetKb} KB budget even after archiving. Early in this session (after you greet the user, before starting work), condense it yourself: merge duplicates, drop stale or finished items, keep only what a future session of yours needs. Do not touch the "${WORK_DONE_SECTION}" list (stag.ai archives it).`
+    )
+  return lines.join('\n')
+}
+
+/**
+ * Đọc → sửa → ghi một note, không đè lên thay đổi của người khác: ngay trước khi ghi, file mà đã đổi (thời điểm sửa /
+ * kích thước khác lúc đọc) thì đọc và làm lại (tối đa vài lần). `edit` trả null = không ghi. Ghi tuần tự theo file.
+ */
+export class NoteWriter {
+  private chains = new Map<string, Promise<unknown>>()
+
+  update(file: string, edit: (text: string | null) => string | null): Promise<boolean> {
+    const key = file.toLowerCase()
+    const prev = this.chains.get(key) ?? Promise.resolve()
+    const next = prev.then(() => this.run(file, edit))
+    this.chains.set(
+      key,
+      next.catch(() => {})
+    )
+    return next
+  }
+
+  private async run(file: string, edit: (text: string | null) => string | null): Promise<boolean> {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const before = await stamp(file)
+      const text = before ? await fs.readFile(file, 'utf8') : null
+      const out = edit(text)
+      if (out === null || out === text) return false
+      const now = await stamp(file)
+      if ((before?.key ?? null) !== (now?.key ?? null)) continue
+      await fs.mkdir(dirname(file), { recursive: true })
+      await fs.writeFile(file, out, 'utf8')
+      return true
+    }
+    throw new Error(`${file} keeps changing; skipped this update.`)
+  }
+}
+
+async function stamp(file: string): Promise<{ key: string } | null> {
+  try {
+    const s = await fs.stat(file)
+    return { key: `${s.mtimeMs}:${s.size}` }
+  } catch {
+    return null
+  }
+}
+
+/** Ghi nhật ký việc + note agent của các workspace. */
+export class MemoryKeeper {
+  readonly writer = new NoteWriter()
+
+  constructor(private cfg: (ws: Workspace, agentId: string) => MemorySettings) {}
+
+  private agentsDir(ws: Workspace): string {
+    return join(ws.vaultPath, '60 Agents')
+  }
+
+  /** Vault có cấu trúc của stag.ai (để không tạo `40 Log/` trong vault tự do của người dùng). */
+  private async structured(ws: Workspace): Promise<boolean> {
+    return (await exists(join(ws.vaultPath, '_INDEX.md'))) || (await exists(join(ws.vaultPath, '40 Log')))
+  }
+
+  /** Việc vừa đóng: dòng nhật ký + dòng "Work done" (theo cài đặt của agent làm việc đó), rồi cất bớt nếu note quá hạn mức. */
+  async taskClosed(ws: Workspace, c: ClosedTask): Promise<void> {
+    const cfg = this.cfg(ws, c.task.agentId)
+    const date = localDate(c.task.doneAt ?? new Date().toISOString())
+    if (cfg.workLog && (await this.structured(ws))) {
+      const line = logLine(c)
+      await this.writer.update(join(ws.vaultPath, '40 Log', `${date}.md`), (text) =>
+        text === null ? newDailyLog(date, [line]) : text.includes(line) ? null : insertInSection(text, LOG_SECTION, [line])
+      )
+    }
+    if (cfg.agentWorkDone) {
+      const line = workDoneLine(c)
+      const file = join(this.agentsDir(ws), `${c.task.agentName}.md`)
+      // Note agent chưa có (agent chưa từng mở phiên / đã xoá note): không tạo mới ở đây.
+      await this.writer.update(file, (text) =>
+        text === null || text.includes(line) ? null : touchUpdated(insertInSection(text, WORK_DONE_SECTION, [line]), date)
+      )
+    }
+    await this.compact(ws, c.task.agentName, cfg)
+  }
+
+  /**
+   * Note agent quá hạn mức → cất mục "Work done" cũ (giữ `keepWorkDone` mục mới nhất) sang note cất.
+   * Trả về độ dài note sau khi cất (null = chưa có note).
+   */
+  async compact(ws: Workspace, agentName: string, cfg: MemorySettings): Promise<{ kb: number; archive: string } | null> {
+    const file = join(this.agentsDir(ws), `${agentName}.md`)
+    const archive = archiveName(agentName)
+    let moved: string[] = []
+    let result: string | null = null
+    await this.writer.update(file, (text) => {
+      result = text
+      moved = []
+      if (text === null || sizeKb(text) <= cfg.noteBudgetKb) return null
+      const r = splitWorkDone(text, cfg.keepWorkDone, archive)
+      if (!r.moved.length) return null
+      moved = r.moved
+      result = r.note
+      return r.note
+    })
+    if (moved.length) {
+      const date = localDate(new Date().toISOString())
+      const items = moved
+      await this.writer.update(join(this.agentsDir(ws), `${archive}.md`), (text) =>
+        touchUpdated(insertInSection(text ?? newArchive(agentName, date), WORK_DONE_SECTION, items), date)
+      )
+    }
+    const text = result as string | null
+    return text === null ? null : { kb: sizeKb(text), archive }
+  }
+
+  /** Agent đổi tên: đổi tên note cất và các liên kết giữa note agent ↔ note cất (note agent đã được đổi tên trước đó). */
+  async renameAgent(ws: Workspace, from: string, to: string): Promise<void> {
+    const dir = this.agentsDir(ws)
+    const oldFile = join(dir, `${archiveName(from)}.md`)
+    const newFile = join(dir, `${archiveName(to)}.md`)
+    if ((await exists(oldFile)) && !(await exists(newFile))) {
+      await fs.rename(oldFile, newFile)
+      await this.writer.update(newFile, (text) =>
+        text === null
+          ? null
+          : text
+              .split(`[[${from}]]`)
+              .join(`[[${to}]]`)
+              .replace(new RegExp(`^# ${escapeRegExp(archiveName(from))}$`, 'm'), () => `# ${archiveName(to)}`)
+      )
+    }
+    await this.writer.update(join(dir, `${to}.md`), (text) => (text === null ? null : text.split(`[[${archiveName(from)}]]`).join(`[[${archiveName(to)}]]`)))
+  }
+
+  /** Đường dẫn note cất (để chuyển vào Thùng rác khi xoá agent). */
+  archiveFile(ws: Workspace, agentName: string): string {
+    return join(this.agentsDir(ws), `${archiveName(agentName)}.md`)
+  }
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

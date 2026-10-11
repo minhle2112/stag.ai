@@ -66,20 +66,20 @@ export function RenameAgentDialog({ wsId, agentId, onClose }: { wsId: string; ag
           onKeyDown={(e) => {
             if (e.key === 'Escape' && !busy) onClose()
           }}
-          className="w-full rounded-md border border-line bg-bg px-2 py-1.5 outline-none focus:border-accent"
+          className="w-full rounded-md border border-line-2 bg-bg px-2 py-1.5 outline-none focus:border-accent"
         />
-        {problem && trimmed !== '' && <div className="mt-1.5 text-[12px] text-red-300">{problem}</div>}
+        {problem && trimmed !== '' && <div className="mt-1.5 text-[12px] text-danger">{problem}</div>}
         <p className="mt-3 text-[12px] text-muted">
           Note bộ nhớ <code>60 Agents/{agent.name}.md</code> trong vault sẽ đổi thành <code>60 Agents/{trimmed || '…'}.md</code>.
           Liên kết <code>[[{agent.name}]]</code> trong các note khác không tự sửa.
         </p>
         {live && (
-          <div className="mt-3 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-[12px] text-amber-200">
+          <div className="mt-3 rounded-md border border-wait/40 bg-wait/10 px-3 py-2 text-[12px] text-wait">
             Phiên đang chạy vẫn mang tên cũ và vẫn nhớ đường dẫn note cũ cho tới phiên sau. Nên đổi tên lúc agent không chạy, hoặc mở phiên mới
             sau khi đổi.
           </div>
         )}
-        {error && <div className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
+        {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}
       </form>
     </Modal>
   )

@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stag.ai · Graphite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0c0e;
+    --panel: #111215;
+    --panel-2: #17181c;
+    --hover: #1c1e23;
+    --line: #222429;
+    --line-soft: #1a1c20;
+    --fg: #e8e9eb;
+    --fg-2: #b4b8c0;
+    --muted: #7d828c;
+    --faint: #555a63;
+    --accent: #8b93ff;
+    --accent-soft: rgba(139, 147, 255, .12);
+    --green: #3ecf8e;
+    --amber: #f2b33d;
+    --red: #f06a6a;
+    --mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 13px/1.45 Inter, 'Segoe UI Variable', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  .app { display: grid; grid-template-rows: 38px 1fr; height: 100vh; }
+
+  /* ---------- Thanh tiêu đề ---------- */
+  .titlebar {
+    display: flex; align-items: center; gap: 12px; padding-left: 14px;
+    border-bottom: 1px solid var(--line-soft); background: var(--bg);
+  }
+  .logo { display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: -.01em; width: 214px; }
+  .logo-mark {
+    width: 18px; height: 18px; border-radius: 5px;
+    background: linear-gradient(135deg, #a5abff, #5b63f0);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+  }
+  .crumbs { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .crumbs b { color: var(--fg); font-weight: 500; }
+  .search {
+    margin: 0 auto; width: 380px; height: 26px; display: flex; align-items: center; gap: 8px;
+    padding: 0 10px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--faint);
+  }
+  .search kbd { margin-left: auto; }
+  kbd {
+    font: 500 10.5px var(--mono); color: var(--muted); padding: 1px 5px; border-radius: 4px;
+    border: 1px solid var(--line); background: var(--panel);
+  }
+  .winctl { display: flex; height: 100%; }
+  .winctl span { width: 46px; display: grid; place-items: center; color: var(--muted); }
+  .winctl span:hover { background: var(--hover); color: var(--fg); }
+  .winctl span:last-child:hover { background: #c42b1c; color: #fff; }
+
+  .body { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
+
+  /* ---------- Thanh bên ---------- */
+  .side { display: flex; flex-direction: column; border-right: 1px solid var(--line-soft); background: var(--bg); min-height: 0; }
+  .ws-switch {
+    margin: 10px 10px 6px; padding: 7px 8px; border-radius: 8px; display: flex; align-items: center; gap: 9px;
+    border: 1px solid var(--line); background: var(--panel); text-align: left;
+  }
+  .ws-switch:hover { background: var(--panel-2); }
+  .ws-icon { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-weight: 600; font-size: 11px; background: #23253a; color: #c3c7ff; }
+  .ws-switch .meta { line-height: 1.2; }
+  .ws-switch .meta small { display: block; color: var(--faint); font-size: 11px; }
+  .chev { margin-left: auto; color: var(--faint); }
+
+  .nav { padding: 4px 8px; }
+  .nav-item {
+    width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px;
+    color: var(--fg-2); text-align: left;
+  }
+  .nav-item:hover { background: var(--hover); color: var(--fg); }
+  .nav-item.active { background: var(--panel-2); color: var(--fg); }
+  .nav-item svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
+  .nav-item.active svg { color: var(--accent); }
+  .nav-item .count { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .nav-item .count.warn { color: var(--amber); background: rgba(242,179,61,.1); padding: 0 6px; border-radius: 10px; }
+
+  .section-label {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 16px 6px; font-size: 11px; color: var(--faint); font-weight: 500; letter-spacing: .02em;
+  }
+  .section-label button { color: var(--faint); font-size: 15px; line-height: 1; }
+  .section-label button:hover { color: var(--fg); }
+  .agents { padding: 0 8px; overflow-y: auto; }
+  .agent {
+    width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; text-align: left;
+  }
+  .agent:hover { background: var(--hover); }
+  .avatar {
+    width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none;
+    font-size: 10.5px; font-weight: 600; position: relative;
+  }
+  .avatar i {
+    position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%;
+    border: 2px solid var(--bg);
+  }
+  .agent .info { min-width: 0; line-height: 1.25; }
+  .agent .info div { color: var(--fg); }
+  .agent .info small { display: block; color: var(--faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .on { background: var(--green); }
+  .wait { background: var(--amber); }
+  .off { background: var(--faint); }
+  .pulse { animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .side-foot { margin-top: auto; padding: 12px 14px 14px; border-top: 1px solid var(--line-soft); }
+  .quota-row { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); }
+  .quota-row b { color: var(--fg-2); font-weight: 500; }
+  .bar { height: 4px; border-radius: 4px; background: var(--panel-2); margin: 7px 0 6px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--amber)); }
+  .quota-sub { font-size: 11px; color: var(--faint); }
+
+  /* ---------- Vùng chính ---------- */
+  .main { display: grid; grid-template-rows: 46px 1fr; min-width: 0; min-height: 0; background: var(--panel); }
+  .toolbar { display: flex; align-items: center; gap: 4px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line-soft); }
+  .toolbar h1 { font-size: 14px; font-weight: 600; margin: 0 14px 0 0; letter-spacing: -.01em; }
+  .seg { display: flex; padding: 2px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line-soft); }
+  .seg button { padding: 3px 10px; border-radius: 6px; color: var(--muted); font-size: 12.5px; }
+  .seg button.active { background: var(--panel-2); color: var(--fg); box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 0 0 1px var(--line); }
+  .spacer { flex: 1; }
+  .btn {
+    height: 28px; padding: 0 10px; border-radius: 7px; display: inline-flex; align-items: center; gap: 6px;
+    color: var(--fg-2); border: 1px solid transparent;
+  }
+  .btn:hover { background: var(--hover); color: var(--fg); }
+  .btn.toggled { background: var(--panel-2); border-color: var(--line); color: var(--fg); }
+  .btn.primary { background: var(--fg); color: #111; font-weight: 500; }
+  .btn.primary:hover { background: #fff; }
+  .btn svg { width: 14px; height: 14px; }
+
+  .content { display: flex; min-height: 0; min-width: 0; overflow: hidden; }
+  .view { flex: 1; min-width: 0; min-height: 0; display: none; }
+  .view.active { display: flex; }
+
+  /* Lưới agent */
+  .grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; padding: 8px; min-height: 0; }
+  .pane {
+    display: flex; flex-direction: column; min-height: 0; border-radius: 10px; overflow: hidden;
+    background: var(--bg); border: 1px solid var(--line-soft);
+  }
+  .pane.focus { border-color: #34376a; box-shadow: 0 0 0 1px rgba(139,147,255,.25); }
+  .pane-head { display: flex; align-items: center; gap: 9px; height: 36px; padding: 0 8px 0 10px; border-bottom: 1px solid var(--line-soft); }
+  .pane-head .avatar { width: 20px; height: 20px; font-size: 10px; }
+  .pane-head .name { font-weight: 500; }
+  .pane-head .task { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11.5px; color: var(--fg-2); background: var(--panel-2); }
+  .chip i { width: 6px; height: 6px; border-radius: 50%; }
+  .chip.amber { color: var(--amber); background: rgba(242,179,61,.1); }
+  .pane-head .acts { margin-left: auto; display: flex; gap: 2px; }
+  .icon-btn { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; color: var(--faint); }
+  .icon-btn:hover { background: var(--hover); color: var(--fg); }
+  .icon-btn svg { width: 14px; height: 14px; }
+  .term { flex: 1; padding: 10px 12px; font: 12px/1.65 var(--mono); color: #c9ccd3; overflow: hidden; white-space: pre-wrap; }
+  .term .dim { color: var(--faint); }
+  .term .acc { color: var(--accent); }
+  .term .ok { color: var(--green); }
+  .term .warn { color: var(--amber); }
+  .term .add { color: #6fd6a0; }
+  .term .del { color: #ef8c8c; }
+  .ask {
+    margin-top: 8px; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(242,179,61,.25);
+    background: rgba(242,179,61,.05); font-family: Inter, sans-serif; font-size: 12.5px; white-space: normal;
+  }
+  .ask .q { color: var(--fg); margin-bottom: 8px; }
+  .ask .opts { display: flex; gap: 6px; }
+  .ask .opts span { padding: 3px 10px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); color: var(--fg-2); }
+  .ask .opts span:first-child { background: var(--amber); color: #1a1405; border-color: transparent; font-weight: 500; }
+  .cursor { display: inline-block; width: 7px; height: 14px; background: var(--fg-2); vertical-align: -2px; animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Pane Browser */
+  .browser { width: 40%; min-width: 360px; display: flex; flex-direction: column; border-left: 1px solid var(--line-soft); background: var(--panel); }
+  .browser.hidden { display: none; }
+  .urlbar { display: flex; align-items: center; gap: 4px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); }
+  .url {
+    flex: 1; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 7px;
+    background: var(--bg); border: 1px solid var(--line-soft); color: var(--fg-2); font-size: 12.5px;
+  }
+  .url .lock { color: var(--green); }
+  .agent-ctl { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12px; color: var(--accent); background: var(--accent-soft); border-bottom: 1px solid var(--line-soft); }
+  .agent-ctl .avatar { width: 18px; height: 18px; font-size: 9.5px; }
+  .agent-ctl button { margin-left: auto; color: var(--fg-2); font-size: 12px; }
+  .viewport { flex: 1; margin: 10px; border-radius: 8px; background: #f7f7f8; color: #18181b; overflow: hidden; position: relative; }
+  .site-nav { display: flex; align-items: center; gap: 18px; padding: 14px 20px; border-bottom: 1px solid #ececef; font-size: 12px; color: #52525b; }
+  .site-nav b { color: #18181b; margin-right: auto; }
+  .site-hero { padding: 36px 24px 20px; }
+  .site-hero h2 { margin: 0 0 8px; font-size: 24px; letter-spacing: -.02em; line-height: 1.15; }
+  .site-hero p { margin: 0 0 16px; color: #71717a; font-size: 13px; max-width: 320px; }
+  .site-hero .cta { display: inline-block; padding: 7px 14px; border-radius: 7px; background: #18181b; color: #fff; font-size: 12px; }
+  .site-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 24px; }
+  .site-cards div { height: 82px; border-radius: 8px; background: #fff; border: 1px solid #ececef; padding: 12px; font-size: 12px; color: #52525b; }
+  .site-cards div b { display: block; color: #18181b; margin-bottom: 4px; font-weight: 600; }
+  .site-rows { margin: 18px 24px 0; border-radius: 8px; background: #fff; border: 1px solid #ececef; }
+  .site-rows div { display: flex; justify-content: space-between; padding: 10px 12px; border-top: 1px solid #f1f1f3; font-size: 12px; color: #52525b; }
+  .site-rows div:first-child { border-top: 0; }
+  .site-rows em { font-style: normal; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: #eef2ff; color: #4f46e5; }
+  .agent-cursor { position: absolute; left: 92px; top: 196px; }
+  .agent-cursor .tag { position: absolute; left: 14px; top: 14px; white-space: nowrap; padding: 2px 7px; border-radius: 5px; background: var(--accent); color: #fff; font-size: 11px; }
+  .agent-cursor .ring { position: absolute; left: -10px; top: -10px; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--accent); animation: ring 1.6s ease-out infinite; }
+  @keyframes ring { from { transform: scale(.5); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
+
+  /* Kanban */
+  .board { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)); gap: 12px; padding: 16px; overflow-x: auto; }
+  .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .col-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 6px; color: var(--fg-2); font-weight: 500; }
+  .col-head i { width: 8px; height: 8px; border-radius: 50%; }
+  .col-head span { color: var(--faint); font-weight: 400; }
+  .card { padding: 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line-soft); }
+  .card:hover { border-color: var(--line); }
+  .card.urgent { border-color: rgba(242,179,61,.3); }
+  .card .top { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .card .top .avatar { width: 18px; height: 18px; font-size: 9.5px; }
+  .card .top .time { margin-left: auto; color: var(--faint); }
+  .card h4 { margin: 8px 0 4px; font-size: 13px; font-weight: 500; line-height: 1.4; }
+  .card .scope { font: 11px var(--mono); color: var(--faint); }
+  .card .status { margin-top: 10px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+  .card .status i { width: 6px; height: 6px; border-radius: 50%; }
+  .card.done h4 { color: var(--fg-2); }
+  .card .reply { margin-top: 10px; display: flex; gap: 6px; }
+  .card .reply span { font-size: 11.5px; padding: 3px 9px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); color: var(--fg-2); }
+
+  /* Vault */
+  .vault { flex: 1; display: grid; grid-template-columns: 250px 1fr 280px; min-height: 0; }
+  .tree { border-right: 1px solid var(--line-soft); padding: 12px 8px; overflow: auto; }
+  .tree .f { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 6px; color: var(--fg-2); }
+  .tree .f:hover { background: var(--hover); }
+  .tree .f.sel { background: var(--panel-2); color: var(--fg); }
+  .tree .f svg { width: 13px; height: 13px; color: var(--faint); flex: none; }
+  .tree .in { padding-left: 18px; }
+  .note { padding: 28px 40px; overflow: auto; }
+  .note .fm { display: flex; gap: 6px; margin-bottom: 18px; }
+  .note .fm span { font: 11px var(--mono); color: var(--muted); background: var(--panel-2); padding: 2px 7px; border-radius: 5px; }
+  .note h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: -.02em; }
+  .note .sub { color: var(--muted); margin-bottom: 22px; }
+  .note h3 { margin: 22px 0 8px; font-size: 14px; }
+  .note p, .note li { color: var(--fg-2); line-height: 1.65; max-width: 640px; }
+  .note ul { padding-left: 18px; margin: 0; }
+  .wl { color: var(--accent); }
+  .graph { border-left: 1px solid var(--line-soft); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .graph h5 { margin: 0; font-size: 11px; color: var(--faint); font-weight: 500; letter-spacing: .02em; }
+  .graph svg { width: 100%; height: 220px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line-soft); }
+  .backlinks div { padding: 7px 0; border-bottom: 1px solid var(--line-soft); color: var(--fg-2); font-size: 12.5px; }
+  .backlinks small { display: block; color: var(--faint); font-size: 11.5px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="titlebar">
+    <div class="logo"><span class="logo-mark"></span>stag.ai</div>
+    <div class="crumbs">stag.ai <span>/</span> <b id="crumb">Agents</b></div>
+    <div class="search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      Tìm agent, việc, note trong vault…
+      <kbd>Ctrl K</kbd>
+    </div>
+    <div class="winctl"><span>─</span><span>☐</span><span>✕</span></div>
+  </div>
+
+  <div class="body">
+    <aside class="side">
+      <button class="ws-switch">
+        <span class="ws-icon">S</span>
+        <span class="meta">stag.ai<small>Desktop\stag.ai</small></span>
+        <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>
+      </button>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="agents">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
+          Agents <span class="count">4</span>
+        </button>
+        <button class="nav-item" data-view="kanban">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></svg>
+          Kanban <span class="count warn">1 chờ bạn</span>
+        </button>
+        <button class="nav-item" data-view="vault">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-4Z"/></svg>
+          Vault <span class="count">38 note</span>
+        </button>
+      </nav>
+
+      <div class="section-label">AGENT <button title="Tạo agent">+</button></div>
+      <div class="agents">
+        <button class="agent">
+          <span class="avatar" style="background:#262a52;color:#c4c8ff">L<i class="on pulse"></i></span>
+          <span class="info"><div>Lead</div><small>Đang chạy Edit · plan.md</small></span>
+        </button>
+        <button class="agent">
+          <span class="avatar" style="background:#3a2f17;color:#f5cf86">A<i class="wait"></i></span>
+          <span class="info"><div>API</div><small style="color:var(--amber)">Cần bạn duyệt quyền</small></span>
+        </button>
+        <button class="agent">
+          <span class="avatar" style="background:#173628;color:#8be3b7">U<i class="on pulse"></i></span>
+          <span class="info"><div>UI</div><small>Đang dùng browser</small></span>
+        </button>
+        <button class="agent">
+          <span class="avatar" style="background:#33203a;color:#e4a8f2">Q<i class="on pulse"></i></span>
+          <span class="info"><div>QA</div><small>Đang hỏi việc</small></span>
+        </button>
+        <button class="agent">
+          <span class="avatar" style="background:#1f2126;color:#7d828c">D<i class="off"></i></span>
+          <span class="info"><div style="color:var(--muted)">Docs</div><small>Phiên đã dừng · 2 giờ</small></span>
+        </button>
+      </div>
+
+      <div class="side-foot">
+        <div class="quota-row"><span>Hạn mức tuần</span><b>86%</b></div>
+        <div class="bar"><span style="width:86%"></span></div>
+        <div class="quota-sub">Đặt lại thứ Bảy, 23:00</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="toolbar">
+        <h1 id="title">Agents</h1>
+        <div class="seg" id="layout-seg">
+          <button class="active">2 × 2</button><button>1 + 2</button><button>Một ô</button>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn toggled" id="browser-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>
+          Browser
+        </button>
+        <button class="btn primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+          Agent
+        </button>
+      </div>
+
+      <div class="content">
+        <!-- ===== Agents ===== -->
+        <section class="view active" id="view-agents">
+          <div class="grid">
+            <div class="pane focus">
+              <div class="pane-head">
+                <span class="avatar" style="background:#262a52;color:#c4c8ff">L</span>
+                <span class="name">Lead</span>
+                <span class="task">Chia việc cho đợt ticket đầu tiên</span>
+                <span class="chip"><i class="on pulse"></i>Edit</span>
+                <span class="acts">
+                  <button class="icon-btn" title="Chia đôi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button>
+                  <button class="icon-btn" title="Đóng ô"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+                </span>
+              </div>
+<div class="term"><span class="dim">›</span> chia nhỏ ticket cho API, UI và QA
+
+<span class="acc">●</span> Đọc <span class="dim">stag.ai memory/_INDEX.md</span>
+<span class="acc">●</span> Đọc <span class="dim">30 Features/Kanban.md</span>
+<span class="acc">●</span> Update <span class="dim">plan.md</span>
+  <span class="add">+ ## Đợt 1 — ticket</span>
+  <span class="add">+ - API: lưu ticket vào .stag/tickets/</span>
+  <span class="add">+ - UI: thẻ ticket trong Kanban</span>
+  <span class="del">- (chưa có)</span>
+
+<span class="ok">✓</span> Đã ghi 3 việc vào bảng
+<span class="cursor"></span></div>
+            </div>
+
+            <div class="pane">
+              <div class="pane-head">
+                <span class="avatar" style="background:#3a2f17;color:#f5cf86">A</span>
+                <span class="name">API</span>
+                <span class="task">Lưu ticket vào .stag/tickets</span>
+                <span class="chip amber"><i class="wait"></i>Chờ bạn</span>
+                <span class="acts"><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>
+              </div>
+<div class="term"><span class="acc">●</span> Write <span class="dim">src/main/tickets.ts</span> <span class="dim">(128 dòng)</span>
+<span class="acc">●</span> Bash <span class="dim">npm run typecheck</span>
+  <span class="ok">✓ không lỗi</span>
+<div class="ask"><div class="q">Cho phép chạy <b>npm install zod</b>?</div><div class="opts"><span>Cho phép</span><span>Luôn cho phép</span><span>Không</span></div></div></div>
+            </div>
+
+            <div class="pane">
+              <div class="pane-head">
+                <span class="avatar" style="background:#173628;color:#8be3b7">U</span>
+                <span class="name">UI</span>
+                <span class="task">Thẻ ticket trong Kanban</span>
+                <span class="chip"><i class="on pulse"></i>browser · click</span>
+                <span class="acts"><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>
+              </div>
+<div class="term"><span class="acc">●</span> stag · browser_navigate <span class="dim">localhost:5173</span>
+<span class="acc">●</span> stag · browser_snapshot
+  <span class="dim">heading "Thẻ việc" · 4 button</span>
+<span class="acc">●</span> stag · browser_click <span class="dim">"Mở thẻ"</span>
+<span class="dim">  …</span></div>
+            </div>
+
+            <div class="pane">
+              <div class="pane-head">
+                <span class="avatar" style="background:#33203a;color:#e4a8f2">Q</span>
+                <span class="name">QA</span>
+                <span class="task" style="color:var(--faint)">Chưa nhận việc</span>
+                <span class="chip"><i class="on"></i>Đang hỏi</span>
+                <span class="acts"><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>
+              </div>
+<div class="term"><span class="fg">Chào bạn — tôi là QA trong workspace stag.ai.</span>
+<span class="dim">Tôi đã đọc vault. Bạn muốn tôi giúp gì?</span>
+
+<span class="dim">›</span> <span class="cursor"></span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Kanban ===== -->
+        <section class="view" id="view-kanban">
+          <div class="board">
+            <div class="col">
+              <div class="col-head"><i style="background:#8b93ff"></i>Đang hỏi việc <span>1</span></div>
+              <div class="card">
+                <div class="top"><span class="avatar" style="background:#33203a;color:#e4a8f2">Q</span>QA<span class="time">vừa xong</span></div>
+                <h4>Chờ bạn giao việc</h4>
+                <div class="status"><i class="on"></i>Phiên đang mở</div>
+              </div>
+            </div>
+            <div class="col">
+              <div class="col-head"><i style="background:var(--green)"></i>Đang làm <span>2</span></div>
+              <div class="card">
+                <div class="top"><span class="avatar" style="background:#262a52;color:#c4c8ff">L</span>Lead<span class="time">12 phút</span></div>
+                <h4>Chia việc cho đợt ticket đầu tiên</h4>
+                <div class="scope">plan.md</div>
+                <div class="status"><i class="on pulse"></i>Đang chạy Edit</div>
+              </div>
+              <div class="card">
+                <div class="top"><span class="avatar" style="background:#173628;color:#8be3b7">U</span>UI<span class="time">8 phút</span></div>
+                <h4>Thẻ ticket trong Kanban</h4>
+                <div class="scope">src/renderer/src/components/</div>
+                <div class="status"><i class="on pulse"></i>stag · browser_click</div>
+              </div>
+            </div>
+            <div class="col">
+              <div class="col-head"><i style="background:var(--amber)"></i>Chờ bạn <span>1</span></div>
+              <div class="card urgent">
+                <div class="top"><span class="avatar" style="background:#3a2f17;color:#f5cf86">A</span>API<span class="time">2 phút</span></div>
+                <h4>Lưu ticket vào .stag/tickets</h4>
+                <div class="scope">src/main/</div>
+                <div class="status" style="color:var(--amber)"><i class="wait"></i>Cần bạn duyệt quyền</div>
+                <div class="reply"><span>Mở ô</span><span>Duyệt</span></div>
+              </div>
+            </div>
+            <div class="col">
+              <div class="col-head"><i style="background:var(--faint)"></i>Xong <span>3</span></div>
+              <div class="card done"><div class="top"><span class="avatar" style="background:#173628;color:#8be3b7">U</span>UI<span class="time">1 giờ</span></div><h4>Danh sách agent ở thanh bên</h4><div class="status"><span style="color:var(--green)">✓</span>Hôm nay</div></div>
+              <div class="card done"><div class="top"><span class="avatar" style="background:#262a52;color:#c4c8ff">L</span>Lead<span class="time">3 giờ</span></div><h4>Browser trong app (M4)</h4><div class="status"><span style="color:var(--green)">✓</span>Hôm nay</div></div>
+              <div class="card done"><div class="top"><span class="avatar" style="background:#1f2126;color:#7d828c">D</span>Docs<span class="time">4 giờ</span></div><h4>Cập nhật note Kanban trong vault</h4><div class="status"><span style="color:var(--green)">✓</span>Hôm nay</div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Vault ===== -->
+        <section class="view" id="view-vault">
+          <div class="vault">
+            <div class="tree">
+              <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>00 Meta</div>
+              <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>10 stag.ai</div>
+              <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>20 Workflow</div>
+              <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>30 Features</div>
+              <div class="in">
+                <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/></svg>Agents và phiên</div>
+                <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/></svg>Browser</div>
+                <div class="f sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/></svg>Kanban</div>
+                <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/></svg>Vault Viewer</div>
+              </div>
+              <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>40 Log</div>
+              <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>50 Decisions</div>
+              <div class="f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>60 Agents</div>
+            </div>
+            <article class="note">
+              <div class="fm"><span>type: feature</span><span>status: đã làm ở M3</span><span>updated: 2026-10-08</span></div>
+              <h2>Kanban</h2>
+              <div class="sub">Quay lại: <span class="wl">_INDEX</span> · <span class="wl">Agents và phiên</span></div>
+              <h3>Mục tiêu</h3>
+              <p>Nhìn một lần là biết agent nào đang làm gì, việc nào đã xong, và ai đang chờ bạn quyết.</p>
+              <h3>Cột</h3>
+              <ul>
+                <li><b>Đang hỏi việc</b> — phiên đang chạy, chưa nhận việc.</li>
+                <li><b>Đang làm</b> — agent đã nhận việc qua <span class="wl">task_start</span>.</li>
+                <li><b>Chờ bạn</b> — cần trả lời, duyệt quyền, hoặc phiên dừng giữa chừng.</li>
+                <li><b>Xong</b> — agent đã báo <span class="wl">task_done</span>.</li>
+              </ul>
+              <h3>Dữ liệu</h3>
+              <p>Lưu trong <code>.stag/board.json</code> của workspace; trạng thái lấy từ hook của Claude Code.</p>
+            </article>
+            <aside class="graph">
+              <h5>ĐỒ THỊ LIÊN KẾT</h5>
+              <svg viewBox="0 0 250 220">
+                <g stroke="#2a2d36" stroke-width="1">
+                  <line x1="125" y1="110" x2="60" y2="60"/><line x1="125" y1="110" x2="195" y2="55"/><line x1="125" y1="110" x2="200" y2="150"/>
+                  <line x1="125" y1="110" x2="70" y2="170"/><line x1="125" y1="110" x2="130" y2="190"/><line x1="60" y1="60" x2="110" y2="35"/>
+                  <line x1="195" y1="55" x2="110" y2="35"/><line x1="200" y1="150" x2="130" y2="190"/>
+                </g>
+                <g fill="#3a3e4a"><circle cx="60" cy="60" r="5"/><circle cx="195" cy="55" r="5"/><circle cx="200" cy="150" r="6"/><circle cx="70" cy="170" r="4"/><circle cx="130" cy="190" r="4"/><circle cx="110" cy="35" r="7"/></g>
+                <circle cx="125" cy="110" r="8" fill="#8b93ff"/>
+                <circle cx="125" cy="110" r="15" fill="none" stroke="#8b93ff" stroke-opacity=".25"/>
+                <g fill="#7d828c" font-size="9" font-family="Inter"><text x="134" y="104">Kanban</text><text x="117" y="30">_INDEX</text><text x="168" y="168">Agents và phiên</text></g>
+              </svg>
+              <h5>LIÊN KẾT NGƯỢC</h5>
+              <div class="backlinks">
+                <div>_INDEX<small>30 Features — Kanban (đã làm ở M3)</small></div>
+                <div>2026-10-08 Kanban theo agent và việc<small>…chi tiết ở [[Kanban]]</small></div>
+                <div>Kế hoạch xương sống<small>M3 — [[Kanban]] theo hoạt động thật</small></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <aside class="browser" id="browser">
+          <div class="urlbar">
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></button>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg></button>
+            <div class="url"><span class="lock">●</span>localhost:5173/kanban</div>
+          </div>
+          <div class="agent-ctl"><span class="avatar" style="background:#173628;color:#8be3b7">U</span>UI đang điều khiển trang này<button>Giành lại</button></div>
+          <div class="viewport">
+            <div class="site-nav"><b>Preview</b><span>Kanban</span><span>Agents</span><span>Vault</span></div>
+            <div class="site-hero">
+              <h2>Thẻ việc</h2>
+              <p>Bản dựng thử thẻ ticket mà agent UI đang làm.</p>
+              <span class="cta">Mở thẻ</span>
+            </div>
+            <div class="site-cards"><div><b>Lưu ticket</b>API · src/main/</div><div><b>Thẻ ticket</b>UI · components/</div></div>
+            <div class="site-rows">
+              <div>Ticket #12 — schema JSON<em>đang làm</em></div>
+              <div>Ticket #11 — bình luận trong thẻ<em>chờ</em></div>
+              <div>Ticket #10 — gắn agent vào ticket<em>xong</em></div>
+            </div>
+            <div class="agent-cursor"><span class="ring"></span><svg width="14" height="14" viewBox="0 0 24 24"><path d="M4 2l16 9-7 2-3 7Z" fill="#8b93ff" stroke="#fff" stroke-width="1.5"/></svg><span class="tag">UI</span></div>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  const titles = { agents: 'Agents', kanban: 'Kanban', vault: 'Vault' };
+  document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('click', () => {
+    const v = b.dataset.view;
+    document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id === 'view-' + v));
+    document.getElementById('title').textContent = titles[v];
+    document.getElementById('crumb').textContent = titles[v];
+    document.getElementById('layout-seg').style.visibility = v === 'agents' ? 'visible' : 'hidden';
+  }));
+  document.querySelectorAll('#layout-seg button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#layout-seg button').forEach(x => x.classList.toggle('active', x === b));
+  }));
+  const br = document.getElementById('browser'), bb = document.getElementById('browser-btn');
+  bb.addEventListener('click', () => { br.classList.toggle('hidden'); bb.classList.toggle('toggled'); });
+</script>
+</body>
+</html>

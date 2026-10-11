@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Agent, AgentRun, CreateAgentRequest, LayoutNode, SplitDir } from '@shared/types'
+import type { Agent, AgentCell, AgentRun, CreateAgentRequest, LayoutNode, SplitDir } from '@shared/types'
 import { cells, insertCell, insertLeaf, leaves, reconcile, removeLeaf, swapLeaves, widgetKey, widgets } from '../layout'
 import { bindPty, disposeTerminal, focusTerminal, onAgentExit, startTerminalBus, terminalSize } from '../terminals'
 import { useUi } from './ui'
@@ -43,6 +43,8 @@ interface AgentsState {
   closeWidget: (wsId: string, widget: string) => void
   /** Đổi tên agent (main đổi tên luôn note bộ nhớ trong vault). Lỗi thì ném ra để hộp thoại hiện. */
   rename: (wsId: string, agentId: string, name: string) => Promise<void>
+  /** Đổi giao diện ô của agent (CLI ↔ chat); main từ chối nếu agent đang có phiên chạy. */
+  setCell: (wsId: string, agentId: string, cell: AgentCell) => Promise<void>
   /** Chuyển agent tới vị trí `index` trong danh sách của workspace (thanh bên). */
   moveAgent: (wsId: string, agentId: string, index: number) => void
   /** Đổi chỗ hai ô trong lưới (theo mã ô). */
@@ -125,6 +127,19 @@ export const useAgents = create<AgentsState>((set, get) => {
     }))
     window.stag.agent.saveLayout(e.workspaceId, layout)
   })
+  // Ô chat không có pty nên không có sự kiện thoát của pty: tiến trình thoát thì main báo phase 'off'.
+  window.stag.chat.onEvent((e) => {
+    if (e.type !== 'state' || e.state.phase !== 'off') return
+    for (const [wsId, w] of Object.entries(get().byWs)) {
+      if (w.running[e.agentId]?.mode === 'chat') {
+        patch(wsId, (cur) => {
+          const running = { ...cur.running }
+          delete running[e.agentId]
+          return { running }
+        })
+      }
+    }
+  })
   onAgentExit((agentId) => {
     for (const [wsId, w] of Object.entries(get().byWs)) {
       if (w.running[agentId]) {
@@ -145,7 +160,7 @@ export const useAgents = create<AgentsState>((set, get) => {
       const running: Record<string, AgentRun> = {}
       for (const r of snap.running) {
         running[r.agentId] = r
-        bindPty(r.agentId, r.ptyId)
+        if (r.mode !== 'chat') bindPty(r.agentId, r.ptyId)
       }
       const layout = reconcile(snap.layout, snap.agents.map((a) => a.id))
       patch(wsId, () => ({ agents: snap.agents, layout, running, focused: firstCell(layout) }))
@@ -178,7 +193,7 @@ export const useAgents = create<AgentsState>((set, get) => {
       })
       try {
         const run = await window.stag.agent.start({ agentId, resume, ...terminalSize(agentId) })
-        bindPty(agentId, run.ptyId)
+        if (run.mode !== 'chat') bindPty(agentId, run.ptyId)
         patch(wsId, (cur) => ({
           running: { ...cur.running, [agentId]: run },
           agents: cur.agents.map((a) => (a.id === agentId ? { ...a, lastSessionId: run.sessionId } : a))
@@ -192,6 +207,11 @@ export const useAgents = create<AgentsState>((set, get) => {
           return { starting }
         })
       }
+    },
+
+    async setCell(wsId, agentId, cell) {
+      const agent = await window.stag.agent.setCell(agentId, cell)
+      patch(wsId, (cur) => ({ agents: cur.agents.map((a) => (a.id === agentId ? agent : a)) }))
     },
 
     async stop(agentId) {

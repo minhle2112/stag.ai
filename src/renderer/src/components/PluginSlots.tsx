@@ -10,14 +10,14 @@ export function SidebarPluginLinks(): React.JSX.Element | null {
   const slots = slotsOf(items, settings, 'sidebar', ws?.id)
   if (!slots.length) return null
   return (
-    <div className="border-t border-line px-2 pt-2">
-      <div className="px-2 pb-1 text-[11px] uppercase tracking-wider text-muted">Plugin</div>
+    <div className="shrink-0 border-t border-line px-1.5 py-1.5">
+      <div className="px-2.5 pb-1 text-[11px] font-semibold tracking-[0.08em] text-dim">PLUGIN</div>
       {slots.map(({ plugin, slot }) => (
         <button
           key={`${plugin.manifest.id}:${slot.id}`}
           onClick={() => void runSlot(plugin, slot, ws?.id)}
-          title={`${plugin.manifest.displayName} (plugin)`}
-          className="w-full truncate rounded-md px-2 py-1.5 text-left text-[12.5px] text-muted hover:bg-panel-2 hover:text-fg"
+          data-tip={`${plugin.manifest.displayName} (plugin)`}
+          className="block h-7 w-full truncate rounded-md px-2.5 text-left text-[13px] text-muted hover:bg-panel-2 hover:text-fg"
         >
           {slot.displayName}
         </button>
@@ -37,8 +37,8 @@ export function ToolbarPluginButtons(): React.JSX.Element {
         <button
           key={`${plugin.manifest.id}:${slot.id}`}
           onClick={() => void runSlot(plugin, slot, ws?.id)}
-          title={`${plugin.manifest.displayName} (plugin)`}
-          className="whitespace-nowrap rounded-md px-3 py-1 text-muted hover:text-fg"
+          data-tip={`${plugin.manifest.displayName} (plugin)`}
+          className="no-drag h-6 shrink-0 rounded-md px-2 text-[12px] whitespace-nowrap text-muted hover:bg-panel-3 hover:text-fg"
         >
           {slot.displayName}
         </button>
@@ -54,7 +54,7 @@ export function PluginToast(): React.JSX.Element | null {
   return (
     <div
       role="status"
-      className={`fixed bottom-9 left-64 z-30 max-w-md rounded-lg border px-4 py-2.5 text-[12.5px] shadow-xl ${bad ? 'border-red-500/40 bg-[#2a1416] text-red-200' : 'border-line bg-panel text-fg'}`}
+      className={`fixed bottom-9 left-14 z-30 max-w-md rounded-lg border px-4 py-2.5 text-[12.5px] shadow-xl ${bad ? 'border-danger/40 bg-[#2a1416] text-danger' : 'border-line-2 bg-panel-2 text-fg'}`}
     >
       <div className="flex items-start gap-3">
         <span className="min-w-0 flex-1 whitespace-pre-wrap">{text}</span>

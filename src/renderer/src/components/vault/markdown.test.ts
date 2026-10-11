@@ -112,6 +112,23 @@ describe('frontmatter', () => {
     expect(r.html).not.toContain('---')
   })
 
+  it('propsBox: hộp thu gọn <details> có dòng tóm tắt, không in thô', () => {
+    const h = renderNote(src, { ...ctx, propsBox: 'closed' }).html
+    expect(h).toContain('<details class="md-propsbox')
+    expect(h).not.toMatch(/<details[^>]* open/)
+    expect(h).toContain('data-line="1"')
+    // Dòng tóm tắt: khoá: giá trị, link wikilink bỏ ngoặc.
+    expect(h).toContain('type: index · updated: 2026-10-08 · tags: a, b · aliases: Mục lục, Index · related: Learnings')
+    expect(h).toContain('<tr><th>type</th><td>index</td></tr>')
+    expect(h).toContain('<a class="wikilink" data-target="Learnings"')
+    expect(h).not.toContain('---')
+    expect(renderNote(src, { ...ctx, propsBox: 'open' }).html).toMatch(/<details[^>]* open>/)
+  })
+
+  it('propsBox: không có frontmatter thì không có hộp', () => {
+    expect(renderNote('# A', { ...ctx, propsBox: 'closed' }).html).not.toContain('<details')
+  })
+
   it('không có frontmatter thì không có bảng', () => {
     expect(renderNote('# A', ctx).props).toEqual([])
     expect(parseProps(null)).toEqual([])
