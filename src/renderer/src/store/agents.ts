@@ -181,7 +181,7 @@ export const useAgents = create<AgentsState>((set, get) => {
     async create(req, place = {}) {
       const agent = await window.stag.agent.create(req)
       const wsId = req.workspaceId
-      // Không nói đặt đâu (Ctrl+K, Ctrl+Alt+N) → giữa vùng đang nhìn.
+      // Không nói đặt đâu (Ctrl+K, Ctrl+Shift+N) → giữa vùng đang nhìn.
       const center = place.at || place.center || place.near ? place.center : (viewCenter(wsId) ?? undefined)
       const layout = addCell(get().byWs[wsId]?.layout ?? emptyCanvas(), { type: 'leaf', agentId: agent.id }, sizeKind(agent), { ...place, center })
       patch(wsId, (cur) => ({

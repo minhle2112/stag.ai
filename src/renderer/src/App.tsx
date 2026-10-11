@@ -69,23 +69,31 @@ export function App(): React.JSX.Element {
   // readline (xoá tới cuối dòng / lùi một ký tự) nên khi con trỏ đang ở terminal thì để terminal dùng.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (!e.ctrlKey || e.metaKey) return
+      if (!e.ctrlKey || e.metaKey || e.altKey) return
       const ui = useUi.getState()
-      // Ctrl+Alt+N: tạo agent mới ở workspace đang xem.
-      if (e.altKey) {
-        const wsId = useWorkspaces.getState().activeId
-        if (!e.shiftKey && e.key.toLowerCase() === 'n' && wsId) {
-          e.preventDefault()
-          e.stopPropagation()
-          ui.setTab('agents')
-          ui.setNewAgent({ wsId })
-        }
-        return
-      }
       const inTerminal = !!(document.activeElement as HTMLElement | null)?.closest?.('.xterm')
       const key = e.key.toLowerCase()
       let handled = true
-      if (!e.shiftKey && e.key === ',') {
+      if (e.shiftKey && key === 'n') {
+        // Ctrl+Shift+N: tạo agent mới ở workspace đang xem.
+        const wsId = useWorkspaces.getState().activeId
+        if (!wsId) handled = false
+        else {
+          ui.closeSettings()
+          ui.setTab('agents')
+          ui.setNewAgent({ wsId })
+        }
+      } else if (!e.shiftKey && key === 'w') {
+        // Ctrl+W: đóng ô agent đang chọn (phiên vẫn chạy, mở lại ở thanh bên) — kể cả khi con trỏ đang ở terminal.
+        // Luôn nuốt phím: không có ô nào để đóng thì menu mặc định của Electron sẽ đóng luôn cửa sổ app.
+        const wsId = useWorkspaces.getState().activeId
+        const w = wsId ? useAgents.getState().byWs[wsId] : undefined
+        const sel = w?.focused
+        if (wsId && sel && !ui.settings && ui.tab === 'agents' && w.agents.some((a) => a.id === sel)) {
+          if (ui.maxCell[wsId] === sel) ui.setMaxCell(wsId, null)
+          useAgents.getState().hide(wsId, sel)
+        }
+      } else if (!e.shiftKey && e.key === ',') {
         if (ui.settings) ui.closeSettings()
         else ui.openSettings()
       } else if (!e.shiftKey && VIEW_KEYS[e.key]) ui.setTab(VIEW_KEYS[e.key])
@@ -189,7 +197,7 @@ export function App(): React.JSX.Element {
   )
 }
 
-/** Hộp thoại tạo agent, mở từ menu chuột phải của canvas, Ctrl+K hoặc Ctrl+Alt+N. */
+/** Hộp thoại tạo agent, mở từ menu chuột phải của canvas, Ctrl+K hoặc Ctrl+Shift+N. */
 function NewAgentDialog(): React.JSX.Element | null {
   const target = useUi((s) => s.newAgent)
   const setNewAgent = useUi((s) => s.setNewAgent)

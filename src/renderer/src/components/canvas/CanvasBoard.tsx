@@ -740,7 +740,7 @@ function CanvasMenu({
   return (
     <Popover at={screen} bounds={bounds} onClose={onClose}>
       <div className={PANEL} role="menu" onMouseOver={(e) => sub && !sub.contains(e.target as Node) && setSub(null)}>
-        <MenuRow icon="plus" label="Agent mới" hint="Ctrl+Alt+N" onClick={run(() => setNewAgent({ wsId: ws.id, at }))} />
+        <MenuRow icon="plus" label="Agent mới" hint="Ctrl+Shift+N" onClick={run(() => setNewAgent({ wsId: ws.id, at }))} />
         <MenuRow icon="term" label="Terminal mới" onClick={run(() => setNewAgent({ wsId: ws.id, at, kind: 'terminal' }))} />
         <div onMouseEnter={(e) => setSub(e.currentTarget)} onClick={(e) => setSub(e.currentTarget)}>
           <MenuRow icon="widget" label="Widget" sub />
