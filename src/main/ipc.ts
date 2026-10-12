@@ -44,6 +44,17 @@ const vaultWatchers = new VaultWatchers()
 export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary, plugins: PluginHost, vaultIndexer: VaultIndexer, dev: DevServerService): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
+  // Nút cửa sổ tự vẽ ở thanh tiêu đề. Đóng đi qua win.close() để vẫn theo "Bấm ×" (thu xuống khay / thoát).
+  ipcMain.on(IPC.winMinimize, (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+  ipcMain.on(IPC.winToggleMaximize, (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.on(IPC.winClose, (e) => BrowserWindow.fromWebContents(e.sender)?.close())
+  ipcMain.handle(IPC.winIsMaximized, (e) => !!BrowserWindow.fromWebContents(e.sender)?.isMaximized())
+
   ipcMain.handle(IPC.ptySpawn, (e, opts: PtySpawnOptions) => ptys.spawn(e.sender, opts))
   ipcMain.on(IPC.ptyWrite, (_e, id: string, data: string) => ptys.write(id, data))
   ipcMain.on(IPC.ptyResize, (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))

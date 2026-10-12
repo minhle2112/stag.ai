@@ -59,9 +59,6 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'stag-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
 ])
 
-/** Chiều cao thanh tiêu đề tự vẽ (px, ở thu phóng 100%): khớp `TitleBar` trong renderer. */
-const TITLE_BAR_HEIGHT = 36
-
 const ptys = new PtyManager()
 const workspaces = new WorkspaceStore()
 const board = new Board(
@@ -303,8 +300,6 @@ function applyGeneral(g: GeneralSettings): void {
   const factor = g.zoom / 100
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.setZoomFactor(factor)
-    // Thanh tiêu đề tự vẽ co giãn theo thu phóng: nút cửa sổ gốc phải cao bằng nó.
-    win.setTitleBarOverlay({ height: Math.round(TITLE_BAR_HEIGHT * factor) })
   }
   browser.setZoom(factor)
   // Bản dev là electron.exe trần: đăng ký chạy cùng Windows sẽ mở Electron trống, nên chỉ làm ở bản cài.
@@ -363,9 +358,8 @@ function createWindow(): void {
     backgroundColor: '#08090b',
     title: 'stag.ai',
     autoHideMenuBar: true,
-    // Thanh tiêu đề do giao diện tự vẽ (cao 36px); Windows chỉ vẽ đè ba nút thu nhỏ / phóng to / đóng.
+    // Thanh tiêu đề do giao diện tự vẽ, cả ba nút thu nhỏ / phóng to / đóng (lớp phủ gốc của Windows gần như không đổi màu khi rê chuột).
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#08090b', symbolColor: '#99a0aa', height: TITLE_BAR_HEIGHT },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -386,8 +380,10 @@ function createWindow(): void {
   win.webContents.on('did-finish-load', () => {
     const factor = settings.general().zoom / 100
     win.webContents.setZoomFactor(factor)
-    win.setTitleBarOverlay({ height: Math.round(TITLE_BAR_HEIGHT * factor) })
   })
+  // Nút phóng to / thu về ở thanh tiêu đề đổi biểu tượng theo trạng thái cửa sổ.
+  win.on('maximize', () => win.webContents.send(IPC.winMaximized, true))
+  win.on('unmaximize', () => win.webContents.send(IPC.winMaximized, false))
 
   // Bấm ×: thu xuống khay (agent vẫn chạy) hoặc thoát hẳn (hỏi lại nếu còn phiên chạy).
   win.on('close', (e) => {

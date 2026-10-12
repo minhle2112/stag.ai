@@ -2,6 +2,11 @@
 
 export const IPC = {
   appInfo: 'app:info',
+  winMinimize: 'win:minimize',
+  winToggleMaximize: 'win:toggle-maximize',
+  winClose: 'win:close',
+  winIsMaximized: 'win:is-maximized',
+  winMaximized: 'win:maximized',
   ptySpawn: 'pty:spawn',
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',

@@ -63,6 +63,18 @@ import type {
 
 const api = {
   appInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IPC.appInfo),
+  /** Nút thu nhỏ / phóng to / đóng tự vẽ ở thanh tiêu đề. */
+  win: {
+    minimize: (): void => ipcRenderer.send(IPC.winMinimize),
+    toggleMaximize: (): void => ipcRenderer.send(IPC.winToggleMaximize),
+    close: (): void => ipcRenderer.send(IPC.winClose),
+    isMaximized: (): Promise<boolean> => ipcRenderer.invoke(IPC.winIsMaximized),
+    onMaximized(cb: (maximized: boolean) => void): () => void {
+      const fn = (_e: IpcRendererEvent, maximized: boolean): void => cb(maximized)
+      ipcRenderer.on(IPC.winMaximized, fn)
+      return () => ipcRenderer.removeListener(IPC.winMaximized, fn)
+    }
+  },
   pty: {
     spawn: (opts: PtySpawnOptions): Promise<string> => ipcRenderer.invoke(IPC.ptySpawn, opts),
     write: (id: string, data: string): void => ipcRenderer.send(IPC.ptyWrite, id, data),
