@@ -1,6 +1,6 @@
 // Trang một việc ở tab Sản phẩm: tóm tắt bàn giao + thẻ các sản phẩm agent đã nộp.
 import { useEffect, useRef, useState } from 'react'
-import { latestVersion, needsYou, unseenVersions, type ArtifactRecord, type DocBlock } from '@shared/artifacts'
+import { failureReason, latestVersion, needsYou, unseenVersions, type ArtifactRecord, type DocBlock } from '@shared/artifacts'
 import type { Workspace } from '@shared/types'
 import { useAgents } from '../../store/agents'
 import { useUi } from '../../store/ui'
@@ -59,7 +59,8 @@ export function TaskPage({ ws, entry: t, running, onOpen }: { ws: Workspace; ent
             <Mi name="warn" className="text-danger" />
             <span className="min-w-0">
               {t.failures.length > 1 ? `${t.failures.length} lần nộp không thành, gần nhất` : '1 lần nộp không thành'} lúc {shortWhen(lastFail.at)}:{' '}
-              <span className="font-mono text-[11.5px]">{lastFail.file || '(không có file)'}</span> — {lastFail.error} Agent đã nhận báo lỗi.
+              <span className="font-mono text-[11.5px]">{lastFail.file || '(không có file)'}</span> —{' '}
+              <span title={lastFail.error}>{failureReason(lastFail.error)}</span>. Agent đã nhận báo lỗi.
             </span>
           </div>
         )}

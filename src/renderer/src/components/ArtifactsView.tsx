@@ -4,6 +4,7 @@ import type { AgentStatus, Workspace } from '@shared/types'
 import { useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
 import { useProducts } from '../store/artifacts'
+import { useUi } from '../store/ui'
 import { highlight } from './vault/highlight'
 import { ArtifactDetail, type Delivery } from './artifacts/ArtifactDetail'
 import { buildEntries, emptyCount, entryBadges, groupEntries, OLDER_PAGE, searchArtifacts, visibleEntries, type TaskEntry } from './artifacts/products'
@@ -92,7 +93,7 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
   const searchRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f' && document.activeElement?.closest('[data-products]')) {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f' && !useUi.getState().settings && !document.querySelector('[role=dialog]')) {
         e.preventDefault()
         searchRef.current?.focus()
       }

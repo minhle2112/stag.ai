@@ -481,16 +481,30 @@ export function inboxOf(arts: readonly ArtifactRecord[]): InboxItem[] {
 
 export type DayBucket = 'run' | 'today' | 'yday' | 'week' | 'older'
 
-/** Nhóm của một việc ở cột trái: đang làm, rồi theo ngày xong (theo giờ máy). */
+/** Nhóm của một việc ở cột trái: đang làm, rồi theo ngày xong (theo giờ máy). "Tuần này" = tuần lịch, từ thứ Hai. */
 export function dayBucket(task: { status: string; doneAt?: string; createdAt: string }, now: Date = new Date()): DayBucket {
   if (task.status === 'open') return 'run'
-  const at = new Date(task.doneAt ?? task.createdAt)
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const t = at.getTime()
-  if (t >= start) return 'today'
-  if (t >= start - 86_400_000) return 'yday'
-  if (t >= start - 6 * 86_400_000) return 'week'
+  const t = new Date(task.doneAt ?? task.createdAt).getTime()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  const d = now.getDate()
+  if (t >= new Date(y, m, d).getTime()) return 'today'
+  if (t >= new Date(y, m, d - 1).getTime()) return 'yday'
+  if (t >= new Date(y, m, d - ((now.getDay() + 6) % 7)).getTime()) return 'week'
   return 'older'
+}
+
+/** Lý do nộp không thành, nói với người dùng (lỗi gốc viết cho agent bằng tiếng Anh, xem main/artifactStore.ts). */
+export function failureReason(error: string): string {
+  if (/call task_start/i.test(error)) return 'agent chưa mở việc nào trên Kanban'
+  if (/does not exist/i.test(error)) return 'file không có trong dự án'
+  if (/outside the project/i.test(error)) return 'file nằm ngoài thư mục dự án'
+  if (/cannot be published/i.test(error)) return 'file nằm trong thư mục không nộp được (.stag, .git, .sessions, node_modules)'
+  if (/too large/i.test(error)) return 'file quá lớn (tối đa 150 MB)'
+  if (/is not a file/i.test(error)) return 'đường dẫn không phải là file'
+  if (/title is empty/i.test(error)) return 'thiếu tiêu đề'
+  if (/file is empty/i.test(error)) return 'thiếu đường dẫn file'
+  return 'lỗi khác (rê chuột để xem chi tiết)'
 }
 
 /** Nhãn chữ tắt của agent (2 ký tự): "Dev Thực Chiến" → "DT", "Tester" → "TE". */

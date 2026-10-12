@@ -6,6 +6,7 @@ import {
   dayBucket,
   diffStats,
   inboxOf,
+  failureReason,
   initials,
   isDocFile,
   locateQuote,
@@ -206,13 +207,25 @@ describe('inboxOf', () => {
 })
 
 describe('helpers', () => {
-  it('dayBucket', () => {
-    const now = new Date(2026, 9, 12, 15, 0)
-    expect(dayBucket({ status: 'open', createdAt: '' }, now)).toBe('run')
-    expect(dayBucket({ status: 'done', createdAt: '', doneAt: new Date(2026, 9, 12, 8).toISOString() }, now)).toBe('today')
-    expect(dayBucket({ status: 'done', createdAt: '', doneAt: new Date(2026, 9, 11, 23).toISOString() }, now)).toBe('yday')
-    expect(dayBucket({ status: 'done', createdAt: '', doneAt: new Date(2026, 9, 7, 9).toISOString() }, now)).toBe('week')
-    expect(dayBucket({ status: 'dropped', createdAt: new Date(2026, 8, 1).toISOString() }, now)).toBe('older')
+  it('dayBucket: tuần này là tuần lịch từ thứ Hai', () => {
+    // 15/10/2026 là thứ Năm.
+    const thu = new Date(2026, 9, 15, 15, 0)
+    const done = (d: number, h = 9): { status: string; createdAt: string; doneAt: string } => ({ status: 'done', createdAt: '', doneAt: new Date(2026, 9, d, h).toISOString() })
+    expect(dayBucket({ status: 'open', createdAt: '' }, thu)).toBe('run')
+    expect(dayBucket(done(15, 8), thu)).toBe('today')
+    expect(dayBucket(done(14, 23), thu)).toBe('yday')
+    expect(dayBucket(done(12, 0), thu)).toBe('week')
+    expect(dayBucket(done(11, 22), thu)).toBe('older')
+    expect(dayBucket({ status: 'dropped', createdAt: new Date(2026, 8, 1).toISOString() }, thu)).toBe('older')
+    // Thứ Hai: hôm qua (Chủ nhật) là "hôm qua", thứ Sáu trước đó đã sang "cũ hơn".
+    const mon = new Date(2026, 9, 12, 10, 0)
+    expect(dayBucket(done(11), mon)).toBe('yday')
+    expect(dayBucket(done(9), mon)).toBe('older')
+  })
+  it('failureReason', () => {
+    expect(failureReason('File "x.json" does not exist in the project. Write it first, then publish.')).toBe('file không có trong dự án')
+    expect(failureReason('You have no task on the kanban. Call task_start first: …')).toBe('agent chưa mở việc nào trên Kanban')
+    expect(failureReason('weird')).toMatch(/lỗi khác/)
   })
   it('initials, doc files, plain text, labels', () => {
     expect(initials('Dev Thực Chiến')).toBe('DT')

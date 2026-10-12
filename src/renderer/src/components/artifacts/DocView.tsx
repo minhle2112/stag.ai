@@ -126,7 +126,7 @@ export function DocView({
   onDiffSelect: () => void
 }): React.JSX.Element {
   const host = useRef<HTMLDivElement>(null)
-  const [float, setFloat] = useState<{ x: number; y: number; a: { block: string; off: number; quote: string } } | null>(null)
+  const [float, setFloat] = useState<{ x: number; y: number; compact: boolean; a: { block: string; off: number; quote: string } } | null>(null)
 
   const body = useMemo(() => {
     if (oldBlocks) {
@@ -200,8 +200,15 @@ export function DocView({
         const blockText = blk.textContent ?? ''
         // Chọn qua nhiều khối: neo vào khối đầu.
         const quote = (blockText.slice(off, off + txt.length) === txt ? txt : blockText.slice(off).trim()).replace(/\s+/g, ' ')
+        // Nút đặt ngang dòng đầu đoạn chọn, không che chữ: ở lề ngoài bên phải tài liệu nếu đủ chỗ, không thì thu thành nút
+        // tròn "＋" nằm trong phần đệm phải của khung tài liệu.
         const r = rg.getBoundingClientRect()
-        setFloat({ x: Math.min(innerWidth - 130, r.right - 50), y: Math.max(44, r.top - 36), a: { block: blk.dataset.b!, off, quote } })
+        const first = rg.getClientRects()[0] ?? r
+        const doc = el.getBoundingClientRect()
+        const box = el.parentElement?.getBoundingClientRect() ?? doc
+        const W = 104
+        const pos = doc.right + 10 + W <= box.right ? { x: doc.right + 10, y: first.top - 3, compact: false } : { x: doc.right - 33, y: first.top - 3, compact: true }
+        setFloat({ ...pos, a: { block: blk.dataset.b!, off, quote } })
       }, 0)
     }
     // Cuộn khung chứa (nút nổi đặt theo toạ độ màn hình) → ẩn nút.
@@ -274,9 +281,16 @@ export function DocView({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => start(float.a)}
           style={{ left: float.x, top: float.y }}
-          className="fixed z-40 inline-flex items-center gap-1.5 rounded-[7px] border border-accent bg-accent px-2.5 py-1 text-[12px] font-semibold text-accent-on shadow-[0_8px_24px_rgba(0,0,0,.5)]"
+          title="Góp ý cho đoạn đã chọn (phím C)"
+          className={`fixed z-40 inline-flex items-center border border-accent bg-accent font-semibold text-accent-on shadow-[0_8px_24px_rgba(0,0,0,.5)] ${float.compact ? 'h-7 w-7 justify-center rounded-full text-[16px] leading-none' : 'gap-1.5 rounded-[7px] px-2.5 py-1 text-[12px]'}`}
         >
-          <Mi name="cmt" /> Góp ý <span className="rounded border border-b-2 border-black/40 px-1 font-mono text-[10.5px]">C</span>
+          {float.compact ? (
+            '＋'
+          ) : (
+            <>
+              <Mi name="cmt" /> Góp ý <span className="rounded border border-b-2 border-black/40 px-1 font-mono text-[10.5px]">C</span>
+            </>
+          )}
         </button>
       )}
     </>

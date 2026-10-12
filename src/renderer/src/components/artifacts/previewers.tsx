@@ -564,7 +564,7 @@ export function SheetView({
           ))}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto select-text">
+      <div className="min-h-0 flex-1 overflow-auto p-3 select-text">
         <div ref={ref} />
         {current?.cut && <Note>Chỉ hiện {SHEET_ROWS} dòng đầu. Mở bằng ứng dụng ngoài (nút ở đầu khung) để xem cả file.</Note>}
         {current && !current.rows && <Note>Sheet trống.</Note>}
