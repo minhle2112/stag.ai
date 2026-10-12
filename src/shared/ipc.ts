@@ -13,6 +13,7 @@ export const IPC = {
   ptyKill: 'pty:kill',
   ptyData: 'pty:data',
   ptyExit: 'pty:exit',
+  ptyClipboard: 'pty:clipboard',
   wsList: 'workspace:list',
   wsPick: 'workspace:pick',
   wsInspect: 'workspace:inspect',

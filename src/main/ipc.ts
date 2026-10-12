@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { copyFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { connectorSecrets, OAUTH_SECRET_PREFIX, parseMcpJson } from '@shared/connectors'
 import type { ApprovalDecision, CliAdapterId, ConnectRequest, ConnectResult, Connector, ConnectorImport, ConnectorTestResult, SkillImportResult, SkillsList } from '@shared/types'
 import { independentSessionEnv } from './adapters'
@@ -62,6 +62,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.on(IPC.ptyWrite, (_e, id: string, data: string) => ptys.write(id, data))
   ipcMain.on(IPC.ptyResize, (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
   ipcMain.on(IPC.ptyKill, (_e, id: string) => ptys.kill(id))
+  ipcMain.handle(IPC.ptyClipboard, () => terminalClipboard())
 
   ipcMain.handle(IPC.wsList, () => workspaces.list())
   ipcMain.handle(IPC.wsPick, async (e) => {
@@ -512,4 +513,28 @@ export function registerVoiceSystemIpc(d: {
     if (typeof text !== 'string' || text.length > 20000) throw new Error('Chữ không hợp lệ.')
     return typeText(d.keys, text, send === true)
   })
+}
+
+/**
+ * Clipboard để dán vào terminal (Ctrl+V trong ô agent). Có chữ thì trả chữ; chỉ có ảnh (chụp màn hình) thì lưu ra file PNG
+ * tạm và trả đường dẫn — Claude Code / Codex tự nhận đường dẫn ảnh được dán thành ảnh đính kèm. File cũ hơn một ngày bị dọn.
+ */
+async function terminalClipboard(): Promise<{ text: string } | { imagePath: string } | null> {
+  const text = await clipboard.readText().catch(() => '')
+  if (text) return { text }
+  const items = await clipboard.read().catch(() => [] as Electron.ClipboardItem[])
+  const item = items.find((it) => it.types.includes('image/png'))
+  if (!item) return null
+  const png = Buffer.from(await (await item.getType('image/png')).arrayBuffer())
+  const dir = join(tmpdir(), 'stag.ai-paste')
+  await mkdir(dir, { recursive: true })
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000
+  for (const name of await readdir(dir).catch(() => [] as string[])) {
+    const file = join(dir, name)
+    const mtime = (await stat(file).catch(() => null))?.mtimeMs ?? Infinity
+    if (mtime < cutoff) await rm(file, { force: true }).catch(() => {})
+  }
+  const imagePath = join(dir, `paste-${Date.now()}.png`)
+  await writeFile(imagePath, png)
+  return { imagePath }
 }

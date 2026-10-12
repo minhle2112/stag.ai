@@ -81,6 +81,8 @@ const api = {
     write: (id: string, data: string): void => ipcRenderer.send(IPC.ptyWrite, id, data),
     resize: (id: string, cols: number, rows: number): void => ipcRenderer.send(IPC.ptyResize, id, cols, rows),
     kill: (id: string): void => ipcRenderer.send(IPC.ptyKill, id),
+    /** Clipboard để dán vào terminal: chữ, hoặc đường dẫn file PNG tạm khi clipboard chỉ có ảnh; null = trống. */
+    clipboard: (): Promise<{ text: string } | { imagePath: string } | null> => ipcRenderer.invoke(IPC.ptyClipboard),
     onData(id: string, cb: (data: string) => void): () => void {
       const fn = (_e: IpcRendererEvent, pid: string, data: string): void => {
         if (pid === id) cb(data)

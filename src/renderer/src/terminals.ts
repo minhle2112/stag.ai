@@ -141,10 +141,38 @@ function entry(agentId: string): Entry {
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
+    term.attachCustomKeyEventHandler((ev) => clipboardKey(term, ev))
     e = { term, fit, el, opened: false, ptyId: null, input: null, sent: null, resizeTimer: null }
     entries.set(agentId, e)
   }
   return e
+}
+
+/**
+ * Chép / dán kiểu Windows Terminal. Mặc định xterm đổi Ctrl+V thành ^V và Ctrl+C thành ^C gửi thẳng vào phiên (chặn luôn
+ * sự kiện paste của trình duyệt), nên không dán được gì từ ngoài vào. Ctrl+V / Ctrl+Shift+V: dán chữ, hoặc ảnh (qua file
+ * PNG tạm, xem pty.clipboard). Ctrl+C khi đang bôi đen: chép rồi bỏ bôi đen; không bôi đen thì vẫn là ^C để ngắt.
+ * Trả false = xterm bỏ qua phím này.
+ */
+function clipboardKey(term: Terminal, ev: KeyboardEvent): boolean {
+  if (!ev.ctrlKey || ev.altKey || ev.metaKey) return true
+  const key = ev.key.toLowerCase()
+  const copy = key === 'c' && term.hasSelection()
+  if (key !== 'v' && !copy) return true
+  // Chặn cả keypress / keyup của tổ hợp này; chỉ làm việc ở keydown. preventDefault để trình duyệt không dán thêm lần nữa.
+  ev.preventDefault()
+  if (ev.type !== 'keydown') return false
+  if (copy) {
+    void navigator.clipboard.writeText(term.getSelection())
+    term.clearSelection()
+  } else {
+    void window.stag.pty.clipboard().then((clip) => {
+      if (!clip) return
+      if ('text' in clip) term.paste(clip.text)
+      else term.paste(/\s/.test(clip.imagePath) ? `"${clip.imagePath}"` : clip.imagePath)
+    })
+  }
+  return false
 }
 
 /** Gắn terminal của agent vào một ô; trả về hàm gỡ ra. */
