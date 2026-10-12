@@ -83,9 +83,9 @@ export function App(): React.JSX.Element {
           ui.setTab('agents')
           ui.setNewAgent({ wsId })
         }
-      } else if (!e.shiftKey && key === 'w') {
-        // Ctrl+W: đóng ô agent đang chọn (phiên vẫn chạy, mở lại ở thanh bên) — kể cả khi con trỏ đang ở terminal.
-        // Luôn nuốt phím: không có ô nào để đóng thì menu mặc định của Electron sẽ đóng luôn cửa sổ app.
+      } else if (e.shiftKey && key === 'w') {
+        // Ctrl+Shift+W (như Windows Terminal): đóng ô agent đang chọn (phiên vẫn chạy, mở lại ở thanh bên) — kể cả khi con
+        // trỏ đang ở terminal. Ctrl+W để lại cho CLI (readline: xoá một từ về trước). Luôn nuốt phím.
         const wsId = useWorkspaces.getState().activeId
         const w = wsId ? useAgents.getState().byWs[wsId] : undefined
         const sel = w?.focused

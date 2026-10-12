@@ -517,6 +517,17 @@ app.whenReady().then(async () => {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.setBackgroundThrottling(!on)
     }
   })
+  // Menu (ẩn) như mặc định của Electron nhưng bỏ "Close" (Ctrl+W): Ctrl+W là phím xoá từ của CLI trong ô terminal, và mục
+  // Close của menu mặc định đóng luôn cửa sổ app — cả khi con trỏ ở pane Trình duyệt hay trong khung widget / plugin, nơi
+  // trang chính không bắt được phím.
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      { role: 'viewMenu' },
+      { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] }
+    ])
+  )
   createWindow()
   globalVoice.sync()
   applyGeneral(settings.general())
