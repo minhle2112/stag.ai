@@ -2,6 +2,7 @@ import type { ChatEvent, ChatPermissionAnswer, ChatSendRequest, ChatSnapshot } f
 import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJobRun, PluginScaffoldRequest } from '@shared/plugins'
 import type { VoiceAiInfo, VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import type { DevServerList } from '@shared/launch'
+import type { ClaudeUsageState } from '@shared/claudeUsage'
 import type { ArtifactComment, ArtifactsSnapshot, CommentAnchor, DocBlock } from '@shared/artifacts'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
@@ -481,7 +482,18 @@ const api = {
     ipcRenderer.on(IPC.revealAgent, fn)
     return () => ipcRenderer.removeListener(IPC.revealAgent, fn)
   },
-  openTemplates: (): Promise<string> => ipcRenderer.invoke(IPC.templatesOpen)
+  openTemplates: (): Promise<string> => ipcRenderer.invoke(IPC.templatesOpen),
+  /** Usage tài khoản Claude (thanh trạng thái); token ở lại main. */
+  claudeUsage: {
+    get: (): Promise<ClaudeUsageState> => ipcRenderer.invoke(IPC.claudeUsageGet),
+    /** Hỏi lại ngay (nút Làm mới). */
+    refresh: (): Promise<ClaudeUsageState> => ipcRenderer.invoke(IPC.claudeUsageRefresh),
+    onChanged(cb: (s: ClaudeUsageState) => void): () => void {
+      const fn = (_e: IpcRendererEvent, s: ClaudeUsageState): void => cb(s)
+      ipcRenderer.on(IPC.claudeUsageChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.claudeUsageChanged, fn)
+    }
+  }
 }
 
 export type StagApi = typeof api

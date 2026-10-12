@@ -6,9 +6,10 @@ import { useUi } from '../../store/ui'
 import { useActiveWorkspace } from '../../store/workspaces'
 import { Icon } from '../Icon'
 import { PluginStatusItems } from '../PluginStatusBar'
+import { ClaudeUsageItem } from './ClaudeUsage'
 import { useWaitingAgents } from './useWaiting'
 
-/** Thanh trạng thái dưới cùng (cao 24px): khoá phạm vi đang giữ, mục của plugin, số agent đang chạy / chờ bạn. */
+/** Thanh trạng thái dưới cùng (cao 24px): số agent đang chạy / chờ bạn, usage Claude, khoá phạm vi đang giữ, mục của plugin. */
 export function StatusBar(): React.JSX.Element {
   const ws = useActiveWorkspace()
   const board = useBoard((s) => (ws ? s.byWs[ws.id] : undefined))
@@ -29,6 +30,7 @@ export function StatusBar(): React.JSX.Element {
           {waiting > 0 && <span className="text-wait">· {waiting} chờ bạn</span>}
         </span>
       )}
+      <ClaudeUsageItem />
       {locks.length > 0 && (
         <div className="relative">
           <button

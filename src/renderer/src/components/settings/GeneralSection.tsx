@@ -63,6 +63,12 @@ export function GeneralSection(): React.JSX.Element {
             options={(ZOOMS.includes(g.zoom) ? ZOOMS : [...ZOOMS, g.zoom].sort((a, b) => a - b)).map((z) => ({ value: z, label: `${z}%` }))}
           />
         </Row>
+        <Row
+          label="Usage Claude ở thanh trạng thái"
+          desc="% phiên 5 giờ và % tuần của tài khoản đang đăng nhập trong Claude Code, hỏi lại mỗi 3 phút và sau mỗi lượt của agent Claude."
+        >
+          <Switch label="Usage Claude ở thanh trạng thái" checked={g.claudeUsage} onChange={(claudeUsage) => set({ claudeUsage })} />
+        </Row>
       </Group>
 
       <Group title="Khởi động">

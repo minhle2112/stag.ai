@@ -38,6 +38,7 @@ import { samePath } from './fsutil'
 import type { GeneralSettings } from '@shared/types'
 import { MemoryKeeper } from './workLog'
 import { resolveMemory } from '@shared/settings'
+import { ClaudeUsageService, registerClaudeUsageIpc } from './claudeUsage'
 
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
 // Phải đặt trước khi tạo các service vì chúng đọc đường dẫn userData lúc khởi tạo.
@@ -66,6 +67,11 @@ const board = new Board(
   (workspaceId) => send(IPC.boardChanged, workspaceId),
   (e) => {
     notifier.onBoardEvent(e)
+    // Agent Claude hết lượt → hỏi lại usage tài khoản (thanh trạng thái).
+    if (e.kind === 'waiting' && e.reason === 'turn') {
+      const a = agents.pluginView().find((v) => v.agent.id === e.agentId)?.agent
+      if (a && agentKind(a) === 'claude') claudeUsage.poke()
+    }
     plugins.emit(
       e.kind === 'waiting'
         ? { type: 'agent.waiting', at: new Date().toISOString(), workspaceId: e.workspaceId, agentId: e.agentId, agentName: e.agentName, data: { reason: e.reason } }
@@ -102,6 +108,13 @@ const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'
   // Đổi "giải phóng sau N phút": hẹn lại giờ tắt tiến trình nhận dạng.
   voice.touch()
   globalVoice.sync()
+  claudeUsage.sync()
+})
+/** Usage tài khoản Claude ở thanh trạng thái (bật / tắt ở Cài đặt → Chung). */
+const claudeUsage = new ClaudeUsageService({
+  enabled: () => settings.general().claudeUsage,
+  changed: (s) => send(IPC.claudeUsageChanged, s),
+  version: app.getVersion()
 })
 const notifier = new Notifier(
   () => settings.general(),
@@ -506,6 +519,8 @@ app.whenReady().then(async () => {
   // Góp ý còn trong hàng chờ từ lần chạy trước: nạp sẵn để được gửi khi agent rảnh, kể cả khi chưa mở tab.
   for (const w of workspaces.list()) void products.warm(w).catch(() => {})
   registerVoiceIpc(voice, new VocabCache(), workspaces, voiceCloud, cloudUsage)
+  registerClaudeUsageIpc(claudeUsage)
+  claudeUsage.sync()
   registerVoiceSystemIpc({
     secrets,
     aiUrl: /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(process.env.STAG_ANTHROPIC_URL ?? '') ? process.env.STAG_ANTHROPIC_URL : undefined,
@@ -556,6 +571,7 @@ app.on('before-quit', () => {
   void plugins.shutdown()
   voice.shutdown()
   voiceCloud.shutdown()
+  claudeUsage.shutdown()
   globalVoice.dispose()
   keySender.dispose()
   overlay.dispose()

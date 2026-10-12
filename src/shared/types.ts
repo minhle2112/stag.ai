@@ -423,6 +423,8 @@ export interface GeneralSettings {
   closeAction: CloseAction
   /** Hỏi lại trước khi thoát nếu còn agent / terminal đang chạy. */
   confirmQuitRunning: boolean
+  /** Mục usage tài khoản Claude ở thanh trạng thái (hỏi usage định kỳ bằng tài khoản Claude Code). */
+  claudeUsage: boolean
 }
 
 export const ZOOM_MIN = 70
@@ -682,7 +684,8 @@ export const DEFAULT_GENERAL: GeneralSettings = {
   notifyTaskDone: true,
   notifySound: true,
   closeAction: 'quit',
-  confirmQuitRunning: true
+  confirmQuitRunning: true,
+  claudeUsage: true
 }
 const DEFAULT_CLI: CliAdapterSettings = { enabled: true, path: '', model: '', effort: '', defaultPermission: 'default', extraArgs: '', env: '' }
 export const DEFAULT_ADAPTERS: AdaptersSettings = {

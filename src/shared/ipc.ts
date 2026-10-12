@@ -244,7 +244,11 @@ export const IPC = {
   /** renderer → main (không chờ): trạng thái lượt nói ngoài app cho ô nổi. */
   voiceOverlay: 'voice:overlay',
   /** Dán chữ vào ứng dụng đang mở (+ Enter nếu nói "gửi"). */
-  voiceType: 'voice:type'
+  voiceType: 'voice:type',
+  /** Usage tài khoản Claude (shared/claudeUsage.ts): lấy trạng thái, hỏi lại ngay; main → renderer: claudeUsageChanged. */
+  claudeUsageGet: 'claude-usage:get',
+  claudeUsageRefresh: 'claude-usage:refresh',
+  claudeUsageChanged: 'claude-usage:changed'
 } as const
 
 export interface AppInfo {

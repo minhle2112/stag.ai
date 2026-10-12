@@ -245,7 +245,8 @@ export function normalizeGeneral(raw: unknown): GeneralSettings {
     notifyTaskDone: bool(r.notifyTaskDone, d.notifyTaskDone),
     notifySound: bool(r.notifySound, d.notifySound),
     closeAction: oneOf(r.closeAction, CLOSE_ACTIONS, d.closeAction),
-    confirmQuitRunning: bool(r.confirmQuitRunning, d.confirmQuitRunning)
+    confirmQuitRunning: bool(r.confirmQuitRunning, d.confirmQuitRunning),
+    claudeUsage: bool(r.claudeUsage, d.claudeUsage)
   }
 }
 
