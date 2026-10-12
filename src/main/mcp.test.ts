@@ -217,3 +217,37 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     expect(r.isError).toBe(true)
   })
 })
+
+describe('tool artifact_publish / artifact_reply (tab Sản phẩm)', () => {
+  it('chỉ có khi app gắn kho sản phẩm; chuyển tham số và báo lỗi cho agent', async () => {
+    const publish = vi.fn(async (i: { file: string }) => {
+      if (i.file === 'missing.md') throw new Error('File "missing.md" does not exist in the project.')
+      return 'Published "R" as v1'
+    })
+    const reply = vi.fn(async () => 'Reply added to c1')
+    const server = createStagMcp({
+      agent,
+      workspace,
+      board: {} as Board,
+      browser: {} as BrowserService,
+      teammates: () => [],
+      syncSessionFile: async () => {},
+      handoff: async () => {},
+      artifacts: { publish, reply }
+    })
+    const [a, b] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test', version: '0' })
+    await Promise.all([server.connect(a), client.connect(b)])
+    expect(await names(client)).toEqual(expect.arrayContaining(['artifact_publish', 'artifact_reply']))
+    const ok = await client.callTool({ name: 'artifact_publish', arguments: { file: 'docs/r.md', title: 'R', description: 'd', fixes: ['c2'] } })
+    expect((ok.content as Array<{ text: string }>)[0].text).toBe('Published "R" as v1')
+    expect(publish).toHaveBeenCalledWith({ file: 'docs/r.md', title: 'R', description: 'd', fixes: ['c2'] })
+    const bad = await client.callTool({ name: 'artifact_publish', arguments: { file: 'missing.md', title: 'R', description: '' } })
+    expect(bad.isError).toBe(true)
+    await client.callTool({ name: 'artifact_reply', arguments: { id: 'c1', text: 'OK?', options: ['Yes', 'No'] } })
+    expect(reply).toHaveBeenCalledWith({ id: 'c1', text: 'OK?', options: ['Yes', 'No'] })
+
+    const { client: plain } = await connect(undefined)
+    expect((await names(plain)).some((n) => n.startsWith('artifact_'))).toBe(false)
+  })
+})

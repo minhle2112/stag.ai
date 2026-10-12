@@ -2,6 +2,7 @@ import type { ChatEvent, ChatPermissionAnswer, ChatSendRequest, ChatSnapshot } f
 import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJobRun, PluginScaffoldRequest } from '@shared/plugins'
 import type { VoiceAiInfo, VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import type { DevServerList } from '@shared/launch'
+import type { ArtifactComment, ArtifactsSnapshot, CommentAnchor, DocBlock } from '@shared/artifacts'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type { AgentApiEvent, AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
@@ -297,6 +298,31 @@ const api = {
       const fn = (_e: IpcRendererEvent, workspaceId: string): void => cb(workspaceId)
       ipcRenderer.on(IPC.artifactsChanged, fn)
       return () => ipcRenderer.removeListener(IPC.artifactsChanged, fn)
+    }
+  },
+  /** Tab Sản phẩm: thứ agent nộp (artifact_publish), phiên bản, góp ý. */
+  products: {
+    list: (workspaceId: string): Promise<ArtifactsSnapshot> => ipcRenderer.invoke(IPC.productList, workspaceId),
+    /** Khối của một bản tài liệu chữ (rỗng = bản đó không tách khối). */
+    blocks: (workspaceId: string, id: string, v: number): Promise<DocBlock[]> => ipcRenderer.invoke(IPC.productBlocks, workspaceId, id, v),
+    seen: (workspaceId: string, id: string): Promise<void> => ipcRenderer.invoke(IPC.productSeen, workspaceId, id),
+    comment: (workspaceId: string, id: string, input: { v: number; anchor: CommentAnchor; text: string; send: boolean }): Promise<ArtifactComment> =>
+      ipcRenderer.invoke(IPC.productComment, workspaceId, id, input),
+    editDraft: (workspaceId: string, cid: string, text: string): Promise<void> => ipcRenderer.invoke(IPC.productEditDraft, workspaceId, cid, text),
+    deleteDraft: (workspaceId: string, cid: string): Promise<void> => ipcRenderer.invoke(IPC.productDeleteDraft, workspaceId, cid),
+    sendDrafts: (workspaceId: string, id: string): Promise<number> => ipcRenderer.invoke(IPC.productSendDrafts, workspaceId, id),
+    /** Viết tiếp trong mạch (trả lời, nút trả lời nhanh, "Chưa ổn…", "Mở lại…"). */
+    say: (workspaceId: string, cid: string, text: string): Promise<void> => ipcRenderer.invoke(IPC.productSay, workspaceId, cid, text),
+    close: (workspaceId: string, cid: string): Promise<void> => ipcRenderer.invoke(IPC.productClose, workspaceId, cid),
+    /** Huỷ gửi (còn trong hàng chờ): trả về chữ của tin vừa lấy ra. */
+    unsend: (workspaceId: string, cid: string): Promise<{ text: string; draft: boolean }> => ipcRenderer.invoke(IPC.productUnsend, workspaceId, cid),
+    hide: (workspaceId: string, id: string): Promise<void> => ipcRenderer.invoke(IPC.productHide, workspaceId, id),
+    /** Chép bản chụp ra file người dùng chọn; false = huỷ. */
+    saveAs: (workspaceId: string, snapshot: string): Promise<boolean> => ipcRenderer.invoke(IPC.productSaveAs, workspaceId, snapshot),
+    onChanged(cb: (workspaceId: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, workspaceId: string): void => cb(workspaceId)
+      ipcRenderer.on(IPC.productsChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.productsChanged, fn)
     }
   },
   openFolder: (path: string): Promise<string> => ipcRenderer.invoke(IPC.openFolder, path),

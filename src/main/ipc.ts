@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
 import { homedir } from 'node:os'
-import { basename, dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { copyFile } from 'node:fs/promises'
 import { connectorSecrets, OAUTH_SECRET_PREFIX, parseMcpJson } from '@shared/connectors'
 import type { ApprovalDecision, CliAdapterId, ConnectRequest, ConnectResult, Connector, ConnectorImport, ConnectorTestResult, SkillImportResult, SkillsList } from '@shared/types'
 import { independentSessionEnv } from './adapters'
@@ -20,6 +21,8 @@ import type { AgentService } from './agents'
 import type { ExternalAdapterStore } from './externalAdapters'
 import { artifactPath, type ArtifactLog } from './artifacts'
 import { artifactThumb } from './artifactThumb'
+import type { ArtifactStore } from './artifactStore'
+import type { CommentAnchor } from '@shared/artifacts'
 import type { Board } from './board'
 import type { BrowserService } from './browser'
 import type { DevServerService } from './devServer'
@@ -41,7 +44,7 @@ import { AI_FIX_SECRET, type VoiceAiInfo, type VoiceCloudInfo } from '@shared/vo
 
 const vaultWatchers = new VaultWatchers()
 
-export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary, plugins: PluginHost, vaultIndexer: VaultIndexer, dev: DevServerService): void {
+export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents: AgentService, board: Board, browser: BrowserService, settings: SettingsStore, activity: VaultActivityLog, artifacts: ArtifactLog, notifier: Notifier, adapters: AdapterService, external: ExternalAdapterStore, secrets: SecretStore, oauth: OAuthService, approvals: ApprovalQueue, skills: SkillLibrary, plugins: PluginHost, vaultIndexer: VaultIndexer, dev: DevServerService, products: ArtifactStore): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ cwd: process.cwd(), platform: process.platform }))
 
   // Nút cửa sổ tự vẽ ở thanh tiêu đề. Đóng đi qua win.close() để vẫn theo "Bấm ×" (thu xuống khay / thoát).
@@ -161,6 +164,32 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     if (err) throw new Error(err)
   })
   ipcMain.handle(IPC.artifactReveal, (_e, workspaceId: string, rel: string) => shell.showItemInFolder(artifactPath(ws(workspaceId), rel)))
+  // Tab Sản phẩm.
+  ipcMain.handle(IPC.productList, (_e, workspaceId: string) => products.snapshot(ws(workspaceId)))
+  ipcMain.handle(IPC.productBlocks, (_e, workspaceId: string, id: string, v: number) => products.blocks(ws(workspaceId), id, v))
+  ipcMain.handle(IPC.productSeen, (_e, workspaceId: string, id: string) => products.markSeen(ws(workspaceId), id))
+  ipcMain.handle(IPC.productComment, (_e, workspaceId: string, id: string, input: { v: number; anchor: CommentAnchor; text: string; send: boolean }) =>
+    products.addComment(ws(workspaceId), id, { v: Number(input?.v) || 1, anchor: input?.anchor, text: String(input?.text ?? ''), send: !!input?.send })
+  )
+  ipcMain.handle(IPC.productEditDraft, (_e, workspaceId: string, cid: string, text: string) => products.editDraft(ws(workspaceId), cid, text))
+  ipcMain.handle(IPC.productDeleteDraft, (_e, workspaceId: string, cid: string) => products.deleteDraft(ws(workspaceId), cid))
+  ipcMain.handle(IPC.productSendDrafts, (_e, workspaceId: string, id: string) => products.sendDrafts(ws(workspaceId), id))
+  ipcMain.handle(IPC.productSay, (_e, workspaceId: string, cid: string, text: string) => products.say(ws(workspaceId), cid, text))
+  ipcMain.handle(IPC.productClose, (_e, workspaceId: string, cid: string) => products.close(ws(workspaceId), cid))
+  ipcMain.handle(IPC.productUnsend, (_e, workspaceId: string, cid: string) => products.unsend(ws(workspaceId), cid))
+  ipcMain.handle(IPC.productHide, (_e, workspaceId: string, id: string) => products.hide(ws(workspaceId), id))
+  // "Lưu bản chụp ra file…" (file gốc đã bị xoá): chép bản chụp ra chỗ người dùng chọn.
+  ipcMain.handle(IPC.productSaveAs, async (e, workspaceId: string, snapshot: string) => {
+    const w = ws(workspaceId)
+    if (!/^\.stag\/artifacts\/a\d+\/[^/]+$/.test(String(snapshot))) throw new Error('Không phải bản chụp sản phẩm')
+    const src = artifactPath(w, snapshot)
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const opts = { defaultPath: join(w.path, basename(snapshot)) }
+    const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+    if (r.canceled || !r.filePath) return false
+    await copyFile(src, r.filePath)
+    return true
+  })
   ipcMain.handle(IPC.vaultUnwatch, (e, vaultPath: string) => vaultWatchers.unwatch(vaultPath, e.sender))
   ipcMain.handle(IPC.settingsOverride, (_e, level: OverrideLevel, id: string, patch: SettingsOverridesPatch) => {
     if (level !== 'workspace' && level !== 'agent') throw new Error('Cấp cài đặt không hợp lệ')

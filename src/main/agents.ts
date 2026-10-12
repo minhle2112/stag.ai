@@ -57,7 +57,7 @@ import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, readText, today, writeIfMissing } from './fsutil'
 import type { StatusHub } from './hub'
-import { AgentMail, mailReady } from './agentMail'
+import { AgentMail, MAIL_GAP_MS, mailReady } from './agentMail'
 import { loadHistory } from './chat/history'
 import { isClaudeFolderTrusted } from './trust'
 import { ChatSession, type ChatSessionBase, type ChatSessionOptions } from './chat/session'
@@ -70,6 +70,7 @@ import { archiveName, memoryRules, oneLine, sizeKb, type MemoryKeeper } from './
 import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
+import { commentMessage, type ArtifactStore } from './artifactStore'
 import type { VaultActivityLog } from './vaultActivity'
 import type { VaultIndexer } from './vaultIndex'
 import { MemoryService, memoryToolRules } from './memory'
@@ -244,6 +245,17 @@ export class AgentService {
   }
 
   private devServers: DevServerService | null = null
+  /** Sản phẩm agent nộp (tool artifact_publish / artifact_reply) + hàng chờ góp ý gửi vào phiên. */
+  private products: ArtifactStore | null = null
+  /** Agent đang được gõ góp ý (tránh gõ hai lần khi lần xét trước chưa xong). */
+  private commentBusy = new Set<string>()
+  /** Không gõ góp ý trước thời điểm này (sau một tin vừa gõ, như MAIL_GAP_MS). */
+  private commentQuiet = new Map<string, number>()
+
+  /** Gắn kho sản phẩm (tạo trước AgentService nhưng cần nó để gửi góp ý). */
+  attachProducts(store: ArtifactStore): void {
+    this.products = store
+  }
 
   /** Gắn dịch vụ dev server (tool preview_*); tạo sau AgentService vì nó cần AgentService. */
   attachDevServers(dev: DevServerService): void {
@@ -997,6 +1009,12 @@ export class AgentService {
         touched: (t) => this.activity.record(ws, agent, t)
       },
       agentApi: resolveAgentApi(this.settings.get(), ws.id, agent.id),
+      artifacts: this.products
+        ? {
+            publish: async (input) => this.products!.publish(ws, agent, await this.publishTask(ws, agent.id), input),
+            reply: (input) => this.products!.reply(ws, agent, input)
+          }
+        : undefined,
       syncSessionFile: async () => {
         const cur = this.running.get(agent.id)
         if (!cur?.sessionFile) return
@@ -1524,17 +1542,69 @@ export class AgentService {
     return `${head}\n---\n${redact(lines.join('\n'), this.secretValues()) || '(no turns)'}\n---`
   }
 
+  /**
+   * Việc để gắn sản phẩm agent vừa nộp: việc đang mở của agent; không có thì việc gần nhất của phiên đang chạy (agent
+   * nộp ngay sau task_done); không có nữa → null (publish báo agent gọi task_start).
+   */
+  private async publishTask(ws: Workspace, agentId: string): Promise<Task | null> {
+    const tasks = (await this.board.snapshot(ws)).tasks.filter((t) => t.agentId === agentId)
+    const open = tasks.find((t) => t.status === 'open')
+    if (open) return open
+    const sid = this.running.get(agentId)?.sessionId
+    return (sid && tasks.filter((t) => t.sessionId === sid).at(-1)) || null
+  }
+
+  /**
+   * Góp ý của người dùng (tab Sản phẩm) đang chờ: gõ vào phiên agent khi agent rảnh (như tin agent_send: hết lượt, người
+   * dùng không đang gõ, không đang bàn giao). Agent đang làm → chờ hết lượt; phiên đóng → chờ phiên mới mở và rảnh.
+   */
+  private async deliverComments(agentId: string, run: Running, agent: Agent, now: number): Promise<void> {
+    const store = this.products
+    if (!store || this.commentBusy.has(agentId) || now < (this.commentQuiet.get(agentId) ?? 0)) return
+    this.commentBusy.add(agentId)
+    try {
+      const items = await store.queuedFor(agentId)
+      if (!items.length || this.running.get(agentId) !== run) return
+      if (run.chat && run.chat.model.state.phase !== 'idle') return
+      if (!mailReady(this.board.statusOf(agentId), this.lastInput(run), Date.now())) return
+      const n = items.reduce((k, i) => k + i.comments.length, 0)
+      this.submit(run, commentMessage(items), {
+        cli: isCliKind(agentKind(agent)),
+        origin: 'app',
+        display: n === 1 ? 'Góp ý từ tab Sản phẩm' : `${n} góp ý từ tab Sản phẩm`
+      })
+      this.commentQuiet.set(agentId, Date.now() + MAIL_GAP_MS)
+      for (const { ws, comments } of items) await store.delivered(ws, comments.map((c) => c.id))
+    } catch (e) {
+      console.error('[artifacts]', e)
+    } finally {
+      this.commentBusy.delete(agentId)
+    }
+  }
+
+  /** Có góp ý mới trong hàng chờ của agent: thử gửi ngay (agent rảnh thì gõ luôn). */
+  kickComments(agentId: string): void {
+    const run = this.running.get(agentId)
+    const agent = this.data.agents.find((a) => a.id === agentId)
+    if (run && agent && agentKind(agent) !== 'terminal') void this.deliverComments(agentId, run, agent, Date.now())
+  }
+
   /** Gõ tin nhắn đang chờ vào terminal của agent nhận nào đang rảnh (gọi định kỳ + ngay khi có tin mới). */
   private deliverMail(): void {
     const now = Date.now()
+    const typed = new Set<string>()
     for (const id of this.mail.targets()) {
       const run = this.running.get(id)
       const agent = this.data.agents.find((a) => a.id === id)
       if (!run || !agent) continue
+      // Vừa gõ góp ý (tab Sản phẩm) vào phiên này: chờ khoảng nghỉ như giữa hai tin.
+      if (now < (this.commentQuiet.get(id) ?? 0)) continue
       // Ô chat: chỉ gửi lúc phiên đã sẵn sàng (idle); người dùng gõ ở ô soạn không va với tin gửi vào.
       if (run.chat && run.chat.model.state.phase !== 'idle') continue
       const item = this.mail.next(id, mailReady(this.board.statusOf(id), this.lastInput(run), now), now)
       if (!item) continue
+      typed.add(id)
+      this.commentQuiet.set(id, now + MAIL_GAP_MS)
       const msg = item.user ? item.text : item.handoff ? handoffMessage(item.fromName, item.text) : agentMessage(item.fromName, item.text)
       // Ô chat hiện tin gốc (không kèm lời đánh dấu); agent nhận vẫn thấy bản có đánh dấu.
       this.submit(run, msg, {
@@ -1544,6 +1614,13 @@ export class AgentService {
         display: item.user ? undefined : item.text
       })
     }
+    // Góp ý tab Sản phẩm: sau tin agent (tin agent vừa gõ thì chờ lần xét sau).
+    if (this.products)
+      for (const [id, run] of this.running) {
+        const agent = this.data.agents.find((a) => a.id === id)
+        if (!agent || agentKind(agent) === 'terminal' || this.mail.pending(id) || typed.has(id)) continue
+        void this.deliverComments(id, run, agent, now)
+      }
   }
 
   /**
@@ -1655,6 +1732,7 @@ export class AgentService {
     this.board.forgetWorkspace(workspaceId)
     this.activity.forgetWorkspace(workspaceId)
     this.artifacts.forgetWorkspace(workspaceId)
+    this.products?.forgetWorkspace(workspaceId)
     this.browser.closeWorkspace(workspaceId)
     await this.save()
   }
@@ -1719,6 +1797,7 @@ export class AgentService {
     if (ws) await this.board.renameAgent(ws, agent.id, name)
     this.activity.renameAgent(agent.id, name)
     void this.artifacts.renameAgent(agent.id, name)
+    void this.products?.renameAgent(agent.id, name)
     this.browser.renameAgent(agent.id, name)
     // File phiên (agent khác đọc trong .sessions/) ghi tên mới và đường dẫn note mới.
     const run = this.running.get(agent.id)

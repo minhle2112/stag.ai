@@ -43,6 +43,11 @@ export interface McpContext {
     /** Note vừa đọc / ghi qua tool (chấm hoạt động trong Vault, sự kiện plugin). */
     touched(t: Touch[]): void
   }
+  /** Tool artifact_publish / artifact_reply (tab Sản phẩm); vắng = không có tool. */
+  artifacts?: {
+    publish(input: { file: string; title: string; description: string; note?: string; fixes?: string[] }): Promise<string>
+    reply(input: { id: string; text: string; options?: string[] }): Promise<string>
+  }
 }
 
 /** Một agent / ô trong workspace, như người dùng thấy ở lưới Agents. */
@@ -294,6 +299,8 @@ export function createStagMcp(ctx: McpContext): McpServer {
     }
   )
 
+  if (ctx.artifacts) registerArtifactTools(server, ctx.artifacts)
+
   // Cài đặt → Agent API tắt nhóm nào: ẩn tool của nhóm đó, gọi thì báo lỗi (như tool trình duyệt).
   const team = registerTeamTools(server, ctx)
   if (ctx.agentApi?.manage === false) hideFromList(server, team.manage)
@@ -317,6 +324,52 @@ export function createStagMcp(ctx: McpContext): McpServer {
   }
 
   return server
+}
+
+/** Tool nộp sản phẩm cho người dùng xem (tab Sản phẩm) + trả lời góp ý. */
+function registerArtifactTools(server: McpServer, api: NonNullable<McpContext['artifacts']>): void {
+  server.registerTool(
+    'artifact_publish',
+    {
+      title: 'Publish an artifact',
+      description:
+        'Publish a file you made for the user to review (report, doc, mockup, image, video, PDF, spreadsheet…) in the stag.ai "Sản phẩm" (Artifacts) tab, under your open kanban task. Only deliverables: not code edits, temp files or config. Publishing the same file again creates a new version (v2, v3…) with a diff; stag.ai keeps a snapshot of each version. The user can comment on passages; comments arrive in your session as "[stag.ai] Comments from the user…".',
+      inputSchema: {
+        file: z.string().min(1).max(500).describe('Path of the file inside the project (relative to the project folder or absolute)'),
+        title: z.string().min(1).max(120).describe('Short title in the conversation language, e.g. "Báo cáo smoke test 0.1.2"'),
+        description: z.string().max(600).describe('One or two sentences in the conversation language: what it is and what the user should look at'),
+        note: z.string().max(600).optional().describe('From the 2nd publish on: what changed in this version, in the conversation language'),
+        fixes: z.array(z.string().max(20)).max(50).optional().describe('Ids of the user comments (e.g. "c7") this version fixes')
+      }
+    },
+    async (input) => {
+      try {
+        return ok(await api.publish(input))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+  server.registerTool(
+    'artifact_reply',
+    {
+      title: 'Reply to an artifact comment',
+      description:
+        'Answer a user comment on one of your artifacts, or ask the user back (optionally with quick-answer buttons). The user sees it in the stag.ai "Sản phẩm" (Artifacts) tab; their answer comes back to your session. To report a fix, re-publish the file with artifact_publish(..., fixes) instead.',
+      inputSchema: {
+        id: z.string().min(1).max(20).describe('Comment id, e.g. "c7"'),
+        text: z.string().min(1).max(4000).describe('Your answer or question, in the conversation language'),
+        options: z.array(z.string().min(1).max(60)).max(4).optional().describe('Quick-answer buttons for a question, e.g. ["Đồng ý", "Thôi"]')
+      }
+    },
+    async (input) => {
+      try {
+        return ok(await api.reply(input))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
 }
 
 /**

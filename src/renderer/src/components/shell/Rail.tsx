@@ -2,6 +2,9 @@ import { pageTab, slotsOf, usePlugins } from '../../store/plugins'
 import { useSettings } from '../../store/settings'
 import { useUi, type MainTab } from '../../store/ui'
 import { useActiveWorkspace } from '../../store/workspaces'
+import { useProducts } from '../../store/artifacts'
+import { inboxOf } from '@shared/artifacts'
+import { useEffect } from 'react'
 import { Icon, type IconName } from '../Icon'
 import { SkillAvatar } from '../settings/SkillsSection'
 import { useWaitingAgents } from './useWaiting'
@@ -9,7 +12,7 @@ import { useWaitingAgents } from './useWaiting'
 const VIEWS: Array<{ tab: MainTab; icon: IconName; tip: string }> = [
   { tab: 'agents', icon: 'grid', tip: 'Agent · Ctrl+1' },
   { tab: 'kanban', icon: 'kanban', tip: 'Kanban · Ctrl+2' },
-  { tab: 'artifacts', icon: 'fdiff', tip: 'Artifacts · tệp agent đã tạo / sửa · Ctrl+3' },
+  { tab: 'artifacts', icon: 'fdiff', tip: 'Sản phẩm · thứ agent nộp cho bạn xem · Ctrl+3' },
   { tab: 'vault', icon: 'vault', tip: 'Vault (bộ nhớ) · Ctrl+4' },
   { tab: 'log', icon: 'brain', tip: 'Nhật ký & bộ nhớ · Ctrl+5' }
 ]
@@ -23,6 +26,13 @@ export function Rail(): React.JSX.Element {
   const closeSettings = useUi((s) => s.closeSettings)
   const active = useActiveWorkspace()
   const waiting = useWaitingAgents().filter((w) => w.wsId === active?.id).length
+  // Số sản phẩm cần bạn xem (bản mới, agent hỏi lại, đã sửa chờ xem) của workspace đang mở.
+  const products = useProducts((s) => (active ? s.byWs[active.id] : undefined))
+  const loadProducts = useProducts((s) => s.load)
+  useEffect(() => {
+    if (active && !products) void loadProducts(active.id).catch(() => {})
+  }, [active, products, loadProducts])
+  const inbox = products ? inboxOf(products.artifacts).length : 0
   const pluginItems = usePlugins((s) => s.items)
   const settingsValue = useSettings((s) => s.value)
   const pages = slotsOf(pluginItems, settingsValue, 'page', active?.id)
@@ -36,6 +46,11 @@ export function Rail(): React.JSX.Element {
           {v.tab === 'kanban' && waiting > 0 && (
             <span className="absolute top-1 right-0.5 box-content flex h-3.5 min-w-3.5 items-center justify-center rounded-full border-[1.5px] border-bg0 bg-wait px-[3px] text-[11px] leading-none font-bold text-[#2a1c00]">
               {waiting}
+            </span>
+          )}
+          {v.tab === 'artifacts' && inbox > 0 && (
+            <span className="absolute top-1 right-0.5 box-content flex h-3.5 min-w-3.5 items-center justify-center rounded-full border-[1.5px] border-bg0 bg-wait px-[3px] text-[11px] leading-none font-bold text-[#2a1c00]">
+              {inbox}
             </span>
           )}
         </RailButton>

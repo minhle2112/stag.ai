@@ -104,6 +104,21 @@ export const IPC = {
   artifactReveal: 'artifact:reveal',
   /** main → renderer: danh sách artifact của một workspace vừa đổi (kèm workspaceId). */
   artifactsChanged: 'artifact:changed',
+  /** Tab Sản phẩm: sản phẩm agent nộp (artifact_publish), phiên bản, góp ý. */
+  productList: 'product:list',
+  productBlocks: 'product:blocks',
+  productSeen: 'product:seen',
+  productComment: 'product:comment',
+  productEditDraft: 'product:edit-draft',
+  productDeleteDraft: 'product:delete-draft',
+  productSendDrafts: 'product:send-drafts',
+  productSay: 'product:say',
+  productClose: 'product:close',
+  productUnsend: 'product:unsend',
+  productHide: 'product:hide',
+  productSaveAs: 'product:save-as',
+  /** main → renderer: sản phẩm của một workspace vừa đổi (kèm workspaceId). */
+  productsChanged: 'product:changed',
   /** Ghi đè cài đặt của một workspace / agent (null = theo cấp trên). */
   settingsOverride: 'settings:override',
   /** Phiên bản app / Electron, thư mục dữ liệu (Settings → Giới thiệu). */

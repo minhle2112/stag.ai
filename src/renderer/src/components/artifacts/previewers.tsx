@@ -123,12 +123,85 @@ async function openPdf(data: Uint8Array): Promise<import('pdfjs-dist').PDFDocume
   return lib.getDocument({ data: data.slice(), enableXfa: false }).promise
 }
 
-export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+/** Ghim góp ý vẽ trên trang PDF / ảnh (tab Sản phẩm). */
+export interface PinMark {
+  id: string
+  /** Số trên ghim ('+' = đang soạn). */
+  label: string
+  page?: number
+  x: number
+  y: number
+  /** Màu theo trạng thái góp ý: you / fixed / open / draft / closed. */
+  tone: string
+  hot?: boolean
+}
+
+const PIN_TONES: Record<string, [string, string]> = {
+  you: ['var(--color-wait)', '#1a1300'],
+  fixed: ['var(--color-work)', '#03200f'],
+  open: ['#c9ced5', '#111'],
+  draft: ['var(--color-accent)', 'var(--color-accent-on)'],
+  closed: ['var(--color-line-3)', 'var(--color-muted)']
+}
+
+/** Phần tử ghim (giọt nước xoay 45°, số ở giữa), đặt theo toạ độ 0–1 trong khung cha `position: relative`. */
+export function pinElement(p: PinMark): HTMLElement {
+  const [bg, fg] = PIN_TONES[p.tone] ?? PIN_TONES.open
+  const el = document.createElement('span')
+  el.dataset.pin = p.id
+  Object.assign(el.style, {
+    position: 'absolute',
+    left: `${p.x * 100}%`,
+    top: `${p.y * 100}%`,
+    width: '22px',
+    height: '22px',
+    margin: '-22px 0 0 -11px',
+    borderRadius: '50% 50% 50% 0',
+    transform: 'rotate(-45deg)',
+    display: 'grid',
+    placeItems: 'center',
+    font: '700 10px var(--font-sans)',
+    cursor: 'pointer',
+    border: '1.5px solid #000a',
+    background: bg,
+    color: fg,
+    boxShadow: p.hot ? '0 0 0 3px rgba(221,225,230,.35)' : 'none',
+    zIndex: '2'
+  })
+  const n = document.createElement('span')
+  n.style.transform = 'rotate(45deg)'
+  n.textContent = p.label
+  el.appendChild(n)
+  return el
+}
+
+export function PdfView({
+  ws,
+  rel,
+  version,
+  pins,
+  picking,
+  onPick,
+  onPin
+}: {
+  ws: Workspace
+  rel: string
+  version: string
+  /** Ghim góp ý (theo trang). */
+  pins?: PinMark[]
+  /** Đang chờ người dùng bấm vào trang để ghim. */
+  picking?: boolean
+  onPick?: (p: { page: number; x: number; y: number }) => void
+  onPin?: (id: string) => void
+}): React.JSX.Element {
   const { data, error, loading } = useBytes(ws, rel, version)
   const host = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
   const [pages, setPages] = useState(0)
   const [failed, setFailed] = useState<string | null>(null)
+  const [laid, setLaid] = useState(0)
+  const pick = useRef({ picking, onPick, onPin })
+  pick.current = { picking, onPick, onPin }
 
   useEffect(() => {
     const el = host.current
@@ -157,7 +230,8 @@ export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; vers
           const scale = width / base.width
           const vp = page.getViewport({ scale })
           const box = document.createElement('div') as HTMLDivElement & { draw?: () => void }
-          Object.assign(box.style, { width: `${vp.width}px`, height: `${vp.height}px`, margin: '0 auto 16px', background: '#fff', boxShadow: '0 6px 30px rgba(0,0,0,.5)' })
+          box.dataset.page = String(n)
+          Object.assign(box.style, { position: 'relative', width: `${vp.width}px`, height: `${vp.height}px`, margin: '0 auto 16px', background: '#fff', boxShadow: '0 6px 30px rgba(0,0,0,.5)' })
           box.draw = () => {
             box.draw = undefined
             const canvas = document.createElement('canvas')
@@ -170,6 +244,7 @@ export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; vers
           el.appendChild(box)
           io.observe(box)
         }
+        if (!cancelled) setLaid((x) => x + 1)
       } catch (e) {
         if (!cancelled) setFailed(cleanError(e))
       }
@@ -181,6 +256,28 @@ export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; vers
     }
   }, [data, zoom])
 
+  // Ghim góp ý: vẽ lại khi danh sách ghim đổi hoặc các trang vừa dựng lại (đổi cỡ).
+  useEffect(() => {
+    const el = host.current
+    if (!el) return
+    el.querySelectorAll('[data-pin]').forEach((p) => p.remove())
+    for (const p of pins ?? []) el.querySelector(`[data-page="${p.page ?? 1}"]`)?.appendChild(pinElement(p))
+  }, [pins, laid])
+
+  const onClick = (e: React.MouseEvent): void => {
+    const t = e.target as HTMLElement
+    const pin = t.closest<HTMLElement>('[data-pin]')
+    if (pin) {
+      e.stopPropagation()
+      pick.current.onPin?.(pin.dataset.pin!)
+      return
+    }
+    const box = t.closest<HTMLElement>('[data-page]')
+    if (!box || !pick.current.picking) return
+    const r = box.getBoundingClientRect()
+    pick.current.onPick?.({ page: Number(box.dataset.page), x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height })
+  }
+
   if (loading) return <Loading />
   if (error || failed) return <Note>{error ?? `Không đọc được file PDF: ${failed}`}</Note>
   return (
@@ -190,7 +287,7 @@ export function PdfView({ ws, rel, version }: { ws: Workspace; rel: string; vers
         <ZoomButtons zoom={zoom} setZoom={setZoom} />
       </div>
       <div className="min-h-0 flex-1 overflow-auto pb-5">
-        <div ref={host} />
+        <div ref={host} onClick={onClick} className={picking ? 'cursor-crosshair' : ''} />
       </div>
     </div>
   )
@@ -331,9 +428,30 @@ const SHEET_CSS = `
   tr:nth-child(even) td { background: rgba(255,255,255,.02); }
   td.n { color: #69717b; text-align: right; background: #16191d !important; position: sticky; left: 0; font-weight: 400; font-family: 'JetBrains Mono Variable', Consolas, monospace; font-size: 11px; }
   a { color: #6aa9ff; }
+  :host(.pick) td[id] { cursor: cell; }
+  :host(.pick) td[id]:hover { background: #16191d; }
+  td.cm { box-shadow: inset 0 -2px 0 #3a4048; background: rgba(221,225,230,.05) !important; }
+  td.cm.you { box-shadow: inset 0 -2px 0 #f4b544; }
+  td.cm.fixed { box-shadow: inset 0 -2px 0 #3ddc84; }
+  td.cm.draft { box-shadow: inset 0 -2px 0 #2de2c0; }
+  td.cm.hot { outline: 2px solid rgba(221,225,230,.35); outline-offset: -2px; }
 `
 
-export function SheetView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+export function SheetView({
+  ws,
+  rel,
+  version,
+  cells,
+  onCell
+}: {
+  ws: Workspace
+  rel: string
+  version: string
+  /** Ô có góp ý (tab Sản phẩm): "Sheet!B4" → màu (you / fixed / open / draft / closed, thêm " hot" khi đang chọn). */
+  cells?: Record<string, string>
+  /** Bấm vào ô (bật chế độ góp ý theo ô). */
+  onCell?: (c: { sheet: string; cell: string; value: string }) => void
+}): React.JSX.Element {
   const { data, error, loading } = useBytes(ws, rel, version)
   const [book, setBook] = useState<{ names: string[]; html: (i: number) => { html: string; rows: number; cut: boolean } } | null>(null)
   const [sheet, setSheet] = useState(0)
@@ -394,6 +512,38 @@ export function SheetView({ ws, rel, version }: { ws: Workspace; rel: string; ve
     guardLinks(root)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.html])
+
+  const sheetName = book?.names[Math.min(sheet, book.names.length - 1)] ?? ''
+  const cellRef = useRef({ onCell, sheetName })
+  cellRef.current = { onCell, sheetName }
+  // Ô có góp ý + bấm ô để góp ý (chỉ khi có onCell).
+  useEffect(() => {
+    const root = shadow()
+    if (!root || !current) return
+    ;(root.host as HTMLElement).classList.toggle('pick', !!onCell)
+    root.querySelectorAll('td.cm').forEach((td) => td.classList.remove('cm', 'you', 'fixed', 'open', 'draft', 'closed', 'hot'))
+    for (const [key, tone] of Object.entries(cells ?? {})) {
+      const at = key.lastIndexOf('!')
+      const sh = at >= 0 ? key.slice(0, at) : ''
+      if (sh && sh !== sheetName) continue
+      const td = root.getElementById(`sjs-${key.slice(at + 1)}`)
+      if (td) td.classList.add('cm', ...tone.split(' ').filter(Boolean))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.html, cells, sheetName, !!onCell])
+  useEffect(() => {
+    const root = shadow()
+    if (!root) return
+    const click = (e: Event): void => {
+      const td = (e.target as Element | null)?.closest?.('td[id^="sjs-"]')
+      const cb = cellRef.current.onCell
+      if (!td || !cb) return
+      cb({ sheet: cellRef.current.sheetName, cell: td.id.slice(4), value: (td.textContent ?? '').trim() })
+    }
+    root.addEventListener('click', click)
+    return () => root.removeEventListener('click', click)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!book])
 
   if (loading) return <Loading />
   if (error || failed) return <Note>{error ?? `Không đọc được bảng tính: ${failed}`}</Note>
@@ -555,10 +705,11 @@ export async function sheetSnippet(ws: Workspace, rel: string): Promise<string[]
  * Dựng trang HTML để xem tĩnh: bỏ script, gộp CSS cạnh file vào trang, đặt `<base>` để ảnh/CSS tương đối tải qua
  * `stag-file`. Iframe sandbox không cho script chạy; trang cần JavaScript thì bấm "Chạy trong Browser".
  */
-export async function staticHtml(ws: Workspace, rel: string, source: string): Promise<string> {
+export async function staticHtml(ws: Workspace, rel: string, source: string, baseRel = rel): Promise<string> {
   const doc = new DOMParser().parseFromString(source, 'text/html')
   doc.querySelectorAll('script, noscript, meta[http-equiv], base').forEach((e) => e.remove())
-  const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : ''
+  // Bản chụp (tab Sản phẩm) nằm ở .stag/artifacts/…: CSS / ảnh tương đối tính theo chỗ của file gốc (`baseRel`).
+  const dir = baseRel.includes('/') ? baseRel.slice(0, baseRel.lastIndexOf('/') + 1) : ''
   for (const link of Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'))) {
     const href = link.getAttribute('href') ?? ''
     if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(href)) continue
@@ -586,7 +737,7 @@ function normalizeRel(p: string): string | null {
   return out.join('/')
 }
 
-export function HtmlView({ ws, rel, version, onRun }: { ws: Workspace; rel: string; version: string; onRun: () => void }): React.JSX.Element {
+export function HtmlView({ ws, rel, version, onRun, baseRel }: { ws: Workspace; rel: string; version: string; onRun: () => void; baseRel?: string }): React.JSX.Element {
   const [srcdoc, setSrcdoc] = useState<string | null>(null)
   const [hasScript, setHasScript] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
@@ -599,14 +750,14 @@ export function HtmlView({ ws, rel, version, onRun }: { ws: Workspace; rel: stri
       .then(async (t) => {
         if (t.status !== 'ok') throw new Error(t.status === 'missing' ? 'Không còn file này trên đĩa.' : 'File không phải văn bản.')
         setHasScript(/<script[\s>]/i.test(t.text))
-        const html = await staticHtml(ws, rel, t.text)
+        const html = await staticHtml(ws, rel, t.text, baseRel ?? rel)
         if (alive) setSrcdoc(html)
       })
       .catch((e) => alive && setFailed(cleanError(e)))
     return () => {
       alive = false
     }
-  }, [ws, rel, version])
+  }, [ws, rel, version, baseRel])
   if (failed) return <Note>{failed}</Note>
   if (srcdoc == null) return <Loading />
   return (

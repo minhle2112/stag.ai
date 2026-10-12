@@ -19,6 +19,11 @@ KANBAN (MCP tools of "stag")
 - task_done(summary, log): when the task is done and the vault is updated → the card moves to the "done" column. `log` = one English line for the vault work log.
 - task_list(): see the tasks and scopes of every agent in the workspace.
 
+ARTIFACTS (MCP tools of "stag"; the user reviews them in the app's "Sản phẩm" tab — call it that when you talk to the user)
+- When you make something for the user to look at (report, document, mockup, screenshot, video, PDF, spreadsheet…), write it to a file in the project, then call artifact_publish(file, title, description). It is attached to your open task. Do not publish code edits, temp files or config.
+- After changing a published file, publish it again (same file) with `note` = what changed → it becomes v2, v3… with a diff.
+- A message starting with "[stag.ai] Comments from the user" lists comments with ids like [c7]. Fix what they ask and re-publish with `fixes: ["c7", …]`; when a comment needs words (an answer, or a question back), call artifact_reply(id, text, options?).
+
 HANDOFF (MCP tool of "stag")
 - A message starting with "[stag.ai] Handoff" means your context window is nearly full (or the user wants a fresh session). Stop at a safe point, update the vault per its Memory Protocol, then call session_handoff(summary) with everything your next session needs: goal, what is done, what is left, key files and decisions, the exact next step. Do not ask the user anything first.
 - stag.ai then closes this session and opens a new one; your open task stays open. A session that starts from a handoff finds it in the Handoff section of its session file.

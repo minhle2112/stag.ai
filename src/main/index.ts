@@ -6,6 +6,7 @@ import { AdapterService } from './adapters'
 import { AgentService } from './agents'
 import { ExternalAdapterStore } from './externalAdapters'
 import { ArtifactLog, serveArtifact } from './artifacts'
+import { ArtifactStore } from './artifactStore'
 import { Board } from './board'
 import { BrowserService } from './browser'
 import { DevServerService } from './devServer'
@@ -267,6 +268,12 @@ const agents = new AgentService(ptys, workspaces, board, browser, settings, acti
 /** Dev server của dự án: Tab mới của browser + tool preview_* của agent. */
 const devServers = new DevServerService(workspaces, agents, browser)
 agents.attachDevServers(devServers)
+/** Sản phẩm agent nộp (tab Sản phẩm): artifact_publish / artifact_reply + góp ý gửi vào phiên agent. */
+const products = new ArtifactStore(
+  (workspaceId) => send(IPC.productsChanged, workspaceId),
+  (agentId) => agents.kickComments(agentId)
+)
+agents.attachProducts(products)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -495,7 +502,9 @@ app.whenReady().then(async () => {
           plugins.callTool(t.pluginId, t.tool.name, params, { workspaceId: ws.id, workspaceName: ws.name, workspacePath: ws.path, agentId: a.id, agentName: a.name })
       }))
   })
-  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins, vaultIndexer, devServers)
+  registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins, vaultIndexer, devServers, products)
+  // Góp ý còn trong hàng chờ từ lần chạy trước: nạp sẵn để được gửi khi agent rảnh, kể cả khi chưa mở tab.
+  for (const w of workspaces.list()) void products.warm(w).catch(() => {})
   registerVoiceIpc(voice, new VocabCache(), workspaces, voiceCloud, cloudUsage)
   registerVoiceSystemIpc({
     secrets,
@@ -530,6 +539,7 @@ app.on('before-quit', () => {
   tray?.destroy()
   tray = null
   void artifacts.flush()
+  void products.flush()
   browser.shutdown()
   webhooks.stop()
   void plugins.shutdown()
