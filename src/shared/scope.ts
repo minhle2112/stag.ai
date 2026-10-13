@@ -23,16 +23,35 @@ const norm = (p: string): string => p.replace(/\\/g, '/')
 const isAbs = (p: string): boolean => /^[a-z]:\//i.test(p) || p.startsWith('/')
 
 /**
+ * Cách viết khác của cùng một đường dẫn trên Windows (đã đổi `\` thành `/`) → dạng `C:/…`: tiền tố `\\?\` / `\\.\`
+ * (`//?/C:/x`), `\\?\UNC\host\share` và chia sẻ quản trị tới chính máy này (`//localhost/C$/x`). Không đổi thì agent
+ * viết đường dẫn kiểu đó là lọt qua khoá phạm vi.
+ */
+function windowsAlias(p: string): string {
+  return p
+    .replace(/^\/\/[?.]\/unc\//i, '//')
+    .replace(/^\/\/[?.]\/(?=[a-z]:)/i, '')
+    .replace(/^\/\/(?:localhost|127\.0\.0\.1|\[::1\])\/([a-z])\$(?=\/|$)/i, '$1:')
+}
+
+/**
  * Đường dẫn (tuyệt đối hoặc tương đối với `base`, mặc định thư mục dự án) → đường dẫn tương đối so với
  * thư mục dự án, '/' và chữ thường (Windows không phân biệt hoa thường). null = nằm ngoài dự án.
  */
 export function projectRel(path: string, root: string, base = root): string | null {
   // Git Bash / MSYS viết ổ đĩa kiểu `/c/Users/...` (agent chạy lệnh trong bash trên Windows) → `c:/Users/...`.
   const msys = (s: string): string => (/^[a-z]:\//i.test(root.replace(/\\/g, '/')) ? s.replace(/^\/([a-z])(?=\/|$)/i, '$1:') : s)
-  let p = msys(norm(path.trim()))
+  let p = msys(windowsAlias(norm(path.trim())))
   if (!p) return null
   const r = norm(root).replace(/\/+$/, '').toLowerCase()
-  if (!isAbs(p)) p = `${msys(norm(base)).replace(/\/+$/, '')}/${p}`
+  const b = msys(norm(base)).replace(/\/+$/, '')
+  // `C:foo` (tương đối với thư mục hiện tại của ổ C): coi như tương đối với `base` nếu cùng ổ, khác ổ thì không biết.
+  const driveRel = /^([a-z]):(?!\/)/i.exec(p)
+  if (driveRel) {
+    if (b.slice(0, 2).toLowerCase() !== `${driveRel[1].toLowerCase()}:`) return null
+    p = p.slice(2)
+  }
+  if (!isAbs(p)) p = `${b}/${p}`
   // Gộp `.` và `..` (không đụng ổ đĩa).
   const out: string[] = []
   for (const seg of p.split('/')) {

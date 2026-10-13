@@ -18,6 +18,7 @@ import {
 } from '@shared/artifacts'
 import type { Agent, Task, Workspace } from '@shared/types'
 import { readText } from './fsutil'
+import { renameRetry } from './jsonFile'
 import { ensureIgnored } from './workspace'
 
 /** File lớn nhất nộp được (bản chụp nằm trong `.stag/artifacts/`). */
@@ -135,7 +136,7 @@ export class ArtifactStore {
       this.ignored.add(ws.id)
     }
     await fs.writeFile(`${file}.tmp`, JSON.stringify(d, null, 2), 'utf8')
-    await fs.rename(`${file}.tmp`, file)
+    await renameRetry(`${file}.tmp`, file)
   }
 
   private changed(workspaceId: string): void {

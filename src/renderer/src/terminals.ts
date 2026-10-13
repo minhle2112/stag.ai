@@ -30,6 +30,10 @@ const entries = new Map<string, Entry>()
 const agentByPty = new Map<string, string>()
 /** Dữ liệu tới trước khi terminal kịp gắn với agent. */
 const pending = new Map<string, string[]>()
+/** Giữ tối đa chừng này ký tự output chưa gắn cho mỗi tiến trình (pty của workspace chưa mở vẫn chạy và in ra). */
+const PENDING_MAX = 256_000
+/** Tiến trình đã thoát trước khi kịp gắn với agent (thoát ngay lúc mở): ptyId → mã thoát. */
+const exitedEarly = new Map<string, number>()
 const exitListeners = new Set<(agentId: string, ptyId: string) => void>()
 let busStarted = false
 
@@ -49,12 +53,21 @@ export function startTerminalBus(): void {
   window.stag.pty.onAnyData((ptyId, data) => {
     const agentId = agentByPty.get(ptyId)
     if (agentId) entries.get(agentId)?.term.write(data)
-    else pending.set(ptyId, [...(pending.get(ptyId) ?? []), data])
+    else bufferPending(ptyId, data)
   })
   window.stag.pty.onAnyExit((ptyId, { exitCode }) => {
     const agentId = agentByPty.get(ptyId)
+    if (!agentId) {
+      // Chưa gắn: có thể là phiên vừa mở mà thoát ngay, trước cả khi app nhận kết quả mở phiên. Nhớ lại để bindPty báo.
+      exitedEarly.set(ptyId, exitCode)
+      if (exitedEarly.size > 50) {
+        const old = exitedEarly.keys().next().value!
+        exitedEarly.delete(old)
+        pending.delete(old)
+      }
+      return
+    }
     pending.delete(ptyId)
-    if (!agentId) return
     agentByPty.delete(ptyId)
     const e = entries.get(agentId)
     if (e && e.ptyId === ptyId) {
@@ -239,19 +252,41 @@ export function terminalSize(agentId: string): { cols: number; rows: number } {
   return { cols: t.cols, rows: t.rows }
 }
 
-/** Nối terminal của agent với một tiến trình đang chạy. */
-export function bindPty(agentId: string, ptyId: string, kind: AgentKind): void {
+/** Thêm output chưa gắn, bỏ phần cũ nhất khi quá PENDING_MAX. */
+function bufferPending(ptyId: string, data: string): void {
+  const list = pending.get(ptyId) ?? []
+  list.push(data)
+  let size = list.reduce((n, c) => n + c.length, 0)
+  while (size > PENDING_MAX && list.length > 1) size -= list.shift()!.length
+  pending.set(ptyId, list)
+}
+
+/**
+ * Nối terminal của agent với một tiến trình. false = tiến trình đã thoát trước khi kịp nối (in dòng "phiên đã đóng",
+ * báo các listener thoát): bên gọi không được coi phiên là đang chạy.
+ */
+export function bindPty(agentId: string, ptyId: string, kind: AgentKind): boolean {
   const e = entry(agentId)
   e.softNewline = wantsSoftNewline(kind)
-  if (e.ptyId === ptyId) return
+  if (e.ptyId === ptyId) return true
   e.input?.dispose()
-  e.ptyId = ptyId
-  agentByPty.set(ptyId, agentId)
+  e.input = null
   for (const chunk of pending.get(ptyId) ?? []) e.term.write(chunk)
   pending.delete(ptyId)
+  const code = exitedEarly.get(ptyId)
+  if (code !== undefined) {
+    exitedEarly.delete(ptyId)
+    e.ptyId = null
+    e.term.write(`\r\n\x1b[90m[phiên đã đóng, mã ${code}]\x1b[0m\r\n`)
+    exitListeners.forEach((fn) => fn(agentId, ptyId))
+    return false
+  }
+  e.ptyId = ptyId
+  agentByPty.set(ptyId, agentId)
   e.input = e.term.onData((data) => window.stag.pty.write(ptyId, data))
   e.sent = null
   if (e.opened) sendSize(e, true)
+  return true
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useUi } from '../store/ui'
 import { Icon, type IconName } from './Icon'
@@ -15,6 +15,9 @@ interface Props {
   tone?: 'wait' | 'accent'
 }
 
+/** Hộp thoại đang mở, theo thứ tự mở (Esc chỉ đóng cái trên cùng). */
+const openModals: object[] = []
+
 /** Hộp thoại giữa màn hình (bản thiết kế "Xưởng"): đầu 44px có nút đóng, thân cuộn được, chân nền sâu hơn. */
 export function Modal({ title, children, footer, onClose, width = 'w-[560px]', icon, tone }: Props): React.JSX.Element {
   useEffect(() => {
@@ -23,10 +26,31 @@ export function Modal({ title, children, footer, onClose, width = 'w-[560px]', i
     return () => ui.modalClosed()
   }, [])
 
+  // Esc đóng hộp thoại trên cùng (hộp thoại chồng nhau: chỉ cái mở sau cùng). Phần tử bên trong đã tự xử lý Esc
+  // (danh sách gợi ý, đang gõ tiếng Việt) thì thôi.
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    const me = {}
+    openModals.push(me)
+    const key = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || openModals[openModals.length - 1] !== me || !closeRef.current) return
+      e.preventDefault()
+      closeRef.current()
+    }
+    window.addEventListener('keydown', key)
+    return () => {
+      window.removeEventListener('keydown', key)
+      openModals.splice(openModals.indexOf(me), 1)
+    }
+  }, [])
+
   // Gắn vào body: hộp thoại mở từ trong một ô canvas (vd. đổi tên) nằm dưới phần tử có transform, "fixed" sẽ bám theo ô.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim" onMouseDown={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
         className={`${width} flex max-h-[84vh] max-w-[94vw] flex-col overflow-hidden rounded-[10px] border bg-panel shadow-modal ${
           tone === 'wait' ? 'border-wait/60' : tone === 'accent' ? 'border-accent/40' : 'border-line-2'
         }`}

@@ -8,6 +8,7 @@ import { importServers, slugify, type EffectiveConnectors, type ParsedImport } f
 import type { CliAdapterId, Connector, ConnectorTestResult, InheritedScan, InheritedServer } from '@shared/types'
 import { codexHome, tomlString } from './codex'
 import { resolveCommand } from './externalAdapters'
+import { claudeJsonPath } from './context'
 import { readText } from './fsutil'
 
 /**
@@ -200,10 +201,10 @@ const obj = (v: unknown): Loose => (v && typeof v === 'object' && !Array.isArray
 const samePath = (a: string, b: string): boolean => a.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 
 /** Cấu hình máy chủ của Claude Code theo phạm vi: user (~/.claude.json), local (dự án trong ~/.claude.json), project (.mcp.json). */
-export async function claudeConfigs(cwd: string, home = homedir()): Promise<Record<'user' | 'local' | 'project', Loose>> {
+export async function claudeConfigs(cwd: string, home = homedir(), env: NodeJS.ProcessEnv = process.env): Promise<Record<'user' | 'local' | 'project', Loose>> {
   let j: Loose = {}
   try {
-    j = obj(JSON.parse((await readText(join(home, '.claude.json'))) ?? '{}'))
+    j = obj(JSON.parse((await readText(claudeJsonPath(env, home))) ?? '{}'))
   } catch {
     /* file hỏng: coi như trống */
   }
@@ -287,14 +288,14 @@ export async function scanInherited(runtime: CliAdapterId, exe: string, cwd: str
     scan.error = `Chạy "${runtime} mcp list" lỗi: ${r.err.trim().split(/\r?\n/)[0] || 'không rõ'}`
     return scan
   }
-  scan.servers = runtime === 'claude' ? parseClaudeMcpList(r.out, await claudeConfigs(cwd)) : parseCodexMcpList(r.out)
+  scan.servers = runtime === 'claude' ? parseClaudeMcpList(r.out, await claudeConfigs(cwd, homedir(), env)) : parseCodexMcpList(r.out)
   return scan
 }
 
 /** Cấu hình kiểu Claude của một máy chủ có sẵn để chép thành connector (giá trị giống token → bí mật). */
 export async function inheritedConfig(runtime: CliAdapterId, name: string, exe: string, cwd: string, env: NodeJS.ProcessEnv): Promise<Loose | null> {
   if (runtime === 'claude') {
-    const c = await claudeConfigs(cwd)
+    const c = await claudeConfigs(cwd, homedir(), env)
     const found = c.local[name] ?? c.project[name] ?? c.user[name]
     return found ? obj(found) : null
   }

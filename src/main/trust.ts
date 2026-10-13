@@ -1,19 +1,21 @@
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
+import { claudeJsonPath } from './context'
 
 /**
  * Claude Code đã được người dùng xác nhận tin cậy thư mục này chưa (hộp thoại "Do you trust the files in this folder?")?
- * Trạng thái nằm ở `projects[<đường dẫn>].hasTrustDialogAccepted` trong ~/.claude.json; thư mục con được tin theo thư
+ * Trạng thái nằm ở `projects[<đường dẫn>].hasTrustDialogAccepted` trong ~/.claude.json (hoặc
+ * `<CLAUDE_CONFIG_DIR>/.claude.json`, `env` = biến môi trường của phiên Claude); thư mục con được tin theo thư
  * mục cha đã tin.
  *
  * Cần cho ô chat: `claude -p` bỏ qua hộp thoại này, nên nếu không kiểm trước thì mã trong `.claude/` của một repo lạ
  * (hook, MCP, settings) chạy mà người dùng chưa từng đồng ý.
  */
-export async function isClaudeFolderTrusted(dir: string, home = homedir()): Promise<boolean> {
+export async function isClaudeFolderTrusted(dir: string, home = homedir(), env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   let data: unknown
   try {
-    data = JSON.parse(await fs.readFile(join(home, '.claude.json'), 'utf8'))
+    data = JSON.parse(await fs.readFile(claudeJsonPath(env, home), 'utf8'))
   } catch {
     return false
   }

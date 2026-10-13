@@ -28,6 +28,18 @@ describe('projectRel', () => {
     expect(projectRel('x.ts', ROOT, '/c/Users/a/Proj/lib')).toBe('lib/x.ts')
   })
 
+  it('cách viết khác của cùng đường dẫn Windows không lọt qua khoá', () => {
+    expect(projectRel('\\\\?\\C:\\Users\\a\\Proj\\src\\x.ts', ROOT)).toBe('src/x.ts')
+    expect(projectRel('\\\\.\\C:\\Users\\a\\Proj\\src\\x.ts', ROOT)).toBe('src/x.ts')
+    expect(projectRel('//localhost/C$/Users/a/Proj/src/x.ts', ROOT)).toBe('src/x.ts')
+    expect(projectRel('\\\\127.0.0.1\\c$\\Users\\a\\Proj\\src\\x.ts', ROOT)).toBe('src/x.ts')
+    // C:src\x.ts = tương đối với thư mục hiện tại của ổ C (cwd của phiên).
+    expect(projectRel('C:src\\x.ts', ROOT)).toBe('src/x.ts')
+    expect(projectRel('D:src\\x.ts', ROOT)).toBe(null)
+    // Máy khác trong mạng: không phải dự án này.
+    expect(projectRel('\\\\server\\C$\\Users\\a\\Proj\\src\\x.ts', ROOT)).toBe(null)
+  })
+
   it('tương đối tính từ base (cwd của phiên), gộp . và ..', () => {
     expect(projectRel('./src/a.ts', ROOT)).toBe('src/a.ts')
     expect(projectRel('../b.ts', ROOT, `${ROOT}\\src\\x`)).toBe('src/b.ts')

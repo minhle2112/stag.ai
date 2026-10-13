@@ -55,6 +55,11 @@ export interface ComposerProps {
 }
 
 /**
+ * Bản nháp đang gõ theo agent: ô chat bị gỡ khi chuyển tab project (canvas mỗi tab một bản), gắn lại thì lấy về.
+ */
+const drafts = new Map<string, { text: string; images: Attached[] }>()
+
+/**
  * Ô soạn tin: một hộp bo tròn — trên là chip tin xếp hàng + ảnh đã dán, giữa là ô nhập (Enter gửi, Shift+Enter xuống
  * dòng, ↑ tin cũ, Esc ngắt lượt), dưới là đính kèm, model · effort, ctx · hạn mức, mic, nút Gửi / Dừng.
  */
@@ -74,27 +79,33 @@ export function Composer({
   offLabel,
   focusRef
 }: ComposerProps): React.JSX.Element {
-  const [text, setTextState] = useState('')
-  const [images, setImagesState] = useState<Attached[]>([])
+  const [text, setTextState] = useState(() => drafts.get(agentId)?.text ?? '')
+  const [images, setImagesState] = useState<Attached[]>(() => drafts.get(agentId)?.images ?? [])
   const [note, setNote] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   // Bản sao mới nhất để handler đăng ký một lần (giọng nói) luôn đọc đúng.
-  const textRef = useRef('')
-  const imagesRef = useRef<Attached[]>([])
+  const textRef = useRef(text)
+  const imagesRef = useRef<Attached[]>(images)
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
   const hist = useRef<{ index: number | null; draft: string }>({ index: null, draft: '' })
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const idSeq = useRef(0)
 
+  const keepDraft = (): void => {
+    if (textRef.current || imagesRef.current.length) drafts.set(agentId, { text: textRef.current, images: imagesRef.current })
+    else drafts.delete(agentId)
+  }
   const setText = (v: string): void => {
     textRef.current = v
     setTextState(v)
+    keepDraft()
   }
   const setImages = (v: Attached[]): void => {
     imagesRef.current = v
     setImagesState(v)
+    keepDraft()
   }
   const flash = (msg: string): void => {
     setNote(msg)

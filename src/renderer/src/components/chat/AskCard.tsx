@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import type { ChatItem } from '@shared/chat'
 import { useChat } from '../../store/chat'
 import { Icon } from '../Icon'
@@ -75,6 +75,9 @@ function Pick({ on, multi }: { on: boolean; multi: boolean }): React.JSX.Element
   )
 }
 
+/** Lựa chọn đang dở của thẻ hỏi, theo agent + yêu cầu. */
+const askDrafts = new Map<string, { picked: Record<string, string[]>; other: Record<string, string> }>()
+
 /** Agent hỏi chọn đáp án (AskUserQuestion của Claude, request_user_input của Codex). Một câu chọn một: bấm là gửi; còn lại chọn đủ rồi bấm Gửi. */
 function QuestionAsk({
   item,
@@ -89,8 +92,13 @@ function QuestionAsk({
   agentName: string
   primary: boolean
 }): React.JSX.Element {
-  const [picked, setPicked] = useState<Record<string, string[]>>({})
-  const [other, setOther] = useState<Record<string, string>>({})
+  const draftKey = `${agentId}:${item.requestId}`
+  const [picked, setPicked] = useState<Record<string, string[]>>(() => askDrafts.get(draftKey)?.picked ?? {})
+  const [other, setOther] = useState<Record<string, string>>(() => askDrafts.get(draftKey)?.other ?? {})
+  // Ô chat bị gỡ khi chuyển tab project: giữ lựa chọn đang dở để gắn lại thì còn.
+  useEffect(() => {
+    askDrafts.set(draftKey, { picked, other })
+  }, [draftKey, picked, other])
   const single = questions.length === 1 && !questions[0].multiSelect
 
   /** Đáp án cuối của từng câu: các nhãn đã chọn + chữ "Khác" (ghi đè khi chọn một; thêm vào khi chọn nhiều). */

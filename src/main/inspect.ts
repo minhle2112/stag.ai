@@ -16,6 +16,7 @@ import {
   PAGE_IPC,
   promoteNext,
   reopen,
+  sendDrafts,
   toPagePin,
   withAgent,
   type AnchorUpdate,
@@ -38,6 +39,7 @@ import type { Agent, Workspace } from '@shared/types'
 import { STATIC_ROOTS, staticCandidates, staticTags, type StaticTag } from '@shared/inspectSource'
 import type { BrowserService, PageTab } from './browser'
 import { readText } from './fsutil'
+import { renameRetry } from './jsonFile'
 import { ensureIgnored } from './workspace'
 
 /** Ảnh chụp lúc gửi mà chưa lưu thành bình luận: bỏ sau chừng này. */
@@ -175,7 +177,7 @@ export class InspectService {
       this.ignored.add(ws.id)
     }
     await fs.writeFile(`${file}.tmp`, JSON.stringify(d, null, 2), 'utf8')
-    await fs.rename(`${file}.tmp`, file)
+    await renameRetry(`${file}.tmp`, file)
   }
 
   private changed(wsId: string): void {
@@ -330,7 +332,7 @@ export class InspectService {
     for (const [k, v] of this.captures) if (t - v.at > CAPTURE_TTL) this.captures.delete(k)
   }
 
-  /** Lưu nháp (send: false) hoặc gửi (send: true) bình luận của một phần tử. */
+  /** Nút "Thêm" (hoặc đóng hộp khi còn chữ): lưu bình luận của một phần tử thành chờ gửi; chưa vào hàng agent nào. */
   private async pageSave(p: PageTab, input: SaveInput): Promise<number> {
     const ws = this.ws(p.wsId)
     const text = String(input?.text ?? '').trim().slice(0, MAX_TEXT)
@@ -340,9 +342,9 @@ export class InspectService {
     const cap = input.captureId ? this.captures.get(input.captureId) : undefined
     if (cap) this.captures.delete(input.captureId!)
     const at = now()
-    const id = await this.mutate(ws, async (d) => {
+    return this.mutate(ws, async (d) => {
       let pin = input.pinId !== undefined ? d.pins.find((x) => x.id === input.pinId) : undefined
-      // Nháp đã bị gửi / xoá ở chỗ khác: tạo mục mới thay vì sửa mạch đã gửi.
+      // Đã được gửi / xoá ở chỗ khác (ngăn Bình luận): tạo mục mới thay vì sửa mạch đã gửi.
       if (pin && pin.state !== 'draft') pin = undefined
       const target = cleanTarget(input.target)
       if (!pin) {
@@ -370,17 +372,27 @@ export class InspectService {
         pin.updatedAt = at
       }
       if (cap) pin.images.before = await this.writeImage(ws, `p${pin.id}-before.png`, cap.png)
-      if (input.send) {
-        enqueue(pin, at)
-        d.lastAgent = member.id
-      }
+      d.lastAgent = member.id
       return pin.id
     })
-    if (input.send) this.events.queued(member.id)
-    return id
   }
 
-  /** Xoá nháp (hộp bình luận đóng khi đã xoá hết chữ). Mạch đã gửi thì không xoá. */
+  /**
+   * Nút "Gửi" của một nhóm trong mục "Chờ gửi": các bình luận chờ gửi vào hàng agent cùng lúc, nên tới agent trong
+   * một tin (gói nhiều #N) theo đường giao tin thường: agent rảnh → gõ ngay, đang bận → cuối lượt.
+   */
+  private async sendGroup(ws: Workspace, ids: number[]): Promise<void> {
+    const team = this.team(ws.id)
+    const agents = await this.mutate(ws, (d) => {
+      const drafts = d.pins.filter((x) => ids.includes(x.id) && x.state === 'draft')
+      const gone = drafts.find((x) => !team.some((a) => a.id === x.agentId))
+      if (gone) throw new Error(`${gone.agentName} không còn trong workspace: xoá hoặc chọn agent khác cho bình luận #${gone.id}`)
+      return [...new Set(sendDrafts(d.pins, ids).map((x) => x.agentId))]
+    })
+    for (const a of agents) this.events.queued(a)
+  }
+
+  /** Xoá bình luận chờ gửi (✕ trong ngăn, hoặc hộp bình luận đóng khi đã xoá hết chữ). Mạch đã gửi thì không xoá. */
   async removeDraft(wsId: string, id: number): Promise<void> {
     const ws = this.ws(wsId)
     await this.mutate(ws, (d) => {
@@ -479,6 +491,12 @@ export class InspectService {
         if (text) await this.answer(ws, a.id, text)
         break
       }
+      case 'send':
+        if (Array.isArray(a.ids)) await this.sendGroup(ws, a.ids.map(Number))
+        break
+      case 'remove':
+        await this.removeDraft(wsId, a.id)
+        break
       case 'close':
         await this.mutate(ws, (d) => {
           // Agent có thể vẫn đang làm mục này: mục kế tiếp chỉ thành "đang trả lời" khi agent trả lời (promoteNext ở reply).

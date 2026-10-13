@@ -71,6 +71,8 @@ function useBlocks(ws: Workspace, id: string, v: ArtifactVersion | undefined): D
 interface Compose {
   anchor: CommentAnchor
   text: string
+  /** Phiên bản đang xem lúc bắt đầu viết (neo tính theo bản này, kể cả khi lưu nháp sau khi đã đổi bản / rời trang). */
+  v: number
   /** Đang sửa nháp này (Huỷ / Esc = giữ nguyên nháp cũ). */
   edit?: string
 }
@@ -205,9 +207,9 @@ export function ArtifactDetail({
   const stash = useCallback(async (): Promise<boolean> => {
     const k = live.current.compose
     if (!k || k.edit || !k.text.trim()) return false
-    await window.stag.products.comment(ws.id, a.id, { v: ver, anchor: k.anchor, text: k.text, send: false })
+    await window.stag.products.comment(ws.id, a.id, { v: k.v, anchor: k.anchor, text: k.text, send: false })
     return true
-  }, [ws.id, a.id, ver])
+  }, [ws.id, a.id])
 
   // Rời sản phẩm: giữ chữ đang viết dở, nhắc nháp chưa gửi. StrictMode (npm run dev) gỡ rồi gắn lại ngay lúc mở:
   // chỉ coi là rời khi sau một nhịp vẫn chưa gắn lại.
@@ -220,7 +222,7 @@ export function ArtifactDetail({
         if (mounted.current) return
         const { compose: k, drafts } = live.current
         if (k && !k.edit && k.text.trim()) {
-          void window.stag.products.comment(ws.id, a.id, { v: ver, anchor: k.anchor, text: k.text, send: false }).catch(() => {})
+          void window.stag.products.comment(ws.id, a.id, { v: k.v, anchor: k.anchor, text: k.text, send: false }).catch(() => {})
           toast(`Góp ý đang viết dở đã được lưu vào nháp ở “${a.title}”.`)
         } else if (drafts) toast(`Còn ${drafts} góp ý nháp chưa gửi ở “${a.title}” — vẫn giữ trong sản phẩm này.`)
       }, 0)
@@ -233,7 +235,7 @@ export function ArtifactDetail({
     setReply(null)
     setPinning(false)
     setRtab('cmt')
-    setCompose({ anchor, text, edit })
+    setCompose({ anchor, text, edit, v: ver })
   }
 
   const act = async (fn: () => Promise<unknown>, ok?: string): Promise<boolean> => {
@@ -259,7 +261,7 @@ export function ArtifactDetail({
       return
     }
     const done = await act(
-      () => window.stag.products.comment(ws.id, a.id, { v: ver, anchor: k.anchor, text: k.text, send }),
+      () => window.stag.products.comment(ws.id, a.id, { v: k.v, anchor: k.anchor, text: k.text, send }),
       send ? sentToast(delivery, a.agentName) : 'Đã lưu nháp — gửi cả loạt ở cuối cột'
     )
     if (done) setCompose(null)
@@ -282,7 +284,8 @@ export function ArtifactDetail({
     const key = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement
       if (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable) return
-      if (e.key !== 'Escape') return
+      // Hộp thoại đang mở đè lên (hỏi khoá phạm vi, agent xin việc…): Esc là của nó.
+      if (e.key !== 'Escape' || e.defaultPrevented || useUi.getState().modals > 0) return
       if (pinning) setPinning(false)
       else if (!compose && !reply) onBack()
     }

@@ -109,8 +109,12 @@ export function AgentMenuPanel({
         ? `Đánh dấu xong việc "${openTask.title}" của ${agent.name}?\n\nKhoá phạm vi của việc được nhả. Agent không được báo.`
         : `Bỏ việc "${openTask.title}" của ${agent.name}?\n\nKhoá phạm vi của việc được nhả, việc không ghi vào nhật ký. Agent không được báo.`
     if (!window.confirm(ask)) return
-    if (how === 'done') await window.stag.board.completeTask(ws.id, openTask.id)
-    else await window.stag.board.dropTask(ws.id, openTask.id)
+    try {
+      if (how === 'done') await window.stag.board.completeTask(ws.id, openTask.id)
+      else await window.stag.board.dropTask(ws.id, openTask.id)
+    } catch (e) {
+      window.alert(String((e as Error).message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    }
   }
 
   const item = (label: string, fn: () => void, danger = false): React.JSX.Element => (
@@ -131,7 +135,7 @@ export function AgentMenuPanel({
       {!running && !starting && item(terminal ? 'Mở terminal' : 'Phiên mới', () => openAndStart(false))}
       {!terminal && !running && !starting && agent.lastSessionId && item('Tiếp tục phiên trước', () => openAndStart(true))}
       {!terminal && !external && running && item('Bàn giao sang phiên mới', () => void handoffNow(agent.id))}
-      {running && item(terminal ? 'Đóng terminal' : 'Dừng phiên', () => stop(agent.id))}
+      {running && item(terminal ? 'Đóng terminal' : 'Dừng phiên', () => void Promise.resolve(stop(agent.id)).catch((e) => window.alert(String((e as Error).message ?? e))))}
       {shown && item('Đóng ô', () => hide(ws.id, agent.id))}
       {item('Đổi tên…', onRename)}
       {(agentKind(agent) === 'claude' || agentKind(agent) === 'codex') &&

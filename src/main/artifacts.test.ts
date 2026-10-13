@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent, Workspace } from '@shared/types'
-import { ArtifactLog, outputRel, pathTokens, serveArtifact, toolTouches } from './artifacts'
+import { ArtifactLog, isRunnableFile, outputRel, pathTokens, serveArtifact, toolTouches } from './artifacts'
 
 // artifacts.ts → workspace.ts có import `app` của Electron (không dùng tới ở đây).
 vi.mock('electron', () => ({
@@ -168,5 +168,16 @@ describe('serveArtifact', () => {
     expect((await serveArtifact(ws, 'v.mp4', 'bytes=20-')).status).toBe(416)
     expect((await serveArtifact(ws, '../x.mp4', null)).status).toBe(403)
     expect((await serveArtifact(ws, 'nope.png', null)).status).toBe(404)
+  })
+})
+
+describe('isRunnableFile (nút "Mở" không chạy file agent tạo)', () => {
+  it('nhận ra chương trình / script / lối tắt, kể cả viết hoa hay có dấu chấm cuối', () => {
+    for (const f of ['setup.cmd', 'a.BAT', 'x.exe', 'run.ps1', 'note.vbs', 'tool.js', 'app.hta', 'link.lnk', 'site.url', 'x.msi', 'evil.cmd.', 'C:\p\y.scr'])
+      expect(isRunnableFile(f), f).toBe(true)
+  })
+  it('file để xem thì mở bình thường', () => {
+    for (const f of ['report.md', 'a.pdf', 'shot.png', 'data.csv', 'deck.pptx', 'index.html', 'notes.txt', 'cmd.md', 'exe'])
+      expect(isRunnableFile(f), f).toBe(false)
   })
 })

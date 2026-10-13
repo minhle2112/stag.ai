@@ -11,6 +11,7 @@ import type {
 } from '@shared/types'
 import { independentSessionEnv } from './adapters'
 import { exists, readText } from './fsutil'
+import { isObject, JsonFile } from './jsonFile'
 
 /**
  * Adapter ngoài (alpha, theo kiểu "Install Adapter" của Paperclip): một gói npm hoặc một thư mục có
@@ -258,17 +259,18 @@ export class ExternalAdapterStore {
   private get file(): string {
     return join(this.root, 'registry.json')
   }
+  private jsonFile?: JsonFile
+  /** Ghi lần lượt + .bak (cài / sửa / gỡ sát nhau không giẫm file tạm của nhau). */
+  private get json(): JsonFile {
+    return (this.jsonFile ??= new JsonFile(this.file))
+  }
   private get npmPrefix(): string {
     return join(this.root, 'npm')
   }
 
   async load(): Promise<void> {
-    try {
-      const raw = JSON.parse((await readText(this.file)) ?? '{}') as Partial<RegistryFile>
-      this.items = Array.isArray(raw.adapters) ? raw.adapters.filter((a) => a?.manifest?.id) : []
-    } catch {
-      this.items = []
-    }
+    const raw = ((await this.json.read(isObject)).data ?? {}) as Partial<RegistryFile>
+    this.items = Array.isArray(raw.adapters) ? raw.adapters.filter((a) => a?.manifest?.id) : []
   }
 
   list(): InstalledAdapter[] {
@@ -385,10 +387,7 @@ export class ExternalAdapterStore {
   }
 
   private async save(): Promise<void> {
-    await fs.mkdir(this.root, { recursive: true })
-    const tmp = `${this.file}.tmp`
-    await fs.writeFile(tmp, JSON.stringify({ adapters: this.items } satisfies RegistryFile, null, 2), 'utf8')
-    await fs.rename(tmp, this.file)
+    await this.json.write({ adapters: this.items } satisfies RegistryFile)
     this.onChange(this.items)
   }
 }

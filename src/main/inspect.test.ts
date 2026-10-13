@@ -83,25 +83,27 @@ const priv = (): {
   reanchor(p: unknown, a: unknown): Promise<void>
 } => svc as never
 
+/** "Thêm" trên trang (kèm ảnh khi `send`); `send` = rồi bấm "Gửi" của nhóm trong ngăn Bình luận. */
 async function save(text = 'Nút to hơn', send = true, pinId?: number): Promise<number> {
   await priv().hello(page, 'http://localhost:5173/#x')
   const cap = send ? await priv().pageCapture(page, { rect: target.rect, scroll: target.scroll }) : null
-  return priv().pageSave(page, {
+  const id = await priv().pageSave(page, {
     ...(pinId !== undefined ? { pinId } : {}),
     ...(cap ? { captureId: cap.captureId } : {}),
     target,
     url: 'http://localhost:5173/',
     title: 'Home',
     text,
-    agentId: 'ag1',
-    send
+    agentId: 'ag1'
   })
+  if (send) await svc.act('ws1', { type: 'send', ids: [id] })
+  return id
 }
 
 const pinOf = async (id: number): Promise<Record<string, unknown>> => (await svc.snapshot('ws1')).pins.find((p) => p.id === id) as never
 
 describe('InspectService', () => {
-  it('nháp lưu xuống đĩa; gửi nháp thì cùng số, kèm ảnh vùng cắt, nhớ agent', async () => {
+  it('chờ gửi lưu xuống đĩa; Thêm lại rồi Gửi thì cùng số, kèm ảnh vùng cắt, nhớ agent', async () => {
     const id = await save('Nút', false)
     expect(await pinOf(id)).toMatchObject({ state: 'draft', target: { pt: { x: 0.3, y: 0.6 } } })
     expect(queued).toEqual([])
@@ -214,7 +216,34 @@ describe('InspectService', () => {
     const again = await save('khác', false, id)
     expect(again).not.toBe(id)
     expect((await pinOf(id)).state).toBe('queued')
-    await expect(priv().pageSave(page, { target, url: '', title: '', text: 'a', agentId: 'nope', send: false })).rejects.toThrow(/Agent/)
+    await expect(priv().pageSave(page, { target, url: '', title: '', text: 'a', agentId: 'nope' })).rejects.toThrow(/Agent/)
+  })
+
+  it('Gửi một nhóm: các bình luận chờ gửi tới agent trong một tin; Thêm chưa đi đâu', async () => {
+    const a = await save('Một', false)
+    const b = await save('Hai', false)
+    expect(queued).toEqual([])
+    expect(await svc.queuedFor('ag1')).toEqual([])
+    const disk = JSON.parse(await fs.readFile(join(root, '.stag', 'inspect', 'index.json'), 'utf8'))
+    expect(disk.lastAgent).toBe('ag1')
+    await svc.act('ws1', { type: 'send', ids: [b, a] })
+    expect(queued).toEqual(['ag1'])
+    const out = await svc.queuedFor('ag1')
+    expect(out).toHaveLength(1)
+    expect(out[0].pins.map((p) => p.id)).toEqual([a, b])
+    expect(out[0].text).toMatch(/^\[stag\.ai\] 2 comments/)
+    expect(out[0].display).toBe(`2 bình luận từ chế độ Soi (#${a}, #${b})`)
+  })
+
+  it('✕ xoá bình luận chờ gửi; agent không còn thì không gửi, báo rõ', async () => {
+    const a = await save('Một', false)
+    const b = await save('Hai', false)
+    await svc.act('ws1', { type: 'remove', id: a })
+    expect((await svc.snapshot('ws1')).pins.map((p) => p.id)).toEqual([b])
+    svc.attachTeam(() => [])
+    await expect(svc.act('ws1', { type: 'send', ids: [b] })).rejects.toThrow(/Dev không còn trong workspace/)
+    expect((await pinOf(b)).state).toBe('draft')
+    expect(queued).toEqual([])
   })
 
   it('trang dò lại phần tử sau khi sửa: lưu khoá mới', async () => {

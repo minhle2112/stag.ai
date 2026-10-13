@@ -112,6 +112,8 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
         team
       })
       useWorkspaces.getState().replace(res.workspace)
+      // Tạo từ menu của workspace khác (thanh bên): chuyển sang workspace đó để thấy project vừa tạo.
+      if (useWorkspaces.getState().activeId !== wsId) useWorkspaces.getState().setActive(wsId)
       const store = useAgents.getState()
       store.setPlace(wsId, res.project.id)
       if (res.agents.length) store.adopt(wsId, res.agents, { show: true })

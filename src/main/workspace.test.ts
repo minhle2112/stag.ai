@@ -86,6 +86,14 @@ describe('ensureIgnored', () => {
     expect(await ensureIgnored(project, ['.sessions/', '.stag/'], 'Kanban')).toEqual([])
   })
 
+  it('thư mục con của một repo git → ghi .gitignore ngay trong thư mục con', async () => {
+    await fs.mkdir(join(project, '.git'))
+    const sub = join(project, 'packages', 'app')
+    await fs.mkdir(sub, { recursive: true })
+    expect(await ensureIgnored(sub, ['.sessions/'], 'H')).toEqual(['.sessions/'])
+    expect(await readFile(join(sub, '.gitignore'))).toBe('# H\n.sessions/\n')
+  })
+
   it('.gitignore chưa có → tạo mới không có dòng trống đầu', async () => {
     await fs.mkdir(join(project, '.git'))
     expect(await ensureIgnored(project, ['a/'], 'H')).toEqual(['a/'])

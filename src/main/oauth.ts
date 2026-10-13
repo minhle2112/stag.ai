@@ -126,6 +126,9 @@ export class OAuthService {
       resource: resource ? new URL(resource) : undefined
     })
     for (const [k, v] of Object.entries(opts.params ?? {})) authorizationUrl.searchParams.set(k, v)
+    // Địa chỉ trang đăng nhập do máy chủ MCP (bên ngoài) khai báo: chỉ mở trang web. `file:`, `search-ms:`, `ms-…:` qua
+    // shell.openExternal sẽ chạy chương trình / file trên máy người dùng.
+    if (!isWebUrl(authorizationUrl)) throw new Error(`Máy chủ trả về địa chỉ đăng nhập không phải trang web (${authorizationUrl.protocol}), app không mở.`)
     const code = await this.waitForCode(authorizationUrl.href, state)
 
     // 4. Đổi mã lấy token.
@@ -250,12 +253,17 @@ export class OAuthService {
           res.writeHead(404).end()
           return
         }
+        // Sai state: không phải lượt đăng nhập này (trang / chương trình khác gọi vào cổng) → bỏ qua, chờ tiếp.
+        if (u.searchParams.get('state') !== state) {
+          res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end(page('Yêu cầu không khớp lượt đăng nhập đang chờ.'))
+          return
+        }
         const err = u.searchParams.get('error')
-        const ok = !err && u.searchParams.get('state') === state && !!u.searchParams.get('code')
+        const ok = !err && !!u.searchParams.get('code')
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
         res.end(page(ok ? 'Đã đăng nhập. Quay lại stag.ai — bạn có thể đóng tab này.' : `Đăng nhập không thành công${err ? `: ${err}` : ''}. Quay lại stag.ai để thử lại.`))
         if (ok) finish(null, u.searchParams.get('code')!)
-        else finish(new Error(err ? `Dịch vụ từ chối đăng nhập: ${u.searchParams.get('error_description') ?? err}` : 'Trang đăng nhập trả về sai mã xác nhận (state).'))
+        else finish(new Error(err ? `Dịch vụ từ chối đăng nhập: ${u.searchParams.get('error_description') ?? err}` : 'Trang đăng nhập không trả về mã xác nhận.'))
       })
       server.once('error', (e: NodeJS.ErrnoException) =>
         finish(new Error(e.code === 'EADDRINUSE' ? `Cổng ${OAUTH_PORT} đang bị chương trình khác dùng, không nhận được kết quả đăng nhập.` : e.message))
@@ -266,6 +274,12 @@ export class OAuthService {
       })
     })
   }
+}
+
+/** https, hoặc http chỉ tới chính máy này (máy chủ thử nghiệm cục bộ). */
+export function isWebUrl(u: URL): boolean {
+  if (u.protocol === 'https:') return true
+  return u.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)
 }
 
 const page = (msg: string): string =>

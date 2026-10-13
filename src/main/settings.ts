@@ -1,5 +1,3 @@
-import { promises as fs } from 'node:fs'
-import { dirname } from 'node:path'
 import { normalizeConnector, validateConnector } from '@shared/connectors'
 import { normalizeSettings, patchApp, patchOverrides, resolveHandoff, resolveModel } from '@shared/settings'
 import {
@@ -15,25 +13,27 @@ import {
   type SettingsOverrides,
   type SettingsOverridesPatch
 } from '@shared/types'
-import { readText } from './fsutil'
+import { isObject, JsonFile } from './jsonFile'
 
 /**
  * Cài đặt của app, lưu ở userData/settings.json: cấp app + ghi đè theo workspace / agent.
- * File hỏng thì dùng mặc định (lần lưu sau ghi đè). File bản 1 được chuyển sang bản 2 khi đọc.
+ * File hỏng thì đọc bản `.bak` (không có thì mặc định, bản hỏng được cất riêng). File bản 1 được chuyển sang bản 2 khi đọc.
  */
 export class SettingsStore {
   private value: Settings = DEFAULT_SETTINGS
-  private writing: Promise<void> = Promise.resolve()
+  private json: JsonFile
 
   constructor(
     private file: string,
     private onChange: (s: Settings) => void = () => {}
-  ) {}
+  ) {
+    this.json = new JsonFile(file)
+  }
 
   async load(): Promise<void> {
-    const raw = await readText(this.file)
+    const { data } = await this.json.read(isObject)
     try {
-      this.value = normalizeSettings(raw ? JSON.parse(raw) : { version: 2 })
+      this.value = normalizeSettings(data ?? { version: 2 })
     } catch {
       this.value = DEFAULT_SETTINGS
     }
@@ -146,15 +146,7 @@ export class SettingsStore {
 
   private async commit(next: Settings): Promise<Settings> {
     this.value = next
-    // Ghi lần lượt: hai lần lưu sát nhau không giẫm lên file tạm của nhau.
-    const write = this.writing.then(async () => {
-      await fs.mkdir(dirname(this.file), { recursive: true })
-      const tmp = `${this.file}.tmp`
-      await fs.writeFile(tmp, JSON.stringify(this.value, null, 2), 'utf8')
-      await fs.rename(tmp, this.file)
-    })
-    this.writing = write.catch(() => {})
-    await write
+    await this.json.write(next)
     this.onChange(this.value)
     return this.value
   }

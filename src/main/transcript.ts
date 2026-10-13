@@ -1,6 +1,7 @@
 import { promises as fs, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { claudeConfigDir } from './context'
 import { samePath } from './fsutil'
 
 /**
@@ -32,8 +33,8 @@ export function projectDirName(cwd: string): string {
  * Đường dẫn transcript đoán trước cho phiên. Chỉ là phỏng đoán ban đầu (đường dẫn rất dài có thể bị
  * Claude Code rút gọn khác đi): hook nào cũng gửi `transcript_path` thật, khi đó đổi sang theo nó.
  */
-export function transcriptPath(cwd: string, sessionId: string, home = homedir()): string {
-  return join(home, '.claude', 'projects', projectDirName(cwd), `${sessionId}.jsonl`)
+export function transcriptPath(cwd: string, sessionId: string, home = homedir(), env: NodeJS.ProcessEnv = process.env): string {
+  return join(claudeConfigDir(env, home), 'projects', projectDirName(cwd), `${sessionId}.jsonl`)
 }
 
 interface TranscriptLine {

@@ -3,7 +3,7 @@
 // - ChatSession (Claude Code): `claude -p --input-format stream-json --output-format stream-json`, mỗi lượt là một
 //   dòng trên stdin, xin quyền qua control_request.
 // - CodexChatSession (codexSession.ts): `codex app-server`, JSON-RPC.
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { ChatEvent, ChatImage, ChatItem, ChatSnapshot, ChatState } from '@shared/chat'
 import { ChatModel } from './protocol'
@@ -36,6 +36,19 @@ export interface ChatSendOptions {
   display?: string
 }
 
+/**
+ * Dừng tiến trình CLI cùng mọi tiến trình con của nó. Trên Windows `proc.kill()` chỉ giết đúng một tiến trình, lệnh
+ * agent đang chạy qua tool shell (`npm run dev`, test, máy chủ MCP stdio) sẽ sống tiếp và giữ cổng / file.
+ */
+export function killTree(proc: { pid?: number; kill: () => boolean }): void {
+  if (process.platform === 'win32' && proc.pid) {
+    execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true }, (err) => {
+      // taskkill lỗi (tiến trình đã thoát, không có quyền…): vẫn thử cách thường.
+      if (err) proc.kill()
+    })
+  } else proc.kill()
+}
+
 /** Gộp các thay đổi liên tiếp trong chừng này ms thành một lần gửi (stream chữ không làm renderer nghẹt). */
 const FLUSH_MS = 40
 
@@ -47,6 +60,8 @@ export abstract class ChatSessionBase {
   protected stateDirty = false
   protected stderr = ''
   protected exited = false
+  /** Đã gọi kill(): tiến trình chưa kịp mở (Codex đang chạy thử hook) thì không mở nữa. */
+  protected killed = false
   /** Tiến trình không mở được (sự kiện 'error' của spawn). */
   private spawnFailed = false
   private pending = new Map<string, ChatItem>()
@@ -87,12 +102,18 @@ export abstract class ChatSessionBase {
   }
 
   kill(): void {
+    this.killed = true
+    // Chưa có tiến trình (Codex còn chạy thử hook trước khi mở app-server): kết thúc phiên ngay, boot() thấy `killed` thì dừng.
+    if (!this.proc) {
+      this.finish(null)
+      return
+    }
     try {
-      this.proc?.stdin.end()
+      this.proc.stdin.end()
     } catch {
       // đã đóng
     }
-    this.proc?.kill()
+    killTree(this.proc)
   }
 
   // ---- cho lớp con ----
@@ -108,6 +129,7 @@ export abstract class ChatSessionBase {
 
   /** Chạy tiến trình (`args` thay cho opts.args nếu có). */
   protected spawnProcess(args?: string[]): void {
+    if (this.killed || this.exited) return
     const o = this.opts
     const a = args ?? o.args
     const proc = spawn(o.command, Array.isArray(a) ? a : [a], {

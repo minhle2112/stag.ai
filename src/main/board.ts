@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, HandoffState, ScopeAsk, Task, WaitReason, Workspace } from '@shared/types'
 import { agentFolder, joinRoot, projectNoteName, projectOf } from '@shared/projects'
 import { readText } from './fsutil'
+import { renameRetry } from './jsonFile'
 import type { ClosedTask } from './workLog'
 import { ensureIgnored } from './workspace'
 
@@ -249,7 +250,7 @@ export class Board {
     return []
   }
 
-  private async save(ws: Workspace): Promise<void> {
+  private async save(ws: Workspace, retry = true): Promise<void> {
     const list = await this.tasks(ws)
     const file = this.file(ws)
     const prev = this.writing.get(ws.id) ?? Promise.resolve()
@@ -261,13 +262,20 @@ export class Board {
       }
       const data: TasksFile = { version: 1, tasks: list }
       await fs.writeFile(`${file}.tmp`, JSON.stringify(data, null, 2), 'utf8')
-      await fs.rename(`${file}.tmp`, file)
+      await renameRetry(`${file}.tmp`, file)
     })
     this.writing.set(
       ws.id,
       next.catch(() => {})
     )
-    await next
+    try {
+      await next
+    } catch (e) {
+      // Việc đã đổi trong bộ nhớ (xong việc, mở việc…): báo lỗi cho agent lúc này thì nó gọi lại và nhận "không có việc
+      // mở", còn dòng nhật ký bị mất. Giữ bản trong bộ nhớ, thử ghi lại sau một lúc.
+      console.error('[board] không ghi được', file, (e as Error).message)
+      if (retry) setTimeout(() => void this.save(ws, false).catch(() => {}), 2000)
+    }
     this.notify(ws.id)
   }
 

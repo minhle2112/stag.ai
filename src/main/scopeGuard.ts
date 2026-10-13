@@ -160,7 +160,10 @@ export interface ScopeConflict {
 /** Cài đặt khoá phạm vi thực tế cho agent đang sửa (app → workspace → agent, đọc lại mỗi lần gọi tool). */
 export type ScopeSettingsFor = (ws: Workspace, agent: Agent) => ScopeLockSettings
 
-/** Một chỗ đụng: `grant` = khoá ghi nhớ khi người dùng cho qua, `label` = chữ hiện cho người dùng. */
+/**
+ * Một chỗ đụng: `grant` = khoá ghi nhớ khi người dùng cho qua (gắn với việc đang giữ khoá: việc đó xong và agent khác
+ * khoá lại chỗ này thì phải hỏi lại), `label` = chữ hiện cho người dùng.
+ */
 interface Hit {
   grant: string
   label: string
@@ -179,7 +182,7 @@ interface Hit {
  * `exempt` = mẫu đường dẫn không bao giờ khoá (cộng vault / .git / .sessions / .stag).
  */
 export class ScopeGuard {
-  /** agentId → chỗ người dùng đã cho qua trong phiên hiện tại (file tương đối chữ thường, hoặc `sh:<mục khoá>`). */
+  /** agentId → chỗ người dùng đã cho qua trong phiên hiện tại (`<id việc giữ khoá>|<file tương đối chữ thường>`, hoặc `<id việc>|sh:<mục khoá>`). */
   private grants = new Map<string, Set<string>>()
   /** agentId → chỗ đã báo ở chế độ chỉ cảnh báo trong phiên này (báo mỗi chỗ một lần, không tính là cho qua). */
   private warned = new Map<string, Set<string>>()
@@ -330,7 +333,7 @@ export class ScopeGuard {
       const rel = projectRel(f, ws.path, cwd)
       if (rel === null) continue
       const h = lockHolder(locks, agent.id, rel, free)
-      if (h) hits.push({ grant: rel, label: displayRel(f, ws.path, cwd), task: h.lock.task, entry: h.entry.label })
+      if (h) hits.push({ grant: `${h.lock.task.id}|${rel}`, label: displayRel(f, ws.path, cwd), task: h.lock.task, entry: h.entry.label })
     }
     const raw = cfg.guessShell ? shellCommand(p) : null
     const cmd = raw && withoutDataHeredocs(raw)
@@ -365,7 +368,7 @@ function shellHits(cmd: string, locks: ScopeLock[], free: ScopeEntry[], root: st
       if ((!e.key && !e.glob) || free.some((s) => covers(s, e))) continue
       if (!mentions(cmd, e, root, cwds) || onlyUnlocked(cmd, e, free, root, cwds)) continue
       // Khoá cấp quyền theo cả mẫu glob: `src/*.ts` và `src/*.md` (cùng key `src`) là hai chỗ khác nhau.
-      const grant = `sh:${e.key}|${e.glob?.source ?? ''}`
+      const grant = `${lock.task.id}|sh:${e.key}|${e.glob?.source ?? ''}`
       if (!hits.some((h) => h.grant === grant)) hits.push({ grant, label: e.label, task: lock.task, entry: e.label })
     }
   }

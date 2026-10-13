@@ -61,6 +61,14 @@ export function claudeConfigDir(env: NodeJS.ProcessEnv = process.env, home = hom
 }
 
 /**
+ * File `.claude.json` của Claude Code: `<CLAUDE_CONFIG_DIR>/.claude.json` nếu đặt biến đó, không thì `~/.claude.json`
+ * (nằm cạnh, không nằm trong, `~/.claude`).
+ */
+export function claudeJsonPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  return env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, '.claude.json') : join(home, '.claude.json')
+}
+
+/**
  * Lệnh statusLine người dùng tự đặt (cấp local > dự án > user, theo thứ tự ưu tiên của Claude Code), null nếu
  * không có. `--settings` của app thắng cả ba, nên script statusLine của app chạy tiếp lệnh này với cùng stdin
  * và in ra kết quả của nó: statusLine của người dùng vẫn hiện như cũ trong phiên agent.

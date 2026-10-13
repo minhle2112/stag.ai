@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '@shared/types'
-import { AgentMail, MAIL_GAP_MS, MAIL_PER_MINUTE, MAIL_QUEUE_MAX, mailReady } from './agentMail'
+import { AgentMail, MAIL_GAP_MS, MAIL_PER_MINUTE, MAIL_QUEUE_MAX, mailReady, USER_SENDER } from './agentMail'
 
 const T = Date.parse('2026-10-10T10:00:00Z')
 const st = (p: Partial<AgentStatus>): AgentStatus => ({ agentId: 'b', activity: 'waiting', reason: 'turn', since: new Date(T - 60_000).toISOString(), ...p })
@@ -70,5 +70,15 @@ describe('AgentMail.drain', () => {
     expect(m.drain('t').map((i) => i.text)).toEqual(['x', 'h'])
     expect(m.pending('t')).toBe(0)
     expect(m.drain('t')).toEqual([])
+  })
+})
+
+describe('AgentMail: broadcast của người dùng', () => {
+  it('gửi tới nhiều agent hơn MAIL_PER_MINUTE vẫn vào hàng chờ (chỉ giới hạn theo agent nhận)', () => {
+    const m = new AgentMail()
+    for (let i = 0; i < MAIL_PER_MINUTE + 4; i++) m.enqueue(`a${i}`, { fromId: USER_SENDER, fromName: '', text: 'x', at: 1000, user: true })
+    expect(m.targets().length).toBe(MAIL_PER_MINUTE + 4)
+    for (let i = 0; i < MAIL_QUEUE_MAX - 1; i++) m.enqueue('a0', { fromId: USER_SENDER, fromName: '', text: 'x', at: 1000, user: true })
+    expect(() => m.enqueue('a0', { fromId: USER_SENDER, fromName: '', text: 'x', at: 1000, user: true })).toThrow(/undelivered/)
   })
 })

@@ -41,6 +41,11 @@ describe('projectDirName / transcriptPath', () => {
     const p = transcriptPath('C:\\x\\y.z', 'abc', 'C:\\home')
     expect(p.replace(/\\/g, '/')).toBe('C:/home/.claude/projects/C--x-y-z/abc.jsonl')
   })
+
+  it('CLAUDE_CONFIG_DIR thay cho ~/.claude', () => {
+    const p = transcriptPath('C:\\x\\y.z', 'abc', 'C:\\home', { CLAUDE_CONFIG_DIR: 'D:\\claude2' })
+    expect(p.replace(/\\/g, '/')).toBe('D:/claude2/projects/C--x-y-z/abc.jsonl')
+  })
 })
 
 describe('parseInterrupt', () => {

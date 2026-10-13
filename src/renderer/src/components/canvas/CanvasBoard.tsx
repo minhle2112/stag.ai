@@ -39,7 +39,7 @@ const fitAllView = (rects: CanvasRect[], size: { w: number; h: number }): Canvas
 /** Số bước hoàn tác giữ lại cho mỗi workspace. */
 const UNDO_MAX = 30
 
-/** Hoàn tác vị trí / kích thước ô (Ctrl+Z, nút "Hoàn tác"): mỗi bước = hình của mọi ô trước khi đổi. */
+/** Hoàn tác vị trí / kích thước ô (Ctrl+Z, nút "Hoàn tác"): mỗi bước = hình của mọi ô trước khi đổi. Theo `<ws>:<tab>`. */
 const undoStacks = new Map<string, Array<Record<string, CanvasRect>>>()
 
 function pushUndo(wsId: string, layout: CanvasLayout): void {
@@ -76,6 +76,8 @@ interface Props {
  */
 export function CanvasBoard({ ws, layout, hasAgents, renderCell, emptyTitle, emptyHint }: Props): React.JSX.Element {
   const wsId = ws.id
+  // Mỗi tab (Chung / project) một canvas riêng (AgentGrid gắn lại CanvasBoard khi đổi tab): hoàn tác cũng riêng từng tab.
+  const [undoKey] = useState(() => `${wsId}:${useAgents.getState().byWs[wsId]?.place ?? ''}`)
   const boxRef = useRef<HTMLDivElement>(null)
   const worldRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<CanvasView>(layout.view ?? HOME)
@@ -280,21 +282,21 @@ export function CanvasBoard({ ws, layout, hasAgents, renderCell, emptyTitle, emp
     (rects: Record<string, CanvasRect>, fly: boolean) => {
       const l = getLayout()
       if (!l) return
-      pushUndo(wsId, l)
+      pushUndo(undoKey, l)
       if (fly) flight()
       setLayout(wsId, setRects(l, rects))
     },
-    [wsId, getLayout, setLayout, flight]
+    [wsId, undoKey, getLayout, setLayout, flight]
   )
 
   const undo = useCallback(() => {
     const l = getLayout()
-    const prev = undoStacks.get(wsId)?.pop()
+    const prev = undoStacks.get(undoKey)?.pop()
     if (!l || !prev) return
     flight()
     setLayout(wsId, setRects(l, prev))
     setToast(null)
-  }, [wsId, getLayout, setLayout, flight])
+  }, [wsId, undoKey, getLayout, setLayout, flight])
 
   // Esc: thu ô đang phóng to về bản đồ. Ctrl+Z: hoàn tác di chuyển / đổi cỡ / xếp gọn. Không đụng tới phím đang gõ
   // vào terminal / ô nhập (Esc là phím ngắt của Claude Code).

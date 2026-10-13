@@ -215,6 +215,22 @@ export const useAgents = create<AgentsState>((set, get) => {
     }
   })
 
+  // Workspace bị gỡ khỏi app: bỏ terminal (xterm + bộ đệm cuộn) và trạng thái agent của nó, không giữ tới lúc tắt app.
+  useWorkspaces.subscribe((s, prev) => {
+    if (s.items === prev.items) return
+    for (const w of prev.items) {
+      if (s.items.some((x) => x.id === w.id)) continue
+      const cur = get().byWs[w.id]
+      if (!cur) continue
+      for (const a of cur.agents) disposeTerminal(a.id)
+      set((st) => {
+        const byWs = { ...st.byWs }
+        delete byWs[w.id]
+        return { byWs }
+      })
+    }
+  })
+
   /** Bỏ agent khỏi mọi bảng và mọi canvas (đã xoá ở main). */
   function forget(wsId: string, ids: string[]): void {
     const gone = new Set(ids)
@@ -251,9 +267,10 @@ export const useAgents = create<AgentsState>((set, get) => {
       const snap = await window.stag.agent.snapshot(wsId)
       const running: Record<string, AgentRun> = {}
       for (const r of snap.running) {
-        running[r.agentId] = r
         const agent = snap.agents.find((a) => a.id === r.agentId)
-        if (r.mode !== 'chat') bindPty(r.agentId, r.ptyId, agent ? agentKind(agent) : 'terminal')
+        // Tiến trình vừa thoát trong lúc nạp: không coi là đang chạy.
+        if (r.mode !== 'chat' && !bindPty(r.agentId, r.ptyId, agent ? agentKind(agent) : 'terminal')) continue
+        running[r.agentId] = r
       }
       const ws = wsOf(wsId)
       const idsAt = (place: string): string[] => snap.agents.filter((a) => placeOf(ws, a) === place).map((a) => a.id)
@@ -320,9 +337,10 @@ export const useAgents = create<AgentsState>((set, get) => {
       try {
         const run = await window.stag.agent.start({ agentId, resume, ...terminalSize(agentId) })
         const agent = get().byWs[wsId]?.agents.find((a) => a.id === agentId)
-        if (run.mode !== 'chat') bindPty(agentId, run.ptyId, agent ? agentKind(agent) : 'terminal')
+        // Phiên thoát ngay (adapter sai, CLI lỗi lúc mở) trước khi nhận được kết quả mở: không để ô kẹt "đang chạy".
+        const alive = run.mode === 'chat' || bindPty(agentId, run.ptyId, agent ? agentKind(agent) : 'terminal')
         patch(wsId, (cur) => ({
-          running: { ...cur.running, [agentId]: run },
+          ...(alive ? { running: { ...cur.running, [agentId]: run } } : {}),
           // Id để "tiếp tục phiên" do main giữ (Codex: thread id, biết sau qua sự kiện 'updated').
           agents: cur.agents.map((a) => (a.id === agentId && run.lastSessionId ? { ...a, lastSessionId: run.lastSessionId } : a))
         }))

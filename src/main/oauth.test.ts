@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ApprovalQueue } from './approvals'
-import { OAuthService } from './oauth'
+import { isWebUrl, OAuthService } from './oauth'
 import { SecretStore, type Cipher } from './secrets'
 
 const plain: Cipher = { available: () => true, encrypt: (s) => Buffer.from(s, 'utf8'), decrypt: (b) => b.toString('utf8') }
@@ -122,5 +122,17 @@ describe('ApprovalQueue', () => {
     q.cancelAgent('b')
     expect(await p3).toBe('deny')
     expect(changes).toEqual([1, 0, 1, 0, 1, 0])
+  })
+})
+
+describe('isWebUrl (địa chỉ đăng nhập do máy chủ MCP khai báo)', () => {
+  it('chỉ nhận https, hoặc http tới chính máy này', () => {
+    expect(isWebUrl(new URL('https://auth.example.com/authorize'))).toBe(true)
+    expect(isWebUrl(new URL('http://127.0.0.1:8080/authorize'))).toBe(true)
+    expect(isWebUrl(new URL('http://localhost/authorize'))).toBe(true)
+    expect(isWebUrl(new URL('http://auth.example.com/authorize'))).toBe(false)
+    expect(isWebUrl(new URL('file://host/share/x.exe'))).toBe(false)
+    expect(isWebUrl(new URL('search-ms:query=x'))).toBe(false)
+    expect(isWebUrl(new URL('ms-settings:privacy'))).toBe(false)
   })
 })

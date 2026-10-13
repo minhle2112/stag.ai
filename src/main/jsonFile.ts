@@ -3,6 +3,14 @@ import { dirname } from 'node:path'
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+/** Bỏ BOM UTF-8 ở đầu (file người dùng sửa bằng Notepad…): JSON.parse không nhận nó. */
+const stripBom = (s: string): string => (s.charCodeAt(0) === 0xfeff ? s.slice(1) : s)
+
+export const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)
+
+/** File JSON hỏng gặp khi đọc (để app báo người dùng một lần lúc mở). */
+export const jsonRecoveries: Array<{ file: string; fromBackup: boolean }> = []
+
 /**
  * Ghi một file JSON an toàn: các lần ghi xếp hàng lần lượt (hai lần ghi sát nhau không chồng lên nhau, bản ngắn không
  * để lại đuôi của bản dài), mỗi lần ghi file tạm rồi đổi tên (tắt máy giữa chừng không để lại file nửa vời), và giữ bản
@@ -27,16 +35,7 @@ export class JsonFile {
     await fs.writeFile(tmp, text, 'utf8')
     // Bản hiện có → .bak, chỉ khi nó là JSON đọc được: file rỗng / hỏng không được đè lên bản sao tốt.
     if (await isJson(this.file)) await fs.copyFile(this.file, `${this.file}.bak`).catch(() => {})
-    // Windows: đổi tên đè có thể vướng tạm (trình diệt virus, trình đọc file đang mở) → thử lại vài lần.
-    for (let i = 0; ; i++) {
-      try {
-        await fs.rename(tmp, this.file)
-        return
-      } catch (e) {
-        if (i >= 4 || !['EPERM', 'EBUSY', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e
-        await sleep(40 * (i + 1))
-      }
-    }
+    await renameRetry(tmp, this.file)
   }
 
   /**
@@ -55,7 +54,7 @@ export class JsonFile {
       }
       if (!raw.trim()) return null
       try {
-        const x: unknown = JSON.parse(raw)
+        const x: unknown = JSON.parse(stripBom(raw))
         return valid(x) ? x : null
       } catch {
         return null
@@ -66,7 +65,24 @@ export class JsonFile {
     const broken = main === null
     if (broken) await fs.rename(this.file, `${this.file}.broken-${Date.now()}`).catch(() => {})
     const bak = await parse(`${this.file}.bak`)
+    if (broken) {
+      jsonRecoveries.push({ file: this.file, fromBackup: !!bak })
+      console.error(`[json] ${this.file} hỏng: ${bak ? 'đọc bản .bak' : 'không có bản .bak, dùng mặc định'}`)
+    }
     return { data: bak ?? null, broken, fromBackup: !!bak }
+  }
+}
+
+/** Đổi tên đè; Windows: có thể vướng tạm (trình diệt virus, trình đọc file đang mở) → thử lại vài lần. */
+export async function renameRetry(from: string, to: string): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      await fs.rename(from, to)
+      return
+    } catch (e) {
+      if (i >= 4 || !['EPERM', 'EBUSY', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e
+      await sleep(40 * (i + 1))
+    }
   }
 }
 
@@ -75,7 +91,7 @@ async function isJson(file: string): Promise<boolean> {
   try {
     const raw = await fs.readFile(file, 'utf8')
     if (!raw.trim()) return false
-    JSON.parse(raw)
+    JSON.parse(stripBom(raw))
     return true
   } catch {
     return false

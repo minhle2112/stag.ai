@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { agentKind, type Agent, type AgentStatus, type CanvasCell, type Workspace } from '@shared/types'
 import { agentFolder, placeOf } from '@shared/projects'
-import { widgetKey } from '../layout'
+import { findCell, widgetKey } from '../layout'
 import { useAgents, type WorkspaceAgents } from '../store/agents'
 import { useExternalAdapters } from '../store/externalAdapters'
 import { useBoard } from '../store/board'
@@ -92,6 +92,9 @@ function AutoStarter({
   useEffect(() => {
     if (!state) return
     for (const id of Object.keys(state.autoStart)) {
+      // Agent của tab khác (vd. agent khác tạo trong project khác): mở phiên khi người dùng mở tab đó, để terminal có
+      // kích thước thật (mở sớm là chạy với 80×24 mặc định).
+      if (!findCell(state.layout, id)) continue
       requestAnimationFrame(() => start(wsId, id, false))
     }
   }, [wsId, state, start])

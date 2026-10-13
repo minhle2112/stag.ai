@@ -19,7 +19,7 @@ import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettings
 import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
 import type { ExternalAdapterStore } from './externalAdapters'
-import { artifactPath, type ArtifactLog } from './artifacts'
+import { artifactPath, isRunnableFile, type ArtifactLog } from './artifacts'
 import { artifactThumb } from './artifactThumb'
 import type { ArtifactStore } from './artifactStore'
 import type { CommentAnchor } from '@shared/artifacts'
@@ -82,7 +82,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục vault', defaultPath: projectPath, properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : inspectVaultDir(r.filePaths[0], projectPath)
   })
-  ipcMain.handle(IPC.wsCreate, (_e, req: CreateWorkspaceRequest) => workspaces.create(req))
+  ipcMain.handle(IPC.wsCreate, (_e, req: CreateWorkspaceRequest) => workspaces.create(req, cliEnv('claude')))
   ipcMain.handle(IPC.wsRemove, async (_e, id: string) => {
     const agentIds = (await agents.snapshot(id)).agents.map((a) => a.id)
     await agents.removeWorkspace(id)
@@ -171,7 +171,10 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.artifactThumb, (_e, workspaceId: string, rel: string) => artifactThumb(artifactPath(ws(workspaceId), rel)))
   ipcMain.handle(IPC.artifactForget, (_e, workspaceId: string, rel: string) => artifacts.forget(ws(workspaceId), rel))
   ipcMain.handle(IPC.artifactOpen, async (_e, workspaceId: string, rel: string) => {
-    const err = await shell.openPath(artifactPath(ws(workspaceId), rel))
+    const full = artifactPath(ws(workspaceId), rel)
+    // Chương trình / script: chỉ chỉ ra trong Explorer, không chạy.
+    if (isRunnableFile(full)) return shell.showItemInFolder(full)
+    const err = await shell.openPath(full)
     if (err) throw new Error(err)
   })
   ipcMain.handle(IPC.artifactReveal, (_e, workspaceId: string, rel: string) => shell.showItemInFolder(artifactPath(ws(workspaceId), rel)))
@@ -367,7 +370,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   })
   ipcMain.handle(IPC.skillsScan, (_e, runtime: CliAdapterId, workspaceId?: string) => {
     if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
-    return scanSkills(runtime, cwdOf(workspaceId), async () => (await adapters.exe('codex')).path, cliEnv('codex'))
+    return scanSkills(runtime, cwdOf(workspaceId), async () => (await adapters.exe('codex')).path, cliEnv(runtime))
   })
   ipcMain.handle(IPC.skillsReveal, async (_e, target: string) => {
     const dir = typeof target === 'string' && /^skill\.md$/i.test(basename(target)) ? dirname(target) : (await skills.read(String(target))).dir

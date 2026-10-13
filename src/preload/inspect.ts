@@ -48,9 +48,9 @@ interface Composer {
   target: InspectTarget
   /** Điểm bấm trong phần tử (0..1). */
   pt: { x: number; y: number }
-  /** Nháp có sẵn của phần tử này. */
+  /** Bình luận chờ gửi có sẵn của phần tử này. */
   draftId?: number
-  /** Chữ / agent của nháp lúc mở (đóng hộp mà không đổi gì thì không ghi lại). */
+  /** Chữ / agent của bình luận chờ gửi lúc mở (đóng hộp mà không đổi gì thì không ghi lại). */
   saved: { text: string; agentId: string }
   text: string
   agentId: string
@@ -61,7 +61,8 @@ interface Composer {
   box: HTMLDivElement
   ta: HTMLTextAreaElement
   who: HTMLDivElement
-  send: HTMLButtonElement
+  /** Nút "Thêm". */
+  add: HTMLButtonElement
 }
 
 function start(): void {
@@ -451,7 +452,7 @@ function locate(p: PagePin): Element | null {
   if (c && c.isConnected) return c
   const { el, fresh } = resolve(p)
   found.set(p.id, el)
-  if (el && fresh && p.state !== 'draft') reanchor(p.id, el)
+  if (el && fresh) reanchor(p.id, el)
   return el
 }
 
@@ -529,7 +530,7 @@ function renderPins(): void {
     return { x, y }
   }
   const keep = new Set<number>()
-  // Mạch trước, nháp sau (nháp nhường chỗ).
+  // Mạch đã gửi trước, chờ gửi sau (chờ gửi nhường chỗ).
   const order = [...state.pins].sort((a, b) => Number(a.state === 'draft') - Number(b.state === 'draft') || a.id - b.id)
   for (const p of order) {
     const el = locate(p)
@@ -551,12 +552,13 @@ function renderPins(): void {
       pinNodes.set(p.id, n)
     }
     const draft = p.state === 'draft'
-    // Nháp: góc phải trên của phần tử (không che chữ); mạch: đúng điểm đã bấm.
-    const pos = draft ? spot(r.right, r.top) : spot(r.left + r.width * (p.pt?.x ?? 1), r.top + r.height * (p.pt?.y ?? 0))
+    // Ghim đặt đúng điểm đã bấm; chờ gửi = nét đứt.
+    const pos = spot(r.left + r.width * (p.pt?.x ?? 1), r.top + r.height * (p.pt?.y ?? 0))
     const cls = draft ? 'draft' : p.state === 'queued' || p.state === 'working' ? 'sent' : p.state
     n.className = `pin ${cls}${peekId === p.id ? ' hl' : ''}`
-    n.textContent = draft ? '…' : String(p.id)
-    n.title = draft ? `Bản nháp chưa gửi: ${p.title.slice(0, 60)}` : `#${p.id} · ${PIN_TIP[p.state] ?? ''}`
+    n.textContent = String(p.id)
+    const who = state.agents.find((a) => a.id === p.agentId)?.name
+    n.title = draft ? `#${p.id} · chờ gửi${who ? ` cho ${who}` : ''}: ${p.title.slice(0, 60)}` : `#${p.id} · ${PIN_TIP[p.state] ?? ''}`
     n.style.left = pos.x + 'px'
     n.style.top = pos.y + 'px'
   }
@@ -636,7 +638,7 @@ function onPointer(e: MouseEvent): void {
   e.preventDefault()
   e.stopImmediatePropagation()
   if (e.type === 'pointerdown') {
-    // Bấm vào chỗ trống: đóng hộp (giữ nháp). (preventDefault ở pointerdown làm trình duyệt bỏ mousedown.)
+    // Bấm vào chỗ trống: đóng hộp (chữ còn → thành chờ gửi). (preventDefault ở pointerdown làm trình duyệt bỏ mousedown.)
     if (cmp && !pickable(e.target)) closeCmp()
     return
   }
@@ -676,10 +678,10 @@ function openCmp(el: Element, pt: { x: number; y: number }): void {
   const box = div('cmp')
   box.setAttribute('role', 'dialog')
   box.setAttribute('aria-label', 'Bình luận')
-  box.innerHTML = `<textarea rows="2" placeholder="Nhập bình luận…"></textarea><div class="row"><div class="whow"></div><button class="send" type="button">Gửi</button></div>`
+  box.innerHTML = `<textarea rows="2" placeholder="Nhập bình luận…"></textarea><div class="row"><div class="whow"></div><button class="send" type="button" title="Thêm vào danh sách chờ gửi (Enter)">Thêm</button></div>`
   const ta = box.querySelector('textarea')!
   const who = box.querySelector<HTMLDivElement>('.whow')!
-  const send = box.querySelector<HTMLButtonElement>('.send')!
+  const add = box.querySelector<HTMLButtonElement>('.send')!
   cmp = {
     el,
     target: snapshotTarget(el, pt),
@@ -694,7 +696,7 @@ function openCmp(el: Element, pt: { x: number; y: number }): void {
     box,
     ta,
     who,
-    send
+    add
   }
   layer.appendChild(box)
   ta.value = text
@@ -727,7 +729,7 @@ function openCmp(el: Element, pt: { x: number; y: number }): void {
       drawWho()
     }
   })
-  send.addEventListener('click', () => void sendCmp())
+  add.addEventListener('click', () => void addCmp())
   drawWho()
   syncSend()
   grow()
@@ -741,7 +743,7 @@ function openCmp(el: Element, pt: { x: number; y: number }): void {
 }
 
 function syncSend(): void {
-  if (cmp) cmp.send.disabled = !cmp.text.trim() || !state.agents.some((a) => a.id === cmp!.agentId)
+  if (cmp) cmp.add.disabled = !cmp.text.trim() || !state.agents.some((a) => a.id === cmp!.agentId)
 }
 
 function grow(): void {
@@ -820,7 +822,7 @@ function cmpKeys(e: KeyboardEvent): void {
     return
   }
   if (e.key === 'Escape') {
-    // Esc lần lượt: menu agent → hộp (giữ nháp). Tắt Soi là Esc tiếp theo, khi trang giữ bàn phím.
+    // Esc lần lượt: menu agent → hộp (chữ còn → thành chờ gửi). Tắt Soi là Esc tiếp theo, khi trang giữ bàn phím.
     e.preventDefault()
     if (c.menu) {
       c.menu = false
@@ -831,11 +833,11 @@ function cmpKeys(e: KeyboardEvent): void {
   }
   if (e.key === 'Enter' && !e.shiftKey && e.target === c.ta) {
     e.preventDefault()
-    if (!c.hid) void sendCmp()
+    if (!c.hid) void addCmp()
   }
 }
 
-/** Kẹp hộp trong khung nhìn; phần tử cuộn khuất → ẩn hộp; node bị thay (HMR) → dò lại, mất hẳn → đóng, giữ nháp. */
+/** Kẹp hộp trong khung nhìn; phần tử cuộn khuất → ẩn hộp; node bị thay (HMR) → dò lại, mất hẳn → đóng, giữ chữ (chờ gửi). */
 function posCmp(): void {
   const c = cmp
   if (!c) return
@@ -881,7 +883,7 @@ function posCmp(): void {
   c.box.style.top = Math.max(T, Math.min(y, B - H)) + 'px'
 }
 
-/** Đóng hộp: chữ còn → lưu nháp của phần tử (ghim "…"); xoá hết chữ → bỏ nháp. */
+/** Đóng hộp: chữ còn → lưu thành bình luận chờ gửi (như "Thêm", không chụp ảnh); xoá hết chữ → bỏ bình luận chờ gửi. */
 function closeCmp(): void {
   const c = cmp
   if (!c) return
@@ -891,7 +893,7 @@ function closeCmp(): void {
   const text = c.text.trim()
   if (text && (text !== c.saved.text.trim() || c.agentId !== c.saved.agentId) && c.agentId) {
     const target = c.el.isConnected ? snapshotTarget(c.el, c.pt) : c.target
-    void save({ ...(c.draftId !== undefined ? { pinId: c.draftId } : {}), target, url: location.href, title: document.title, text, agentId: c.agentId, send: false })
+    void save({ ...(c.draftId !== undefined ? { pinId: c.draftId } : {}), target, url: location.href, title: document.title, text, agentId: c.agentId })
   } else if (!text && c.draftId !== undefined) void ipcRenderer.invoke(PAGE_IPC.remove, c.draftId).catch(() => {})
   render()
   if (pendingReload) {
@@ -904,13 +906,13 @@ async function save(input: SaveInput): Promise<number | null> {
   try {
     return (await ipcRenderer.invoke(PAGE_IPC.save, input)) as number
   } catch (e) {
-    toast(`${input.send ? 'Không gửi được' : 'Không lưu được nháp'}: ${errText(e)}`)
+    toast(`Không thêm được bình luận: ${errText(e)}`)
     return null
   }
 }
 
-/** Gửi: chụp vùng phần tử (lớp Soi ẩn đi) để gửi kèm gói tin, rồi lưu + vào hàng của agent. */
-async function sendCmp(): Promise<void> {
+/** "Thêm": chụp vùng phần tử (lớp Soi ẩn đi) để sau này gửi kèm gói tin, rồi lưu thành bình luận chờ gửi. */
+async function addCmp(): Promise<void> {
   const c = cmp
   if (!c) return
   const text = c.text.trim()
@@ -928,11 +930,10 @@ async function sendCmp(): Promise<void> {
     url: location.href,
     title: document.title,
     text,
-    agentId: c.agentId,
-    send: true
+    agentId: c.agentId
   })
   if (id === null && el?.isConnected && !cmp) {
-    // Không gửi được: mở lại hộp với chữ vừa gõ.
+    // Không thêm được: mở lại hộp với chữ vừa gõ.
     openCmp(el, c.pt)
     if (cmp) {
       const k = cmp as Composer
@@ -1049,7 +1050,7 @@ const STYLE = `
 .pin.sent{background:var(--accent);color:var(--accentOn)}
 .pin.new{background:var(--wait);color:var(--waitOn)}
 .pin.read{background:#fff;color:#0d6e5d;border-color:var(--accent)}
-.pin.draft{background:#f1f3f5;color:#3f454d;border:1.5px dashed #3f454d;box-shadow:0 2px 6px rgba(0,0,0,.2);font-size:13px;line-height:1}
+.pin.draft{background:#f1f3f5;color:#3f454d;border:1.5px dashed #3f454d;box-shadow:0 2px 6px rgba(0,0,0,.2)}
 .pin.hl,.pin:hover{transform:scale(1.25)}
 .flash{position:fixed;border:2px solid var(--wait);border-radius:4px;animation:flash 1.6s ease-out forwards}
 @keyframes flash{0%,30%{box-shadow:0 0 0 4px rgba(244,181,68,.9)}100%{box-shadow:0 0 0 0 rgba(244,181,68,0);border-color:transparent}}

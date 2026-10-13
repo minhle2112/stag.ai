@@ -7,7 +7,9 @@ import JSZip from 'jszip'
 import { parseSkillMd, setSkillName, SKILL_NAME_RE, skillMd, skillProblem, type EffectiveSkills } from '@shared/skills'
 import type { InheritedSkill, LibrarySkill, SkillCatalogEntry, SkillDoc, SkillFile, SkillScan, SkillSource } from '@shared/types'
 import { codexHome, tomlString } from './codex'
+import { claudeConfigDir } from './context'
 import { exists, readText } from './fsutil'
+import { isObject, JsonFile } from './jsonFile'
 
 /**
  * Skill (Cài đặt → Skill):
@@ -97,19 +99,25 @@ export class SkillLibrary {
     readonly sessionsRoot: string
   ) {}
 
+  private indexFile?: JsonFile
+  private get indexJson(): JsonFile {
+    return (this.indexFile ??= new JsonFile(join(this.root, INDEX)))
+  }
+  private indexing: Promise<unknown> = Promise.resolve()
+
   private async index(): Promise<Record<string, SkillSource>> {
-    try {
-      return JSON.parse((await readText(join(this.root, INDEX))) ?? '{}') as Record<string, SkillSource>
-    } catch {
-      return {}
-    }
+    return ((await this.indexJson.read(isObject)).data ?? {}) as Record<string, SkillSource>
   }
 
-  private async setIndex(fn: (i: Record<string, SkillSource>) => void): Promise<void> {
-    const i = await this.index()
-    fn(i)
-    await fs.mkdir(this.root, { recursive: true })
-    await fs.writeFile(join(this.root, INDEX), JSON.stringify(i, null, 2), 'utf8')
+  /** Đọc → sửa → ghi lần lượt: hai lần cài skill sát nhau không làm mất nguồn của nhau. */
+  private setIndex(fn: (i: Record<string, SkillSource>) => void): Promise<void> {
+    const p = this.indexing.then(async () => {
+      const i = await this.index()
+      fn(i)
+      await this.indexJson.write(i)
+    })
+    this.indexing = p.catch(() => {})
+    return p
   }
 
   private dir(name: string): string {
@@ -373,8 +381,8 @@ async function readJson(file: string): Promise<Record<string, unknown>> {
  * ~/.claude/skills/synced/<tài khoản>/ (claude.ai), <cwd>/.claude/skills (project), plugin đã bật
  * (~/.claude/plugins/installed_plugins.json + enabledPlugins). Skill của plugin chỉ tắt được cả plugin.
  */
-export async function scanClaudeSkills(cwd: string, home = homedir()): Promise<InheritedSkill[]> {
-  const claude = join(home, '.claude')
+export async function scanClaudeSkills(cwd: string, home = homedir(), env: NodeJS.ProcessEnv = process.env): Promise<InheritedSkill[]> {
+  const claude = claudeConfigDir(env, home)
   const out: InheritedSkill[] = []
   const add = (s: { dir: string; name: string; description: string }, scope: InheritedSkill['scope'], plugin?: string): void => {
     const name = plugin ? `${plugin.split('@')[0]}:${s.name}` : s.name
@@ -482,7 +490,7 @@ export function codexSkillsFromList(result: unknown): InheritedSkill[] {
 export async function scanSkills(runtime: 'claude' | 'codex', cwd: string, codexExe?: () => Promise<string>, env: NodeJS.ProcessEnv = process.env): Promise<SkillScan> {
   const scannedAt = now()
   try {
-    const skills = runtime === 'claude' ? await scanClaudeSkills(cwd) : await scanCodexSkills(await codexExe!(), cwd, env)
+    const skills = runtime === 'claude' ? await scanClaudeSkills(cwd, homedir(), env) : await scanCodexSkills(await codexExe!(), cwd, env)
     return { runtime, cwd, skills, error: null, scannedAt }
   } catch (e) {
     return { runtime, cwd, skills: [], error: (e as Error).message, scannedAt }

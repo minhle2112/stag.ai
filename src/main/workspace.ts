@@ -1,21 +1,22 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { app, BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { CreateWorkspaceRequest, CreateWorkspaceResult, Workspace, WorkspaceInspection } from '@shared/types'
+import { claudeConfigDir } from './context'
 import { exists, isDir, mentionsPath, readText, samePath, today, writeIfMissing } from './fsutil'
+import { JsonFile } from './jsonFile'
 import { copyVaultTemplate, readTemplate, type TemplateVars } from './templates'
 import { defaultProjectName, detectVaults, vaultDirName } from './vault'
 
 const run = promisify(execFile)
 
 /** Thư mục auto memory của Claude Code: mọi ký tự ngoài [A-Za-z0-9] thành '-' (đã kiểm chứng). */
-export function autoMemoryDir(projectDir: string): string {
-  return join(homedir(), '.claude', 'projects', resolve(projectDir).replace(/[^A-Za-z0-9]/g, '-'), 'memory')
+export function autoMemoryDir(projectDir: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(claudeConfigDir(env), 'projects', resolve(projectDir).replace(/[^A-Za-z0-9]/g, '-'), 'memory')
 }
 
 /** Ký tự không hợp lệ trong tên file Windows. */
@@ -24,25 +25,13 @@ export function safeName(name: string): string {
 }
 
 export class WorkspaceStore {
-  private file = join(app.getPath('userData'), 'workspaces.json')
+  private file = new JsonFile(join(app.getPath('userData'), 'workspaces.json'))
   private items: Workspace[] = []
 
   async load(): Promise<void> {
-    const raw = await readText(this.file)
-    if (!raw) {
-      this.items = []
-      return
-    }
-    try {
-      const parsed: unknown = JSON.parse(raw)
-      if (!Array.isArray(parsed)) throw new Error('not a list')
-      this.items = parsed.filter((w): w is Workspace => !!w && typeof w === 'object' && typeof w.id === 'string' && typeof w.path === 'string')
-    } catch (e) {
-      // File hỏng (tắt máy giữa lúc ghi…): giữ bản hỏng cạnh đó để cứu tay, app vẫn mở được với danh sách trống.
-      console.error('[workspaces]', e)
-      await fs.copyFile(this.file, `${this.file}.broken-${Date.now()}`).catch(() => undefined)
-      this.items = []
-    }
+    // File hỏng (tắt máy giữa lúc ghi…): JsonFile cất bản hỏng cạnh đó và đọc bản .bak; không có thì danh sách trống.
+    const { data } = await this.file.read((x): x is unknown[] => Array.isArray(x))
+    this.items = (data ?? []).filter((w): w is Workspace => !!w && typeof w === 'object' && typeof (w as Workspace).id === 'string' && typeof (w as Workspace).path === 'string')
   }
 
   list(): Workspace[] {
@@ -53,21 +42,9 @@ export class WorkspaceStore {
     return this.items.find((w) => w.id === id)
   }
 
-  private saving: Promise<void> = Promise.resolve()
-
-  /** Lần ghi nối đuôi nhau (hai lần ghi song song không giẫm file tạm của nhau). */
+  /** Ghi nối đuôi nhau, file tạm rồi đổi tên, giữ bản .bak (xem JsonFile). */
   private save(): Promise<void> {
-    const p = this.saving.then(() => this.write())
-    this.saving = p.catch(() => undefined)
-    return p
-  }
-
-  private async write(): Promise<void> {
-    await fs.mkdir(app.getPath('userData'), { recursive: true })
-    // Ghi file tạm rồi đổi tên: tắt máy giữa chừng không để lại file nửa vời (mất hết workspace).
-    const tmp = `${this.file}.tmp`
-    await fs.writeFile(tmp, JSON.stringify(this.items, null, 2), 'utf8')
-    await fs.rename(tmp, this.file)
+    return this.file.write(this.items)
   }
 
   /** Đổi một workspace (project, gợi ý monorepo…) rồi lưu; trả về bản mới. */
@@ -107,7 +84,22 @@ export class WorkspaceStore {
     }
   }
 
-  async create(input: CreateWorkspaceRequest): Promise<CreateWorkspaceResult> {
+  /** `claudeEnv`: biến môi trường của phiên Claude (CLAUDE_CONFIG_DIR đặt ở Cài đặt → Adapter đổi chỗ auto memory). */
+  async create(input: CreateWorkspaceRequest, claudeEnv: NodeJS.ProcessEnv = process.env): Promise<CreateWorkspaceResult> {
+    // Bấm tạo hai lần liền (hoặc hai lần gọi song song): lần sau đợi lần trước xong rồi mới xét trùng.
+    const key = resolve(input.path).toLowerCase()
+    if (this.creating.has(key)) throw new Error('Đang tạo workspace cho thư mục này')
+    this.creating.add(key)
+    try {
+      return await this.createNow(input, claudeEnv)
+    } finally {
+      this.creating.delete(key)
+    }
+  }
+
+  private creating = new Set<string>()
+
+  private async createNow(input: CreateWorkspaceRequest, claudeEnv: NodeJS.ProcessEnv): Promise<CreateWorkspaceResult> {
     const req = { ...input, path: resolve(input.path) }
     if (req.vault.mode === 'existing') req.vault = { ...req.vault, path: resolve(req.vault.path) }
     if (!(await isDir(req.path))) throw new Error(`Không tìm thấy thư mục: ${req.path}`)
@@ -123,12 +115,21 @@ export class WorkspaceStore {
       VAULT_DIR: relative(req.path, vaultPath) || '.',
       VAULT_PATH: vaultPath,
       PROJECT_PATH: req.path,
-      AUTO_MEMORY_PATH: autoMemoryDir(req.path)
+      AUTO_MEMORY_PATH: autoMemoryDir(req.path, claudeEnv)
+    }
+
+    // Kiểm tra trước khi ghi gì: lỗi giữa chừng (vd. không có git) không được để lại vault dở dang chặn lần thử lại.
+    if (req.vault.mode === 'new' && (await exists(vaultPath))) throw new Error(`Đã có thư mục "${vars.VAULT_DIR}". Hãy chọn "dùng vault có sẵn".`)
+    // Thư mục con của một repo git: đã có git (không `git init` lồng repo trong repo), .gitignore ghi ngay trong thư mục này.
+    let isGit = await insideGit(req.path)
+    if (!isGit && req.gitInit) {
+      await run('git', ['init', '-b', 'main'], { cwd: req.path })
+      isGit = true
+      report.push('Khởi tạo git (nhánh main)')
     }
 
     // 1. Vault
     if (req.vault.mode === 'new') {
-      if (await exists(vaultPath)) throw new Error(`Đã có thư mục "${vars.VAULT_DIR}". Hãy chọn "dùng vault có sẵn".`)
       const created = await copyVaultTemplate(vaultPath, vars)
       report.push(`Tạo vault mới "${vars.VAULT_DIR}" (${created.filter((c) => c.endsWith('.md')).length} note)`)
     } else if (req.vault.augment) {
@@ -143,12 +144,6 @@ export class WorkspaceStore {
     }
 
     // 2. Git
-    let isGit = await exists(join(req.path, '.git'))
-    if (!isGit && req.gitInit) {
-      await run('git', ['init', '-b', 'main'], { cwd: req.path })
-      isGit = true
-      report.push('Khởi tạo git (nhánh main)')
-    }
     if (isGit) report.push(await this.ensureGitignore(req.path, vaultPath))
 
     // 3. CLAUDE.md + cache auto memory. Vault không có _INDEX.md (vault có sẵn khác mẫu, giữ nguyên)
@@ -177,9 +172,13 @@ export class WorkspaceStore {
   private async ensureClaudeMd(projectDir: string, vars: TemplateVars, structured: boolean): Promise<string> {
     const file = join(projectDir, 'CLAUDE.md')
     const full = await readTemplate('CLAUDE.md', vars)
-    const cut = full.search(/^## Memory/m)
-    const section = structured ? full.slice(cut) : await readTemplate('CLAUDE.memory-plain.md', vars)
-    if (await writeIfMissing(file, `${full.slice(0, cut)}${section}`)) return 'Tạo CLAUDE.md có quy tắc recall vault'
+    // Mẫu người dùng tự sửa có thể không còn tiêu đề "## Memory": coi cả mẫu là mục Memory.
+    const at = full.search(/^## Memory/m)
+    const cut = at < 0 ? 0 : at
+    const plain = structured ? '' : await readTemplate('CLAUDE.memory-plain.md', vars)
+    const section = structured ? full.slice(cut) : plain
+    const head = at < 0 ? (structured ? '' : `${full.trimEnd()}\n\n`) : full.slice(0, cut)
+    if (await writeIfMissing(file, `${head}${section}`)) return 'Tạo CLAUDE.md có quy tắc recall vault'
     const current = (await readText(file)) ?? ''
     if (mentionsPath(current, vars.VAULT_PATH) || /^##\s+Memory\b/m.test(current)) return 'CLAUDE.md đã có mục Memory, giữ nguyên'
     await fs.appendFile(file, `${current.endsWith('\n') ? '' : '\n'}\n${section}`, 'utf8')
@@ -209,8 +208,19 @@ export function gitignoreEscape(path: string): string {
     .replace(/ $/, '\\ ')
 }
 
+/** Thư mục nằm trong một repo git (có `.git` ở chính nó hoặc một thư mục cha; `.git` là file với worktree / submodule). */
+export async function insideGit(dir: string): Promise<boolean> {
+  for (let cur = resolve(dir); ; ) {
+    if (await exists(join(cur, '.git'))) return true
+    const parent = dirname(cur)
+    if (parent === cur) return false
+    cur = parent
+  }
+}
+
 export async function ensureIgnored(projectDir: string, entries: string[], header: string): Promise<string[]> {
-  if (!(await exists(join(projectDir, '.git')))) return []
+  // .gitignore trong thư mục con cũng có hiệu lực (đường dẫn tính từ thư mục đó): workspace là thư mục con của repo vẫn ghi ở đây.
+  if (!(await insideGit(projectDir))) return []
   const file = join(projectDir, '.gitignore')
   const current = (await readText(file)) ?? ''
   const have = new Set(current.split(/\r?\n/).map((l) => l.trim().replace(/^\//, '')))

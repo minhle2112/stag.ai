@@ -1,8 +1,6 @@
-import { promises as fs } from 'node:fs'
-import { dirname } from 'node:path'
 import { SECRET_NAME_RE } from '@shared/connectors'
 import type { SecretsList } from '@shared/types'
-import { readText } from './fsutil'
+import { isObject, JsonFile } from './jsonFile'
 
 /** Mã hoá / giải mã (Electron safeStorage: DPAPI của Windows, gắn với tài khoản Windows đang đăng nhập). */
 export interface Cipher {
@@ -26,25 +24,23 @@ const MAX_VALUE = 16_000
  */
 export class SecretStore {
   private items: Record<string, Entry> = {}
-  private writing: Promise<void> = Promise.resolve()
+  private json: JsonFile
 
   constructor(
-    private file: string,
+    file: string,
     private cipher: Cipher,
     private onChange: (list: SecretsList) => void = () => {}
-  ) {}
+  ) {
+    this.json = new JsonFile(file)
+  }
 
   async load(): Promise<void> {
-    const raw = await readText(this.file)
-    try {
-      const j = raw ? JSON.parse(raw) : {}
-      const items = j && typeof j === 'object' && j.items && typeof j.items === 'object' ? j.items : {}
-      this.items = {}
-      for (const [k, v] of Object.entries(items as Record<string, Entry>))
-        if (SECRET_NAME_RE.test(k) && typeof v?.data === 'string') this.items[k] = { data: v.data, updatedAt: String(v.updatedAt ?? '') }
-    } catch {
-      this.items = {}
-    }
+    // File hỏng: đọc bản .bak (mất hết bí mật là mất mọi API key của connector).
+    const { data } = await this.json.read(isObject)
+    const items = isObject(data?.items) ? data.items : {}
+    this.items = {}
+    for (const [k, v] of Object.entries(items as Record<string, Entry>))
+      if (SECRET_NAME_RE.test(k) && typeof v?.data === 'string') this.items[k] = { data: v.data, updatedAt: String(v.updatedAt ?? '') }
   }
 
   list(): SecretsList {
@@ -100,14 +96,7 @@ export class SecretStore {
 
   private async commit(next: Record<string, Entry>): Promise<void> {
     this.items = next
-    const write = this.writing.then(async () => {
-      await fs.mkdir(dirname(this.file), { recursive: true })
-      const tmp = `${this.file}.tmp`
-      await fs.writeFile(tmp, JSON.stringify({ version: 1, items: this.items }, null, 2), 'utf8')
-      await fs.rename(tmp, this.file)
-    })
-    this.writing = write.catch(() => {})
-    await write
+    await this.json.write({ version: 1, items: next })
     this.onChange(this.list())
   }
 }

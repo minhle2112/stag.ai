@@ -56,7 +56,12 @@ export class PtyManager {
       if (!owner.isDestroyed()) owner.removeListener('destroyed', onDestroyed)
       this.ended.set(id, session.output.slice(-OUTPUT_MAX))
       if (this.ended.size > ENDED_MAX) this.ended.delete(this.ended.keys().next().value!)
-      extras.onExit?.({ exitCode, signal })
+      // Lỗi trong phần dọn của bên gọi không được chặn sự kiện thoát (ô trên giao diện kẹt "đang chạy").
+      try {
+        extras.onExit?.({ exitCode, signal })
+      } catch (e) {
+        console.error('[pty] onExit', e)
+      }
       if (!owner.isDestroyed()) owner.send(IPC.ptyExit, id, { exitCode, signal })
     })
     return id

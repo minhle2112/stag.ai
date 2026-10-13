@@ -13,6 +13,7 @@ import {
   promoteNext,
   queuePosition,
   reopen,
+  sendDrafts,
   sortForList,
   toPagePin,
   type InspectPin
@@ -84,6 +85,37 @@ describe('hàng chờ mỗi agent', () => {
     expect(a.state).toBe('working')
     expect(b.state).toBe('queued')
     expect(b.delivered).toBe(false)
+  })
+})
+
+describe('gom rồi gửi', () => {
+  it('Gửi một nhóm: chỉ các bình luận chờ gửi được chọn vào hàng, cùng lúc, theo số → một gói tin', () => {
+    const a = pin({ id: 3 })
+    const b = pin({ id: 1 })
+    const other = pin({ id: 2 })
+    const sent = pin({ id: 4, state: 'read' })
+    const all = [a, b, other, sent]
+    const out = sendDrafts(all, [3, 1, 4], '2026-10-14T09:00:00Z')
+    expect(out.map((p) => p.id)).toEqual([1, 3])
+    expect([a.state, b.state, other.state, sent.state]).toEqual(['queued', 'queued', 'draft', 'read'])
+    expect(a.queuedAt).toBe(b.queuedAt)
+    expect(a.delivered).toBe(false)
+    expect(a.round).toBe(1)
+    expect(a.thread).toHaveLength(1)
+    const msg = packetMessage(all.filter((p) => p.state === 'queued').sort((x, y) => x.id - y.id))
+    expect(msg).toMatch(/^\[stag\.ai\] 2 comments/)
+    expect(msg.indexOf('#1 ')).toBeLessThan(msg.indexOf('#3 '))
+    markDelivered(all, 'a1', [1, 3])
+    expect(b.state).toBe('working')
+    expect(a.state).toBe('queued')
+  })
+
+  it('đã gửi rồi thì gửi lại không làm gì', () => {
+    const a = pin({ id: 1 })
+    sendDrafts([a], [1])
+    const at = a.queuedAt
+    expect(sendDrafts([a], [1])).toEqual([])
+    expect(a.queuedAt).toBe(at)
   })
 })
 
@@ -218,19 +250,19 @@ describe('gói tin gửi agent', () => {
     expect(packetItem(a)).toContain('scope: only this element (it is 1 of 4 items from the same template')
   })
 
-  it('gói nhiều mục + cách trả lời, không còn Trước / Sau', () => {
+  it('gói nhiều mục: dòng đầu + từng mục #N, không còn Trước / Sau', () => {
     const t = packetMessage([pin({ id: 1 }), pin({ id: 2 })])
     expect(t).toMatch(/^\[stag\.ai\] 2 comments from the user on a web page/)
-    expect(t).toContain('inspect_reply(id')
+    expect(t).toContain('#1 ')
+    expect(t).toContain('#2 ')
     expect(t).not.toContain('before / after')
   })
 
-  it('bình luận không phải lúc nào cũng là yêu cầu sửa: trả lời bằng lời, chỉ sửa code khi được yêu cầu', () => {
+  it('không lặp hướng dẫn trả lời ở cuối tin (đã nằm trong luật phiên + mô tả inspect_reply)', () => {
     const t = packetMessage([pin({ id: 1 })])
-    expect(t).toContain('A comment is not always a change request')
-    expect(t).toContain('translate')
-    expect(t).toContain('Edit code only when the comment asks to change the page')
-    expect(t).not.toMatch(/when you are done call inspect_reply/)
+    expect(t).toBe(`${t.split('\n')[0]}\n\n${packetItem(pin({ id: 1 }))}`)
+    expect(t).not.toContain('A comment is not always a change request')
+    expect(t).not.toContain('WordPress')
   })
 })
 

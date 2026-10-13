@@ -93,6 +93,17 @@ export function outputRel(path: string, ws: Workspace, cwd: string): string | nu
   return norm.length >= rel.length && norm.slice(-rel.length).toLowerCase() === rel ? norm.slice(-rel.length) : rel
 }
 
+/** Đuôi file Windows chạy được khi mở bằng shell (chương trình, script, lối tắt). */
+const RUNNABLE = /\.(exe|com|bat|cmd|ps1|psm1|psd1|vbs|vbe|js|jse|wsf|wsh|hta|msc|msi|msp|mst|scr|cpl|lnk|url|pif|reg|jar|appref-ms|application|gadget|inf|scf|settingcontent-ms|library-ms|search-ms|sys|dll)$/i
+
+/**
+ * File mở bằng shell sẽ chạy (không phải để xem). File do agent tạo: nút "Mở" không được chạy nó, kẻo agent bị
+ * prompt-injection viết một `.cmd` rồi chờ người dùng bấm, lách bước duyệt lệnh Bash.
+ */
+export function isRunnableFile(path: string): boolean {
+  return RUNNABLE.test(path.replace(/[\s.]+$/, ''))
+}
+
 /** Đường dẫn tuyệt đối của `rel` trong dự án; chặn đường dẫn thoát ra ngoài. */
 export function artifactPath(ws: Workspace, rel: string): string {
   const root = resolve(ws.path)
@@ -344,6 +355,10 @@ export class ArtifactLog {
   forgetWorkspace(workspaceId: string): void {
     this.lists.delete(workspaceId)
     this.paths.delete(workspaceId)
+    // Lần lưu đang hẹn sẽ ghi lại `.stag/` vào thư mục vừa gỡ khỏi app.
+    const t = this.saveTimers.get(workspaceId)
+    if (t) clearTimeout(t)
+    this.saveTimers.delete(workspaceId)
   }
 
   /** Đợi mọi lần ghi xuống đĩa (khi tắt app). */

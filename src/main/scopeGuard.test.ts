@@ -115,6 +115,16 @@ describe('ScopeGuard — Claude Code', () => {
     expect(await guard.preToolUse(ws, B, 'claude', edit(f))).toBeDefined()
   })
 
+  it('đã cho qua khi A giữ khoá: A xong, C khoá lại cùng chỗ → hỏi lại', async () => {
+    const f = join(root, 'src', 'auth', 'login.ts')
+    expect(await guard.preToolUse(ws, B, 'claude', edit(f))).toBeDefined()
+    await guard.postToolUse(ws, B, edit(f, 'PostToolUse'))
+    expect(await guard.preToolUse(ws, B, 'claude', edit(f))).toBeUndefined()
+    await board.finishTask(ws, 'a', 'xong')
+    await board.startTask(ws, agent('c'), 's3', 'Sửa đăng nhập', 'src/auth/')
+    expect(await guard.preToolUse(ws, B, 'claude', edit(f))).toBeDefined()
+  })
+
   it('file đã sửa ngoài phạm vi khai → vào vùng khoá của việc', async () => {
     await guard.postToolUse(ws, A, edit(join(root, 'src', 'util', 'date.ts'), 'PostToolUse'))
     await guard.postToolUse(ws, A, edit(join(root, 'src', 'auth', 'in-scope.ts'), 'PostToolUse'))

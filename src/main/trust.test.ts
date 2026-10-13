@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -35,5 +35,14 @@ describe('isClaudeFolderTrusted', () => {
     expect(await isClaudeFolderTrusted('C:/work/app', home)).toBe(false)
     await rm(join(home, '.claude.json'))
     expect(await isClaudeFolderTrusted('C:/work/app', home)).toBe(false)
+  })
+
+  it('CLAUDE_CONFIG_DIR: đọc <thư mục đó>/.claude.json, không đọc ~/.claude.json', async () => {
+    await write({})
+    const dir = join(home, 'claude2')
+    await mkdir(dir)
+    await writeFile(join(dir, '.claude.json'), JSON.stringify({ projects: { 'C:/work/app': { hasTrustDialogAccepted: true } } }))
+    expect(await isClaudeFolderTrusted('C:/work/app', home)).toBe(false)
+    expect(await isClaudeFolderTrusted('C:/work/app', home, { CLAUDE_CONFIG_DIR: dir })).toBe(true)
   })
 })

@@ -205,6 +205,8 @@ export class CodexChatSession extends ChatSessionBase {
     } catch (e) {
       console.error('[codex-chat] hooks/list', e)
     }
+    // Người dùng dừng / xoá agent trong lúc chạy thử hook: không mở app-server nữa.
+    if (this.killed || this.exited) return
     if (!trust.length) this.queue(this.model.addNotice('warn', 'Codex chưa tin cậy hook của stag.ai: việc đang làm, khoá phạm vi và sản phẩm của phiên này có thể không cập nhật.'))
     this.spawnProcess([...o.args, ...codexHookTrustArgs(trust), 'app-server'])
     await this.request('initialize', { clientInfo: CLIENT_INFO, capabilities: CAPABILITIES })

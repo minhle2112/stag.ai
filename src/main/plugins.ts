@@ -31,6 +31,7 @@ import { pluginOn } from '@shared/settings'
 import type { Settings } from '@shared/types'
 import { npmInstall, npmUninstall } from './externalAdapters'
 import { isInside, readText, realPathInside, relSlash } from './fsutil'
+import { isObject, JsonFile } from './jsonFile'
 import { scaffoldFiles } from './pluginScaffold'
 
 /**
@@ -236,16 +237,16 @@ export class PluginHost {
   private get file(): string {
     return join(this.root, 'registry.json')
   }
+  private jsonFile?: JsonFile
+  private get json(): JsonFile {
+    return (this.jsonFile ??= new JsonFile(this.file))
+  }
 
   async load(): Promise<void> {
-    try {
-      const raw = JSON.parse((await readText(this.file)) ?? '{}') as { plugins?: Entry[] }
-      this.entries = (raw.plugins ?? []).filter((e) => e?.manifest?.id)
-      // Bản cũ chưa có approvedAt: plugin đã được duyệt quyền thì coi như đã duyệt; plugin 0 quyền phải duyệt một lần.
-      for (const e of this.entries) if (!e.approvedAt && e.approved?.length) e.approvedAt = e.installedAt
-    } catch {
-      this.entries = []
-    }
+    const raw = ((await this.json.read(isObject)).data ?? {}) as { plugins?: Entry[] }
+    this.entries = (Array.isArray(raw.plugins) ? raw.plugins : []).filter((e) => e?.manifest?.id)
+    // Bản cũ chưa có approvedAt: plugin đã được duyệt quyền thì coi như đã duyệt; plugin 0 quyền phải duyệt một lần.
+    for (const e of this.entries) if (!e.approvedAt && e.approved?.length) e.approvedAt = e.installedAt
     // Plugin kèm app: thư mục và manifest theo bản app hiện tại (cập nhật app xin thêm quyền → chờ duyệt lại).
     for (const e of this.entries) {
       if (e.source.type !== 'catalog' || !this.deps.catalogDir) continue
@@ -300,10 +301,7 @@ export class PluginHost {
   }
 
   private async save(): Promise<void> {
-    await fs.mkdir(this.root, { recursive: true })
-    const tmp = `${this.file}.tmp`
-    await fs.writeFile(tmp, JSON.stringify({ plugins: this.entries }, null, 2), 'utf8')
-    await fs.rename(tmp, this.file)
+    await this.json.write({ plugins: this.entries })
   }
 
   private runtime(id: string): Runtime {

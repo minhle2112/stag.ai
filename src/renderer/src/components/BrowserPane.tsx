@@ -43,7 +43,8 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
     void loadInspect(wsId)
   }, [wsId, loadInspect])
   const onPage = pagePins(inspectPins ?? [], active)
-  const openCount = onPage.filter((p) => isOpen(p.state)).length
+  // Mạch đang mở + bình luận chờ gửi: vừa "Thêm" ở ô rộng thì ngăn tự mở để thấy mục "Chờ gửi".
+  const openCount = onPage.filter((p) => isOpen(p.state) || p.state === 'draft').length
   const web = !!active && /^https?:\/\//i.test(active.url) && !blank
   const pane = useRef<HTMLDivElement>(null)
   const [narrow, setNarrow] = useState(false)
@@ -160,13 +161,14 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
   )
 }
 
-/** Nút của chế độ Soi trên thanh địa chỉ: Soi (chỉ icon) và nút Bình luận mang huy hiệu duy nhất (vàng = số trả lời mới,
- * xám = số bình luận đang mở khi ngăn đang ẩn). */
+/** Nút của chế độ Soi trên thanh địa chỉ: Soi (chỉ icon) và nút Bình luận mang huy hiệu duy nhất (vàng = số trả lời mới;
+ * khi ngăn đang ẩn: xám = số chờ gửi, không có thì số bình luận đang mở). Tắt Soi khi còn bình luận chờ gửi không hỏi gì. */
 function InspectTools({ tab, pins, side, onSoi, onSide }: { tab: BrowserTab; pins: InspectPin[]; side: boolean; onSoi: () => void; onSide: () => void }): React.JSX.Element {
   const open = pins.filter((p) => isOpen(p.state)).length
   const fresh = pins.filter((p) => needsYou(p.state)).length
+  const drafts = pins.filter((p) => p.state === 'draft').length
   const on = !!tab.inspect
-  const n = fresh || (side ? 0 : open)
+  const n = fresh || (side ? 0 : drafts || open)
   return (
     <>
       <button
@@ -184,7 +186,10 @@ function InspectTools({ tab, pins, side, onSoi, onSide }: { tab: BrowserTab; pin
         onClick={onSide}
         aria-pressed={side}
         aria-label="Bình luận"
-        data-tip={`${side ? 'Ẩn bình luận' : 'Bình luận'}${fresh ? ` · ${fresh} trả lời mới` : open ? ` · ${open} đang mở` : ''}`}
+        data-tip={`${side ? 'Ẩn bình luận' : 'Bình luận'}${[fresh && `${fresh} trả lời mới`, drafts && `${drafts} chờ gửi`, open && `${open} đang mở`]
+          .filter(Boolean)
+          .map((x) => ` · ${x}`)
+          .join('')}`}
         className={`relative grid h-7 w-7 shrink-0 place-items-center rounded-md hover:bg-panel-3 hover:text-fg ${side ? 'text-accent' : 'text-muted'}`}
       >
         <Icon name="comment" />

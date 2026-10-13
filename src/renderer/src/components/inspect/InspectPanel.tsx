@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { agentColor, elementLabel, isOpen, pageKey, sortForList, type InspectPin, type PinPlace } from '@shared/inspect'
+import { agentColor, elementLabel, firstUserText, isOpen, pageKey, sortForList, type InspectPin, type PinPlace } from '@shared/inspect'
 import { initials } from '@shared/artifacts'
 import type { BrowserTab } from '@shared/types'
 import { useAgents } from '../../store/agents'
@@ -7,7 +7,7 @@ import { useInspect } from '../../store/inspect'
 import { Icon } from '../Icon'
 import { IconButton } from '../shell/IconButton'
 
-/** Bình luận (kể cả nháp) đang ở trang của tab này. */
+/** Bình luận (kể cả chờ gửi) đang ở trang của tab này. */
 export function pagePins(pins: InspectPin[], tab: BrowserTab | undefined): InspectPin[] {
   if (!tab?.url) return []
   const key = pageKey(tab.url)
@@ -22,10 +22,22 @@ function dotClass(p: InspectPin): string {
   return 'bg-accent text-accent-on'
 }
 
+/** Bình luận chờ gửi nhóm theo agent (thứ tự: agent có bình luận chờ gửi sớm nhất trước; trong nhóm theo số). */
+export function draftGroups(pins: InspectPin[]): Array<{ agentId: string; agentName: string; pins: InspectPin[] }> {
+  const out: Array<{ agentId: string; agentName: string; pins: InspectPin[] }> = []
+  for (const p of pins.filter((x) => x.state === 'draft').sort((a, b) => a.id - b.id)) {
+    const g = out.find((x) => x.agentId === p.agentId)
+    if (g) g.pins.push(p)
+    else out.push({ agentId: p.agentId, agentName: p.agentName, pins: [p] })
+  }
+  return out
+}
+
 /**
- * Ngăn "Bình luận" bên phải ô Browser (chế độ Soi): mỗi mạch gồm nhãn phần tử, tin của bạn, câu trả lời của agent, ô
- * "Trả lời…" và nút ✓ đóng / Mở lại. `overlay` = ô hẹp: ngăn phủ lên trang (trang thật là view gốc của main, nằm trên
- * HTML, nên pane ẩn view đi khi ngăn phủ).
+ * Ngăn "Bình luận" bên phải ô Browser (chế độ Soi). Mục "Chờ gửi": bình luận đã "Thêm" mà chưa gửi, nhóm theo agent,
+ * mỗi nhóm một nút "Gửi" (cả nhóm đi trong một tin), ✕ xoá từng bình luận. Mục "Đã gửi": mỗi mạch gồm nhãn phần tử, tin
+ * của bạn, câu trả lời của agent, ô "Trả lời…" (gửi ngay) và nút ✓ đóng / Mở lại. `overlay` = ô hẹp: ngăn phủ lên trang
+ * (trang thật là view gốc của main, nằm trên HTML, nên pane ẩn view đi khi ngăn phủ).
  */
 export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; tab: BrowserTab | undefined; overlay: boolean; onClose: () => void }): React.JSX.Element {
   const snap = useInspect((s) => s.byWs[wsId])
@@ -34,7 +46,9 @@ export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; ta
   const [showClosed, setShowClosed] = useState(false)
   const [hl, setHl] = useState<number | null>(null)
   const list = useRef<HTMLDivElement>(null)
-  const pins = pagePins(snap?.pins ?? [], tab).filter((p) => p.state !== 'draft')
+  const all = pagePins(snap?.pins ?? [], tab)
+  const pins = all.filter((p) => p.state !== 'draft')
+  const groups = draftGroups(all)
   const places = (tab && snap?.places[tab.id]) || {}
   const open = sortForList(pins.filter((p) => isOpen(p.state)))
   const closed = sortForList(pins.filter((p) => p.state === 'closed'))
@@ -82,7 +96,26 @@ export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; ta
         <IconButton icon="x" tip="Ẩn bình luận" size="s" onClick={onClose} />
       </div>
       <div ref={list} className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-2.5" onMouseLeave={() => peek(null)}>
-        {!open.length && !(showClosed && closed.length) && <div className="px-4 py-10 text-center text-[12.5px] text-dim">Chưa có bình luận.</div>}
+        {!groups.length && !open.length && !(showClosed && closed.length) && <div className="px-4 py-10 text-center text-[12.5px] text-dim">Chưa có bình luận.</div>}
+        {groups.length > 0 && <Section>Chờ gửi</Section>}
+        {groups.map((g) => (
+          <DraftGroup
+            key={g.agentId}
+            wsId={wsId}
+            agentId={g.agentId}
+            agentName={g.agentName}
+            pins={g.pins}
+            places={places}
+            onPeek={peek}
+            onShow={(id) => {
+              if (tabId && places[id] === 'ok') {
+                void act(wsId, { type: 'focus', tabId, id })
+                if (overlay) onClose()
+              }
+            }}
+          />
+        ))}
+        {(open.length > 0 || (showClosed && closed.length > 0)) && <Section>Đã gửi</Section>}
         {[...open, ...(showClosed ? closed : [])].map((p) => (
           <Thread
             key={p.id}
@@ -110,6 +143,98 @@ export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; ta
         </div>
       )}
     </aside>
+  )
+}
+
+function Section({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return <div className="px-1 pt-1 text-[10.5px] font-semibold tracking-[.06em] text-dim uppercase">{children}</div>
+}
+
+/** Một nhóm trong "Chờ gửi": agent, số bình luận, nút "Gửi"; từng bình luận (số, phần tử, chữ, ✕). */
+function DraftGroup({
+  wsId,
+  agentId,
+  agentName,
+  pins,
+  places,
+  onPeek,
+  onShow
+}: {
+  wsId: string
+  agentId: string
+  agentName: string
+  pins: InspectPin[]
+  places: Record<number, PinPlace>
+  onPeek: (id: number | null) => void
+  onShow: (id: number) => void
+}): React.JSX.Element {
+  const act = useInspect((s) => s.act)
+  const exists = useAgents((s) => !!s.byWs[wsId]?.agents.some((a) => a.id === agentId))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const send = async (): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      await act(wsId, { type: 'send', ids: pins.map((p) => p.id) })
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="rounded-[9px] border border-dashed border-line-3 bg-panel px-[11px] py-2">
+      <div className="flex items-center gap-[7px]">
+        <Avatar name={agentName} />
+        <b className="min-w-0 truncate text-[12.5px] font-semibold">{agentName}</b>
+        <span className="shrink-0 text-[12px] text-dim">{pins.length} bình luận</span>
+        <span className="flex-1" />
+        <button
+          type="button"
+          disabled={busy || !exists}
+          data-tip={exists ? `Gửi ${pins.length} bình luận cho ${agentName} trong một tin` : `${agentName} không còn trong workspace`}
+          onClick={() => void send()}
+          className="h-[26px] shrink-0 rounded-md bg-accent px-3 text-[12px] font-semibold text-accent-on hover:brightness-110 disabled:opacity-40"
+        >
+          Gửi
+        </button>
+      </div>
+      {pins.map((p) => {
+        const l = elementLabel(p.target)
+        const gone = places[p.id] === 'orphan'
+        return (
+          <div
+            key={p.id}
+            data-pin={p.id}
+            onMouseEnter={() => onPeek(p.id)}
+            onClick={(e) => {
+              if (!(e.target as Element).closest('button')) onShow(p.id)
+            }}
+            className="mt-2 flex cursor-pointer items-start gap-2 border-t border-line pt-2"
+          >
+            <span className="mt-px grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border-[1.5px] border-dashed border-muted text-[10px] font-bold text-muted">{p.id}</span>
+            <div className="min-w-0 flex-1">
+              <div className={`truncate text-[12px] ${gone ? 'text-dim line-through' : 'text-muted'}`} data-tip={gone ? 'Phần tử này không còn trên trang' : undefined}>
+                <b className="mr-[5px] font-mono text-[11.5px] font-medium text-dim">{l.t}</b>
+                {l.txt}
+              </div>
+              <div className="text-[13px] leading-[1.45] whitespace-pre-wrap text-fg [overflow-wrap:anywhere]">{firstUserText(p)}</div>
+            </div>
+            <button
+              type="button"
+              data-tip="Xoá bình luận này"
+              aria-label={`Xoá bình luận #${p.id}`}
+              onClick={() => void act(wsId, { type: 'remove', id: p.id })}
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-[5px] text-muted hover:bg-panel-3 hover:text-fg"
+            >
+              <Icon name="x" size="s" />
+            </button>
+          </div>
+        )
+      })}
+      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+    </div>
   )
 }
 

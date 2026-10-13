@@ -164,7 +164,7 @@ export function setJsonKey(text: string, key: string, value: string | null): str
   return /\r?\n$/.test(text) ? out + eol : out
 }
 
-async function syncClaudeTheme(file: string, backupFile: string, enabled: boolean, terminal: Theme): Promise<void> {
+async function syncClaudeTheme(file: string, backupFile: string, enabled: boolean, terminal: Theme, attempt = 0): Promise<void> {
   const backup = await readBackup(backupFile)
   if (!enabled && !backup) return
   if (!existsSync(file)) return
@@ -177,12 +177,25 @@ async function syncClaudeTheme(file: string, backupFile: string, enabled: boolea
     const out = setJsonKey(text, 'theme', plan.write)
     const tmp = `${file}.stag-tmp`
     writeFileSync(tmp, out, 'utf8')
-    try {
-      renameSync(tmp, file)
-    } catch {
-      // Windows không cho thay file đang mở bởi tiến trình khác → ghi thẳng.
-      writeFileSync(file, out, 'utf8')
-      await fs.rm(tmp, { force: true })
+    // Không bao giờ ghi thẳng vào file đang dùng: Claude Code có thể đọc phải file dở (nó coi là hỏng và tạo lại cấu hình)
+    // hoặc phần nó vừa ghi bị đè mất. Đổi tên không được thì thử lại; file đổi trong lúc chờ thì làm lại từ đầu.
+    for (let i = 0; ; i++) {
+      try {
+        renameSync(tmp, file)
+        break
+      } catch (e) {
+        if (i >= 4) {
+          await fs.rm(tmp, { force: true })
+          console.warn('[theme] không đổi được theme của Claude Code', (e as Error).message)
+          return
+        }
+      }
+      await new Promise((r) => setTimeout(r, 80 * (i + 1)))
+      if (readFileSync(file, 'utf8') !== text) {
+        await fs.rm(tmp, { force: true })
+        if (attempt < 2) return syncClaudeTheme(file, backupFile, enabled, terminal, attempt + 1)
+        return
+      }
     }
   }
   if (plan.backup) {

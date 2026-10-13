@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
-import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { parseEnv, splitArgs } from '@shared/settings'
 import type { AdapterModel, AdapterStatus, CliAdapterId, ModelSettings } from '@shared/types'
 import { codexHome, isCodexSessionVar, resolveCodex } from './codex'
+import { claudeConfigDir } from './context'
 import { exists, readText } from './fsutil'
 import type { SettingsStore } from './settings'
 
@@ -85,13 +85,9 @@ export function modelArgs(id: CliAdapterId, m: ModelSettings): string[] {
   return out
 }
 
-/** Thư mục cấu hình Claude Code của người dùng (đổi được bằng CLAUDE_CONFIG_DIR). */
-function claudeHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-}
 
 /** Model trong ~/.claude/settings.json. */
-export async function claudeConfigModel(home = claudeHome()): Promise<string | null> {
+export async function claudeConfigModel(home = claudeConfigDir()): Promise<string | null> {
   try {
     const s = JSON.parse((await readText(join(home, 'settings.json'))) ?? '{}') as { model?: unknown }
     return typeof s.model === 'string' && s.model ? s.model : null

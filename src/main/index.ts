@@ -38,6 +38,7 @@ import { CloudUsage, VoiceCloud } from './voiceCloud'
 import { GlobalVoice, KeySender, VoiceOverlay } from './voiceSystem'
 import { SONIOX_SECRET } from '@shared/voice'
 import { samePath } from './fsutil'
+import { jsonRecoveries } from './jsonFile'
 import type { GeneralSettings, Workspace } from '@shared/types'
 import { MemoryKeeper } from './workLog'
 import { resolveMemory } from '@shared/settings'
@@ -341,7 +342,11 @@ function mainWindow(): BrowserWindow | undefined {
 
 function showWindow(): void {
   const win = mainWindow()
-  if (!win) return createWindow()
+  // Mở app lần nữa trong lúc đang khởi động: cửa sổ sẽ được tạo khi xong (tạo sớm thì IPC chưa đăng ký).
+  if (!win) {
+    if (initDone) createWindow()
+    return
+  }
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
@@ -374,6 +379,48 @@ function applyGeneral(g: GeneralSettings): void {
     const win = mainWindow()
     if (win && !win.isVisible()) showWindow()
   }
+}
+
+/** Đã khởi động xong (IPC đã đăng ký, cửa sổ chính đã tạo). */
+let initDone = false
+// Promise bị từ chối mà không ai bắt (lưu file lỗi vì ổ đầy / trình diệt virus giữ file…): ghi log, không làm sập main.
+process.on('unhandledRejection', (e) => console.error('[main] unhandledRejection', e))
+/** Bước khởi động bị lỗi: app vẫn mở cửa sổ (không thì tiến trình chạy ngầm giữ khoá một-phiên-bản), báo người dùng. */
+const startupErrors: string[] = []
+
+async function step(name: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn()
+  } catch (e) {
+    console.error(`[startup] ${name}`, e)
+    startupErrors.push(`• ${name}: ${(e as Error).message}`)
+  }
+}
+
+function warnStartupErrors(): void {
+  if (!startupErrors.length) return
+  const opts = {
+    type: 'error' as const,
+    title: 'stag.ai',
+    message: 'Một số phần của app không khởi động được',
+    detail: [...startupErrors, '', 'App vẫn mở, nhưng các phần này có thể không chạy. Thử đóng hẳn app rồi mở lại.'].join('\n')
+  }
+  const win = mainWindow()
+  void (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))
+}
+
+/** File dữ liệu của app hỏng lúc mở (mất điện giữa lúc ghi, BOM…): báo một lần, không để người dùng tưởng cài đặt tự mất. */
+function warnRecoveredFiles(): void {
+  if (!jsonRecoveries.length) return
+  const lines = jsonRecoveries.map((r) => `• ${r.file}: ${r.fromBackup ? 'đã đọc lại bản sao lưu (.bak) gần nhất' : 'không có bản sao lưu, dùng mặc định'}`)
+  const opts = {
+    type: 'warning' as const,
+    title: 'stag.ai',
+    message: 'Một số file dữ liệu của app bị hỏng',
+    detail: [...lines, '', 'Bản hỏng được cất cạnh file gốc với đuôi .broken-<thời điểm> để bạn cứu tay nếu cần.'].join('\n')
+  }
+  const win = mainWindow()
+  void (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))
 }
 
 /** Thoát hẳn; còn agent / terminal đang chạy thì hỏi lại trước (nếu bật trong Settings). */
@@ -487,20 +534,20 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   if (!primary) return
-  await workspaces.load()
-  await settings.load()
+  await step('Danh sách workspace', () => workspaces.load())
+  await step('Cài đặt', () => settings.load())
   browser.setSettings(settings.get().app.browser)
   // Trước khi tạo cửa sổ: nền cửa sổ và trang đầu tiên lấy đúng màu đã lưu (không chớp sai màu).
   theme.start()
   registerThemeIpc(theme)
   browser.themeToggle = () => void theme.toggle()
-  await external.load()
-  await secrets.load()
-  await skills.cleanAllSessions()
-  await voice.load()
-  await cloudUsage.load()
-  await agents.load()
-  await hub.start()
+  await step('Adapter ngoài', () => external.load())
+  await step('Bí mật (connector)', () => secrets.load())
+  await step('Dọn skill của phiên cũ', () => skills.cleanAllSessions())
+  await step('Giọng nói', () => voice.load())
+  await step('Chi phí giọng nói', () => cloudUsage.load())
+  await step('Danh sách agent', () => agents.load())
+  await step('Máy chủ trạng thái cho agent (hub)', () => hub.start())
   protocol.handle('stag-file', (req) => {
     const url = new URL(req.url)
     const ws = workspaces.get(url.hostname)
@@ -523,8 +570,8 @@ app.whenReady().then(async () => {
   // (chỉ cửa sổ app dùng; trình duyệt trong app có phiên riêng).
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (d, cb) => cb({ cancel: d.resourceType === 'subFrame' }))
   agents.attachHub(hub)
-  await plugins.load()
-  await plugins.applySettings(settings.get())
+  await step('Plugin', () => plugins.load())
+  await step('Cài đặt plugin', () => plugins.applySettings(settings.get()))
   plugins.startScheduler()
   await webhooks.start().catch((e) => console.error('[plugins] webhook server', e))
   agents.attachPlugins({
@@ -603,7 +650,10 @@ app.whenReady().then(async () => {
       { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] }
     ])
   )
+  initDone = true
   createWindow()
+  warnRecoveredFiles()
+  warnStartupErrors()
   globalVoice.sync()
   applyGeneral(settings.general())
   app.on('activate', () => {

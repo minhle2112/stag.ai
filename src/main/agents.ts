@@ -60,11 +60,11 @@ import type { OAuthService } from './oauth'
 import type { ApprovalQueue } from './approvals'
 import { claudeSkillSettings, codexSkillArgs, scanClaudeSkills, skillInstructions, type SkillLibrary } from './skills'
 import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
-import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
+import { claudeConfigDir, contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
 import { exists, isDir, readText, today, writeIfMissing } from './fsutil'
 import { JsonFile } from './jsonFile'
 import type { StatusHub } from './hub'
-import { AgentMail, MAIL_GAP_MS, mailReady } from './agentMail'
+import { AgentMail, MAIL_GAP_MS, mailReady, USER_SENDER } from './agentMail'
 import { loadHistory } from './chat/history'
 import { isClaudeFolderTrusted } from './trust'
 import { ChatSession, type ChatSessionBase, type ChatSessionOptions } from './chat/session'
@@ -160,6 +160,8 @@ export class AgentService {
   private startingRuns = new Map<string, Promise<AgentRun>>()
   /** Bấm dừng lúc phiên đang mở: dừng ngay khi mở xong. */
   private stopAfterStart = new Set<string>()
+  /** Agent đang bị xoá (remove() chưa xong). */
+  private removing = new Set<string>()
 
   private hub: StatusHub | null = null
   /** Yêu cầu của agent chờ người dùng xác nhận (Agent API: agent_create…); renderer nhận qua IPC.agentRequests. */
@@ -329,7 +331,6 @@ export class AgentService {
     // File hỏng (tắt máy / hai lần ghi chồng nhau ở bản cũ): cất bản hỏng, đọc bản .bak; không có thì mở với danh sách
     // trống thay vì không mở được app.
     const read = await this.file.read((x): x is StoreFile => !!x && typeof x === 'object' && Array.isArray((x as StoreFile).agents))
-    if (read.broken) console.error(`[agents] ${this.file.file} hỏng: ${read.fromBackup ? 'đọc bản .bak' : 'không có bản .bak, mở với danh sách trống'}`)
     if (read.data) this.data = { ...read.data, layouts: read.data.layouts ?? {} }
     // Canvas ô (agent + widget plugin): bỏ ô hỏng do sửa tay, đổi lưới chia đôi cũ sang canvas.
     const layouts: StoreFile['layouts'] = {}
@@ -338,7 +339,7 @@ export class AgentService {
     // Lúc khởi động chưa phiên nào chạy: file phiên còn lại là do app bị tắt đột ngột (crash, kill).
     for (const agent of this.data.agents) {
       const ws = this.workspaces.get(agent.workspaceId)
-      if (ws && agent.lastSessionId) rmSync(join(ws.path, '.sessions', `${agent.lastSessionId}.md`), { force: true })
+      if (ws && agent.lastSessionId) removeQuietly(join(ws.path, '.sessions', `${agent.lastSessionId}.md`))
     }
   }
 
@@ -441,7 +442,7 @@ export class AgentService {
     if (kind === 'external' && !ext) throw new Error(`Adapter "${agent.adapterId}" của agent này đã bị gỡ. Cài lại ở Cài đặt → Adapter.`)
     if (kind !== 'claude' && kind !== 'codex' && !ext) throw new Error('Loại agent này chưa được hỗ trợ')
     // `claude -p` bỏ qua hộp thoại "tin cậy thư mục": ô chat chỉ chạy ở thư mục người dùng đã tin ở ô CLI.
-    if (chatMode && kind === 'claude' && !(await isClaudeFolderTrusted(cwd)))
+    if (chatMode && kind === 'claude' && !(await isClaudeFolderTrusted(cwd, homedir(), this.claudeEnv())))
       throw new Error(
         'Claude Code chưa được xác nhận tin cậy thư mục dự án này. Đổi agent sang ô CLI, mở phiên một lần và chọn "Yes, I trust this folder", rồi quay lại ô chat.'
       )
@@ -469,7 +470,7 @@ export class AgentService {
     const sk = effectiveSkills(this.settings.get(), await this.skills.usable(), agent.workspaceId, agent.id)
     // Claude tắt skill theo tên (skillOverrides) nên không tách được hai skill cùng tên: trùng với skill Claude Code
     // tự nạp (user / claude.ai / project) thì phiên Claude dùng bản của Claude Code, không chép bản thư viện.
-    const claudeOwn = kind === 'claude' ? new Set((await scanClaudeSkills(cwd)).filter((s) => s.scope !== 'plugin').map((s) => s.name)) : null
+    const claudeOwn = kind === 'claude' ? new Set((await scanClaudeSkills(cwd, homedir(), this.claudeEnv())).filter((s) => s.scope !== 'plugin').map((s) => s.name)) : null
     const sessionSkills = await this.skills.prepareSession(sessionId, claudeOwn ? sk.library.filter((n) => !claudeOwn.has(n)) : sk.library)
     const sessionFile = join(ws.path, '.sessions', `${sessionId}.md`)
     const agentNote = join(ws.vaultPath, '60 Agents', `${agent.name}.md`)
@@ -522,6 +523,11 @@ export class AgentService {
       NOW: new Date().toISOString()
     }
 
+    // Agent bị xoá trong lúc đang mở phiên (các await ở trên): không tạo lại note / file phiên cho nó.
+    if (this.deleted(agent)) {
+      void this.skills.cleanSession(sessionId)
+      throw new Error('Agent đã bị xoá')
+    }
     await this.writeSessionFile(sessionFile, vars, open)
     await writeIfMissing(agentNote, await readTemplate('agent/agent-note.md', vars))
     await ensureIgnored(ws.path, ['.sessions/'], 'stag.ai agent sessions')
@@ -590,9 +596,14 @@ export class AgentService {
       if (!resume && !chatMode) args.push('--', opening)
       // statusLine của app (cho biết kích thước cửa sổ context) thay statusLine của người dùng trong phiên
       // agent; script của app chạy tiếp lệnh của họ để nó vẫn hiện như cũ (xem statusScript trong hub.ts).
-      const ownStatusLine = await userStatusLine(cwd)
+      const ownStatusLine = await userStatusLine(cwd, claudeConfigDir(this.claudeEnv()))
       if (ownStatusLine) statusEnv = { STAG_USER_STATUSLINE: ownStatusLine, STAG_USER_STATUSLINE_BASH: (await findGitBash()) ?? '' }
-      transcriptFile = transcriptPath(cwd, sessionId)
+      transcriptFile = transcriptPath(cwd, sessionId, homedir(), this.claudeEnv())
+    }
+    if (this.deleted(agent)) {
+      removeSessionFiles(sessionFile)
+      void this.skills.cleanSession(sessionId)
+      throw new Error('Agent đã bị xoá')
     }
     const hubToken = this.hub.issueToken(agent.id, sessionId)
     const sessionEnv: Record<string, string> = {
@@ -630,13 +641,13 @@ export class AgentService {
             onSessionId: (threadId) => {
               if (agent.lastSessionId === threadId) return
               agent.lastSessionId = threadId
-              void this.save()
+              void this.save().catch((e) => console.error('[agents] save', e))
               this.apiEvent({ type: 'updated', agent: { ...agent } })
             }
           })
         } else {
           const spec = spawnSpec(command, Array.isArray(args) ? args : [args])
-          history = resume ? await loadHistory(transcriptPath(cwd, sessionId)) : kept
+          history = resume ? await loadHistory(transcriptPath(cwd, sessionId, homedir(), this.claudeEnv())) : kept
           chat = new ChatSession({ ...this.chatCallbacks(owner, agent, ptyId), command: spec.command, args: spec.args, cwd, env })
         }
         chat.start(history, sessionId, resume)
@@ -693,6 +704,16 @@ export class AgentService {
     return { ...publicRun(run), ...(agent.lastSessionId ? { lastSessionId: agent.lastSessionId } : {}) }
   }
 
+  /** Agent đã bị xoá khỏi app (sau một await trong lúc mở phiên). */
+  private deleted(agent: Agent): boolean {
+    return this.removing.has(agent.id) || !this.data.agents.some((a) => a.id === agent.id)
+  }
+
+  /** Biến môi trường của phiên Claude Code (app + Cài đặt → Adapter): CLAUDE_CONFIG_DIR đặt ở đó đổi chỗ transcript / .claude.json. */
+  private claudeEnv(): NodeJS.ProcessEnv {
+    return { ...process.env, ...this.adapters.env('claude') }
+  }
+
   /** Nối phiên ô chat của một agent với app: sự kiện → renderer, thoát → finish, ctx / phase → board. */
   private chatCallbacks(owner: WebContents, agent: Agent, ptyId: string): Pick<ChatSessionOptions, 'emit' | 'onExit' | 'onContext' | 'onPhase'> {
     const agentId = agent.id
@@ -720,7 +741,7 @@ export class AgentService {
     const items =
       agentKind(agent) === 'codex'
         ? await loadCodexHistory(await findCodexRollout(agent.lastSessionId, new Date(), codexHome(), 60))
-        : await loadHistory(transcriptPath(this.cwdOf(agent, ws), agent.lastSessionId))
+        : await loadHistory(transcriptPath(this.cwdOf(agent, ws), agent.lastSessionId, homedir(), this.claudeEnv()))
     return { items, state: { phase: 'off', sessionId: agent.lastSessionId } }
   }
 
@@ -844,7 +865,9 @@ export class AgentService {
       void this.skills.cleanSession(run.sessionId)
     }
     const agent = this.data.agents.find((a) => a.id === agentId)
-    if (!agent || agentKind(agent) === 'terminal') return
+    // Agent bị xoá khi phiên còn đang mở: bỏ trạng thái phiên mở dở đặt lại sau lúc xoá (không để "starting" ma).
+    if (!agent) return this.board.forget(agentId)
+    if (agentKind(agent) === 'terminal') return
     this.board.setActivity(agent, 'stopped')
     // Người dùng dừng trong lúc chờ bàn giao: không mở phiên mới; bản bàn giao giữ cho lần mở phiên sau.
     if (run.userStopped && this.board.statusOf(agentId)?.handoff === 'restarting') this.board.setHandoff(agent, undefined)
@@ -923,7 +946,14 @@ export class AgentService {
     if (process.env.STAG_DEBUG_HOOKS) void fs.appendFile(process.env.STAG_DEBUG_HOOKS, `${JSON.stringify({ agent: ctx.agent.name, ...payload })}\n`).catch(() => {})
     // Đường dẫn transcript thật (đoán sai lúc mở, hoặc /clear sang phiên mới) → theo file đó.
     if (payload.transcript_path) void ctx.run.transcript?.follow(payload.transcript_path)
-    if (agentKind(ctx.agent) === 'codex') void this.codexHook(ctx.agent, ctx.run, payload)
+    if (agentKind(ctx.agent) === 'codex') void this.codexHook(ctx.agent, ctx.run, payload).catch((e) => console.error('[codex] hook', e))
+    // Claude: /clear (hoặc /resume trong phiên) chuyển sang id phiên khác, báo qua SessionStart. Lưu lại để "Tiếp tục
+    // phiên", agent_log và lịch sử ô chat đọc đúng hội thoại đang dùng, không phải hội thoại trước /clear.
+    else if (agentKind(ctx.agent) === 'claude' && payload.hook_event_name === 'SessionStart' && payload.session_id && payload.session_id !== ctx.agent.lastSessionId) {
+      ctx.agent.lastSessionId = payload.session_id
+      void this.save().catch((e) => console.error('[agents] save', e))
+      this.apiEvent({ type: 'updated', agent: { ...ctx.agent } })
+    }
     this.board.hook(ctx.agent, payload)
     const ask = ctx.run.handoffAsk
     if (ask && this.board.statusOf(agentId)?.handoff === 'asking') {
@@ -1543,6 +1573,13 @@ export class AgentService {
     if (task) {
       const no = (await this.approveCross(caller, ws, target, 'open', task)) ?? (await this.approveDrive(caller, ws, target, 'open', task))
       if (no) return no
+      // Người dùng mở agent này trong lúc chờ duyệt: việc đầu không còn tới được phiên mới, gửi vào phiên đang chạy.
+      if (this.running.has(target.id)) {
+        this.mail.enqueue(target.id, { fromId: caller.id, fromName: caller.name, text: task, at: Date.now() })
+        this.deliverMail()
+        this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
+        return `"${target.name}" was opened meanwhile: your task was sent into its running session (as with agent_send).`
+      }
     }
     if (task) this.firstTasks.set(target.id, { from: caller.name, task, created: false })
     this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
@@ -1600,7 +1637,7 @@ export class AgentService {
         continue
       }
       try {
-        this.mail.enqueue(id, { fromId: 'user', fromName: '', text, at: Date.now(), user: true })
+        this.mail.enqueue(id, { fromId: USER_SENDER, fromName: '', text, at: Date.now(), user: true })
       } catch {
         // Hàng chờ của agent đầy (đã có tin chưa gõ): coi như không gửi được lúc này.
         results.push({ agentId: id, name: agent.name, status: 'invalid' })
@@ -1633,8 +1670,8 @@ export class AgentService {
     const summary = input.summary.trim()
     if (!summary) throw new Error('summary is empty.')
     if (summary.length > TASK_MAX) throw new Error(`summary is too long (max ${TASK_MAX} characters).`)
-    const run = this.running.get(target.id)
-    const now = Date.now()
+    let run = this.running.get(target.id)
+    let now = Date.now()
     if (run) {
       const problem = this.mail.check(target.id, caller.id, now)
       if (problem) throw new Error(problem)
@@ -1648,6 +1685,16 @@ export class AgentService {
       )
     const no = (await this.approveCross(caller, ws, target, 'handoff', summary)) ?? (await this.approveDrive(caller, ws, target, 'handoff', summary))
     if (no) return no
+    // Thẻ hỏi có thể chờ vài phút: agent kia có thể vừa được mở / vừa dừng. Xét lại, và kiểm hàng chờ trước khi chuyển
+    // thẻ việc (chuyển rồi mới báo lỗi thì thẻ đã sang agent kia mà nội dung bàn giao không tới).
+    run = this.running.get(target.id)
+    now = Date.now()
+    if (run) {
+      const problem = this.mail.check(target.id, caller.id, now)
+      if (problem) throw new Error(`${problem} Nothing was handed off.`)
+    } else if (!resolveAgentApi(this.settings.get(), ws.id, caller.id).manage) {
+      throw new Error(`"${target.name}" stopped while waiting, and opening agents is turned off for you (Settings → Agent API). Nothing was handed off. Tell the user to open it, then try again.`)
+    }
 
     const card = await this.board.transferTask(ws, caller.id, target, run?.sessionId ?? '', summary, input.title)
     const body = handoffBody(caller.name, summary, card, agentFolder(this.workspaces.get(ws.id) ?? ws, target))
@@ -1735,10 +1782,10 @@ export class AgentService {
     if (path && !path.endsWith('.rollout-pending') && (await exists(path))) return path
     if (!agent.lastSessionId) return null
     if (agentKind(agent) === 'codex') return findCodexRollout(agent.lastSessionId, new Date(), codexHome(), 60)
-    const guess = transcriptPath(this.cwdOf(agent, ws), agent.lastSessionId)
+    const guess = transcriptPath(this.cwdOf(agent, ws), agent.lastSessionId, homedir(), this.claudeEnv())
     if (await exists(guess)) return guess
     // Đường dẫn dự án rất dài: Claude Code có thể đặt tên thư mục khác cách đoán → tìm theo tên file.
-    const root = join(homedir(), '.claude', 'projects')
+    const root = join(claudeConfigDir(this.claudeEnv()), 'projects')
     for (const d of await fs.readdir(root).catch(() => [] as string[])) {
       const f = join(root, d, `${agent.lastSessionId}.jsonl`)
       if (await exists(f)) return f
@@ -1928,6 +1975,16 @@ export class AgentService {
    * bỏ thẻ việc đang dở. Lịch sử việc đã xong được giữ. `keepNote` (xoá cả project): note giữ nguyên trong vault.
    */
   async remove(agentId: string, opts: { keepNote?: boolean } = {}): Promise<void> {
+    // Phiên đang mở dở (doStart) thấy cờ này thì dừng, không tạo lại note vừa chuyển vào Thùng rác.
+    this.removing.add(agentId)
+    try {
+      await this.removeNow(agentId, opts)
+    } finally {
+      this.removing.delete(agentId)
+    }
+  }
+
+  private async removeNow(agentId: string, opts: { keepNote?: boolean }): Promise<void> {
     const ctx = this.context(agentId)
     if (ctx && !opts.keepNote) {
       // Chuyển note trước: không chuyển được (bị khoá…) thì báo lỗi và chưa xoá gì cả.
@@ -1962,9 +2019,13 @@ export class AgentService {
       if (a.workspaceId !== workspaceId) continue
       this.stop(a.id)
       if (this.data.handoffs) delete this.data.handoffs[a.id]
+      this.mail.forget(a.id)
+      this.firstTasks.delete(a.id)
+      this.chats.delete(a.id)
     }
     this.data.agents = this.data.agents.filter((a) => a.workspaceId !== workspaceId)
-    delete this.data.layouts[workspaceId]
+    // Canvas của Chung (`<ws>`) và của từng project (`<ws>#<project>`).
+    for (const key of Object.keys(this.data.layouts)) if (key === workspaceId || key.startsWith(`${workspaceId}#`)) delete this.data.layouts[key]
     this.board.forgetWorkspace(workspaceId)
     this.activity.forgetWorkspace(workspaceId)
     this.artifacts.forgetWorkspace(workspaceId)
@@ -2166,5 +2227,17 @@ function layoutKey(workspaceId: string, projectId?: string | null): string {
 
 /** File phiên trong .sessions/: file phiên + luật phiên (adapter ngoài) + cấu hình MCP / settings riêng (connector). */
 function removeSessionFiles(sessionFile: string): void {
-  for (const ext of ['.md', '.rules.md', '.mcp.json', '.settings.json']) rmSync(sessionFile.replace(/\.md$/, ext), { force: true })
+  for (const ext of ['.md', '.rules.md', '.mcp.json', '.settings.json']) removeQuietly(sessionFile.replace(/\.md$/, ext))
+}
+
+/**
+ * Xoá file, không bao giờ ném: `force` chỉ bỏ qua ENOENT, còn file đang bị mở (trình diệt virus, OneDrive, trình soạn
+ * thảo) ném EPERM / EBUSY — ném ở đây làm dở dang việc dọn phiên (ô agent kẹt "đang chạy", không giết các phiên khác lúc thoát).
+ */
+function removeQuietly(file: string): void {
+  try {
+    rmSync(file, { force: true, maxRetries: 2, retryDelay: 50 })
+  } catch (e) {
+    console.error('[agents] không xoá được', file, (e as Error).message)
+  }
 }

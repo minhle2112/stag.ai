@@ -222,6 +222,8 @@ function EditProjectDialog({ ws, project, field, onClose }: { ws: Workspace; pro
       <form
         onSubmit={(e) => {
           e.preventDefault()
+          // Enter trong ô tên: cùng điều kiện với nút Lưu (không gửi tên rỗng, không gửi hai lần khi đang lưu).
+          if (busy || (field === 'name' && !value.trim())) return
           void save()
         }}
       >

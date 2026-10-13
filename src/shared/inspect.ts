@@ -5,7 +5,8 @@
 // preload của trang và renderer; test bằng vitest.
 
 /** Trạng thái một bình luận (ghim).
- * - draft: chữ gõ dở trong hộp bình luận của một phần tử, chưa gửi (ghim nét đứt "…").
+ * - draft: chờ gửi — bấm "Thêm" (hoặc đóng hộp khi còn chữ): ghim nét đứt, nằm ở mục "Chờ gửi" của ngăn Bình luận,
+ *   chưa vào hàng của agent nào; nút "Gửi" của nhóm agent gửi cả đợt trong một tin (sendDrafts).
  * - queued: đã gửi, chờ agent (agent đang bận / phiên chưa mở, hoặc đã gõ vào phiên nhưng chưa tới lượt).
  * - working: agent đang trả lời mục này.
  * - new: agent đã trả lời, bạn chưa xem (ghim vàng).
@@ -128,7 +129,7 @@ export interface PagePin {
   text: string
   tag: string
   agentId: string
-  /** Chữ bình luận đầu tiên (nháp: chữ đang gõ dở). */
+  /** Chữ bình luận đầu tiên (chờ gửi: chữ sẽ gửi). */
   title: string
   pt?: { x: number; y: number }
 }
@@ -154,9 +155,9 @@ export const PAGE_IPC = {
   state: 'stag-inspect:state',
   /** invoke({ rect, scroll }) → CaptureResult | null: chụp vùng phần tử lúc gửi (lớp Soi đã ẩn). */
   capture: 'stag-inspect:capture',
-  /** invoke(SaveInput) → số bình luận */
+  /** invoke(SaveInput) → số bình luận (lưu thành chờ gửi) */
   save: 'stag-inspect:save',
-  /** invoke(id): xoá nháp (đã xoá hết chữ) */
+  /** invoke(id): xoá bình luận chờ gửi (hộp đóng khi đã xoá hết chữ) */
   remove: 'stag-inspect:remove',
   /** send(on): bật / tắt Soi (Esc tắt; bấm ghim nháp khi Soi tắt thì bật) */
   soi: 'stag-inspect:soi',
@@ -206,24 +207,28 @@ export interface CaptureResult {
   captureId: string
 }
 
+/** Thêm / sửa một bình luận chờ gửi (chưa vào hàng agent; gửi cả đợt bằng InspectAction 'send'). */
 export interface SaveInput {
-  /** Nháp có sẵn của phần tử này. */
+  /** Bình luận chờ gửi có sẵn của phần tử này. */
   pinId?: number
+  /** Ảnh vùng phần tử lúc bấm "Thêm" (gửi kèm gói tin). */
   captureId?: string
-  /** Bắt buộc khi tạo mới; nháp có sẵn thì gửi kèm để chụp lại ngữ cảnh. */
+  /** Bắt buộc khi tạo mới; có sẵn thì gửi kèm để chụp lại ngữ cảnh. */
   target?: InspectTarget
   url: string
   title: string
   text: string
   agentId: string
-  /** true = gửi; false = lưu nháp. */
-  send: boolean
 }
 
 /** Việc người dùng làm từ ngăn Bình luận / thanh Browser (renderer → main). */
 export type InspectAction =
   | { type: 'toggle'; tabId: string; on?: boolean }
   | { type: 'reply'; id: number; text: string }
+  /** Nút "Gửi" của một nhóm trong mục "Chờ gửi": các bình luận chờ gửi này vào hàng agent cùng lúc (một tin). */
+  | { type: 'send'; ids: number[] }
+  /** ✕ trên một bình luận chờ gửi. */
+  | { type: 'remove'; id: number }
   /** Đã xem câu trả lời mới. */
   | { type: 'read'; id: number }
   | { type: 'close'; id: number }
@@ -349,6 +354,17 @@ export function enqueue(p: InspectPin, at = now(), text?: string): void {
   p.updatedAt = at
 }
 
+/**
+ * Gửi cả đợt: các bình luận chờ gửi trong `ids` vào hàng của agent của chúng, cùng một mốc thời gian (thứ tự trong
+ * đợt theo số). Đường giao tin gom mọi mục chưa gõ của một agent thành một tin (packetMessage). Trả về các mục đã gửi.
+ */
+export function sendDrafts(all: InspectPin[], ids: number[], at = now()): InspectPin[] {
+  const set = new Set(ids)
+  const out = all.filter((p) => set.has(p.id) && p.state === 'draft').sort((a, b) => a.id - b.id)
+  for (const p of out) enqueue(p, at)
+  return out
+}
+
 export interface ReplyInput {
   id: number
   text: string
@@ -461,17 +477,14 @@ export function packetItem(p: InspectPin): string {
   return lines.join('\n')
 }
 
-/** Gói tin gõ vào phiên agent cho các mục `pins` (theo thứ tự hàng chờ). */
+/**
+ * Gói tin gõ vào phiên agent cho các mục `pins` (theo thứ tự hàng chờ): dòng đầu + từng mục #N. Cách trả lời nằm trong
+ * luật phiên (mục SOI của agent/rules.md) và mô tả tool inspect_reply, không lặp lại trong mỗi tin.
+ */
 export function packetMessage(pins: InspectPin[]): string {
   const n = pins.length
   const head = `[stag.ai] ${n === 1 ? 'A comment' : `${n} comments`} from the user on a web page (stag.ai Browser, "Soi" mode), each pinned on one element. Handle them in this order:`
-  const how = [
-    'A comment is not always a change request. Read what the user wrote and answer each one with inspect_reply(id, text) in the conversation language; the user sees your text as a reply in the comment thread. A question → answer it in text. A request you can answer in words (translate / explain / review the element\'s text…) → put the result in text, no code edit. Edit code only when the comment asks to change the page.',
-    'After changing the page: inspect_reply(id, text: one sentence saying what you changed, changes: "file:line — short summary" or the WP-CLI command); stag.ai reloads the page only when changes is set, so always set it after an edit and never when you only answered.',
-    'Unclear → inspect_reply(id, text: your question, ask: true) and wait for their answer. A change you cannot make (file locked, source not found, tool error) → inspect_reply(id, text: why, failed: true).',
-    'When you edit: edit the source, never the live DOM. Never edit a production site. WordPress: edit the child theme (copy a parent-theme file into the child theme first), or use WP-CLI on the local copy; purge caches after an edit. Do not edit outside your task scope without asking.'
-  ]
-  return [head, '', ...pins.map((p) => packetItem(p)).flatMap((b) => [b, '']), ...how].join('\n')
+  return [head, '', ...pins.map((p) => packetItem(p)).flatMap((b, i) => (i ? ['', b] : [b]))].join('\n')
 }
 
 /** Dòng hiển thị trong ô chat khi gõ gói tin. */
