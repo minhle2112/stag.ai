@@ -14,9 +14,9 @@ export function ApprovalToast(): React.JSX.Element | null {
     <button
       type="button"
       onClick={() => open('connectors', { review: true })}
-      className="fixed right-3.5 bottom-9 z-30 flex w-[350px] max-w-[92vw] items-center gap-3 rounded-lg border border-l-[3px] border-line-2 border-l-wait bg-panel-2 px-3 py-2.5 text-left shadow-[0_12px_40px_rgba(0,0,0,.55)] hover:bg-panel-3"
+      className="fixed right-3.5 bottom-9 z-30 flex w-[350px] max-w-[92vw] items-center gap-3 rounded-lg border border-l-[3px] border-line-2 border-l-wait bg-panel-2 px-3 py-2.5 text-left shadow-float hover:bg-panel-3"
     >
-      <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-wait px-1 text-[12px] font-bold text-[#1a1300]">{items.length}</span>
+      <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-wait px-1 text-[12px] font-bold text-wait-on">{items.length}</span>
       <span className="min-w-0">
         <span className="block text-[13px] font-medium">Đang chờ bạn duyệt</span>
         <span className="block truncate text-[12px] text-muted">

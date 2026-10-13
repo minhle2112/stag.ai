@@ -140,8 +140,8 @@ export function DocView({
               o.op === 'eq'
                 ? escapeHtml(o.text)
                 : o.op === 'ins'
-                  ? `<ins class="rounded-[2px] bg-work/20 text-[#bff3d2] no-underline">${escapeHtml(o.text)}</ins>`
-                  : `<del class="rounded-[2px] bg-danger/14 text-[#e9a7a1] line-through decoration-danger">${escapeHtml(o.text)}</del>`
+                  ? `<ins class="rounded-[2px] bg-work/20 text-add-text no-underline">${escapeHtml(o.text)}</ins>`
+                  : `<del class="rounded-[2px] bg-danger/14 text-del-text line-through decoration-danger">${escapeHtml(o.text)}</del>`
             )
             .join('')
           const tag = rb.kind === 'heading' ? 'font-semibold text-[1.1em]' : ''
@@ -282,7 +282,7 @@ export function DocView({
           onClick={() => start(float.a)}
           style={{ left: float.x, top: float.y }}
           title="Góp ý cho đoạn đã chọn (phím C)"
-          className={`fixed z-40 inline-flex items-center border border-accent bg-accent font-semibold text-accent-on shadow-[0_8px_24px_rgba(0,0,0,.5)] ${float.compact ? 'h-7 w-7 justify-center rounded-full text-[16px] leading-none' : 'gap-1.5 rounded-[7px] px-2.5 py-1 text-[12px]'}`}
+          className={`fixed z-40 inline-flex items-center border border-accent bg-accent font-semibold text-accent-on shadow-float ${float.compact ? 'h-7 w-7 justify-center rounded-full text-[16px] leading-none' : 'gap-1.5 rounded-[7px] px-2.5 py-1 text-[12px]'}`}
         >
           {float.compact ? (
             '＋'

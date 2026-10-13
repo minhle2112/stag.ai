@@ -1,6 +1,7 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { composerFor } from './store/chat'
+import { TERMINAL_PALETTES, type Theme } from '@shared/theme'
 
 /**
  * Terminal của từng agent sống ngoài React: khi ô gắn lại (đóng / mở ô, đổi workspace), phần tử DOM của terminal
@@ -28,15 +29,14 @@ const pending = new Map<string, string[]>()
 const exitListeners = new Set<(agentId: string, ptyId: string) => void>()
 let busStarted = false
 
-const theme = {
-  background: '#101215',
-  foreground: '#dde1e6',
-  cursor: '#2de2c0',
-  selectionBackground: '#2f3b52',
-  scrollbarSliderBackground: 'rgba(139, 147, 167, 0.2)',
-  scrollbarSliderHoverBackground: 'rgba(139, 147, 167, 0.35)',
-  scrollbarSliderActiveBackground: 'rgba(139, 147, 167, 0.5)',
-  overviewRulerBorder: '#101215'
+/** Màu terminal hiện tại (store/theme.ts đặt): đủ 16 màu ANSI, sáng hoặc tối. */
+let palette: Theme = document.documentElement.dataset.theme === 'light' && !('termdark' in document.documentElement.dataset) ? 'light' : 'dark'
+
+/** Đổi màu mọi terminal đang mở ngay, không mở lại phiên. */
+export function setTerminalTheme(t: Theme): void {
+  if (t === palette) return
+  palette = t
+  for (const e of entries.values()) e.term.options.theme = TERMINAL_PALETTES[t]
 }
 
 export function startTerminalBus(): void {
@@ -137,7 +137,10 @@ function entry(agentId: string): Entry {
       fontSize,
       cursorBlink: true,
       allowProposedApi: true,
-      theme
+      theme: TERMINAL_PALETTES[palette],
+      // Chữ mờ của Claude Code là SGR 2 (xterm vẽ bằng màu chữ nhạt đi một nửa) → trên nền trắng chỉ ~3:1. xterm tự đẩy
+      // màu chữ lên cho đủ 4.5:1 với nền (cả hai chế độ).
+      minimumContrastRatio: 4.5
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

@@ -74,10 +74,10 @@ for (const [lang, exts] of Object.entries({
 
 /** Màu theo bản thiết kế (design/v2/1-xuong.html: .kw .s .nu .cm). Chuỗi lớp nằm trong mã nguồn để Tailwind sinh. */
 const CLS = {
-  kw: 'text-[#c792ea]',
-  str: 'text-[#c3e88d]',
-  num: 'text-[#f78c6c]',
-  cm: 'text-[#5c646e] italic'
+  kw: 'text-code-kw',
+  str: 'text-code-str',
+  num: 'text-code-num',
+  cm: 'text-code-cm italic'
 }
 
 const NUM = /(?:0[xX][\da-fA-F_]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)/y

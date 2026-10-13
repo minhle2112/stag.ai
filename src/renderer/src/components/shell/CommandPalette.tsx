@@ -124,7 +124,16 @@ function PaletteBody(): React.JSX.Element {
       { id: 'a-newws', group: 'Hành động', label: 'Workspace mới…', icon: 'folder', run: go(() => void startNewWorkspace()) },
       { id: 'a-sidebar', group: 'Hành động', label: 'Bật / tắt thanh bên', hint: 'Ctrl B', icon: 'side', run: go(toggleSidebar) },
       { id: 'a-browser', group: 'Hành động', label: 'Bật / tắt trình duyệt', hint: 'Ctrl Shift B', icon: 'globe', run: go(toggleBrowser) },
-      { id: 'a-settings', group: 'Hành động', label: 'Cài đặt', hint: 'Ctrl ,', icon: 'gear', run: go(() => openSettings()) }
+      { id: 'a-settings', group: 'Hành động', label: 'Cài đặt', hint: 'Ctrl ,', icon: 'gear', run: go(() => openSettings()) },
+      { id: 'a-theme', group: 'Hành động', label: 'Đổi sáng / tối', hint: 'Ctrl Shift L', icon: 'sun', run: go(() => void window.stag.theme.toggle()), keywords: 'giao dien theme mau sang toi light dark' },
+      ...(['dark', 'light', 'system'] as const).map((pref) => ({
+        id: `a-theme-${pref}`,
+        group: 'Hành động',
+        label: `Giao diện: ${pref === 'dark' ? 'Tối' : pref === 'light' ? 'Sáng' : 'Theo Windows'}`,
+        icon: (pref === 'dark' ? 'moon' : pref === 'light' ? 'sun' : 'monitor') as IconName,
+        run: go(() => void useSettings.getState().save({ general: { theme: pref } })),
+        keywords: 'giao dien theme mau light dark windows he thong'
+      }))
     )
     for (const [id, label] of SETTINGS)
       cmds.push({ id: `s-${id}`, group: 'Cài đặt', label, icon: 'gear', run: go(() => openSettings(id)), keywords: 'cai dat settings' })
@@ -187,9 +196,9 @@ function PaletteBody(): React.JSX.Element {
 
   let lastGroup = ''
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 pt-[84px]" onMouseDown={close}>
+    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-scrim pt-[84px]" onMouseDown={close}>
       <div
-        className="flex max-h-[80vh] w-[620px] max-w-[92vw] flex-col overflow-hidden rounded-[10px] border border-line-2 bg-panel shadow-[0_24px_70px_rgba(0,0,0,.7)]"
+        className="flex max-h-[80vh] w-[620px] max-w-[92vw] flex-col overflow-hidden rounded-[10px] border border-line-2 bg-panel shadow-modal"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <input

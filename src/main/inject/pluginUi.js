@@ -4,7 +4,8 @@
 //   <link rel="stylesheet" href="/__stag/ui.css" />
 //   <script type="module">
 //     import { host } from '/__stag/ui.js'
-//     const ctx = await host.ready                 // { pluginId, slotId, slotType, workspace, agent, theme }
+//     const ctx = await host.ready                 // { pluginId, slotId, slotType, workspace, agent, theme: 'dark' | 'light' }
+//     host.onTheme((theme) => …)                    // app đổi sáng / tối
 //     const stats = await host.getData('stats')    // ctx.data.register('stats', …) trong worker
 //     await host.action('hello', { name: 'A' })    // ctx.actions.register('hello', …)
 //     host.on('feed', (data) => …)                 // ctx.streams.emit('feed', data) trong worker
@@ -16,6 +17,7 @@
 const TIMEOUT_MS = 60_000
 const pending = new Map()
 const contextFns = new Set()
+const themeFns = new Set()
 const streamFns = new Map()
 let nextId = 1
 let context = null
@@ -42,6 +44,10 @@ window.addEventListener('message', (e) => {
     document.documentElement.dataset.theme = context?.theme ?? 'dark'
     markReady(context)
     for (const fn of contextFns) fn(context)
+  } else if (m.event === 'theme') {
+    if (context) context = { ...context, theme: m.theme }
+    document.documentElement.dataset.theme = m.theme
+    for (const fn of themeFns) fn(m.theme)
   } else if (m.event === 'stream') {
     for (const fn of streamFns.get(m.channel) ?? []) fn(m.data)
   }
@@ -71,6 +77,11 @@ export const host = {
   onContext(fn) {
     contextFns.add(fn)
     return () => contextFns.delete(fn)
+  },
+  /** App đổi sáng / tối ('dark' | 'light'). /__stag/ui.css tự đổi màu theo; trả về hàm huỷ. */
+  onTheme(fn) {
+    themeFns.add(fn)
+    return () => themeFns.delete(fn)
   },
   call,
   getData: (key, params = {}) => call('data.get', { key, params }),

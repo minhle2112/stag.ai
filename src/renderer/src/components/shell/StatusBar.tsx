@@ -45,7 +45,7 @@ export function StatusBar(): React.JSX.Element {
           {lockOpen && (
             <>
               <div className="fixed inset-0 z-40" onMouseDown={() => setLockOpen(false)} />
-              <div className="absolute bottom-full left-0 z-50 mb-1 w-80 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 text-[12px] shadow-[0_14px_40px_rgba(0,0,0,.6)]">
+              <div className="absolute bottom-full left-0 z-50 mb-1 w-80 overflow-hidden rounded-lg border border-line-2 bg-pop p-1 text-[12px] shadow-pop">
                 <div className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-dim">KHOÁ PHẠM VI ĐANG GIỮ</div>
                 {locks.map((l) => {
                   const a = agents?.agents.find((x) => x.id === l.task.agentId)

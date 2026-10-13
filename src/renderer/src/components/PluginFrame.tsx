@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InstalledPlugin, PluginSlot } from '@shared/plugins'
 import { openPluginUrl, pluginErr, usePluginToast } from '../store/plugins'
+import { useTheme } from '../store/theme'
 
 /** Ngữ cảnh app gửi cho trang plugin (host.context trong /__stag/ui.js). */
 export interface PluginFrameContext {
@@ -8,7 +9,8 @@ export interface PluginFrameContext {
   slotId: string
   slotType: PluginSlot['type']
   workspace: { id: string; name: string; path: string } | null
-  theme: 'dark'
+  /** Màu app đang dùng; đổi thì trang nhận lại sự kiện `context` và sự kiện `theme`. */
+  theme: 'dark' | 'light'
   locale: 'vi'
 }
 
@@ -33,6 +35,7 @@ export function PluginFrame({
 }): React.JSX.Element {
   const ref = useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = useState(240)
+  const theme = useTheme((s) => s.theme)
   const id = plugin.manifest.id
   const context = useMemo<PluginFrameContext>(
     () => ({
@@ -40,10 +43,10 @@ export function PluginFrame({
       slotId: slot.id,
       slotType: slot.type,
       workspace: workspace ? { id: workspace.id, name: workspace.name, path: workspace.path } : null,
-      theme: 'dark',
+      theme,
       locale: 'vi'
     }),
-    [id, slot.id, slot.type, workspace?.id, workspace?.name, workspace?.path] // eslint-disable-line react-hooks/exhaustive-deps
+    [id, slot.id, slot.type, workspace?.id, workspace?.name, workspace?.path, theme] // eslint-disable-line react-hooks/exhaustive-deps
   )
   const ctxRef = useRef(context)
   ctxRef.current = context
@@ -54,6 +57,8 @@ export function PluginFrame({
 
   // Ngữ cảnh đổi (chuyển workspace) → báo trang.
   useEffect(() => post({ event: 'context', context }), [context])
+  // Đổi sáng / tối: sự kiện riêng (host.onTheme trong /__stag/ui.js); trang không nghe thì giữ màu của nó.
+  useEffect(() => post({ event: 'theme', theme }), [theme])
 
   useEffect(() => {
     const onMessage = async (e: MessageEvent): Promise<void> => {

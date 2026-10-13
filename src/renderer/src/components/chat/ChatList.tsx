@@ -98,7 +98,7 @@ export function ChatList({
             setAway(false)
             toBottom()
           }}
-          className="absolute right-4 bottom-3 inline-flex h-7 items-center gap-1.5 rounded-full border border-line-2 bg-panel-2 px-3 text-[12px] text-fg shadow-[0_6px_18px_rgba(0,0,0,.5)] hover:border-line-3 hover:bg-panel-3"
+          className="absolute right-4 bottom-3 inline-flex h-7 items-center gap-1.5 rounded-full border border-line-2 bg-panel-2 px-3 text-[12px] text-fg shadow-tip hover:border-line-3 hover:bg-panel-3"
         >
           <Icon name="send" size="s" className="rotate-180" />
           Mới nhất

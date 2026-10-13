@@ -120,6 +120,18 @@ export const IPC = {
   productSaveAs: 'product:save-as',
   /** main → renderer: sản phẩm của một workspace vừa đổi (kèm workspaceId). */
   productsChanged: 'product:changed',
+  /** Chế độ Soi của ô Browser: góp ý ghim lên trang. */
+  inspectSnapshot: 'inspect:snapshot',
+  inspectAct: 'inspect:act',
+  /** main → renderer: góp ý của workspace đổi (kèm workspaceId). */
+  inspectChanged: 'inspect:changed',
+  /** main → renderer: người dùng bấm ghim trên trang (workspaceId, tabId, số góp ý). */
+  inspectFocus: 'inspect:focus',
+  /** Tìm nguồn: dự án có Vite / Next / WordPress không, đã cài chưa; cài / gỡ; lời nhờ agent gắn plugin. */
+  inspectSetup: 'inspect:setup',
+  inspectInstall: 'inspect:install',
+  inspectUninstall: 'inspect:uninstall',
+  inspectSetupMessage: 'inspect:setup-message',
   /** Ghi đè cài đặt của một workspace / agent (null = theo cấp trên). */
   settingsOverride: 'settings:override',
   /** Phiên bản app / Electron, thư mục dữ liệu (Settings → Giới thiệu). */
@@ -248,7 +260,12 @@ export const IPC = {
   /** Usage tài khoản Claude (shared/claudeUsage.ts): lấy trạng thái, hỏi lại ngay; main → renderer: claudeUsageChanged. */
   claudeUsageGet: 'claude-usage:get',
   claudeUsageRefresh: 'claude-usage:refresh',
-  claudeUsageChanged: 'claude-usage:changed'
+  claudeUsageChanged: 'claude-usage:changed',
+  /** Màu app (shared/theme.ts): lấy trạng thái (themeGetSync cho script đầu trang), đổi nhanh sáng / tối; main → renderer: themeChanged. */
+  themeGet: 'theme:get',
+  themeGetSync: 'theme:get-sync',
+  themeToggle: 'theme:toggle',
+  themeChanged: 'theme:changed'
 } as const
 
 export interface AppInfo {

@@ -37,6 +37,9 @@ extraResources:
     to: plugin-catalog
   - from: resources/plugin-sdk
     to: plugin-sdk
+  # inspect.ts: plugin Vite / loader Next / mu-plugin WordPress của chế độ Soi (chép vào dự án khi người dùng bấm).
+  - from: resources/inspect
+    to: inspect
 
 asar: true
 # Module native (.node, winpty-agent.exe) không nạp/chạy được từ trong asar.

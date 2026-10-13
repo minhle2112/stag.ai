@@ -46,6 +46,7 @@ import {
   type SettingsOverridesPatch,
   type ShellId,
   type TerminalAdapterSettings,
+  type ThemePref,
   type VoiceEngine,
   type VoiceGlobalHotkey,
   type VoiceHotkey,
@@ -67,6 +68,7 @@ const oneOf = <T extends string>(v: unknown, all: readonly T[], d: T): T => (all
 
 const SHELLS: readonly ShellId[] = ['powershell', 'pwsh', 'gitbash', 'cmd']
 const CLOSE_ACTIONS: readonly CloseAction[] = ['quit', 'tray']
+const THEME_PREFS: readonly ThemePref[] = ['dark', 'light', 'system']
 const PERMISSIONS: readonly PermissionMode[] = ['default', 'acceptEdits', 'auto', 'plan']
 export const SCOPE_MODES: readonly ScopeMode[] = ['ask', 'block', 'warn', 'off']
 const SEARCH_ENGINES: readonly SearchEngine[] = ['google', 'duckduckgo', 'bing']
@@ -246,7 +248,10 @@ export function normalizeGeneral(raw: unknown): GeneralSettings {
     notifySound: bool(r.notifySound, d.notifySound),
     closeAction: oneOf(r.closeAction, CLOSE_ACTIONS, d.closeAction),
     confirmQuitRunning: bool(r.confirmQuitRunning, d.confirmQuitRunning),
-    claudeUsage: bool(r.claudeUsage, d.claudeUsage)
+    claudeUsage: bool(r.claudeUsage, d.claudeUsage),
+    theme: oneOf(r.theme, THEME_PREFS, d.theme),
+    terminalFollowTheme: bool(r.terminalFollowTheme, d.terminalFollowTheme),
+    claudeThemeSync: bool(r.claudeThemeSync, d.claudeThemeSync)
   }
 }
 

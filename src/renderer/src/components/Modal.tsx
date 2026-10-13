@@ -25,9 +25,9 @@ export function Modal({ title, children, footer, onClose, width = 'w-[560px]', i
 
   // Gắn vào body: hộp thoại mở từ trong một ô canvas (vd. đổi tên) nằm dưới phần tử có transform, "fixed" sẽ bám theo ô.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(3,4,6,.66)]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim" onMouseDown={onClose}>
       <div
-        className={`${width} flex max-h-[84vh] max-w-[94vw] flex-col overflow-hidden rounded-[10px] border bg-panel shadow-[0_24px_70px_rgba(0,0,0,.7)] ${
+        className={`${width} flex max-h-[84vh] max-w-[94vw] flex-col overflow-hidden rounded-[10px] border bg-panel shadow-modal ${
           tone === 'wait' ? 'border-wait/60' : tone === 'accent' ? 'border-accent/40' : 'border-line-2'
         }`}
         onMouseDown={(e) => e.stopPropagation()}
@@ -83,7 +83,7 @@ export function Button({
   const tone =
     variant === 'danger'
       ? primary
-        ? 'border-danger bg-danger font-semibold text-[#240a07] hover:brightness-110'
+        ? 'border-danger bg-danger font-semibold text-danger-on hover:brightness-110'
         : 'border-transparent bg-transparent text-danger hover:bg-danger/12'
       : primary
         ? 'border-accent bg-accent font-semibold text-accent-on hover:brightness-110'

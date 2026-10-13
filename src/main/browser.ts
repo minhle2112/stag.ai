@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { app, BrowserWindow, nativeImage, session as electronSession, WebContentsView, type Session, type WebContents } from 'electron'
 import { browserPartition, originDecision, toUrl } from '@shared/browser'
 import { DEFAULT_BROWSER, type Agent, type BrowserPermissionAsk, type BrowserSettings, type BrowserState, type BrowserTab, type BrowserTabDev, type BrowserTabOwner, type ViewRect } from '@shared/types'
+import { VIEWPORT_WIDTH, type Rect, type ViewportKind } from '@shared/inspect'
 import snapshotSrc from './inject/snapshot.js?raw'
+import { PAGE_BG, type ThemeState } from '@shared/theme'
 
 interface ConsoleEntry {
   level: string
@@ -21,6 +23,27 @@ interface Tab {
   cdp: boolean
   /** Đang chờ dev server (xem devTab). */
   dev?: BrowserTabDev
+  /** Chế độ Soi đang bật trên tab này. */
+  inspect: boolean
+  /** Khung màn hình (Desktop / Tablet / Mobile). */
+  viewport: ViewportKind
+  /** Đang xem ảnh bản TRƯỚC của góp ý số này (chế độ Soi). */
+  before?: number
+}
+
+/** Tab trang web nhìn từ chế độ Soi (InspectService). */
+export interface PageTab {
+  wsId: string
+  tabId: string
+  wc: WebContents
+  owner: BrowserTabOwner
+  inspect: boolean
+  viewport: ViewportKind
+}
+
+/** Móc của chế độ Soi: Ctrl+Shift+C trong trang, trang tải xong. */
+export interface InspectHooks {
+  toggle(wsId: string, tabId: string): void
 }
 
 interface WsBrowser {
@@ -91,8 +114,22 @@ export class BrowserService {
   private config: BrowserSettings = DEFAULT_BROWSER
   /** Partition đã gắn xử lý quyền / tải file (mỗi partition một lần). */
   private wired = new Set<string>()
+  /** Chế độ Soi (gắn sau, xem attachInspect). */
+  private inspectHooks: InspectHooks | null = null
+  /** Màu app + màu Windows (ThemeService). Trang web giữ màu theo Windows, không theo app. */
+  private theme: ThemeState | null = null
+  /** Ctrl+Shift+L khi trang đang giữ bàn phím: đổi nhanh sáng / tối như ở trang app. */
+  themeToggle: (() => void) | null = null
 
-  constructor(private events: BrowserEvents) {}
+  /** `pagePreload` = script chế độ Soi chạy trong thế giới cô lập của mỗi trang (trang không đọc được nó). */
+  constructor(
+    private events: BrowserEvents,
+    private pagePreload?: string
+  ) {}
+
+  attachInspect(hooks: InspectHooks): void {
+    this.inspectHooks = hooks
+  }
 
   /**
    * Cài đặt đổi. Áp ngay: trang tab mới, máy tìm kiếm, chính sách trang ngoài (câu hỏi đang chờ được trả lời theo
@@ -140,6 +177,37 @@ export class BrowserService {
       const ses = electronSession.fromPartition(name)
       await ses.clearStorageData()
       await ses.clearCache()
+    }
+  }
+
+  /**
+   * Màu app đổi. `nativeTheme.themeSource` lật cả `prefers-color-scheme` của trang web, nên khi màu app khác màu Windows
+   * thì ghim lại màu Windows cho mọi tab bằng CDP; nền view (trước khi trang vẽ) theo màu app.
+   */
+  setTheme(s: ThemeState): void {
+    this.theme = s
+    for (const b of this.byWs.values())
+      for (const t of b.tabs) {
+        t.view.setBackgroundColor(PAGE_BG[s.theme])
+        void this.pinScheme(t)
+      }
+  }
+
+  /** Áp ghim `prefers-color-scheme` cho một tab (gắn debugger nếu cần). Lỗi (tab đóng, DevTools giữ…) thì bỏ qua. */
+  private async pinScheme(tab: Tab): Promise<void> {
+    const s = this.theme
+    const wc = tab.view.webContents
+    if (!s || wc.isDestroyed()) return
+    const page = s.windowsDark ? 'dark' : 'light'
+    const pin = s.theme !== page
+    // Không cần ghim mà debugger chưa gắn: không gắn chỉ để gỡ ghim.
+    if (!pin && !tab.cdp) return
+    try {
+      if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+      tab.cdp = true
+      await wc.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: pin ? page : '' }] })
+    } catch {
+      /* tab đã đóng / không gắn được debugger */
     }
   }
 
@@ -196,18 +264,21 @@ export class BrowserService {
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
+        // Lớp Soi: chạy trong thế giới cô lập (contextIsolation), chỉ nói chuyện với main qua IPC, trang không chạm tới.
+        ...(this.pagePreload ? { preload: this.pagePreload } : {}),
         // Tab của agent thường không hiện trên màn hình mà vẫn phải chạy bình thường.
         backgroundThrottling: false
       }
     })
-    view.setBackgroundColor('#ffffff')
+    view.setBackgroundColor(PAGE_BG[this.theme?.theme ?? 'dark'])
     // Pane là khung nổi bo góc (như Claude desktop): bo cả trang cho khớp góc dưới của khung.
     view.setBorderRadius(VIEW_RADIUS)
     view.setVisible(false)
-    const tab: Tab = { id: randomUUID(), wsId, owner, view, console: [], cdp: false }
+    const tab: Tab = { id: randomUUID(), wsId, owner, view, console: [], cdp: false, inspect: false, viewport: 'desk' }
     b.tabs.push(tab)
     b.active = tab.id
     this.wire(tab)
+    void this.pinScheme(tab)
     this.win?.contentView.addChildView(view)
     if (url) view.webContents.loadURL(url).catch(() => {})
     this.layout()
@@ -231,6 +302,18 @@ export class BrowserService {
     wc.on('did-navigate-in-page', changed)
     wc.on('devtools-opened', changed)
     wc.on('devtools-closed', changed)
+    // Ctrl+Shift+C khi trang đang giữ bàn phím (ô Browser đang chọn): bật / tắt Soi. Ô khác (terminal) không nhận
+    // phím này nên không đụng tới phím chép của terminal.
+    wc.on('before-input-event', (e, input) => {
+      if (input.type !== 'keyDown' || !input.control || !input.shift || input.alt || input.meta) return
+      if (input.key.toLowerCase() === 'l' && this.themeToggle) {
+        e.preventDefault()
+        return this.themeToggle()
+      }
+      if (input.key.toLowerCase() !== 'c' || !this.inspectHooks) return
+      e.preventDefault()
+      this.inspectHooks.toggle(tab.wsId, tab.id)
+    })
 
     wc.on('console-message', (e) => {
       // Cảnh báo bảo mật của chính Electron về trang (thiếu CSP…), không phải lỗi của trang.
@@ -242,7 +325,13 @@ export class BrowserService {
       if (isMainFrame && code !== -3) this.log(tab, 'error', `[stag] Failed to load ${url}: ${desc} (${code})`)
     })
     wc.on('render-process-gone', (_e, d) => this.log(tab, 'error', `[stag] Page crashed: ${d.reason}`))
-    wc.on('did-navigate', (_e, url) => this.log(tab, 'info', `[stag] Opened ${url}`))
+    wc.on('did-navigate', (_e, url) => {
+      // Trang mới: ảnh bản TRƯỚC (chế độ Soi) không còn nằm đè lên trang nữa.
+      tab.before = undefined
+      this.log(tab, 'info', `[stag] Opened ${url}`)
+      // Ghim màu trang có thể mất khi trang đổi tiến trình; áp lại (rẻ, không gắn thêm gì nếu không cần).
+      void this.pinScheme(tab)
+    })
 
     // Agent bấm link / bị chuyển hướng sang origin chưa được phép → chặn, bảo agent xin quyền
     // (hoặc báo Cài đặt chặn hẳn trang ngoài).
@@ -274,7 +363,12 @@ export class BrowserService {
     })
     wc.debugger.on('detach', () => {
       tab.cdp = false
+      // Mở / đóng DevTools tách debugger và xoá ghim màu trang theo Windows: gắn lại sau khi DevTools gắn xong.
+      setTimeout(() => void this.pinScheme(tab), 300)
     })
+    const repin = (): void => void setTimeout(() => void this.pinScheme(tab), 300)
+    wc.on('devtools-opened', repin)
+    wc.on('devtools-closed', repin)
   }
 
   private log(tab: Tab, level: string, text: string): void {
@@ -403,7 +497,7 @@ export class BrowserService {
       for (const tab of b.tabs) {
         const visible = !!this.shown && this.shown.wsId === wsId && b.active === tab.id
         if (visible) {
-          const r = this.shown!.rect
+          const r = viewportRect(this.shown!.rect, tab.viewport)
           const z = this.zoom
           tab.view.setBounds({ x: Math.round(r.x * z), y: Math.round(r.y * z), width: Math.round(r.width * z), height: Math.round(r.height * z) })
         }
@@ -413,6 +507,81 @@ export class BrowserService {
         // view có thể giữ khung trống tới lần trang tự vẽ tiếp.
         if (visible && !wasVisible && !tab.view.webContents.isDestroyed()) tab.view.webContents.invalidate()
       }
+    }
+  }
+
+  // ---- chế độ Soi ----
+
+  private pageOf(t: Tab): PageTab {
+    return { wsId: t.wsId, tabId: t.id, wc: t.view.webContents, owner: t.owner, inspect: t.inspect, viewport: t.viewport }
+  }
+
+  /** Tab có trang `wc` (IPC từ lớp Soi của trang: chỉ nhận từ tab của app). */
+  pageTab(wc: WebContents): PageTab | null {
+    const t = this.findByContents(wc)
+    return t ? this.pageOf(t) : null
+  }
+
+  page(wsId: string, tabId: string): PageTab | null {
+    const t = this.byWs.get(wsId)?.tabs.find((x) => x.id === tabId)
+    return t && !t.view.webContents.isDestroyed() ? this.pageOf(t) : null
+  }
+
+  pages(wsId: string): PageTab[] {
+    return (this.byWs.get(wsId)?.tabs ?? []).filter((t) => !t.view.webContents.isDestroyed()).map((t) => this.pageOf(t))
+  }
+
+  /** Bật / tắt Soi trên tab; trả về trạng thái mới. Tắt thì bỏ luôn chế độ xem bản trước. */
+  setInspect(wsId: string, tabId: string, on: boolean): boolean {
+    const t = this.tab(wsId, tabId)
+    if (t.inspect === on) return on
+    t.inspect = on
+    this.emit(wsId)
+    return on
+  }
+
+  setViewport(wsId: string, tabId: string, kind: ViewportKind): void {
+    const t = this.tab(wsId, tabId)
+    if (t.viewport === kind) return
+    t.viewport = kind
+    this.layout()
+    this.emit(wsId)
+  }
+
+  /** Góp ý đang xem ảnh bản TRƯỚC trên tab (thanh "Đang xem bản TRƯỚC" của pane). */
+  setBefore(wsId: string, tabId: string, id: number | undefined): void {
+    const t = this.byWs.get(wsId)?.tabs.find((x) => x.id === tabId)
+    if (!t || t.before === id) return
+    t.before = id
+    this.emit(wsId)
+  }
+
+  /**
+   * Ảnh PNG một vùng của trang (`rect` px CSS trong khung nhìn). Trang đang hiện: webContents.capturePage(rect) — đúng
+   * cái người dùng thấy. Trang đang ẩn (pane đóng, hộp thoại che) capturePage trả ảnh rỗng → chụp qua CDP (vùng cắt
+   * của CDP tính theo toạ độ tài liệu nên cần `scroll` của trang).
+   */
+  async capture(wsId: string, tabId: string, rect: Rect, scroll = { x: 0, y: 0 }): Promise<Buffer | null> {
+    const t = this.byWs.get(wsId)?.tabs.find((x) => x.id === tabId)
+    if (!t || t.view.webContents.isDestroyed()) return null
+    const wc = t.view.webContents
+    const z = wc.getZoomFactor()
+    const r = { x: Math.max(0, Math.floor(rect.x)), y: Math.max(0, Math.floor(rect.y)), w: Math.ceil(rect.w), h: Math.ceil(rect.h) }
+    if (r.w < 1 || r.h < 1) return null
+    if (t.view.getVisible()) {
+      // capturePage có lúc không bao giờ xong (view vừa đổi cỡ / chưa vẽ lại): quá 1,5 giây thì chụp qua CDP.
+      const img = await Promise.race([
+        wc.capturePage({ x: Math.round(r.x * z), y: Math.round(r.y * z), width: Math.round(r.w * z), height: Math.round(r.h * z) }),
+        delay(1500).then(() => null)
+      ]).catch(() => null)
+      if (img && !img.isEmpty()) return img.toPNG()
+    }
+    try {
+      const clip = { x: r.x + scroll.x, y: r.y + scroll.y, width: r.w, height: r.h, scale: 1 }
+      const res = (await this.cdp(t, 'Page.captureScreenshot', { format: 'png', clip })) as { data: string }
+      return Buffer.from(res.data, 'base64')
+    } catch {
+      return null
     }
   }
 
@@ -521,8 +690,11 @@ export class BrowserService {
   private async cdp(tab: Tab, method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     const dbg = tab.view.webContents.debugger
     if (!tab.cdp) {
-      if (!dbg.isAttached()) dbg.attach('1.3')
+      const fresh = !dbg.isAttached()
+      if (fresh) dbg.attach('1.3')
       tab.cdp = true
+      // Gắn lại sau khi debugger bị tách: ghim màu trang theo Windows mất theo, áp lại.
+      if (fresh) void this.pinScheme(tab)
     }
     return dbg.sendCommand(method, params)
   }
@@ -645,8 +817,18 @@ function describeTab(t: Tab): BrowserTab {
     canGoBack: !dead && wc.navigationHistory.canGoBack(),
     canGoForward: !dead && wc.navigationHistory.canGoForward(),
     devtools: !dead && wc.isDevToolsOpened(),
+    inspect: t.inspect,
+    viewport: t.viewport,
+    ...(t.before !== undefined ? { before: t.before } : {}),
     ...(t.dev ? { dev: t.dev } : {})
   }
+}
+
+/** Vùng của view theo khung màn hình: Tablet / Mobile = bề ngang cố định, đặt giữa (hẹp hơn thì lấy hết). */
+export function viewportRect(r: ViewRect, kind: ViewportKind): ViewRect {
+  if (kind === 'desk') return r
+  const width = Math.min(r.width, VIEWPORT_WIDTH[kind])
+  return { x: r.x + Math.floor((r.width - width) / 2), y: r.y, width, height: r.height }
 }
 
 /** Chờ trang ổn định sau một thao tác: đợi chút, nếu đang tải thì chờ tải xong (tối đa 10 giây). */

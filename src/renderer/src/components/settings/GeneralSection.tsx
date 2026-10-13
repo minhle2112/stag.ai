@@ -43,17 +43,8 @@ export function GeneralSection(): React.JSX.Element {
             ]}
           />
         </Row>
-        <Row label="Chủ đề" desc="Giao diện sáng sẽ có khi bạn chọn hướng thiết kế (Graphite / Paper / Nocturne).">
-          <Select
-            label="Chủ đề"
-            value="dark"
-            onChange={() => {}}
-            options={[
-              { value: 'dark', label: 'Tối' },
-              { value: 'light', label: 'Sáng (sắp có)', disabled: true },
-              { value: 'system', label: 'Theo Windows (sắp có)', disabled: true }
-            ]}
-          />
+        <Row label="Sáng / tối" desc="Chọn ở Cài đặt → Giao diện.">
+          <SmallButton onClick={() => openSettings('appearance')}>Mở Giao diện</SmallButton>
         </Row>
         <Row label="Thu phóng" desc="Phóng to / thu nhỏ toàn bộ giao diện app (không đổi cỡ chữ terminal).">
           <Select

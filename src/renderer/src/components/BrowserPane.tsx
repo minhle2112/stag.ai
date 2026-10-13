@@ -8,6 +8,10 @@ import { IconButton } from './shell/IconButton'
 import { isBlankTab, NewTabPanel } from './NewTabPanel'
 import { MenuItem } from './AgentMenu'
 import { Popover } from './canvas/frame'
+import { isOpen, needsYou, type InspectPin } from '@shared/inspect'
+import { useInspect } from '../store/inspect'
+import { InspectPanel, pagePins } from './inspect/InspectPanel'
+import { SourceSetupDialog } from './inspect/SourceSetupDialog'
 
 /**
  * Pane browser của một workspace. Trang thật là WebContentsView do main vẽ đè lên vùng `viewport`;
@@ -29,13 +33,47 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
     load(wsId)
   }, [wsId, load])
 
-  // Báo main vị trí vùng hiển thị; ẩn view khi có hộp thoại hoặc đang kéo đổi độ rộng
+  // Chế độ Soi: bình luận của workspace, ngăn Bình luận bên phải trang (ô hẹp: phủ lên trang).
+  const loadInspect = useInspect((s) => s.load)
+  const inspectPins = useInspect((s) => s.byWs[wsId]?.pins)
+  const sideSet = useInspect((s) => s.side[wsId])
+  const setSide = useInspect((s) => s.setSide)
+  const actInspect = useInspect((s) => s.act)
+  useEffect(() => {
+    void loadInspect(wsId)
+  }, [wsId, loadInspect])
+  const onPage = pagePins(inspectPins ?? [], active)
+  const openCount = onPage.filter((p) => isOpen(p.state)).length
+  const web = !!active && /^https?:\/\//i.test(active.url) && !blank
+  const pane = useRef<HTMLDivElement>(null)
+  const [narrow, setNarrow] = useState(false)
+  useLayoutEffect(() => {
+    const el = pane.current
+    if (!el) return
+    // Đo ngay một lần: ResizeObserver chỉ báo theo nhịp vẽ (cửa sổ bị che thì chưa báo).
+    setNarrow(el.clientWidth < 700)
+    const ro = new ResizeObserver(() => setNarrow(el.clientWidth < 700))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  // Chưa bấm tay: ô rộng tự mở khi trang có bình luận; ô hẹp chỉ mở khi bấm (ngăn phủ lên trang).
+  const side = web && (sideSet ?? (!narrow && openCount > 0))
+  const covered = side && narrow
+  // Vừa gửi thêm bình luận ở ô rộng: mở ngăn để thấy mạch mới.
+  const lastCount = useRef({ tab: active?.id, n: openCount })
+  useEffect(() => {
+    const prev = lastCount.current
+    if (prev.tab === active?.id && openCount > prev.n && !narrow && web && sideSet === false) setSide(wsId, true)
+    lastCount.current = { tab: active?.id, n: openCount }
+  }, [active?.id, openCount, narrow, web, sideSet, setSide, wsId])
+
+  // Báo main vị trí vùng hiển thị; ẩn view khi có hộp thoại, đang kéo đổi độ rộng hoặc ngăn Bình luận phủ trang
   // (view gốc luôn nằm trên HTML và nuốt sự kiện chuột).
   useEffect(() => {
     const el = viewport.current
     if (!el) return
     const report = (): void => {
-      if (modals > 0 || resizing || blank) return b.setBounds(null, null)
+      if (modals > 0 || resizing || blank || covered) return b.setBounds(null, null)
       const r = el.getBoundingClientRect()
       b.setBounds(wsId, { x: r.left, y: r.top, width: r.width, height: r.height })
     }
@@ -48,17 +86,34 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
       window.removeEventListener('resize', report)
       b.setBounds(null, null)
     }
-  }, [wsId, modals, resizing, blank, b])
+  }, [wsId, modals, resizing, blank, covered, b])
 
   const driver = active?.owner.kind === 'agent' ? active.owner.agentName : null
   const toggleBrowser = useUi((s) => s.toggleBrowser)
   const expanded = useBrowser((s) => s.expanded)
   const setExpanded = useBrowser((s) => s.setExpanded)
   const [menu, setMenu] = useState(false)
+  const [sourceDialog, setSourceDialog] = useState(false)
   const menuBtn = useRef<HTMLSpanElement>(null)
 
+  const toggleSoi = (): void => {
+    if (active && web) void actInspect(wsId, { type: 'toggle', tabId: active.id })
+  }
+  // Ctrl+Shift+C khi đang chọn ô Browser (thanh tab / địa chỉ / ngăn Bình luận). Trong trang: main bắt phím này ở
+  // before-input-event của tab (không mở DevTools).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!e.ctrlKey || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'c') return
+      if (!pane.current?.contains(document.activeElement)) return
+      e.preventDefault()
+      toggleSoi()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   return (
-    <div className="flex h-full flex-col">
+    <div ref={pane} className="flex h-full flex-col">
       <div className="flex h-10 shrink-0 items-center gap-1 pr-2 pl-2">
         <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           {state?.tabs.map((t) => (
@@ -74,11 +129,14 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
       </div>
       {menu && (
         <Popover anchor={menuBtn.current} onClose={() => setMenu(false)}>
-          <BrowserMenu wsId={wsId} tab={active} onClose={() => setMenu(false)} />
+          <BrowserMenu wsId={wsId} tab={active} onClose={() => setMenu(false)} onSource={() => setSourceDialog(true)} />
         </Popover>
       )}
 
-      <AddressBar wsId={wsId} tab={active} />
+      {sourceDialog && <SourceSetupDialog wsId={wsId} onClose={() => setSourceDialog(false)} />}
+      <AddressBar wsId={wsId} tab={active}>
+        {web && active && <InspectTools tab={active} pins={onPage} side={side} onSoi={toggleSoi} onSide={() => setSide(wsId, !side)} />}
+      </AddressBar>
 
       {driver && (
         <div className="flex h-[30px] shrink-0 items-center gap-1.5 border-b border-line bg-accent/10 px-3 text-[12px]">
@@ -88,13 +146,59 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
         </div>
       )}
 
-      <div ref={viewport} className="relative min-h-0 flex-1 rounded-b-[11px] bg-bg">
-        {blank && !resizing && <NewTabPanel wsId={wsId} tab={active} />}
-        {active && resizing && (
-          <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-dim">Thả chuột để giữ độ rộng này</div>
-        )}
+      <div className="flex min-h-0 flex-1">
+        <div ref={viewport} className={`relative min-h-0 min-w-0 flex-1 bg-bg ${side && !narrow ? 'rounded-bl-[11px]' : 'rounded-b-[11px]'}`}>
+          {blank && !resizing && <NewTabPanel wsId={wsId} tab={active} />}
+          {active && resizing && (
+            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-dim">Thả chuột để giữ độ rộng này</div>
+          )}
+          {covered && <InspectPanel wsId={wsId} tab={active} overlay onClose={() => setSide(wsId, false)} />}
+        </div>
+        {side && !narrow && <InspectPanel wsId={wsId} tab={active} overlay={false} onClose={() => setSide(wsId, false)} />}
       </div>
     </div>
+  )
+}
+
+/** Nút của chế độ Soi trên thanh địa chỉ: Soi (chỉ icon) và nút Bình luận mang huy hiệu duy nhất (vàng = số trả lời mới,
+ * xám = số bình luận đang mở khi ngăn đang ẩn). */
+function InspectTools({ tab, pins, side, onSoi, onSide }: { tab: BrowserTab; pins: InspectPin[]; side: boolean; onSoi: () => void; onSide: () => void }): React.JSX.Element {
+  const open = pins.filter((p) => isOpen(p.state)).length
+  const fresh = pins.filter((p) => needsYou(p.state)).length
+  const on = !!tab.inspect
+  const n = fresh || (side ? 0 : open)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onSoi}
+        aria-pressed={on}
+        aria-label="Soi"
+        data-tip={`${on ? 'Tắt' : 'Bật'} Soi (Ctrl+Shift+C)`}
+        className={`ml-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md border ${on ? 'border-accent bg-accent text-accent-on' : 'border-line-2 text-muted hover:text-fg'}`}
+      >
+        <Icon name="soi" />
+      </button>
+      <button
+        type="button"
+        onClick={onSide}
+        aria-pressed={side}
+        aria-label="Bình luận"
+        data-tip={`${side ? 'Ẩn bình luận' : 'Bình luận'}${fresh ? ` · ${fresh} trả lời mới` : open ? ` · ${open} đang mở` : ''}`}
+        className={`relative grid h-7 w-7 shrink-0 place-items-center rounded-md hover:bg-panel-3 hover:text-fg ${side ? 'text-accent' : 'text-muted'}`}
+      >
+        <Icon name="comment" />
+        {n > 0 && (
+          <span
+            className={`absolute top-px right-0 grid h-3.5 min-w-3.5 place-items-center rounded-full px-[3px] text-[10px] font-semibold ${
+              fresh ? 'bg-wait text-wait-on' : 'bg-panel-3 text-fg'
+            }`}
+          >
+            {n}
+          </span>
+        )}
+      </button>
+    </>
   )
 }
 
@@ -216,7 +320,7 @@ export function BrowserDock({ workspace }: { workspace: Workspace }): React.JSX.
         </div>
       )}
       {/* Khung nổi bo góc như pane browser của Claude desktop; view trang được bo góc dưới ở main. */}
-      <div className="h-full overflow-hidden rounded-xl border border-line-2 bg-panel shadow-[0_4px_18px_rgba(0,0,0,0.35)]">
+      <div className="h-full overflow-hidden rounded-xl border border-line-2 bg-panel shadow-card">
         <BrowserPane key={workspace.id} workspace={workspace} />
       </div>
       {dragging && <div className="fixed inset-0 z-[60] cursor-col-resize" />}
@@ -263,7 +367,7 @@ function TabButton({ tab, active, onSelect, onClose }: { tab: BrowserTab; active
   )
 }
 
-function AddressBar({ wsId, tab }: { wsId: string; tab: BrowserTab | undefined }): React.JSX.Element {
+function AddressBar({ wsId, tab, children }: { wsId: string; tab: BrowserTab | undefined; children?: React.ReactNode }): React.JSX.Element {
   const [text, setText] = useState('')
   const [editing, setEditing] = useState(false)
   const b = window.stag.browser
@@ -318,12 +422,13 @@ function AddressBar({ wsId, tab }: { wsId: string; tab: BrowserTab | undefined }
         spellCheck={false}
         className="mx-1 h-7 min-w-0 flex-1 rounded-md border border-line-2 bg-bg0 px-2.5 text-[12.5px] text-fg outline-none select-text placeholder:text-dim focus:border-accent/60"
       />
+      {children}
       <button
         type="button"
         disabled={!tab || isBlankTab(tab)}
         onClick={() => tab && b.toggleDevTools(wsId, tab.id)}
         aria-pressed={!!tab?.devtools}
-        data-tip={tab?.devtools ? 'Đóng DevTools của tab này' : 'Soi phần tử (DevTools) · F12'}
+        data-tip={tab?.devtools ? 'Đóng DevTools của tab này' : 'DevTools của tab · F12'}
         className={`grid h-7 w-7 shrink-0 place-items-center rounded-md hover:bg-panel-3 hover:text-fg disabled:opacity-30 ${tab?.devtools ? 'bg-panel-3 text-accent' : 'text-muted'}`}
       >
         <Icon name="code" />
@@ -333,7 +438,7 @@ function AddressBar({ wsId, tab }: { wsId: string; tab: BrowserTab | undefined }
 }
 
 /** Menu ⋮ của pane: việc ít dùng (mở ngoài, DevTools, dev server, xoá dữ liệu trang). Ẩn view trang khi mở (view nằm đè HTML). */
-function BrowserMenu({ wsId, tab, onClose }: { wsId: string; tab: BrowserTab | undefined; onClose: () => void }): React.JSX.Element {
+function BrowserMenu({ wsId, tab, onClose, onSource }: { wsId: string; tab: BrowserTab | undefined; onClose: () => void; onSource: () => void }): React.JSX.Element {
   const b = window.stag.browser
   useEffect(() => {
     const ui = useUi.getState()
@@ -351,6 +456,7 @@ function BrowserMenu({ wsId, tab, onClose }: { wsId: string; tab: BrowserTab | u
       <MenuItem label="Dev server của dự án…" onClick={run(() => void b.newTab(wsId))} />
       {web && <MenuItem label="Mở bằng trình duyệt ngoài" onClick={run(() => window.open(tab.url))} />}
       {tab && !isBlankTab(tab) && <MenuItem label={tab.devtools ? 'Đóng DevTools' : 'Mở DevTools'} hint="F12" onClick={run(() => void b.toggleDevTools(wsId, tab.id))} />}
+      <MenuItem label="Tìm nguồn cho chế độ Soi…" onClick={run(onSource)} />
       {tab && <MenuItem label="Đóng tab" onClick={run(() => void b.closeTab(wsId, tab.id))} />}
       <div className="my-1 h-px bg-line" />
       <MenuItem label="Xoá cookie và dữ liệu trang" danger onClick={run(() => void b.clearData(wsId))} />

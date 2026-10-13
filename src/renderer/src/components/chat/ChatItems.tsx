@@ -273,7 +273,7 @@ function FileCard({ path, rows, add, del, root, wsId }: { path: string; rows: Di
         mini.length > 0 && (
           <button type="button" onClick={() => setAll(true)} data-tip="Xem hết diff" className="block w-full border-t border-line bg-bg py-0.5 text-left font-mono text-[11.5px] leading-[1.6]">
             {mini.map((r, i) => (
-              <div key={i} className={`truncate px-2.5 whitespace-pre ${r.t === '+' ? 'bg-work/[0.08] text-[#9fe8bd]' : 'bg-danger/[0.08] text-[#f2a39c]'}`}>
+              <div key={i} className={`truncate px-2.5 whitespace-pre ${r.t === '+' ? 'bg-work/[0.08] text-add-text' : 'bg-danger/[0.08] text-del-text'}`}>
                 {r.t}
                 {r.s || ' '}
               </div>

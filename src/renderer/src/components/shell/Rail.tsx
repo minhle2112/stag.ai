@@ -44,12 +44,12 @@ export function Rail(): React.JSX.Element {
         <RailButton key={v.tab} on={current === v.tab} tip={v.tip} onClick={() => setTab(v.tab)}>
           <Icon name={v.icon} size="l" />
           {v.tab === 'kanban' && waiting > 0 && (
-            <span className="absolute top-1 right-0.5 box-content flex h-3.5 min-w-3.5 items-center justify-center rounded-full border-[1.5px] border-bg0 bg-wait px-[3px] text-[11px] leading-none font-bold text-[#2a1c00]">
+            <span className="absolute top-1 right-0.5 box-content flex h-3.5 min-w-3.5 items-center justify-center rounded-full border-[1.5px] border-bg0 bg-wait px-[3px] text-[11px] leading-none font-bold text-wait-on">
               {waiting}
             </span>
           )}
           {v.tab === 'artifacts' && inbox > 0 && (
-            <span className="absolute top-1 right-0.5 box-content flex h-3.5 min-w-3.5 items-center justify-center rounded-full border-[1.5px] border-bg0 bg-wait px-[3px] text-[11px] leading-none font-bold text-[#2a1c00]">
+            <span className="absolute top-1 right-0.5 box-content flex h-3.5 min-w-3.5 items-center justify-center rounded-full border-[1.5px] border-bg0 bg-wait px-[3px] text-[11px] leading-none font-bold text-wait-on">
               {inbox}
             </span>
           )}

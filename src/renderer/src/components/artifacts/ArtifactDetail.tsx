@@ -834,7 +834,7 @@ export function ArtifactDetail({
           )}
         </div>
         {gone && (
-          <div className="flex items-center gap-2.5 border-b border-line bg-danger/6 px-[22px] py-2 text-[12.5px] text-[#f4a49c]">
+          <div className="flex items-center gap-2.5 border-b border-line bg-danger/6 px-[22px] py-2 text-[12.5px] text-danger-text">
             <Mi name="warn" />
             <span className="min-w-0">
               File gốc <span className="font-mono">{a.rel}</span> đã bị xoá khỏi dự án. Đây là bản chụp lúc nộp v{cur.v}.
@@ -1102,8 +1102,8 @@ function PinImage({ src, pins, picking, onPick, onPin }: { src: string; pins: Pi
 }
 
 const PIN_BG: Record<string, string> = {
-  you: 'bg-wait text-[#1a1300]',
-  fixed: 'bg-work text-[#03200f]',
+  you: 'bg-wait text-wait-on',
+  fixed: 'bg-work text-work-on',
   open: 'bg-[#c9ced5] text-[#111]',
   draft: 'bg-accent text-accent-on',
   closed: 'bg-line-3 text-muted'

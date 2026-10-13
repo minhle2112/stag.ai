@@ -136,7 +136,7 @@ export function ConnectorsSection(): React.JSX.Element {
                 label: (
                   <>
                     Duyệt
-                    {pending > 0 && <span className="rounded-full bg-wait px-1.5 text-[11px] font-semibold text-[#2a1c00]">{pending}</span>}
+                    {pending > 0 && <span className="rounded-full bg-wait px-1.5 text-[11px] font-semibold text-wait-on">{pending}</span>}
                   </>
                 ),
                 tip: 'Lần gọi tool đang chờ bạn duyệt'

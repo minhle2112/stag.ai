@@ -113,7 +113,7 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
         <span className="min-w-0 truncate">{ws.name}</span>
         <span className="flex-1" />
         {waiting > 0 && !open && (
-          <span className="shrink-0 rounded-full bg-wait px-1.5 font-mono text-[11px] leading-4 font-semibold text-[#1a1300]" data-tip={`${waiting} agent chờ bạn`}>
+          <span className="shrink-0 rounded-full bg-wait px-1.5 font-mono text-[11px] leading-4 font-semibold text-wait-on" data-tip={`${waiting} agent chờ bạn`}>
             {waiting}
           </span>
         )}
@@ -147,7 +147,7 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
                 setMenu(false)
               }}
             />
-            <div className="absolute top-full right-0 z-20 mt-1 w-52 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 text-[13px] font-normal text-fg shadow-[0_14px_40px_rgba(0,0,0,.6)]">
+            <div className="absolute top-full right-0 z-20 mt-1 w-52 overflow-hidden rounded-lg border border-line-2 bg-pop p-1 text-[13px] font-normal text-fg shadow-pop">
               <MenuItem
                 label="Mở thư mục dự án"
                 onClick={() => {

@@ -1,12 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, protocol, safeStorage, session, shell, Tray, utilityProcess } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, safeStorage, session, shell, Tray, utilityProcess } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AdapterService } from './adapters'
 import { AgentService } from './agents'
 import { ExternalAdapterStore } from './externalAdapters'
 import { ArtifactLog, serveArtifact } from './artifacts'
 import { ArtifactStore } from './artifactStore'
+import { InspectService } from './inspect'
+import { detectSetup, installSetup, removeWordpress, setupMessage } from './inspectSetup'
 import { Board } from './board'
 import { BrowserService } from './browser'
 import { DevServerService } from './devServer'
@@ -26,6 +28,7 @@ import { independentSessionEnv } from './adapters'
 import { onUserNoteWrite, putNote, readNote } from './vault'
 import { agentKind } from '@shared/types'
 import type { PluginEvent } from '@shared/plugins'
+import type { InspectAction, SourceKind } from '@shared/inspect'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
 import { VaultIndexer } from './vaultIndex'
@@ -35,10 +38,13 @@ import { CloudUsage, VoiceCloud } from './voiceCloud'
 import { GlobalVoice, KeySender, VoiceOverlay } from './voiceSystem'
 import { SONIOX_SECRET } from '@shared/voice'
 import { samePath } from './fsutil'
-import type { GeneralSettings } from '@shared/types'
+import type { GeneralSettings, Workspace } from '@shared/types'
 import { MemoryKeeper } from './workLog'
 import { resolveMemory } from '@shared/settings'
 import { ClaudeUsageService, registerClaudeUsageIpc } from './claudeUsage'
+import { registerThemeIpc, ThemeService } from './theme'
+import { WINDOW_BG } from '@shared/theme'
+import { homedir } from 'node:os'
 
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
 // Phải đặt trước khi tạo các service vì chúng đọc đường dẫn userData lúc khởi tạo.
@@ -94,21 +100,39 @@ const memory = new MemoryKeeper((ws, agentId) => resolveMemory(settings.get(), w
 const send = (channel: string, ...args: unknown[]): void => {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...args)
 }
-const browser = new BrowserService({
-  changed: (workspaceId, state) => send(IPC.browserChanged, workspaceId, state),
-  reveal: (workspaceId, tabId) => send(IPC.browserReveal, workspaceId, tabId),
-  ask: (ask) => send(IPC.browserAsk, ask),
-  askClosed: (askId) => send(IPC.browserAskClosed, askId)
-})
+const browser = new BrowserService(
+  {
+    changed: (workspaceId, state) => send(IPC.browserChanged, workspaceId, state),
+    reveal: (workspaceId, tabId) => send(IPC.browserReveal, workspaceId, tabId),
+    ask: (ask) => send(IPC.browserAsk, ask),
+    askClosed: (askId) => send(IPC.browserAskClosed, askId)
+  },
+  // Lớp Soi của trang (chế độ Soi): preload riêng, chạy trong thế giới cô lập của mỗi tab.
+  join(__dirname, '../preload/inspect.js')
+)
 const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), (s) => {
   send(IPC.settingsChanged, s)
   applyGeneral(s.app.general)
+  theme.apply()
   browser.setSettings(s.app.browser)
   void plugins.applySettings(s)
   // Đổi "giải phóng sau N phút": hẹn lại giờ tắt tiến trình nhận dạng.
   voice.touch()
   globalVoice.sync()
   claudeUsage.sync()
+})
+/** Màu app (Cài đặt → Giao diện): nativeTheme, nền cửa sổ, ô Trình duyệt, theme của Claude Code. */
+const theme = new ThemeService({
+  general: () => settings.general(),
+  setPref: (pref) => settings.setApp({ general: { theme: pref } }),
+  changed: (s) => {
+    send(IPC.themeChanged, s)
+    for (const w of BrowserWindow.getAllWindows()) w.setBackgroundColor(WINDOW_BG[s.theme])
+    browser.setTheme(s)
+  },
+  // Như Claude Code: CLAUDE_CONFIG_DIR (nếu đặt) chứa .claude.json thay cho thư mục nhà.
+  claudeConfig: join(process.env.CLAUDE_CONFIG_DIR || homedir(), '.claude.json'),
+  claudeBackup: join(app.getPath('userData'), 'claude-theme.json')
 })
 /** Usage tài khoản Claude ở thanh trạng thái (bật / tắt ở Cài đặt → Chung). */
 const claudeUsage = new ClaudeUsageService({
@@ -287,6 +311,14 @@ const products = new ArtifactStore(
   (agentId) => agents.kickComments(agentId)
 )
 agents.attachProducts(products)
+/** Chế độ Soi của ô Browser: bình luận ghim lên phần tử trang → agent sửa (tool inspect_reply). */
+const inspect = new InspectService(browser, (id) => workspaces.get(id), {
+  changed: (workspaceId) => send(IPC.inspectChanged, workspaceId),
+  queued: (agentId) => agents.kickComments(agentId),
+  focus: (workspaceId, tabId, id) => send(IPC.inspectFocus, workspaceId, tabId, id)
+})
+inspect.attachTeam((wsId) => agents.inspectTeam(wsId))
+agents.attachInspect(inspect)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -375,7 +407,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    backgroundColor: '#08090b',
+    backgroundColor: WINDOW_BG[theme.get().theme],
     title: 'stag.ai',
     autoHideMenuBar: true,
     // Thanh tiêu đề do giao diện tự vẽ, cả ba nút thu nhỏ / phóng to / đóng (lớp phủ gốc của Windows gần như không đổi màu khi rê chuột).
@@ -401,6 +433,8 @@ function createWindow(): void {
     const factor = settings.general().zoom / 100
     win.webContents.setZoomFactor(factor)
   })
+  // Người dùng vừa đổi sáng / tối trong Cài đặt của Windows rồi quay lại app.
+  win.on('focus', () => theme.refreshWindows())
   // Nút phóng to / thu về ở thanh tiêu đề đổi biểu tượng theo trạng thái cửa sổ.
   win.on('maximize', () => win.webContents.send(IPC.winMaximized, true))
   win.on('unmaximize', () => win.webContents.send(IPC.winMaximized, false))
@@ -456,6 +490,10 @@ app.whenReady().then(async () => {
   await workspaces.load()
   await settings.load()
   browser.setSettings(settings.get().app.browser)
+  // Trước khi tạo cửa sổ: nền cửa sổ và trang đầu tiên lấy đúng màu đã lưu (không chớp sai màu).
+  theme.start()
+  registerThemeIpc(theme)
+  browser.themeToggle = () => void theme.toggle()
   await external.load()
   await secrets.load()
   await skills.cleanAllSessions()
@@ -518,6 +556,28 @@ app.whenReady().then(async () => {
   registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins, vaultIndexer, devServers, products)
   // Góp ý còn trong hàng chờ từ lần chạy trước: nạp sẵn để được gửi khi agent rảnh, kể cả khi chưa mở tab.
   for (const w of workspaces.list()) void products.warm(w).catch(() => {})
+  inspect.register()
+  ipcMain.handle(IPC.inspectSnapshot, (_e, workspaceId: string) => inspect.snapshot(String(workspaceId)))
+  ipcMain.handle(IPC.inspectAct, (_e, workspaceId: string, action: InspectAction) => inspect.act(String(workspaceId), action))
+  for (const w of workspaces.list()) void inspect.warm(w).catch(() => {})
+  const inspectRes = app.isPackaged ? join(process.resourcesPath, 'inspect') : join(app.getAppPath(), 'resources', 'inspect')
+  const wsOf = (id: unknown): Workspace => {
+    const w = workspaces.get(String(id))
+    if (!w) throw new Error('Workspace không còn')
+    return w
+  }
+  ipcMain.handle(IPC.inspectSetup, (_e, workspaceId: string) => detectSetup(wsOf(workspaceId)))
+  ipcMain.handle(IPC.inspectInstall, (_e, workspaceId: string, kind: SourceKind) => {
+    if (kind !== 'vite' && kind !== 'next' && kind !== 'wordpress') throw new Error('Không rõ loại')
+    return installSetup(wsOf(workspaceId), kind, inspectRes)
+  })
+  ipcMain.handle(IPC.inspectUninstall, (_e, workspaceId: string) => removeWordpress(wsOf(workspaceId)))
+  ipcMain.handle(IPC.inspectSetupMessage, async (_e, workspaceId: string, kind: 'vite' | 'next') => {
+    const setup = await detectSetup(wsOf(workspaceId))
+    const cfg = kind === 'vite' ? setup.vite?.config : setup.next?.config
+    if (!cfg || (kind !== 'vite' && kind !== 'next')) throw new Error('Không thấy file cấu hình')
+    return setupMessage(kind, cfg)
+  })
   registerVoiceIpc(voice, new VocabCache(), workspaces, voiceCloud, cloudUsage)
   registerClaudeUsageIpc(claudeUsage)
   claudeUsage.sync()

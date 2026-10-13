@@ -193,7 +193,7 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
           <>
             <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />
             <div
-              className="fixed z-50 w-[330px] rounded-[10px] border border-line-2 bg-panel-2 p-1.5 text-[12px] text-muted shadow-[0_14px_40px_rgba(0,0,0,.6)]"
+              className="fixed z-50 w-[330px] rounded-[10px] border border-line-2 bg-pop p-1.5 text-[12px] text-muted shadow-pop"
               style={{ left: pos.left, bottom: pos.bottom }}
             >
               <div className="flex items-center gap-2 px-2 pt-1.5 pb-2">
@@ -210,19 +210,19 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
               </div>
 
               {state.status === 'signedOut' && (
-                <div className="mx-1.5 my-1 rounded-md border border-wait/25 bg-wait/8 px-2.5 py-2 leading-[1.45] text-[#f7cd80]">
+                <div className="mx-1.5 my-1 rounded-md border border-wait/25 bg-wait/8 px-2.5 py-2 leading-[1.45] text-wait-text">
                   {state.error ? `${state.error} ` : ''}Mở một ô Claude và gõ <b>/login</b> (hoặc gửi một tin để Claude Code làm mới phiên), rồi bấm Làm mới.
                 </div>
               )}
               {state.status === 'error' && (
-                <div className="mx-1.5 my-1 rounded-md border border-danger/25 bg-danger/10 px-2.5 py-2 leading-[1.45] text-[#f6a19a]">
+                <div className="mx-1.5 my-1 rounded-md border border-danger/25 bg-danger/10 px-2.5 py-2 leading-[1.45] text-danger-text">
                   Không lấy được usage. {state.error}
                 </div>
               )}
               {warn && (
                 <div
                   className={`mx-1.5 my-1 rounded-md border px-2.5 py-2 leading-[1.45] ${
-                    warn.tone === 'danger' ? 'border-danger/25 bg-danger/10 text-[#f6a19a]' : 'border-wait/25 bg-wait/8 text-[#f7cd80]'
+                    warn.tone === 'danger' ? 'border-danger/25 bg-danger/10 text-danger-text' : 'border-wait/25 bg-wait/8 text-wait-text'
                   }`}
                 >
                   {warn.text}

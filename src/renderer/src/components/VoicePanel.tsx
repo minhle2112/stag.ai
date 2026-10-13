@@ -126,7 +126,7 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
   const key = VOICE_HOTKEYS[hotkey]
   return (
     <div
-      className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-line-2 bg-panel-2/95 px-3 py-2 shadow-[0_10px_30px_rgba(0,0,0,.5)]"
+      className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-line-2 bg-panel-2/95 px-3 py-2 shadow-float"
       // Không để ô / terminal bên dưới giành focus khi bấm vào khung.
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}

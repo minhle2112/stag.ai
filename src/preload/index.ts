@@ -3,7 +3,9 @@ import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJ
 import type { VoiceAiInfo, VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import type { DevServerList } from '@shared/launch'
 import type { ClaudeUsageState } from '@shared/claudeUsage'
+import type { ThemeState } from '@shared/theme'
 import type { ArtifactComment, ArtifactsSnapshot, CommentAnchor, DocBlock } from '@shared/artifacts'
+import type { InspectAction, InspectActionResult, InspectSnapshot, SourceKind, SourceSetup } from '@shared/inspect'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type { AgentApiEvent, AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
@@ -328,6 +330,26 @@ const api = {
       return () => ipcRenderer.removeListener(IPC.productsChanged, fn)
     }
   },
+  /** Chế độ Soi của ô Browser: góp ý ghim lên phần tử trang, gửi agent. */
+  inspect: {
+    snapshot: (workspaceId: string): Promise<InspectSnapshot> => ipcRenderer.invoke(IPC.inspectSnapshot, workspaceId),
+    act: (workspaceId: string, action: InspectAction): Promise<InspectActionResult> => ipcRenderer.invoke(IPC.inspectAct, workspaceId, action),
+    setup: (workspaceId: string): Promise<SourceSetup> => ipcRenderer.invoke(IPC.inspectSetup, workspaceId),
+    /** Chép plugin (Vite / Next → .stag/inspect/) hoặc mu-plugin (WordPress); trả về file đã chép. */
+    install: (workspaceId: string, kind: SourceKind): Promise<string[]> => ipcRenderer.invoke(IPC.inspectInstall, workspaceId, kind),
+    uninstall: (workspaceId: string): Promise<void> => ipcRenderer.invoke(IPC.inspectUninstall, workspaceId),
+    setupMessage: (workspaceId: string, kind: 'vite' | 'next'): Promise<string> => ipcRenderer.invoke(IPC.inspectSetupMessage, workspaceId, kind),
+    onChanged(cb: (workspaceId: string) => void): () => void {
+      const fn = (_e: IpcRendererEvent, workspaceId: string): void => cb(workspaceId)
+      ipcRenderer.on(IPC.inspectChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.inspectChanged, fn)
+    },
+    onFocus(cb: (workspaceId: string, tabId: string, id: number) => void): () => void {
+      const fn = (_e: IpcRendererEvent, workspaceId: string, tabId: string, id: number): void => cb(workspaceId, tabId, id)
+      ipcRenderer.on(IPC.inspectFocus, fn)
+      return () => ipcRenderer.removeListener(IPC.inspectFocus, fn)
+    }
+  },
   openFolder: (path: string): Promise<string> => ipcRenderer.invoke(IPC.openFolder, path),
   /** Chọn một thư mục; null = huỷ. */
   pickFolder: (title: string, defaultPath?: string): Promise<string | null> => ipcRenderer.invoke(IPC.pickFolder, title, defaultPath),
@@ -492,6 +514,25 @@ const api = {
       const fn = (_e: IpcRendererEvent, s: ClaudeUsageState): void => cb(s)
       ipcRenderer.on(IPC.claudeUsageChanged, fn)
       return () => ipcRenderer.removeListener(IPC.claudeUsageChanged, fn)
+    }
+  },
+  /** Màu app: Sáng / Tối / Theo Windows (Cài đặt → Giao diện). */
+  theme: {
+    /** Đồng bộ: script đầu trang đặt data-theme trước khi React vẽ (không chớp sai màu). */
+    initial: (): ThemeState | null => {
+      try {
+        return ipcRenderer.sendSync(IPC.themeGetSync) as ThemeState
+      } catch {
+        return null
+      }
+    },
+    get: (): Promise<ThemeState> => ipcRenderer.invoke(IPC.themeGet),
+    /** Ctrl+Shift+L / nút mặt trời. */
+    toggle: (): Promise<void> => ipcRenderer.invoke(IPC.themeToggle),
+    onChanged(cb: (s: ThemeState) => void): () => void {
+      const fn = (_e: IpcRendererEvent, s: ThemeState): void => cb(s)
+      ipcRenderer.on(IPC.themeChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.themeChanged, fn)
     }
   }
 }

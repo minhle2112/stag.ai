@@ -10,6 +10,7 @@ import { SecretsSection } from './SecretsSection'
 import { SkillsSection } from './SkillsSection'
 import { PluginsSection } from './PluginsSection'
 import { GeneralSection } from './GeneralSection'
+import { AppearanceSection } from './AppearanceSection'
 import { HandoffSection } from './HandoffSection'
 import { ScopeSection } from './ScopeSection'
 import { AgentApiSection } from './AgentApiSection'
@@ -29,6 +30,7 @@ interface NavItem {
 const NAV: NavItem[][] = [
   [
     { id: 'general', label: 'Chung', icon: 'gear' },
+    { id: 'appearance', label: 'Giao diện', icon: 'palette' },
     { id: 'voice', label: 'Giọng nói', icon: 'mic' }
   ],
   [
@@ -88,7 +90,7 @@ export function SettingsPage(): React.JSX.Element {
                   <span className="flex-1">{item.label}</span>
                   {item.soon && <span className="rounded bg-line/60 px-1.5 text-[11px] text-muted">sắp có</span>}
                   {item.id === 'connectors' && pending > 0 && (
-                    <span className="rounded-full bg-wait px-1.5 text-[11px] font-semibold text-[#2a1c00]" data-tip="Đang chờ bạn duyệt">
+                    <span className="rounded-full bg-wait px-1.5 text-[11px] font-semibold text-wait-on" data-tip="Đang chờ bạn duyệt">
                       {pending}
                     </span>
                   )}
@@ -114,6 +116,8 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
   switch (id) {
     case 'general':
       return <GeneralSection />
+    case 'appearance':
+      return <AppearanceSection />
     case 'adapters':
       return <AdaptersSection />
     case 'connectors':

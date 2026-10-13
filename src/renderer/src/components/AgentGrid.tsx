@@ -246,7 +246,7 @@ function AgentCell({ ws, agent, state }: { ws: Workspace; agent: Agent; state: W
           <VoicePanel agentId={agent.id} />
         </div>
       ) : (
-        <div className="relative min-h-0 flex-1 bg-panel pt-1 pl-2" data-cell-body onClick={() => focusTerminal(agent.id)}>
+        <div className="relative min-h-0 flex-1 bg-t-bg pt-1 pl-2" data-cell-body onClick={() => focusTerminal(agent.id)}>
           <div ref={hostRef} className="h-full w-full overflow-hidden" />
           <VoicePanel agentId={agent.id} />
           {!running && !starting && !pendingAuto && (

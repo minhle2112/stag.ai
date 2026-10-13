@@ -92,7 +92,7 @@ export function ImageView({ ws, rel, version, onError }: { ws: Workspace; rel: s
         draggable={false}
         onError={onError}
         onLoad={(e) => setDim(`${e.currentTarget.naturalWidth} × ${e.currentTarget.naturalHeight}`)}
-        className="max-h-full max-w-full rounded-[4px] object-contain shadow-[0_8px_30px_rgba(0,0,0,.5)]"
+        className="max-h-full max-w-full rounded-[4px] object-contain shadow-float"
       />
       {dim && (
         <div className="font-mono text-[11px] text-dim">
@@ -137,8 +137,8 @@ export interface PinMark {
 }
 
 const PIN_TONES: Record<string, [string, string]> = {
-  you: ['var(--color-wait)', '#1a1300'],
-  fixed: ['var(--color-work)', '#03200f'],
+  you: ['var(--color-wait)', 'var(--color-wait-on)'],
+  fixed: ['var(--color-work)', 'var(--color-work-on)'],
   open: ['#c9ced5', '#111'],
   draft: ['var(--color-accent)', 'var(--color-accent-on)'],
   closed: ['var(--color-line-3)', 'var(--color-muted)']
@@ -165,7 +165,7 @@ export function pinElement(p: PinMark): HTMLElement {
     border: '1.5px solid #000a',
     background: bg,
     color: fg,
-    boxShadow: p.hot ? '0 0 0 3px rgba(221,225,230,.35)' : 'none',
+    boxShadow: p.hot ? '0 0 0 3px color-mix(in srgb, var(--color-fg) 35%, transparent)' : 'none',
     zIndex: '2'
   })
   const n = document.createElement('span')
@@ -281,7 +281,7 @@ export function PdfView({
   if (loading) return <Loading />
   if (error || failed) return <Note>{error ?? `Không đọc được file PDF: ${failed}`}</Note>
   return (
-    <div className="flex h-full flex-col bg-[#24282d]">
+    <div className="flex h-full flex-col bg-stage">
       <div className="flex shrink-0 items-center justify-center gap-1 py-1.5 text-[12px] text-muted">
         <span className="mr-1 font-mono text-[11px]">{pages ? `${pages} trang` : ''}</span>
         <ZoomButtons zoom={zoom} setZoom={setZoom} />
@@ -393,7 +393,7 @@ export function DocxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
         const w = body.querySelector<HTMLElement>('.docx-wrapper')
         const host = ref.current
         if (!w || !host) return
-        Object.assign(w.style, { background: '#24282d', padding: '16px' })
+        Object.assign(w.style, { background: 'var(--color-stage)', padding: '16px' })
         const pageWidth = Math.max(...Array.from(w.querySelectorAll<HTMLElement>(':scope > section')).map((s) => s.offsetWidth), 1)
         const fit = (): void => {
           w.style.zoom = String(Math.min(1, (host.clientWidth - 32) / pageWidth))
@@ -412,7 +412,7 @@ export function DocxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
 
   if (loading) return <Loading />
   if (error || failed) return <Note>{error ?? `Không đọc được file Word: ${failed}`}</Note>
-  return <div ref={ref} className="min-h-full bg-[#24282d] select-text" />
+  return <div ref={ref} className="min-h-full bg-stage select-text" />
 }
 
 // ---------- Bảng tính (SheetJS) ----------
@@ -422,19 +422,19 @@ const SHEET_ROWS = 2000
 
 const SHEET_CSS = `
   :host { display: block; }
-  table { border-collapse: collapse; font: 12px 'Inter Variable', 'Segoe UI', system-ui, sans-serif; color: #dde1e6; }
-  td, th { border: 1px solid #2a2f36; padding: 3px 8px; white-space: pre; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
-  tr:first-child td { background: #1d2126; font-weight: 600; position: sticky; top: 0; }
-  tr:nth-child(even) td { background: rgba(255,255,255,.02); }
-  td.n { color: #69717b; text-align: right; background: #16191d !important; position: sticky; left: 0; font-weight: 400; font-family: 'JetBrains Mono Variable', Consolas, monospace; font-size: 11px; }
-  a { color: #6aa9ff; }
+  table { border-collapse: collapse; font: 12px 'Inter Variable', 'Segoe UI', system-ui, sans-serif; color: var(--color-fg); }
+  td, th { border: 1px solid var(--color-line-2); padding: 3px 8px; white-space: pre; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+  tr:first-child td { background: var(--color-panel-3); font-weight: 600; position: sticky; top: 0; }
+  tr:nth-child(even) td { background: color-mix(in srgb, var(--color-fg) 2%, transparent); }
+  td.n { color: var(--color-dim); text-align: right; background: var(--color-panel-2) !important; position: sticky; left: 0; font-weight: 400; font-family: 'JetBrains Mono Variable', Consolas, monospace; font-size: 11px; }
+  a { color: var(--color-info); }
   :host(.pick) td[id] { cursor: cell; }
-  :host(.pick) td[id]:hover { background: #16191d; }
-  td.cm { box-shadow: inset 0 -2px 0 #3a4048; background: rgba(221,225,230,.05) !important; }
-  td.cm.you { box-shadow: inset 0 -2px 0 #f4b544; }
-  td.cm.fixed { box-shadow: inset 0 -2px 0 #3ddc84; }
-  td.cm.draft { box-shadow: inset 0 -2px 0 #2de2c0; }
-  td.cm.hot { outline: 2px solid rgba(221,225,230,.35); outline-offset: -2px; }
+  :host(.pick) td[id]:hover { background: var(--color-panel-2); }
+  td.cm { box-shadow: inset 0 -2px 0 var(--color-line-3); background: color-mix(in srgb, var(--color-fg) 5%, transparent) !important; }
+  td.cm.you { box-shadow: inset 0 -2px 0 var(--color-wait); }
+  td.cm.fixed { box-shadow: inset 0 -2px 0 var(--color-work); }
+  td.cm.draft { box-shadow: inset 0 -2px 0 var(--color-accent); }
+  td.cm.hot { outline: 2px solid color-mix(in srgb, var(--color-fg) 35%, transparent); outline-offset: -2px; }
 `
 
 export function SheetView({
@@ -614,7 +614,7 @@ export function PptxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
           Object.assign(outer.style, { margin: '0 auto 6px', overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,.4)', position: 'relative' })
           outer.appendChild(slide)
           const label = document.createElement('div')
-          Object.assign(label.style, { textAlign: 'center', color: '#69717b', font: "11px 'JetBrains Mono Variable', Consolas, monospace", margin: '0 0 14px' })
+          Object.assign(label.style, { textAlign: 'center', color: 'var(--color-dim)', font: "11px 'JetBrains Mono Variable', Consolas, monospace", margin: '0 0 14px' })
           label.textContent = `Slide ${i + 1} / ${deck.count}`
           list.append(outer, label)
           frames.push({ outer, slide })
@@ -636,7 +636,7 @@ export function PptxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
   if (loading) return <Loading />
   if (error || failed) return <Note>{error ?? `Không đọc được file PowerPoint: ${failed}`}</Note>
   return (
-    <div className="min-h-full bg-[#24282d] select-text">
+    <div className="min-h-full bg-stage select-text">
       {info && <div className="px-4 pt-3 text-center text-[11px] text-dim">{info.count} slide · bản xem trước gần đúng (biểu đồ, SmartArt, hiệu ứng chưa vẽ)</div>}
       <div ref={ref} className="px-4 py-3" />
     </div>
@@ -761,7 +761,7 @@ export function HtmlView({ ws, rel, version, onRun, baseRel }: { ws: Workspace; 
   if (failed) return <Note>{failed}</Note>
   if (srcdoc == null) return <Loading />
   return (
-    <div className="flex h-full flex-col bg-[#24282d]">
+    <div className="flex h-full flex-col bg-stage">
       {hasScript && (
         <div className="flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-1.5 text-[12px] text-muted">
           <Icon name="info" size="s" className="text-dim" />

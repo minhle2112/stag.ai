@@ -4,7 +4,7 @@ const STYLE: Record<AgentKind, string> = {
   claude: 'bg-[#c96442] text-white',
   codex: 'bg-[#4a515a] text-white',
   external: 'bg-[#2f6fd0] text-white',
-  terminal: 'bg-[#22262b] font-mono font-semibold text-[#b4bbc4] shadow-[inset_0_0_0_1px_#3a4048]'
+  terminal: 'bg-panel-3 font-mono font-semibold text-muted shadow-[inset_0_0_0_1px_var(--color-line-3)]'
 }
 
 /** Ô nhỏ nhận diện loại agent (CC = Claude Code, CX = Codex, `>_` = terminal, 2 chữ đầu = adapter ngoài): một bộ dùng cả app. */

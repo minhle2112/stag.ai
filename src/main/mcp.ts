@@ -48,6 +48,10 @@ export interface McpContext {
     publish(input: { file: string; title: string; description: string; note?: string; fixes?: string[] }): Promise<string>
     reply(input: { id: string; text: string; options?: string[] }): Promise<string>
   }
+  /** Tool inspect_reply (chế độ Soi của ô Browser); vắng = không có tool. */
+  inspect?: {
+    reply(input: { id: number; text: string; changes?: string; ask?: boolean; quick?: string[]; failed?: boolean }): Promise<string>
+  }
 }
 
 /** Một agent / ô trong workspace, như người dùng thấy ở lưới Agents. */
@@ -300,6 +304,7 @@ export function createStagMcp(ctx: McpContext): McpServer {
   )
 
   if (ctx.artifacts) registerArtifactTools(server, ctx.artifacts)
+  if (ctx.inspect) registerInspectTools(server, ctx.inspect)
 
   // Cài đặt → Agent API tắt nhóm nào: ẩn tool của nhóm đó, gọi thì báo lỗi (như tool trình duyệt).
   const team = registerTeamTools(server, ctx)
@@ -360,6 +365,33 @@ function registerArtifactTools(server: McpServer, api: NonNullable<McpContext['a
         id: z.string().min(1).max(20).describe('Comment id, e.g. "c7"'),
         text: z.string().min(1).max(4000).describe('Your answer or question, in the conversation language'),
         options: z.array(z.string().min(1).max(60)).max(4).optional().describe('Quick-answer buttons for a question, e.g. ["Đồng ý", "Thôi"]')
+      }
+    },
+    async (input) => {
+      try {
+        return ok(await api.reply(input))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+}
+
+/** Tool báo lại góp ý chế độ Soi (người dùng ghim lên phần tử trang trong ô Browser). */
+function registerInspectTools(server: McpServer, api: NonNullable<McpContext['inspect']>): void {
+  server.registerTool(
+    'inspect_reply',
+    {
+      title: 'Report back on a page comment',
+      description:
+        'Reply to a comment the user pinned on a web page element in the stag.ai Browser ("Soi" mode); they arrive in your session as "[stag.ai] … comment(s) from the user on a web page". Your text shows as a reply in the comment thread. After fixing: inspect_reply(id, text, changes) — stag.ai reloads the page. Unclear: ask your question in text (ask: true). Cannot do it: failed: true. One call per comment; then move on to the next one.',
+      inputSchema: {
+        id: z.number().int().min(1).describe('Comment number, e.g. 7 for "#7"'),
+        text: z.string().min(1).max(4000).describe('One or two sentences in the conversation language: what you changed, your question, or why you could not do it'),
+        changes: z.string().max(1000).optional().describe('What changed where, e.g. "src/Hero.tsx:42 — padding 10/18 → 15/28px" or the WP-CLI command you ran'),
+        ask: z.boolean().optional().describe('true = you are asking the user back and waiting for their answer'),
+        quick: z.array(z.string().min(1).max(60)).max(4).optional().describe('Ignored (kept for older sessions); put options in text instead'),
+        failed: z.boolean().optional().describe('true = you could not do it (file locked, element not found, tool error); say why in text')
       }
     },
     async (input) => {

@@ -32,7 +32,7 @@ export function IconButton({
     >
       <Icon name={icon} size={size} />
       {!!badge && (
-        <span className="pointer-events-none absolute top-0 right-0 box-content flex h-3.5 min-w-3.5 translate-x-[42%] -translate-y-[22%] items-center justify-center rounded-full border-[1.5px] border-bg0 bg-wait px-[3px] text-[11px] leading-none font-bold text-[#2a1c00]">
+        <span className="pointer-events-none absolute top-0 right-0 box-content flex h-3.5 min-w-3.5 translate-x-[42%] -translate-y-[22%] items-center justify-center rounded-full border-[1.5px] border-bg0 bg-wait px-[3px] text-[11px] leading-none font-bold text-wait-on">
           {badge}
         </span>
       )}

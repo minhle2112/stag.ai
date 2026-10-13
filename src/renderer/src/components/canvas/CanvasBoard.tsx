@@ -501,7 +501,7 @@ export function CanvasBoard({ ws, layout, hasAgents, renderCell }: Props): React
       )}
 
       {toast && (
-        <div className="absolute bottom-4 left-1/2 z-[5] flex -translate-x-1/2 items-center gap-3 rounded-lg border border-line-2 bg-panel-2 py-1.5 pr-1.5 pl-3 text-[12.5px] shadow-[0_10px_30px_rgba(0,0,0,.5)]">
+        <div className="absolute bottom-4 left-1/2 z-[5] flex -translate-x-1/2 items-center gap-3 rounded-lg border border-line-2 bg-panel-2 py-1.5 pr-1.5 pl-3 text-[12.5px] shadow-float">
           {toast.text}
           {toast.undo && (
             <button type="button" onClick={undo} className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-panel-3" data-tip="Ctrl+Z">
@@ -597,7 +597,7 @@ function CellFrame({
           transition: flying ? `left ${FLY_MS}ms ${FLY_EASE}, top ${FLY_MS}ms ${FLY_EASE}, width ${FLY_MS}ms ${FLY_EASE}, height ${FLY_MS}ms ${FLY_EASE}` : undefined
         }}
       >
-        <div className={`absolute inset-0 overflow-hidden ${maximized ? '' : 'rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,.45)]'}`}>{children}</div>
+        <div className={`absolute inset-0 overflow-hidden ${maximized ? '' : 'rounded-[10px] shadow-float'}`}>{children}</div>
         {!maximized &&
           HANDLES.map((h) => (
             <div key={h.name} className="absolute z-[6]" style={{ ...h.style, cursor: HANDLE_CURSOR[h.name] }} onMouseDown={(e) => onResize(h.edges, e)} />
@@ -666,7 +666,7 @@ function Toolbar({
   const z = useEmitter(zoom)
   return (
     <div
-      className="absolute top-2.5 left-1/2 z-[5] flex -translate-x-1/2 cursor-auto items-center gap-0.5 rounded-[10px] border border-line-2 bg-panel/90 p-1 shadow-[0_10px_30px_rgba(0,0,0,.45)] backdrop-blur"
+      className="absolute top-2.5 left-1/2 z-[5] flex -translate-x-1/2 cursor-auto items-center gap-0.5 rounded-[10px] border border-line-2 bg-panel/90 p-1 shadow-float backdrop-blur"
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.stopPropagation()}
     >
@@ -704,7 +704,7 @@ function MenuRow({ icon, label, hint, onClick, sub }: { icon?: IconName; label: 
   )
 }
 
-const PANEL = 'w-56 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 text-[13px] shadow-[0_14px_40px_rgba(0,0,0,.6)]'
+const PANEL = 'w-56 overflow-hidden rounded-lg border border-line-2 bg-pop p-1 text-[13px] shadow-pop'
 
 /** Menu chuột phải trên nền canvas: tạo ô ngay tại chỗ bấm, xếp gọn, vừa khung. */
 function CanvasMenu({

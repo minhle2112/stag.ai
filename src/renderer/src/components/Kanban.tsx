@@ -305,7 +305,7 @@ function AgentCard({ wsId, data, now, onClick }: { wsId: string; data: AgentCard
         <div
           onClick={(e) => e.stopPropagation()}
           onMouseLeave={() => setMenu(false)}
-          className="absolute top-8 right-2 z-10 w-40 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 shadow-[0_14px_40px_rgba(0,0,0,.6)]"
+          className="absolute top-8 right-2 z-10 w-40 overflow-hidden rounded-lg border border-line-2 bg-pop p-1 shadow-pop"
         >
           <MenuItem
             onClick={() => {

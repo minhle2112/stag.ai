@@ -1,35 +1,123 @@
 @import 'tailwindcss';
 
 @theme {
-  /* Bảng màu "Xưởng" (design/v2/1-xuong.html). Tên cũ (bg / panel / panel-2 / line / fg / muted / accent)
-     giữ nguyên để mọi component tự đổi màu; thêm các bậc và màu ngữ nghĩa mới. */
+  /* Bảng màu "Xưởng" (design/v2/1-xuong.html) = chế độ tối. Chế độ sáng (design/theme/index.html) đổi giá trị của đúng
+     các token này trên <html data-theme="light"> (khối bên dưới), nên component không phải biết đang sáng hay tối.
+     Quy tắc: không đặt chữ dim trên nền panel-3. */
   --color-bg0: #08090b; /* thanh tiêu đề, thanh icon trái, thanh trạng thái */
   --color-bg: #0c0e10; /* vùng làm việc, thanh bên */
   --color-panel: #101215; /* ô, hộp thoại, cột, thẻ */
   --color-panel-2: #16191d; /* rê chuột, nút phụ */
   --color-panel-3: #1d2126; /* đang chọn */
+  --color-pop: #16191d; /* nền menu / popover */
   --color-line: #1e2227; /* vạch ngăn */
-  --color-line-2: #2a2f36; /* viền ô nhập, nút */
+  --color-line-2: #2a2f36; /* viền nút */
   --color-line-3: #3a4048;
+  --color-input-line: #5c646e; /* viền ô nhập, công tắc tắt (≥ 3:1) */
   --color-fg: #dde1e6;
   --color-muted: #99a0aa;
-  --color-dim: #69717b;
+  --color-dim: #7d8590;
   /* Teal = điểm nhấn · xanh lá = đang chạy · hổ phách = chờ bạn · đỏ = nguy hiểm · xanh dương = bàn giao */
   --color-accent: #2de2c0;
   --color-accent-on: #03201a;
   --color-work: #3ddc84;
+  --color-work-on: #03200f;
   --color-wait: #f4b544;
+  --color-wait-on: #2a1c00; /* chữ trên nền hổ phách (huy hiệu) */
+  --color-wait-text: #f7cd80; /* chữ hổ phách trên nền hổ phách nhạt */
+  --color-work-text: #3ddc84; /* chữ xanh lá / teal trên nền nhạt cùng màu (chip trên dòng đang chọn) */
+  --color-accent-text: #2de2c0;
   --color-danger: #f26a5f;
+  --color-danger-on: #240a07;
+  --color-danger-text: #f4a49c;
+  --color-danger-soft: #2a1416; /* nền đặc của thông báo lỗi */
   --color-info: #6aa9ff;
   --color-neutral: #7c8590;
+  --color-close-hover: #c42b1c; /* nút đóng cửa sổ, đỏ Windows 11 */
+  --color-scroll: #262b31;
+  --color-scrim: rgba(3, 4, 6, 0.66); /* nền mờ sau hộp thoại */
+  --color-chip: rgba(8, 9, 11, 0.86); /* nhãn nổi trên ảnh xem trước */
+  --color-stage: #24282d; /* nền sân khấu xem trước tài liệu / ảnh */
+  --color-add-text: #9fe8bd;
+  --color-del-text: #f2a39c;
+  /* Ô terminal: theo app, hoặc luôn tối (data-termdark). Bảng 16 màu ANSI ở src/shared/theme.ts. */
+  --color-t-bg: #101215;
+  --color-t-dim: #8b949e; /* = brightBlack của bảng terminal */
+  /* Tô màu code trong xem trước */
+  --color-code-kw: #c792ea;
+  --color-code-str: #c3e88d;
+  --color-code-num: #f78c6c;
+  --color-code-cm: #8b949e;
+  --shadow-pop: 0 14px 40px rgba(0, 0, 0, 0.6);
+  --shadow-modal: 0 24px 70px rgba(0, 0, 0, 0.7);
+  --shadow-float: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-tip: 0 6px 18px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 4px 18px rgba(0, 0, 0, 0.35);
   --font-sans: 'Inter Variable', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+/* Chế độ sáng: nền trắng, chữ đậm, teal sẫm (#2de2c0 trên trắng chỉ ~1.6:1). Mọi cặp chữ / nền ≥ 4.5:1. */
+:root[data-theme='light'] {
+  --color-bg0: #e8ebef;
+  --color-bg: #f3f5f7;
+  --color-panel: #ffffff;
+  --color-panel-2: #eef1f4;
+  --color-panel-3: #dde3ea;
+  --color-pop: #ffffff;
+  --color-line: #dde2e8;
+  --color-line-2: #cdd3da;
+  --color-line-3: #b3bbc5;
+  --color-input-line: #8a939e;
+  --color-fg: #181c21;
+  --color-muted: #454e59;
+  --color-dim: #5c6570;
+  /* Teal / xanh lá / hổ phách sẫm hơn mockup một chút: chữ nhỏ trên dòng đang chọn (panel-3) và chip nền nhạt vẫn ≥ 4.5:1. */
+  --color-accent: #06705d;
+  --color-accent-on: #ffffff;
+  --color-work: #0f6b39;
+  --color-work-on: #ffffff;
+  --color-wait: #8a5a00;
+  --color-wait-on: #ffffff;
+  --color-wait-text: #704a00;
+  --color-work-text: #0b5a30;
+  --color-accent-text: #055c4c;
+  --color-danger: #cc3328;
+  --color-danger-on: #ffffff;
+  --color-danger-text: #b42318;
+  --color-danger-soft: #fdecea;
+  --color-info: #1f5fcc;
+  --color-neutral: #6b7480;
+  --color-scroll: #c9cfd6;
+  --color-scrim: rgba(16, 24, 40, 0.32);
+  --color-chip: rgba(255, 255, 255, 0.92);
+  --color-stage: #e4e7eb;
+  --color-add-text: #116329;
+  --color-del-text: #b42318;
+  --color-t-bg: #ffffff;
+  --color-t-dim: #5c6570;
+  --color-code-kw: #7c3aed;
+  --color-code-str: #116329;
+  --color-code-num: #b54708;
+  --color-code-cm: #5c6570;
+  --shadow-pop: 0 14px 40px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --shadow-modal: 0 24px 70px rgba(16, 24, 40, 0.22), 0 4px 12px rgba(16, 24, 40, 0.08);
+  --shadow-float: 0 10px 30px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --shadow-tip: 0 4px 14px rgba(16, 24, 40, 0.14);
+  --shadow-card: 0 2px 10px rgba(16, 24, 40, 0.08);
+  /* Chữ tắt trên avatar màu pastel (tab Sản phẩm): pha với màu chữ cho đủ tương phản trên nền sáng. */
+  --avatar-ink: 45%;
+}
+/* "Terminal theo giao diện app" tắt: ô terminal giữ nền tối trong app sáng. */
+:root[data-theme='light'][data-termdark] {
+  --color-t-bg: #101215;
+  --color-t-dim: #8b949e;
 }
 
 /* Thanh cuộn mảnh như bản thiết kế. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #262b31 transparent;
+  scrollbar-color: var(--color-scroll) transparent;
 }
 
 html,
@@ -50,12 +138,22 @@ body {
 
 :root {
   color-scheme: dark;
+  --avatar-ink: 100%;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 .xterm,
 .xterm .xterm-viewport {
   height: 100%;
-  background-color: var(--color-panel) !important;
+  background-color: var(--color-t-bg) !important;
+}
+
+/* Chữ mờ (SGR 2, Claude Code dùng cho gợi ý / chữ phụ): xterm vẽ bằng màu chữ nhạt 50% và chỉ đẩy tương phản tới một nửa
+   minimumContrastRatio (~2.3:1) → trên nền trắng gần như không đọc được. Vẽ bằng màu xám brightBlack (≥ 4.5:1). */
+.xterm .xterm-dim {
+  color: var(--color-t-dim) !important;
 }
 
 /* xterm 6 tự vẽ thanh cuộn; ẩn thanh cuộn gốc của Chromium trên viewport. */
@@ -290,13 +388,13 @@ body {
 }
 .sdot.ok,
 .sdot.in {
-  border: 2px solid rgba(61, 220, 132, 0.2);
+  border: 2px solid color-mix(in srgb, var(--color-work) 20%, transparent);
   border-top-color: var(--color-work);
   border-right-color: var(--color-work);
   animation: sdot-spin 0.9s linear infinite;
 }
 .sdot.in {
-  border-color: rgba(106, 169, 255, 0.2);
+  border-color: color-mix(in srgb, var(--color-info) 20%, transparent);
   border-top-color: var(--color-info);
   border-right-color: var(--color-info);
 }
@@ -326,11 +424,11 @@ body {
 }
 @keyframes sdot-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(244, 181, 68, 0.7);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-wait) 70%, transparent);
   }
   70%,
   100% {
-    box-shadow: 0 0 0 6px rgba(244, 181, 68, 0);
+    box-shadow: 0 0 0 6px transparent;
   }
 }
 

@@ -401,6 +401,8 @@ export const HANDOFF_MAX = 95
 /** Shell cho ô Terminal. Không có trên máy thì dùng PowerShell. */
 export type ShellId = 'powershell' | 'pwsh' | 'gitbash' | 'cmd'
 export type CloseAction = 'quit' | 'tray'
+/** Chế độ màu của app: tối, sáng, hay theo cài đặt sáng / tối của Windows. */
+export type ThemePref = 'dark' | 'light' | 'system'
 
 /** Mục "Chung" của Settings (chỉ ở cấp app). */
 export interface GeneralSettings {
@@ -425,6 +427,12 @@ export interface GeneralSettings {
   confirmQuitRunning: boolean
   /** Mục usage tài khoản Claude ở thanh trạng thái (hỏi usage định kỳ bằng tài khoản Claude Code). */
   claudeUsage: boolean
+  /** Chế độ màu (Cài đặt → Giao diện). */
+  theme: ThemePref
+  /** Ô terminal đổi màu theo app; tắt = terminal luôn nền tối, kể cả khi app sáng. */
+  terminalFollowTheme: boolean
+  /** Ghi theme `light-ansi` / `dark-ansi` của Claude Code vào ~/.claude.json theo màu terminal; tắt = trả lại theme cũ. */
+  claudeThemeSync: boolean
 }
 
 export const ZOOM_MIN = 70
@@ -685,7 +693,10 @@ export const DEFAULT_GENERAL: GeneralSettings = {
   notifySound: true,
   closeAction: 'quit',
   confirmQuitRunning: true,
-  claudeUsage: true
+  claudeUsage: true,
+  theme: 'dark',
+  terminalFollowTheme: true,
+  claudeThemeSync: true
 }
 const DEFAULT_CLI: CliAdapterSettings = { enabled: true, path: '', model: '', effort: '', defaultPermission: 'default', extraArgs: '', env: '' }
 export const DEFAULT_ADAPTERS: AdaptersSettings = {
@@ -778,6 +789,12 @@ export interface BrowserTab {
   canGoForward: boolean
   /** DevTools của tab đang mở (cửa sổ riêng). */
   devtools: boolean
+  /** Chế độ Soi đang bật trên tab. */
+  inspect?: boolean
+  /** Khung màn hình: desk = cả ô, tab = 820px, mob = 390px. */
+  viewport?: 'desk' | 'tab' | 'mob'
+  /** Đang xem ảnh bản TRƯỚC của góp ý số này. */
+  before?: number
   /** Tab đang chờ dev server mở cổng (Tab mới → "Dùng cái này"); có `error` = không chạy được. */
   dev?: BrowserTabDev
 }

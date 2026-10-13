@@ -86,7 +86,7 @@ export function Tooltips(): React.JSX.Element | null {
     <div
       ref={box}
       role="tooltip"
-      className="pointer-events-none fixed z-[200] w-max max-w-[360px] rounded-md border border-line-2 bg-panel-3 px-2 py-1 text-[12px] leading-snug whitespace-pre-line text-fg shadow-[0_6px_18px_rgba(0,0,0,.45)]"
+      className="pointer-events-none fixed z-[200] w-max max-w-[360px] rounded-md border border-line-2 bg-panel-3 px-2 py-1 text-[12px] leading-snug whitespace-pre-line text-fg shadow-tip"
       style={{ left: tip.x, top: tip.y, transform: tip.side === 'right' ? 'translateY(-50%)' : 'translateX(-50%)' }}
     >
       {tip.text}

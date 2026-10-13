@@ -125,11 +125,11 @@ function Card({ ws, a, onOpen }: { ws: Workspace; a: ArtifactRecord; onOpen: () 
     >
       <div className="relative h-[148px] overflow-hidden border-b border-line bg-panel-2">
         <Thumb ws={ws} a={a} />
-        <span className="absolute top-2 left-2 rounded-full border border-line-2 bg-[rgba(8,9,11,.86)] px-[7px] py-0.5 text-[10.5px] font-semibold text-muted">{typeLabel(kind)}</span>
+        <span className="absolute top-2 left-2 rounded-full border border-line-2 bg-chip px-[7px] py-0.5 text-[10.5px] font-semibold text-muted">{typeLabel(kind)}</span>
         {fresh ? (
-          <span className="absolute top-2 right-2 rounded-full border border-accent/45 bg-[rgba(8,9,11,.86)] px-[7px] py-0.5 text-[10.5px] font-semibold text-accent">Mới · v{v.v}</span>
+          <span className="absolute top-2 right-2 rounded-full border border-accent/45 bg-chip px-[7px] py-0.5 text-[10.5px] font-semibold text-accent">Mới · v{v.v}</span>
         ) : a.versions.length > 1 ? (
-          <span className="absolute top-2 right-2 rounded-full border border-line-2 bg-[rgba(8,9,11,.86)] px-[7px] py-0.5 font-mono text-[10.5px] font-semibold text-fg">v{v.v}</span>
+          <span className="absolute top-2 right-2 rounded-full border border-line-2 bg-chip px-[7px] py-0.5 font-mono text-[10.5px] font-semibold text-fg">v{v.v}</span>
         ) : null}
       </div>
       <div className="flex flex-1 flex-col gap-[5px] px-[13px] pt-[11px] pb-3">
@@ -226,7 +226,7 @@ function Thumb({ ws, a }: { ws: Workspace; a: ArtifactRecord }): React.JSX.Eleme
     )
   else if (data?.lines)
     inner = (
-      <div className="absolute inset-x-[22px] top-[14px] -bottom-2.5 overflow-hidden rounded-t-md border border-line-2 bg-[#15181c] px-3.5 py-3 text-[8.5px] leading-normal text-muted">
+      <div className="absolute inset-x-[22px] top-[14px] -bottom-2.5 overflow-hidden rounded-t-md border border-line-2 bg-panel-2 px-3.5 py-3 text-[8.5px] leading-normal text-muted">
         {data.lines.map((l, i) =>
           i === 0 ? (
             <h4 key={i} className="mb-1.5 truncate text-[11px] font-semibold text-fg">

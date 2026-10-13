@@ -27,6 +27,7 @@ import { pageTab, slotsOf, usePlugins } from './store/plugins'
 import { useSettings } from './store/settings'
 import { startNewWorkspace } from './store/workspaceFlow'
 import { setTerminalFontSize } from './terminals'
+import { startThemeBus } from './store/theme'
 import { useBrowserOpen, useSidebarOpen, useUi, type MainTab } from './store/ui'
 import { useActiveWorkspace, useWorkspaces } from './store/workspaces'
 
@@ -52,6 +53,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => startThemeBus(), [])
 
   useEffect(() => setTerminalFontSize(terminalFontSize), [terminalFontSize])
 
@@ -105,6 +108,7 @@ export function App(): React.JSX.Element {
         if (!wsId || ui.settings || ui.tab !== 'agents') handled = false
         else ui.setMaxCell(wsId, ui.maxCell[wsId] ? null : (sel ?? null))
       }
+      else if (e.shiftKey && key === 'l') void window.stag.theme.toggle()
       else if (e.shiftKey && key === 'p') ui.setPalette(true)
       else if (!e.shiftKey && key === 'k' && !inTerminal) ui.setPalette(!ui.palette)
       else if (!e.shiftKey && key === 'b' && !inTerminal) ui.toggleSidebar()

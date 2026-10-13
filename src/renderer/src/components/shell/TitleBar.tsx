@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useBrowser } from '../../store/browser'
+import { useInspect } from '../../store/inspect'
+import { needsYou } from '@shared/inspect'
 import { useBrowserOpen, useSidebarOpen, useUi } from '../../store/ui'
 import { useActiveWorkspace, useWorkspaces } from '../../store/workspaces'
 import { openAgent } from '../../store/agents'
@@ -8,6 +10,7 @@ import { Icon } from '../Icon'
 import { ToolbarPluginButtons } from '../PluginSlots'
 import { IconButton } from './IconButton'
 import { useWaitingAgents } from './useWaiting'
+import { useTheme } from '../../store/theme'
 
 /**
  * Thanh tiêu đề tự vẽ (cao 36px): logo, đường dẫn workspace, ô "Tìm hoặc chạy lệnh", chuông, bật / tắt thanh bên và
@@ -23,6 +26,13 @@ export function TitleBar(): React.JSX.Element {
   const waiting = useWaitingAgents()
   const agentDrives = useBrowser((s) => !!active && !!s.byWs[active.id]?.tabs.some((t) => t.owner.kind === 'agent'))
   const [bell, setBell] = useState(false)
+  const theme = useTheme((s) => s.theme)
+  // Bình luận chế độ Soi có trả lời mới của agent (bạn chưa xem): số trên nút Trình duyệt.
+  const loadInspect = useInspect((s) => s.load)
+  const inspectWaiting = useInspect((s) => (active ? (s.byWs[active.id]?.pins.filter((p) => needsYou(p.state)).length ?? 0) : 0))
+  useEffect(() => {
+    if (active) void loadInspect(active.id).catch(() => {})
+  }, [active, loadInspect])
 
   return (
     <header
@@ -61,12 +71,22 @@ export function TitleBar(): React.JSX.Element {
           on={bell}
           className="mr-2"
         />
+        <IconButton
+          icon={theme === 'dark' ? 'sun' : 'moon'}
+          tip={theme === 'dark' ? 'Chuyển sang sáng · Ctrl+Shift+L' : 'Chuyển sang tối · Ctrl+Shift+L'}
+          onClick={() => void window.stag.theme.toggle()}
+        />
         <IconButton icon="side" tip="Thanh bên · Ctrl+B" on={sidebarOpen} onClick={toggleSidebar} />
         <IconButton
           icon="globe"
-          tip={browserOpen ? 'Ẩn trình duyệt · Ctrl+Shift+B' : `Trình duyệt · Ctrl+Shift+B${agentDrives ? ' · agent đang dùng' : ''}`}
+          tip={
+            (browserOpen ? 'Ẩn trình duyệt · Ctrl+Shift+B' : `Trình duyệt · Ctrl+Shift+B${agentDrives ? ' · agent đang dùng' : ''}`) +
+            (inspectWaiting ? `\n${inspectWaiting} trả lời mới trong Soi` : '')
+          }
           on={browserOpen}
-          dot={agentDrives && !browserOpen}
+          // Cả khi pane đang mở: tab hiện tại có thể không phải trang có trả lời mới (hoặc chưa có tab).
+          badge={inspectWaiting}
+          dot={agentDrives && !browserOpen && !inspectWaiting}
           onClick={toggleBrowser}
         />
         {bell && <WaitingMenu onClose={() => setBell(false)} />}
@@ -109,7 +129,7 @@ function WindowControls(): React.JSX.Element {
           )}
         </svg>
       </button>
-      <button type="button" aria-label="Đóng" data-tip="Đóng" onClick={() => window.stag.win.close()} className={`${base} hover:bg-[#e81123] hover:text-white active:bg-[#c50f1f]`}>
+      <button type="button" aria-label="Đóng" data-tip="Đóng" onClick={() => window.stag.win.close()} className={`${base} hover:bg-close-hover hover:text-white active:bg-close-hover/85`}>
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
           <path d="M0.5 0.5l9 9M9.5 0.5l-9 9" stroke="currentColor" />
         </svg>
@@ -125,7 +145,7 @@ function WaitingMenu({ onClose }: { onClose: () => void }): React.JSX.Element {
   return (
     <>
       <div className="no-drag fixed inset-0 z-40" onMouseDown={onClose} />
-      <div className="no-drag absolute top-full right-0 z-50 mt-1 w-72 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 shadow-[0_14px_40px_rgba(0,0,0,.6)]">
+      <div className="no-drag absolute top-full right-0 z-50 mt-1 w-72 overflow-hidden rounded-lg border border-line-2 bg-pop p-1 shadow-pop">
         {waiting.length === 0 && <div className="px-3 py-3 text-[12px] text-dim">Không có agent nào đang chờ bạn.</div>}
         {waiting.map((w) => (
           <button

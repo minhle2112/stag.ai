@@ -44,7 +44,7 @@ const LOGO: Record<AgentKind, string> = {
   claude: 'bg-[#c96442] text-white',
   codex: 'bg-[#4a515a] text-white',
   external: 'bg-[#2f6fd0] text-white',
-  terminal: 'bg-[#22262b] font-mono text-[#b4bbc4] shadow-[inset_0_0_0_1px_#3a4048]'
+  terminal: 'bg-panel-3 font-mono text-muted shadow-[inset_0_0_0_1px_var(--color-line-3)]'
 }
 function AdapterLogo({ kind, label, size = 30 }: { kind: AgentKind; label?: string; size?: number }): React.JSX.Element {
   const text = kind === 'claude' ? 'CC' : kind === 'codex' ? 'CX' : kind === 'terminal' ? '>_' : (label ?? 'ai').replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2) || 'ai'

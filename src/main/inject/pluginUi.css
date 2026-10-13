@@ -14,6 +14,19 @@
   --stag-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
   color-scheme: dark;
 }
+:root[data-theme='light'] {
+  --stag-bg: #f3f5f7;
+  --stag-panel: #ffffff;
+  --stag-panel-2: #eef1f4;
+  --stag-line: #cdd3da;
+  --stag-fg: #181c21;
+  --stag-muted: #454e59;
+  --stag-accent: #087a65;
+  --stag-ok: #137a42;
+  --stag-warn: #9a6700;
+  --stag-bad: #cc3328;
+  color-scheme: light;
+}
 html,
 body {
   margin: 0;

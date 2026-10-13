@@ -97,7 +97,7 @@ export function AgentMenuPanel({
   )
 
   return (
-    <div className={`z-20 w-52 overflow-hidden rounded-lg border border-line-2 bg-panel-2 p-1 text-[13px] shadow-[0_14px_40px_rgba(0,0,0,.6)] ${className}`}>
+    <div className={`z-20 w-52 overflow-hidden rounded-lg border border-line-2 bg-pop p-1 text-[13px] shadow-pop ${className}`}>
       {before}
       {!shown && item('Mở ô', () => openAgent(ws.id, agent.id))}
       {!running && !starting && item(terminal ? 'Mở terminal' : 'Phiên mới', () => openAndStart(false))}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTheme } from '../../store/theme'
 import ForceGraph from 'force-graph'
 import type { VaultIndex } from '@shared/types'
 import { AgentAvatar } from '../ui/AgentAvatar'
@@ -79,26 +80,29 @@ function savedFor(vaultPath: string): Saved {
   return s
 }
 
-/** Màu giao diện đọc từ biến CSS của theme (styles.css). */
-function themeColors(): Record<'fg' | 'muted' | 'accent' | 'line2' | 'line3' | 'font', string> {
+type GraphPalette = Record<'fg' | 'muted' | 'accent' | 'line2' | 'line3' | 'font' | 'stage' | 'node' | 'halo' | 'link', string>
+
+/**
+ * Màu graph: màu giao diện đọc từ biến CSS của theme (styles.css), cộng màu riêng của sân khấu graph (nền tối / sáng dần
+ * ra mép, node note thường, viền nền quanh chữ nhãn, cạnh). Đọc lại khi đổi sáng / tối.
+ */
+function themeColors(): GraphPalette {
   const s = getComputedStyle(document.documentElement)
   const v = (name: string, d: string): string => s.getPropertyValue(name).trim() || d
+  const light = document.documentElement.dataset.theme === 'light'
   return {
     fg: v('--color-fg', '#dde1e6'),
     muted: v('--color-muted', '#99a0aa'),
     accent: v('--color-accent', '#2de2c0'),
     line2: v('--color-line-2', '#2a2f36'),
     line3: v('--color-line-3', '#3a4048'),
-    font: v('--font-sans', 'system-ui, sans-serif')
+    font: v('--font-sans', 'system-ui, sans-serif'),
+    stage: light ? 'radial-gradient(circle at 50% 45%, #ffffff, #eef1f4)' : 'radial-gradient(circle at 50% 45%, #12161a, #0c0e10)',
+    node: light ? '#6b7480' : '#8a929c',
+    halo: light ? '#f6f8fa' : '#0e1114',
+    link: light ? '#c4cbd3' : '#2c3239'
   }
 }
-
-/** Nền sân khấu (như bản thiết kế): tối dần ra mép. */
-const STAGE_BG = 'radial-gradient(circle at 50% 45%, #12161a, #0c0e10)'
-/** Node note thường; viền nền quanh chữ nhãn; màu cạnh. */
-const NODE_GREY = '#8a929c'
-const LABEL_HALO = '#0e1114'
-const LINK_GREY = '#2c3239'
 
 const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`)
 const idOf = (x: string | SimNode): string => (typeof x === 'string' ? x : x.id)
@@ -156,6 +160,14 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
 
   const hostRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<FG | null>(null)
+  /** Màu graph; đổi tại chỗ khi đổi sáng / tối để các hàm vẽ (đọc mỗi khung hình) lấy màu mới. */
+  const palRef = useRef<GraphPalette>(themeColors())
+  const appTheme = useTheme((s) => s.theme)
+  useEffect(() => {
+    Object.assign(palRef.current, themeColors())
+    // Graph đứng yên thì không tự vẽ lại: đặt lại một thuộc tính để vẽ một khung với màu mới.
+    fgRef.current?.backgroundColor(palRef.current.stage).nodeRelSize(1)
+  }, [appTheme])
   const currentRef = useRef(current)
   currentRef.current = current
   const activityRef = useRef(activity)
@@ -226,22 +238,19 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
   // Tạo graph một lần khi mount, dọn khi unmount.
   useEffect(() => {
     const host = hostRef.current!
-    const t = themeColors()
-    const linkColor = LINK_GREY
-    const linkDim = withAlpha(LINK_GREY, 0.25)
-    const linkHl = withAlpha(t.accent, 0.85)
+    const t = palRef.current
     const touches = (l: SimLink, id: string): boolean => idOf(l.source) === id || idOf(l.target) === id
 
     const fg = new ForceGraph<SimNode, SimLink>(host)
       .width(host.clientWidth)
       .height(host.clientHeight)
-      .backgroundColor(STAGE_BG)
+      .backgroundColor(t.stage)
       .nodeId('id')
       .nodeRelSize(1)
       .nodeVal((n) => n.r * n.r) // vùng bấm/hover = hình tròn bán kính r
       .nodeLabel((n) => (n.ghost ? `${esc(n.name)} — <i>Chưa có note</i>` : esc(n.id)))
       .showPointerCursor((o) => !!o && !(o as SimNode).ghost)
-      .linkColor((l) => (hover.current.id ? (touches(l, hover.current.id) ? linkHl : linkDim) : linkColor))
+      .linkColor((l) => (hover.current.id ? (touches(l, hover.current.id) ? withAlpha(t.accent, 0.85) : withAlpha(t.link, 0.25)) : t.link))
       .linkWidth((l) => (hover.current.id && touches(l, hover.current.id) ? 1.6 : 1))
       .d3AlphaDecay(0.03)
       .d3AlphaMin(0.01) // mặc định 0 → chỉ dừng khi hết cooldownTime
@@ -302,7 +311,7 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
           ctx.stroke()
           ctx.setLineDash([])
         } else {
-          ctx.fillStyle = n.id === currentRef.current ? t.accent : colorByTypeRef.current ? n.color : NODE_GREY
+          ctx.fillStyle = n.id === currentRef.current ? t.accent : colorByTypeRef.current ? n.color : t.node
           ctx.fill()
         }
         if (n.id === h.id) {
@@ -339,7 +348,7 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
         ctx.textBaseline = 'top'
         ctx.lineJoin = 'round'
         ctx.lineWidth = 4 / k
-        ctx.strokeStyle = LABEL_HALO
+        ctx.strokeStyle = t.halo
         const label = (n: SimNode, text: string, alpha: number, strong: boolean): void => {
           const lx = n.x ?? 0
           const ly = (n.y ?? 0) + n.r + 2 / k
@@ -611,7 +620,7 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
                 >
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ background: settings.colorByType ? typeColor(key || null) : NODE_GREY }}
+                    style={{ background: settings.colorByType ? typeColor(key || null) : palRef.current.node }}
                   />
                   <span className="min-w-0 flex-1 truncate">{key || 'không loại'}</span>
                   <span className="font-mono text-[11px] text-dim">{count}</span>

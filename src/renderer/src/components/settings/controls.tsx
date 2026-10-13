@@ -9,7 +9,7 @@ import { Icon, type IconName } from '../Icon'
 // ---- kiểu chữ nhập ----
 
 const FIELD =
-  'rounded-md border border-line-2 bg-bg px-2 text-fg outline-none placeholder:text-dim focus:border-accent/40 disabled:cursor-not-allowed disabled:opacity-50'
+  'rounded-md border border-input-line bg-bg px-2 text-fg outline-none placeholder:text-dim focus:border-accent/40 disabled:cursor-not-allowed disabled:opacity-50'
 /** Ô một dòng cao 28px. Thêm `w-*` / `flex-1` ở chỗ dùng. */
 export const INPUT = `h-7 ${FIELD} text-[13px]`
 /** Như INPUT, chữ đơn cách (đường dẫn, tên biến, lệnh). */
@@ -193,11 +193,11 @@ export function Switch({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-block h-[17px] w-[30px] shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked ? 'border-accent bg-accent' : 'border-line-2 bg-panel-3 hover:border-line-3'
+        checked ? 'border-accent bg-accent' : 'border-input-line bg-input-line hover:brightness-110'
       }`}
     >
       <span
-        className={`absolute top-[2px] h-[11px] w-[11px] rounded-full transition-[left] ${checked ? 'left-[15px] bg-accent-on' : 'left-[2px] bg-muted'}`}
+        className={`absolute top-[2px] h-[11px] w-[11px] rounded-full transition-[left] ${checked ? 'left-[15px] bg-accent-on' : 'left-[2px] bg-white'}`}
       />
     </button>
   )
@@ -342,7 +342,7 @@ const BUTTON_TONE: Record<ButtonVariant, string> = {
   default: 'border-line-2 bg-panel-2 font-medium text-fg hover:border-line-3 hover:bg-panel-3',
   primary: 'border-accent bg-accent font-semibold text-accent-on hover:brightness-110',
   danger: 'border-transparent bg-transparent font-medium text-danger hover:bg-danger/12',
-  dangerSolid: 'border-danger bg-danger font-semibold text-[#240a07] hover:brightness-110',
+  dangerSolid: 'border-danger bg-danger font-semibold text-danger-on hover:brightness-110',
   ghost: 'border-transparent bg-transparent font-medium text-muted hover:bg-panel-3 hover:text-fg'
 }
 

@@ -16,7 +16,13 @@ export default defineConfig({
     }
   },
   preload: {
-    resolve: { alias: shared }
+    resolve: { alias: shared },
+    build: {
+      rollupOptions: {
+        // inspect: lớp Soi của trang trong ô Browser (preload riêng của mỗi tab, thế giới cô lập), out/preload/inspect.js.
+        input: { index: resolve('src/preload/index.ts'), inspect: resolve('src/preload/inspect.ts') }
+      }
+    }
   },
   renderer: {
     resolve: {

@@ -204,12 +204,12 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
                         </div>
                         <div className="mt-[5px] ml-[25px] flex flex-wrap gap-1">
                           {x.newVersions > 0 && (
-                            <Kc cls="bg-accent/15 text-accent">
+                            <Kc cls="bg-accent/15 text-accent-text">
                               {x.newVersions > 1 ? `${x.newVersions} bản mới (v${a.seen + 1}–v${latestVersion(a).v})` : `Bản mới v${latestVersion(a).v}`}
                             </Kc>
                           )}
-                          {x.asks > 0 && <Kc cls="bg-wait/15 text-wait">{x.asks} hỏi bạn</Kc>}
-                          {x.fixed > 0 && <Kc cls="bg-work/15 text-work">{x.fixed} đã sửa, chờ bạn xem</Kc>}
+                          {x.asks > 0 && <Kc cls="bg-wait/15 text-wait-text">{x.asks} hỏi bạn</Kc>}
+                          {x.fixed > 0 && <Kc cls="bg-work/15 text-work-text">{x.fixed} đã sửa, chờ bạn xem</Kc>}
                         </div>
                         <div className="mt-1 ml-[25px] truncate text-[11.5px] text-dim">{x.sub}</div>
                       </button>
@@ -397,7 +397,7 @@ function Help({ onClose }: { onClose: () => void }): React.JSX.Element {
   return (
     <div
       ref={ref}
-      className="absolute top-9 right-3 z-30 max-h-[calc(100%-48px)] w-[400px] overflow-auto rounded-[10px] border border-line-2 bg-panel-2 px-4 py-3.5 leading-relaxed text-muted shadow-[0_14px_40px_rgba(0,0,0,.6)] select-text"
+      className="absolute top-9 right-3 z-30 max-h-[calc(100%-48px)] w-[400px] overflow-auto rounded-[10px] border border-line-2 bg-pop px-4 py-3.5 leading-relaxed text-muted shadow-pop select-text"
     >
       <h3 className="mb-1 text-[13px] font-semibold text-fg">Tab Sản phẩm chỉ có thứ agent tự nộp</h3>
       Code đã sửa, file tạm, config không hiện ở đây (xem trong Kanban → thẻ việc). Khi có thứ cho bạn xem, agent gọi tool của stag:

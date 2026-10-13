@@ -50,6 +50,7 @@ export interface NewAgentTarget {
 /** Các mục của trang Settings, theo thứ tự trên menu trái. */
 export type SettingsSection =
   | 'general'
+  | 'appearance'
   | 'adapters'
   | 'connectors'
   | 'skills'

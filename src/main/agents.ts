@@ -71,6 +71,7 @@ import { browserToolsOn } from '@shared/settings'
 import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
 import { commentMessage, type ArtifactStore } from './artifactStore'
+import type { InspectService, InspectTeamMember } from './inspect'
 import type { VaultActivityLog } from './vaultActivity'
 import type { VaultIndexer } from './vaultIndex'
 import { MemoryService, memoryToolRules } from './memory'
@@ -255,6 +256,20 @@ export class AgentService {
   /** Gắn kho sản phẩm (tạo trước AgentService nhưng cần nó để gửi góp ý). */
   attachProducts(store: ArtifactStore): void {
     this.products = store
+  }
+
+  /** Góp ý chế độ Soi (ô Browser): tool inspect_reply + hàng chờ gửi vào phiên, như góp ý tab Sản phẩm. */
+  private inspect: InspectService | null = null
+
+  attachInspect(svc: InspectService): void {
+    this.inspect = svc
+  }
+
+  /** Agent nhận được góp ý chế độ Soi trong workspace (không phải ô terminal thường). */
+  inspectTeam(workspaceId: string): InspectTeamMember[] {
+    return this.data.agents
+      .filter((a) => a.workspaceId === workspaceId && agentKind(a) !== 'terminal')
+      .map((a) => ({ id: a.id, name: a.name, running: this.running.has(a.id), busy: this.board.statusOf(a.id)?.activity === 'working' }))
   }
 
   /** Gắn dịch vụ dev server (tool preview_*); tạo sau AgentService vì nó cần AgentService. */
@@ -683,6 +698,48 @@ export class AgentService {
     this.running.get(agentId)?.chat?.interrupt()
   }
 
+  /**
+   * Ngắt lượt đang chạy của agent (nút Dừng ở chế độ Soi): ô chat → interrupt; ô CLI (Claude Code / Codex) → gõ Esc,
+   * chỉ khi agent đang làm (Esc lúc rảnh có thể xoá chữ người dùng đang gõ).
+   */
+  interruptTurn(agentId: string): boolean {
+    const run = this.running.get(agentId)
+    if (!run) return false
+    if (run.chat) {
+      run.chat.interrupt()
+      return true
+    }
+    const agent = this.data.agents.find((a) => a.id === agentId)
+    if (!agent || !isCliKind(agentKind(agent)) || this.board.statusOf(agentId)?.activity !== 'working') return false
+    this.ptys.write(run.ptyId, '\x1b', false)
+    this.appInterrupts.set(agentId, Date.now())
+    // Dòng "đã ngắt" trong transcript có thể tới chậm: xét lại sau một lúc.
+    setTimeout(() => this.afterAppInterrupt(agentId), 4000)
+    return true
+  }
+
+  /** Lần app tự ngắt lượt agent (nút Dừng của chế độ Soi), theo agent. */
+  private appInterrupts = new Map<string, number>()
+
+  /**
+   * Ngắt do app (không phải người dùng bấm Esc): coi agent là rảnh (waiting / idle) thay vì "bị người dùng ngắt", để hàng
+   * chờ (góp ý chế độ Soi còn lại, tin agent khác) gõ tiếp được — mailReady không gõ vào phiên người dùng tự ngắt.
+   */
+  private afterAppInterrupt(agentId: string): void {
+    const at = this.appInterrupts.get(agentId)
+    if (!at) return
+    if (Date.now() - at > 30_000) {
+      this.appInterrupts.delete(agentId)
+      return
+    }
+    const st = this.board.statusOf(agentId)
+    const agent = this.data.agents.find((a) => a.id === agentId)
+    if (!agent || st?.activity !== 'waiting' || st.reason !== 'interrupted') return
+    this.appInterrupts.delete(agentId)
+    this.board.setActivity(agent, 'waiting', { reason: 'idle' })
+    this.deliverMail()
+  }
+
   chatPermission(a: ChatPermissionAnswer): void {
     this.running.get(a.agentId)?.chat?.answer(a.requestId, a.behavior, !!a.remember, a.updatedInput)
   }
@@ -880,6 +937,7 @@ export class AgentService {
     const ctx = this.context(agentId)
     if (ctx?.run?.ptyId !== ptyId) return
     this.board.interrupted(ctx.agent, at)
+    this.afterAppInterrupt(agentId)
     // Người dùng ngắt giữa lúc agent đang bàn giao: thôi, không tự nhờ lại trong phiên này.
     if (this.board.statusOf(agentId)?.handoff === 'asking') this.handoffFailed(ctx.agent, ctx.run)
   }
@@ -1015,6 +1073,7 @@ export class AgentService {
             reply: (input) => this.products!.reply(ws, agent, input)
           }
         : undefined,
+      inspect: this.inspect ? { reply: (input) => this.inspect!.reply(ws, agent, input) } : undefined,
       syncSessionFile: async () => {
         const cur = this.running.get(agent.id)
         if (!cur?.sessionFile) return
@@ -1560,21 +1619,32 @@ export class AgentService {
    */
   private async deliverComments(agentId: string, run: Running, agent: Agent, now: number): Promise<void> {
     const store = this.products
-    if (!store || this.commentBusy.has(agentId) || now < (this.commentQuiet.get(agentId) ?? 0)) return
+    if ((!store && !this.inspect) || this.commentBusy.has(agentId) || now < (this.commentQuiet.get(agentId) ?? 0)) return
     this.commentBusy.add(agentId)
+    const ready = (): boolean =>
+      this.running.get(agentId) === run &&
+      !(run.chat && run.chat.model.state.phase !== 'idle') &&
+      mailReady(this.board.statusOf(agentId), this.lastInput(run), Date.now())
     try {
-      const items = await store.queuedFor(agentId)
-      if (!items.length || this.running.get(agentId) !== run) return
-      if (run.chat && run.chat.model.state.phase !== 'idle') return
-      if (!mailReady(this.board.statusOf(agentId), this.lastInput(run), Date.now())) return
-      const n = items.reduce((k, i) => k + i.comments.length, 0)
-      this.submit(run, commentMessage(items), {
-        cli: isCliKind(agentKind(agent)),
-        origin: 'app',
-        display: n === 1 ? 'Góp ý từ tab Sản phẩm' : `${n} góp ý từ tab Sản phẩm`
-      })
+      const items = store ? await store.queuedFor(agentId) : []
+      if (items.length) {
+        if (!ready()) return
+        const n = items.reduce((k, i) => k + i.comments.length, 0)
+        this.submit(run, commentMessage(items), {
+          cli: isCliKind(agentKind(agent)),
+          origin: 'app',
+          display: n === 1 ? 'Góp ý từ tab Sản phẩm' : `${n} góp ý từ tab Sản phẩm`
+        })
+        this.commentQuiet.set(agentId, Date.now() + MAIL_GAP_MS)
+        for (const { ws, comments } of items) await store!.delivered(ws, comments.map((c) => c.id))
+        return
+      }
+      // Góp ý chế độ Soi: một gói tin mỗi workspace (thường chỉ một), lần sau xét tiếp.
+      const packet = this.inspect ? (await this.inspect.queuedFor(agentId))[0] : undefined
+      if (!packet || !ready()) return
+      this.submit(run, packet.text, { cli: isCliKind(agentKind(agent)), origin: 'app', display: packet.display })
       this.commentQuiet.set(agentId, Date.now() + MAIL_GAP_MS)
-      for (const { ws, comments } of items) await store.delivered(ws, comments.map((c) => c.id))
+      await this.inspect!.delivered(packet.ws, agentId, packet.pins.map((p) => p.id))
     } catch (e) {
       console.error('[artifacts]', e)
     } finally {
@@ -1614,8 +1684,8 @@ export class AgentService {
         display: item.user ? undefined : item.text
       })
     }
-    // Góp ý tab Sản phẩm: sau tin agent (tin agent vừa gõ thì chờ lần xét sau).
-    if (this.products)
+    // Góp ý tab Sản phẩm / chế độ Soi: sau tin agent (tin agent vừa gõ thì chờ lần xét sau).
+    if (this.products || this.inspect)
       for (const [id, run] of this.running) {
         const agent = this.data.agents.find((a) => a.id === id)
         if (!agent || agentKind(agent) === 'terminal' || this.mail.pending(id) || typed.has(id)) continue
@@ -1733,6 +1803,7 @@ export class AgentService {
     this.activity.forgetWorkspace(workspaceId)
     this.artifacts.forgetWorkspace(workspaceId)
     this.products?.forgetWorkspace(workspaceId)
+    this.inspect?.forgetWorkspace(workspaceId)
     this.browser.closeWorkspace(workspaceId)
     await this.save()
   }
@@ -1798,6 +1869,7 @@ export class AgentService {
     this.activity.renameAgent(agent.id, name)
     void this.artifacts.renameAgent(agent.id, name)
     void this.products?.renameAgent(agent.id, name)
+    void this.inspect?.renameAgent(agent.id, name)
     this.browser.renameAgent(agent.id, name)
     // File phiên (agent khác đọc trong .sessions/) ghi tên mới và đường dẫn note mới.
     const run = this.running.get(agent.id)

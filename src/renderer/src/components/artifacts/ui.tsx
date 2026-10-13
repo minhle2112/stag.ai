@@ -28,7 +28,8 @@ export function ProductAvatar({ name, small }: { name: string; small?: boolean }
         height: size,
         borderRadius: small ? 4 : 5,
         fontSize: small ? 8 : 9,
-        color: c,
+        // Tối: đúng màu agent; sáng: pha với màu chữ (--avatar-ink trong styles.css) để đọc được trên nền pastel.
+        color: `color-mix(in srgb, ${c} var(--avatar-ink), var(--color-fg))`,
         background: `color-mix(in srgb, ${c} 18%, transparent)`,
         border: `1px solid color-mix(in srgb, ${c} 35%, transparent)`
       }}
@@ -101,7 +102,7 @@ export function useToast(): [React.ReactNode, (text: string) => void] {
   const node = (
     <div
       role="status"
-      className={`pointer-events-none fixed bottom-8 left-1/2 z-50 max-w-[560px] -translate-x-1/2 rounded-lg border border-line-3 bg-panel-3 px-3.5 py-2 text-center text-[12.5px] shadow-[0_10px_30px_rgba(0,0,0,.5)] transition-opacity ${text ? 'opacity-100' : 'opacity-0'}`}
+      className={`pointer-events-none fixed bottom-8 left-1/2 z-50 max-w-[560px] -translate-x-1/2 rounded-lg border border-line-3 bg-panel-3 px-3.5 py-2 text-center text-[12.5px] shadow-float transition-opacity ${text ? 'opacity-100' : 'opacity-0'}`}
     >
       {text}
     </div>

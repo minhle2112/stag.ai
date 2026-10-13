@@ -41,7 +41,7 @@ export const noteHighlight = HighlightStyle.define([
   { tag: tags.emphasis, fontStyle: 'italic' },
   { tag: tags.strikethrough, textDecoration: 'line-through' },
   { tag: [tags.link, tags.url], color: 'var(--color-accent)' },
-  { tag: tags.monospace, color: '#c3e88d' },
+  { tag: tags.monospace, color: 'var(--color-code-str)' },
   { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator, tags.quote], color: 'var(--color-dim)' },
   // Frontmatter YAML (Obsidian: Properties).
   { tag: [tags.propertyName, tags.definition(tags.propertyName)], color: 'var(--color-dim)' }
@@ -54,9 +54,9 @@ export const noteTheme = EditorView.theme(
     '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.7', overflow: 'auto' },
     '.cm-content': { padding: '24px 40px 40vh', caretColor: 'var(--color-accent)' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--color-accent)' },
-    '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.025)' },
-    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(45,226,192,0.2) !important' },
-    '.cm-selectionMatch': { backgroundColor: 'rgba(45,226,192,0.12)' },
+    '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--color-fg) 3%, transparent)' },
+    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'color-mix(in srgb, var(--color-accent) 20%, transparent) !important' },
+    '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--color-accent) 12%, transparent)' },
     // [[wikilink]] và frontmatter (decorations bên dưới).
     '.cm-wikilink': { color: 'var(--color-accent)' },
     '.cm-fm, .cm-fm span': { color: 'var(--color-dim)' },
@@ -71,7 +71,7 @@ export const noteTheme = EditorView.theme(
       padding: '2px 6px',
       outline: 'none'
     },
-    '.cm-textfield:focus': { borderColor: 'rgba(45,226,192,0.42)' },
+    '.cm-textfield:focus': { borderColor: 'color-mix(in srgb, var(--color-accent) 42%, transparent)' },
     '.cm-button': {
       backgroundImage: 'none',
       backgroundColor: 'var(--color-panel-2)',

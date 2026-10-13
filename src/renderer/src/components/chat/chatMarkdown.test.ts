@@ -21,7 +21,7 @@ describe('renderChatMarkdown', () => {
     const html = renderChatMarkdown('```ts\nconst a = "<b>"\n```')
     expect(html).toContain('data-copy')
     expect(html).toContain('>ts</span>')
-    expect(html).toContain('text-[#c792ea]')
+    expect(html).toContain('text-code-kw')
     expect(html).toContain('&lt;b&gt;')
     expect(html).not.toContain('<b>')
   })
