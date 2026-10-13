@@ -140,6 +140,14 @@ describe('InspectService', () => {
     expect(sent.some((c) => c.type === 'reload')).toBe(false)
   })
 
+  it('agent chỉ trả lời bằng chữ (không có changes): không tải lại trang', async () => {
+    const id = await save()
+    await svc.delivered(ws, 'ag1', [id])
+    await svc.reply(ws, agent, { id, text: 'Bản dịch: "Book a table"' })
+    expect((await pinOf(id)).state).toBe('new')
+    expect(sent.some((c) => c.type === 'reload')).toBe(false)
+  })
+
   it('trả lời trong mạch → vòng 2 vào hàng, gói tin có lịch sử', async () => {
     const id = await save()
     await svc.delivered(ws, 'ag1', [id])
@@ -161,7 +169,7 @@ describe('InspectService', () => {
     expect((await pinOf(id)).state).toBe('closed')
   })
 
-  it('đóng mục đang sửa: mục kế tiếp chỉ lên "đang sửa" khi agent trả lời', async () => {
+  it('đóng mục đang trả lời: mục kế tiếp chỉ lên "đang trả lời" khi agent trả lời', async () => {
     const a = await save('Một')
     const b = await save('Hai')
     await svc.delivered(ws, 'ag1', [a, b])

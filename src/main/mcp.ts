@@ -384,11 +384,11 @@ function registerInspectTools(server: McpServer, api: NonNullable<McpContext['in
     {
       title: 'Report back on a page comment',
       description:
-        'Reply to a comment the user pinned on a web page element in the stag.ai Browser ("Soi" mode); they arrive in your session as "[stag.ai] … comment(s) from the user on a web page". Your text shows as a reply in the comment thread. After fixing: inspect_reply(id, text, changes) — stag.ai reloads the page. Unclear: ask your question in text (ask: true). Cannot do it: failed: true. One call per comment; then move on to the next one.',
+        'Reply to a comment the user pinned on a web page element in the stag.ai Browser ("Soi" mode); they arrive in your session as "[stag.ai] … comment(s) from the user on a web page". Your text shows as a reply in the comment thread. A comment is not always a change request: answer questions and word-only requests (translate / explain…) in text without editing code; edit code only when the comment asks to change the page, then inspect_reply(id, text, changes) — stag.ai reloads the page only when changes is set. Unclear: ask your question in text (ask: true). Cannot do it: failed: true. One call per comment; then move on to the next one.',
       inputSchema: {
         id: z.number().int().min(1).describe('Comment number, e.g. 7 for "#7"'),
-        text: z.string().min(1).max(4000).describe('One or two sentences in the conversation language: what you changed, your question, or why you could not do it'),
-        changes: z.string().max(1000).optional().describe('What changed where, e.g. "src/Hero.tsx:42 — padding 10/18 → 15/28px" or the WP-CLI command you ran'),
+        text: z.string().min(1).max(4000).describe('In the conversation language: your answer to the comment, what you changed, your question, or why you could not do it'),
+        changes: z.string().max(1000).optional().describe('Only after you edited the page: what changed where, e.g. "src/Hero.tsx:42 — padding 10/18 → 15/28px" or the WP-CLI command you ran (setting it reloads the page). Leave it out when you only answered'),
         ask: z.boolean().optional().describe('true = you are asking the user back and waiting for their answer'),
         quick: z.array(z.string().min(1).max(60)).max(4).optional().describe('Ignored (kept for older sessions); put options in text instead'),
         failed: z.boolean().optional().describe('true = you could not do it (file locked, element not found, tool error); say why in text')

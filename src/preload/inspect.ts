@@ -509,7 +509,7 @@ function placeBox(b: HTMLElement, r: { x: number; y: number; w: number; h: numbe
   b.style.height = r.h + 'px'
 }
 
-const PIN_TIP: Record<string, string> = { queued: 'đang chờ agent', working: 'đang sửa', new: 'có trả lời mới', read: 'đã xem' }
+const PIN_TIP: Record<string, string> = { queued: 'đang chờ agent', working: 'agent đang trả lời', new: 'có trả lời mới', read: 'đã xem' }
 
 function renderPins(): void {
   const places: Record<number, PinPlace> = {}
@@ -676,7 +676,7 @@ function openCmp(el: Element, pt: { x: number; y: number }): void {
   const box = div('cmp')
   box.setAttribute('role', 'dialog')
   box.setAttribute('aria-label', 'Bình luận')
-  box.innerHTML = `<textarea rows="2" placeholder="Cần sửa gì?"></textarea><div class="row"><div class="whow"></div><button class="send" type="button">Gửi</button></div>`
+  box.innerHTML = `<textarea rows="2" placeholder="Nhập bình luận…"></textarea><div class="row"><div class="whow"></div><button class="send" type="button">Gửi</button></div>`
   const ta = box.querySelector('textarea')!
   const who = box.querySelector<HTMLDivElement>('.whow')!
   const send = box.querySelector<HTMLButtonElement>('.send')!
@@ -871,19 +871,12 @@ function posCmp(): void {
   const R = vw - 8
   const T = 8
   const B = vh - 8
-  // Ưu tiên: bên phải phần tử → bên dưới (ngay điểm bấm) → bên trên; luôn kẹp trong khung nhìn.
-  let x: number
-  let y: number
-  if (r.x + r.w + 10 + W <= R) {
-    x = r.x + r.w + 10
-    y = r.y
-  } else if (r.y + r.h + 8 + H <= B) {
-    x = r.x + r.w * c.pt.x - 20
-    y = r.y + r.h + 8
-  } else {
-    x = r.x + r.w * c.pt.x - 20
-    y = r.y - H - 8
-  }
+  // Ngay dưới điểm bấm (con trỏ chuột; điểm lưu theo tỉ lệ trong phần tử nên cuộn trang vẫn bám theo); dưới không đủ
+  // chỗ → ngay trên điểm bấm; luôn kẹp trong khung nhìn.
+  const px = r.x + r.w * c.pt.x
+  const py = r.y + r.h * c.pt.y
+  const x = px - 12
+  const y = py + 14 + H <= B ? py + 14 : py - 14 - H
   c.box.style.left = Math.max(L, Math.min(x, R - W)) + 'px'
   c.box.style.top = Math.max(T, Math.min(y, B - H)) + 'px'
 }

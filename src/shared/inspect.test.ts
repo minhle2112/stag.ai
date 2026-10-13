@@ -59,7 +59,7 @@ describe('pageKey', () => {
 })
 
 describe('hàng chờ mỗi agent', () => {
-  it('gửi → chờ; gõ vào phiên → mục đầu đang sửa, mục sau chờ tới lượt', () => {
+  it('gửi → chờ; gõ vào phiên → mục đầu đang trả lời, mục sau chờ tới lượt', () => {
     const a = pin({ id: 1 })
     const b = pin({ id: 2 })
     enqueue(a, '2026-10-12T10:00:01Z')
@@ -223,6 +223,14 @@ describe('gói tin gửi agent', () => {
     expect(t).toMatch(/^\[stag\.ai\] 2 comments from the user on a web page/)
     expect(t).toContain('inspect_reply(id')
     expect(t).not.toContain('before / after')
+  })
+
+  it('bình luận không phải lúc nào cũng là yêu cầu sửa: trả lời bằng lời, chỉ sửa code khi được yêu cầu', () => {
+    const t = packetMessage([pin({ id: 1 })])
+    expect(t).toContain('A comment is not always a change request')
+    expect(t).toContain('translate')
+    expect(t).toContain('Edit code only when the comment asks to change the page')
+    expect(t).not.toMatch(/when you are done call inspect_reply/)
   })
 })
 

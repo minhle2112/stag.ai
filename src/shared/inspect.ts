@@ -7,7 +7,7 @@
 /** Trạng thái một bình luận (ghim).
  * - draft: chữ gõ dở trong hộp bình luận của một phần tử, chưa gửi (ghim nét đứt "…").
  * - queued: đã gửi, chờ agent (agent đang bận / phiên chưa mở, hoặc đã gõ vào phiên nhưng chưa tới lượt).
- * - working: agent đang sửa mục này.
+ * - working: agent đang trả lời mục này.
  * - new: agent đã trả lời, bạn chưa xem (ghim vàng).
  * - read: đã xem câu trả lời (ghim viền teal).
  * - closed: bạn đã đóng (✓); ghim ẩn. */
@@ -140,7 +140,7 @@ export interface InspectAgent {
   running: boolean
   /** Đang làm một lượt. */
   busy: boolean
-  /** Số bình luận đang chờ / đang sửa của agent này (mọi trang). */
+  /** Số bình luận đang chờ / đang trả lời của agent này (mọi trang). */
   load: number
 }
 
@@ -376,14 +376,14 @@ export function applyReply(p: InspectPin, input: ReplyInput, agentId: string, at
   return p.state
 }
 
-/** Đã gõ gói tin vào phiên agent: mục đầu tiên chưa có agent nào làm → đang sửa, còn lại chờ tới lượt. */
+/** Đã gõ gói tin vào phiên agent: mục đầu tiên chưa có agent nào làm → đang trả lời, còn lại chờ tới lượt. */
 export function markDelivered(all: InspectPin[], agentId: string, ids: number[]): void {
   const set = new Set(ids)
   for (const p of all) if (set.has(p.id) && p.state === 'queued') p.delivered = true
   promoteNext(all, agentId)
 }
 
-/** Agent không còn mục đang sửa → mục đã gõ vào phiên tiếp theo trong hàng thành đang sửa. */
+/** Agent không còn mục đang trả lời → mục đã gõ vào phiên tiếp theo trong hàng thành đang trả lời. */
 export function promoteNext(all: InspectPin[], agentId: string): InspectPin | null {
   if (all.some((p) => p.agentId === agentId && p.state === 'working')) return null
   const next = all.filter((p) => p.agentId === agentId && p.state === 'queued' && p.delivered).sort(byQueue)[0]
@@ -441,7 +441,7 @@ export function packetItem(p: InspectPin): string {
   if (s && s.chip !== 'none') {
     lines.push(`  source: ${s.file ? `${s.file}${s.line ? `:${s.line}` : ''}` : s.label}${s.inherited ? ' (of a parent element)' : ''}${s.file && s.label !== s.file && !s.label.startsWith(s.file) ? ` — ${s.label}` : ''}`)
     if (s.hint) lines.push(`  how to edit: ${s.hint}`)
-  } else lines.push('  source: unknown — find it from the selector / HTML / text')
+  } else lines.push('  source: unknown — if you need to edit, find it from the selector / HTML / text')
   if (t.group)
     lines.push(
       `  scope: only this element (it is 1 of ${t.group.n} ${t.group.kind === 'loop' ? 'items from the same template — change only this one unless the user says all' : 'similar but separate widgets'}; ${t.group.selector})`
@@ -464,11 +464,12 @@ export function packetItem(p: InspectPin): string {
 /** Gói tin gõ vào phiên agent cho các mục `pins` (theo thứ tự hàng chờ). */
 export function packetMessage(pins: InspectPin[]): string {
   const n = pins.length
-  const head = `[stag.ai] ${n === 1 ? 'A comment' : `${n} comments`} from the user on a web page (stag.ai Browser, "Soi" mode). Work on them in this order:`
+  const head = `[stag.ai] ${n === 1 ? 'A comment' : `${n} comments`} from the user on a web page (stag.ai Browser, "Soi" mode), each pinned on one element. Handle them in this order:`
   const how = [
-    'For each one, when you are done call inspect_reply(id, text: one sentence in the conversation language saying what you changed, changes: "file:line — short summary" or the WP-CLI command). The user sees your text as a reply in the comment thread; stag.ai reloads the page.',
-    'Unclear request → inspect_reply(id, text: your question) and wait for their answer. Cannot do it (file locked, element not found, tool error) → inspect_reply(id, text: why, failed: true).',
-    'Edit the source, never the live DOM. Never edit a production site. WordPress: edit the child theme (copy a parent-theme file into the child theme first), or use WP-CLI on the local copy; purge caches after an edit. Do not edit outside your task scope without asking.'
+    'A comment is not always a change request. Read what the user wrote and answer each one with inspect_reply(id, text) in the conversation language; the user sees your text as a reply in the comment thread. A question → answer it in text. A request you can answer in words (translate / explain / review the element\'s text…) → put the result in text, no code edit. Edit code only when the comment asks to change the page.',
+    'After changing the page: inspect_reply(id, text: one sentence saying what you changed, changes: "file:line — short summary" or the WP-CLI command); stag.ai reloads the page only when changes is set, so always set it after an edit and never when you only answered.',
+    'Unclear → inspect_reply(id, text: your question, ask: true) and wait for their answer. A change you cannot make (file locked, source not found, tool error) → inspect_reply(id, text: why, failed: true).',
+    'When you edit: edit the source, never the live DOM. Never edit a production site. WordPress: edit the child theme (copy a parent-theme file into the child theme first), or use WP-CLI on the local copy; purge caches after an edit. Do not edit outside your task scope without asking.'
   ]
   return [head, '', ...pins.map((p) => packetItem(p)).flatMap((b) => [b, '']), ...how].join('\n')
 }

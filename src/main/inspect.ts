@@ -481,7 +481,7 @@ export class InspectService {
       }
       case 'close':
         await this.mutate(ws, (d) => {
-          // Agent có thể vẫn đang làm mục này: mục kế tiếp chỉ thành "đang sửa" khi agent trả lời (promoteNext ở reply).
+          // Agent có thể vẫn đang làm mục này: mục kế tiếp chỉ thành "đang trả lời" khi agent trả lời (promoteNext ở reply).
           const pin = d.pins.find((x) => x.id === a.id)
           if (pin) close(pin)
         })
@@ -555,9 +555,9 @@ export class InspectService {
       const left = d.pins.filter((x) => x.agentId === agent.id && x.state === 'queued').length
       return { state, url: pin.url, next: next?.id ?? null, left }
     })
-    // Agent đã trả lời (thường là đã sửa): tải lại trang đang mở — trang tĩnh / WordPress không có HMR. Lớp Soi chờ hộp
-    // bình luận đang gõ đóng lại rồi mới tải.
-    if (res.state === 'new' && !input.ask && !input.failed)
+    // Agent đã sửa trang (báo `changes`): tải lại trang đang mở — trang tĩnh / WordPress không có HMR. Chỉ trả lời bằng
+    // chữ (câu hỏi, dịch…) thì giữ nguyên trang. Lớp Soi chờ hộp bình luận đang gõ đóng lại rồi mới tải.
+    if (res.state === 'new' && !input.ask && !input.failed && input.changes?.trim())
       for (const p of this.browser.pages(ws.id)) if (this.pageUrl.get(p.tabId) === res.url) this.cmd(p, { type: 'reload' })
     const what = res.state === 'closed' ? 'The user had already closed this comment; nothing more to do on it.' : 'The user sees your reply in the comment thread.'
     const next = res.next !== null ? ` Next for you: #${res.next}.` : res.left ? ` ${res.left} more comment(s) are waiting for you; stag.ai sends them when you are idle.` : ''

@@ -202,7 +202,7 @@ function Thread({
               <i key={d} className="h-1 w-1 animate-pulse rounded-full bg-muted" style={{ animationDelay: `${d}ms` }} />
             ))}
           </span>
-          {p.agentName} đang sửa
+          {p.agentName} đang trả lời
         </div>
       )}
       {(p.state === 'new' || p.state === 'read') && (
