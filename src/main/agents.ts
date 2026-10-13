@@ -13,9 +13,11 @@ import {
   handoffBody,
   handoffMessage,
   handoffOpening,
+  isChungName,
   isCliKind,
   MESSAGE_MAX,
   parsePermission,
+  parseTeamPreset,
   permissionAbove,
   ROLE_MAX,
   TASK_MAX,
@@ -25,7 +27,10 @@ import {
   type AgentCreateInput,
   type AgentRequestInput,
   type AgentTargetInfo,
-  type AgentUpdateInput
+  type AgentUpdateInput,
+  type ProjectCreateDraft,
+  type ProjectCreateInput,
+  type ProjectUpdateInput
 } from '@shared/agentApi'
 import {
   type Agent,
@@ -37,6 +42,7 @@ import {
   type CreateAgentRequest,
   type CanvasLayout,
   type PermissionMode,
+  type Project,
   type IndexCleanResult,
   type StartAgentRequest,
   type Task,
@@ -55,7 +61,8 @@ import type { ApprovalQueue } from './approvals'
 import { claudeSkillSettings, codexSkillArgs, scanClaudeSkills, skillInstructions, type SkillLibrary } from './skills'
 import { reply as hookReply, type PreToolUseReply } from './scopeGuard'
 import { contextPercent, findGitBash, handoffDue, handoffPrompt, mergeContext, parseStatusLine, userStatusLine } from './context'
-import { exists, readText, today, writeIfMissing } from './fsutil'
+import { exists, isDir, readText, today, writeIfMissing } from './fsutil'
+import { JsonFile } from './jsonFile'
 import type { StatusHub } from './hub'
 import { AgentMail, MAIL_GAP_MS, mailReady } from './agentMail'
 import { loadHistory } from './chat/history'
@@ -64,7 +71,8 @@ import { ChatSession, type ChatSessionBase, type ChatSessionOptions } from './ch
 import { CodexChatSession } from './chat/codexSession'
 import { loadCodexHistory } from './chat/codexHistory'
 import { AgentRequestQueue, type AgentRequestAnswer } from './agentRequests'
-import { createStagMcp, describeAgent, type AdapterInfo, type AgentInfo, type AgentLogInput, type ExtraTool } from './mcp'
+import { createStagMcp, describeAgent, type AdapterInfo, type AgentInfo, type AgentLogInput, type ExtraTool, type ProjectInfo } from './mcp'
+import type { ProjectService } from './projects'
 import { formatEntries, parseClaudeLog, parseCodexLog, readTailLines, redact, secretParts } from './sessionLog'
 import { archiveName, memoryRules, oneLine, sizeKb, type MemoryKeeper } from './workLog'
 import { browserToolsOn } from '@shared/settings'
@@ -84,6 +92,7 @@ import { ensureIgnored, type WorkspaceStore } from './workspace'
 import { normalizeLayout } from './agentLayout'
 import { emptyCanvas } from '@shared/canvas'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
+import { agentFolder, CHUNG, crossProjectAsk, joinRoot, placeOf, projectOf, projectPair, projectSection, teamPreset, uniqueAgentName } from '@shared/projects'
 import { effectiveConnectors, OAUTH_SECRET_PREFIX, toolPolicy } from '@shared/connectors'
 import { effectiveSkills } from '@shared/skills'
 import type { ChatItem, ChatPermissionAnswer, ChatSendRequest, ChatSnapshot } from '@shared/chat'
@@ -98,7 +107,10 @@ interface Handoff {
 
 interface StoreFile {
   agents: Agent[]
-  /** Bố cục canvas theo workspace (bản cũ có thể là cây chia đôi: normalizeLayout đổi sang canvas). */
+  /**
+   * Bố cục canvas theo workspace (bản cũ có thể là cây chia đôi: normalizeLayout đổi sang canvas). Khoá = id workspace
+   * (tab Chung) hoặc `<id workspace>#<id project>` (tab của project, xem layoutKey).
+   */
   layouts: Record<string, CanvasLayout>
   /** Theo agentId. Lưu file để app tắt giữa chừng thì phiên sau vẫn nhận được bản bàn giao. */
   handoffs?: Record<string, Handoff>
@@ -138,7 +150,8 @@ function publicRun({ agentId, sessionId, ptyId, startedAt, chat }: Running): Age
 }
 
 export class AgentService {
-  private file = join(app.getPath('userData'), 'agents.json')
+  /** userData/agents.json: ghi lần lượt, qua file tạm, giữ bản .bak (xem jsonFile.ts). */
+  private file = new JsonFile(join(app.getPath('userData'), 'agents.json'))
   private data: StoreFile = { agents: [], layouts: {} }
   private running = new Map<string, Running>()
   /** Phiên ô chat theo agent: giữ lại sau khi thoát để ô vẫn hiện hội thoại cho tới khi mở phiên mới. */
@@ -265,6 +278,13 @@ export class AgentService {
     this.inspect = svc
   }
 
+  /** Tạo / đổi project (tool project_create / project_update); ProjectService tự gắn vào khi được tạo. */
+  private projects: ProjectService | null = null
+
+  attachProjects(svc: ProjectService): void {
+    this.projects = svc
+  }
+
   /** Agent nhận được góp ý chế độ Soi trong workspace (không phải ô terminal thường). */
   inspectTeam(workspaceId: string): InspectTeamMember[] {
     return this.data.agents
@@ -306,8 +326,11 @@ export class AgentService {
   }
 
   async load(): Promise<void> {
-    const raw = await readText(this.file)
-    if (raw) this.data = JSON.parse(raw) as StoreFile
+    // File hỏng (tắt máy / hai lần ghi chồng nhau ở bản cũ): cất bản hỏng, đọc bản .bak; không có thì mở với danh sách
+    // trống thay vì không mở được app.
+    const read = await this.file.read((x): x is StoreFile => !!x && typeof x === 'object' && Array.isArray((x as StoreFile).agents))
+    if (read.broken) console.error(`[agents] ${this.file.file} hỏng: ${read.fromBackup ? 'đọc bản .bak' : 'không có bản .bak, mở với danh sách trống'}`)
+    if (read.data) this.data = { ...read.data, layouts: read.data.layouts ?? {} }
     // Canvas ô (agent + widget plugin): bỏ ô hỏng do sửa tay, đổi lưới chia đôi cũ sang canvas.
     const layouts: StoreFile['layouts'] = {}
     for (const [wsId, l] of Object.entries(this.data.layouts ?? {})) layouts[wsId] = normalizeLayout(l)
@@ -319,8 +342,8 @@ export class AgentService {
     }
   }
 
-  private async save(): Promise<void> {
-    await fs.writeFile(this.file, JSON.stringify(this.data, null, 2), 'utf8')
+  private save(): Promise<void> {
+    return this.file.write(this.data)
   }
 
   snapshot(workspaceId: string): AgentsSnapshot {
@@ -328,7 +351,17 @@ export class AgentService {
     const running = [...this.running.values()]
       .filter((r) => agents.some((a) => a.id === r.agentId))
       .map(publicRun)
-    return { agents, layout: this.data.layouts[workspaceId] ?? emptyCanvas(), running }
+    const projectLayouts: Record<string, CanvasLayout> = {}
+    for (const p of this.workspaces.get(workspaceId)?.projects ?? []) {
+      const l = this.data.layouts[layoutKey(workspaceId, p.id)]
+      if (l) projectLayouts[p.id] = l
+    }
+    return { agents, layout: this.data.layouts[workspaceId] ?? emptyCanvas(), running, projectLayouts }
+  }
+
+  /** Thư mục agent mở phiên: thư mục project của nó, hoặc gốc workspace (Chung). */
+  private cwdOf(agent: Agent, ws: Workspace): string {
+    return joinRoot(ws.path, agentFolder(ws, agent))
   }
 
   async create(req: CreateAgentRequest): Promise<Agent> {
@@ -338,6 +371,7 @@ export class AgentService {
     if (problem) throw new Error(problem)
     const taken = this.data.agents.some((a) => a.workspaceId === req.workspaceId && sameAgentName(a.name, name))
     if (taken) throw new Error(`Đã có agent tên "${name}" trong workspace này`)
+    if (req.projectId && !this.workspaces.get(req.workspaceId)?.projects?.some((p) => p.id === req.projectId)) throw new Error('Project này không còn trong workspace')
     const terminal = req.kind === 'terminal'
     if (req.kind === 'external' && !this.external.get(req.adapterId ?? '')) throw new Error('Adapter ngoài này không còn, cài lại ở Cài đặt → Adapter')
     const cli = req.kind === 'claude' || req.kind === 'codex'
@@ -354,7 +388,8 @@ export class AgentService {
       createdAt: new Date().toISOString(),
       ...(req.kind === 'external' ? { adapterId: req.adapterId } : {}),
       // Ô chat: Claude Code (stream-json) và Codex (app-server); adapter ngoài / terminal chỉ có ô CLI.
-      ...(req.cell === 'chat' && cli ? { cell: 'chat' as const } : {})
+      ...(req.cell === 'chat' && cli ? { cell: 'chat' as const } : {}),
+      ...(req.projectId ? { projectId: req.projectId } : {})
     }
     this.data.agents.push(agent)
     await this.save()
@@ -397,13 +432,16 @@ export class AgentService {
     if (agentKind(agent) === 'terminal') return this.startTerminal(owner, agent, ws, req)
 
     if (!this.hub) throw new Error('Máy chủ trạng thái của app chưa sẵn sàng')
+    // Agent của project mở phiên trong thư mục project (cố định cả phiên); file phiên, .stag, vault vẫn ở gốc workspace.
+    const cwd = this.cwdOf(agent, ws)
+    if (cwd !== ws.path && !(await isDir(cwd))) throw new Error(`Không thấy thư mục project ${cwd}. Tạo lại thư mục, hoặc xoá project này.`)
     const kind = agentKind(agent)
     const chatMode = (kind === 'claude' || kind === 'codex') && agent.cell === 'chat'
     const ext = kind === 'external' ? this.external.get(agent.adapterId ?? '') : undefined
     if (kind === 'external' && !ext) throw new Error(`Adapter "${agent.adapterId}" của agent này đã bị gỡ. Cài lại ở Cài đặt → Adapter.`)
     if (kind !== 'claude' && kind !== 'codex' && !ext) throw new Error('Loại agent này chưa được hỗ trợ')
     // `claude -p` bỏ qua hộp thoại "tin cậy thư mục": ô chat chỉ chạy ở thư mục người dùng đã tin ở ô CLI.
-    if (chatMode && kind === 'claude' && !(await isClaudeFolderTrusted(ws.path)))
+    if (chatMode && kind === 'claude' && !(await isClaudeFolderTrusted(cwd)))
       throw new Error(
         'Claude Code chưa được xác nhận tin cậy thư mục dự án này. Đổi agent sang ô CLI, mở phiên một lần và chọn "Yes, I trust this folder", rồi quay lại ô chat.'
       )
@@ -416,7 +454,7 @@ export class AgentService {
     const fresh = await this.oauth.fresh(conn.servers.filter((c) => c.oauth).map((c) => ({ name: c.bearerSecret, label: c.label || c.id })))
     // Bí mật OAuth chỉ đi vào phiên dưới dạng access token đã làm mới, không bao giờ cả khối JSON (có refresh token).
     const connEnv = connectorEnv(conn.servers, (n) => fresh.get(n) ?? (n.startsWith(OAUTH_SECRET_PREFIX) ? undefined : this.secrets.get(n)))
-    const connCmds = await resolveCommands(conn.servers, ws.path)
+    const connCmds = await resolveCommands(conn.servers, cwd)
     // Adapter ngoài không có cách tiếp tục phiên (chưa biết id phiên của CLI đó).
     const resume = req.resume && !!agent.lastSessionId && !ext
     const open = await this.board.openTask(ws, agent.id)
@@ -431,7 +469,7 @@ export class AgentService {
     const sk = effectiveSkills(this.settings.get(), await this.skills.usable(), agent.workspaceId, agent.id)
     // Claude tắt skill theo tên (skillOverrides) nên không tách được hai skill cùng tên: trùng với skill Claude Code
     // tự nạp (user / claude.ai / project) thì phiên Claude dùng bản của Claude Code, không chép bản thư viện.
-    const claudeOwn = kind === 'claude' ? new Set((await scanClaudeSkills(ws.path)).filter((s) => s.scope !== 'plugin').map((s) => s.name)) : null
+    const claudeOwn = kind === 'claude' ? new Set((await scanClaudeSkills(cwd)).filter((s) => s.scope !== 'plugin').map((s) => s.name)) : null
     const sessionSkills = await this.skills.prepareSession(sessionId, claudeOwn ? sk.library.filter((n) => !claudeOwn.has(n)) : sk.library)
     const sessionFile = join(ws.path, '.sessions', `${sessionId}.md`)
     const agentNote = join(ws.vaultPath, '60 Agents', `${agent.name}.md`)
@@ -450,7 +488,8 @@ export class AgentService {
       ROLE_SUFFIX: agent.role ? ` (role: ${agent.role})` : '',
       ROLE_LINE: agent.role || '_(no role set)_',
       WORKSPACE: ws.name,
-      PROJECT_PATH: ws.path,
+      PROJECT_PATH: cwd,
+      PROJECT_SECTION: projectSection(ws, agent, cwd),
       VAULT_PATH: ws.vaultPath,
       SESSION_ID: sessionId,
       SESSION_FILE: sessionFile,
@@ -500,7 +539,7 @@ export class AgentService {
     if (ext) {
       // Luật phiên vào một file cạnh file phiên; CLI nhận qua cờ hoặc biến môi trường (stagAdapter.rules).
       const rulesFile = sessionFile.replace(/\.md$/, '.rules.md')
-      const note = ext.manifest.mcpConfigFlag ? '' : '\n\nNOTE: this CLI has no access to the stag MCP tools mentioned above (kanban, browser, handoff). Skip those steps.\n'
+      const note = ext.manifest.mcpConfigFlag ? '' : '\n\nNOTE: this CLI has no access to the stag MCP tools mentioned above (task list, browser, handoff). Skip those steps.\n'
       await fs.writeFile(rulesFile, rules + skillText + note, 'utf8')
       const own = ext.manifest.mcpConfigFlag
         ? await this.hub.writeSessionConfigs(sessionFile.replace(/\.md$/, ''), claudeServers(conn.servers, connCmds), { allow: [], ask: [], deny: [], deniedMcpServers: [] })
@@ -512,7 +551,7 @@ export class AgentService {
       userEnv = l.env
       transcriptFile = null
     } else if (kind === 'codex') {
-      const codexUser = [...codexConnectorArgs(conn, connCmds, await codexConfiguredServers(ws.path), connEnv), ...(await codexSkillArgs(sk.denied.codex, ws.path))]
+      const codexUser = [...codexConnectorArgs(conn, connCmds, await codexConfiguredServers(cwd), connEnv), ...(await codexSkillArgs(sk.denied.codex, cwd))]
       if (chatMode) {
         // Ô chat: `codex [-c …] app-server`; luật phiên + mức quyền đi qua thread/start (xem chat/codexSession.ts).
         const user = codexAppServerUserArgs(this.adapters.launchArgs('codex', agent))
@@ -551,9 +590,9 @@ export class AgentService {
       if (!resume && !chatMode) args.push('--', opening)
       // statusLine của app (cho biết kích thước cửa sổ context) thay statusLine của người dùng trong phiên
       // agent; script của app chạy tiếp lệnh của họ để nó vẫn hiện như cũ (xem statusScript trong hub.ts).
-      const ownStatusLine = await userStatusLine(ws.path)
+      const ownStatusLine = await userStatusLine(cwd)
       if (ownStatusLine) statusEnv = { STAG_USER_STATUSLINE: ownStatusLine, STAG_USER_STATUSLINE_BASH: (await findGitBash()) ?? '' }
-      transcriptFile = transcriptPath(ws.path, sessionId)
+      transcriptFile = transcriptPath(cwd, sessionId)
     }
     const hubToken = this.hub.issueToken(agent.id, sessionId)
     const sessionEnv: Record<string, string> = {
@@ -583,9 +622,9 @@ export class AgentService {
             ...this.chatCallbacks(owner, agent, ptyId),
             command,
             args: args as string[],
-            cwd: ws.path,
+            cwd,
             env,
-            thread: { cwd: ws.path, developerInstructions: rules + skillText, ...codexThreadPermission(agent.permissionMode) },
+            thread: { cwd, developerInstructions: rules + skillText, ...codexThreadPermission(agent.permissionMode) },
             resumeId: codexResume,
             hookUrl: this.hub.endpoints().hookUrl,
             onSessionId: (threadId) => {
@@ -597,8 +636,8 @@ export class AgentService {
           })
         } else {
           const spec = spawnSpec(command, Array.isArray(args) ? args : [args])
-          history = resume ? await loadHistory(transcriptPath(ws.path, sessionId)) : kept
-          chat = new ChatSession({ ...this.chatCallbacks(owner, agent, ptyId), command: spec.command, args: spec.args, cwd: ws.path, env })
+          history = resume ? await loadHistory(transcriptPath(cwd, sessionId)) : kept
+          chat = new ChatSession({ ...this.chatCallbacks(owner, agent, ptyId), command: spec.command, args: spec.args, cwd, env })
         }
         chat.start(history, sessionId, resume)
         // Phiên mới: lời mở đi như lượt đầu tiên (tiếp tục phiên thì agent đứng chờ người dùng gõ).
@@ -606,7 +645,7 @@ export class AgentService {
       } else {
         ptyId = this.ptys.spawn(
           owner,
-          { command, args, cwd: ws.path, cols: req.cols, rows: req.rows },
+          { command, args, cwd, cols: req.cols, rows: req.rows },
           { env: sessionEnv, filterEnv: independentSessionEnv, onExit: () => this.finish(agent.id, ptyId) }
         )
       }
@@ -681,7 +720,7 @@ export class AgentService {
     const items =
       agentKind(agent) === 'codex'
         ? await loadCodexHistory(await findCodexRollout(agent.lastSessionId, new Date(), codexHome(), 60))
-        : await loadHistory(transcriptPath(ws.path, agent.lastSessionId))
+        : await loadHistory(transcriptPath(this.cwdOf(agent, ws), agent.lastSessionId))
     return { items, state: { phase: 'off', sessionId: agent.lastSessionId } }
   }
 
@@ -766,7 +805,7 @@ export class AgentService {
     const sh = await resolveShell(this.settings.get().app.adapters.terminal.shell)
     const ptyId = this.ptys.spawn(
       owner,
-      { command: sh.path, args: sh.args, cwd: ws.path, cols: req.cols, rows: req.rows },
+      { command: sh.path, args: sh.args, cwd: this.cwdOf(agent, ws), cols: req.cols, rows: req.rows },
       { filterEnv: independentSessionEnv, onExit: () => this.finish(agent.id, ptyId) }
     )
     this.lastPty.set(agent.id, ptyId)
@@ -1040,7 +1079,7 @@ export class AgentService {
       scope: () => resolveScope(this.settings.get(), ws.id, agent.id),
       browser: this.browser,
       devServers: this.devServers?.agentApi(ws.id, agent.id, (dev) =>
-        this.confirm(agent, 'preview_start', { workspaceId: ws.id, fromAgentId: agent.id, fromName: agent.name, action: 'devserver', dev })
+        this.confirm(agent, 'preview_start', { workspaceId: ws.id, fromAgentId: agent.id, fromName: agent.name, action: 'devserver', dev }).then((a) => (a === 'always' ? 'allow' : a))
       ),
       teammates: () =>
         this.data.agents.filter((a) => a.workspaceId === ws.id && agentKind(a) !== 'terminal').map((a) => ({ agent: a, running: this.running.has(a.id) })),
@@ -1057,7 +1096,10 @@ export class AgentService {
         handoff: (input) => this.apiHandoff(agent, ws, input),
         remove: (input) => this.apiDelete(agent, ws, input),
         status: (input) => this.apiStatus(agent, ws, input),
-        log: (input) => this.apiLog(ws, input)
+        log: (input) => this.apiLog(ws, input),
+        projects: () => this.projectList(ws, agent),
+        createProject: (input) => this.apiProjectCreate(agent, ws, input),
+        updateProject: (input) => this.apiProjectUpdate(ws, input)
       },
       // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi; phiên mở sau đó không thấy tool.
       browserTools: browserToolsOn(this.settings.get(), ws.id, agent.id),
@@ -1069,7 +1111,7 @@ export class AgentService {
       agentApi: resolveAgentApi(this.settings.get(), ws.id, agent.id),
       artifacts: this.products
         ? {
-            publish: async (input) => this.products!.publish(ws, agent, await this.publishTask(ws, agent.id), input),
+            publish: async (input) => this.products!.publish(ws, agent, await this.publishTask(ws, agent.id), input, this.cwdOf(agent, ws)),
             reply: (input) => this.products!.reply(ws, agent, input)
           }
         : undefined,
@@ -1109,7 +1151,8 @@ export class AgentService {
           permissionMode: a.permissionMode,
           running: this.running.has(a.id),
           activity: kind === 'terminal' ? null : (this.board.statusOf(a.id)?.activity ?? null),
-          context: this.contextOf(a.id)
+          context: this.contextOf(a.id),
+          ...(ws.projects?.length ? { project: projectInfo(projectOf(ws, a)) } : {})
         }
       })
   }
@@ -1137,7 +1180,7 @@ export class AgentService {
       kind: 'terminal',
       label: 'Terminal',
       available: true,
-      detail: 'a plain shell in the project folder, no memory, not on the kanban',
+      detail: 'a plain shell in the project folder, no memory, no tasks',
       defaultModel: null,
       defaultEffort: null,
       models: []
@@ -1186,13 +1229,17 @@ export class AgentService {
       if (!ext) throw new Error(`No external adapter "${d.adapterId}" is installed (see adapter_models).`)
       kindLabel = ext.manifest.label
     }
-    const draft: AgentCreateDraft = { ...d, kindLabel }
+    // Chỗ của agent mới: tham số `project` (tên project / "Chung"), vắng = chỗ của agent đang xin.
+    const cur = this.workspaces.get(ws.id) ?? ws
+    const target = targetProject(cur, caller, input.project)
+    const draft: AgentCreateDraft = {
+      ...d,
+      kindLabel,
+      ...(cur.projects?.length ? { project: target ? { id: target.id, name: target.name, color: target.color } : null } : {})
+    }
 
-    // Cài đặt → Agent API tắt "hỏi trước khi tạo": vẫn hỏi nếu agent mới được quyền cao hơn agent đang xin.
-    const ask = resolveAgentApi(s, ws.id, caller.id).confirmCreate || (isCliKind(draft.kind) && permissionAbove(draft.permissionMode, caller.permissionMode))
-    const answer = ask
-      ? await this.confirm(caller, 'agent_create', { workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'create', create: draft })
-      : 'allow'
+    // Hỏi theo công tắc "Hỏi bạn trước…" của Cài đặt → Agent API (xem confirm); tắt thì tạo luôn.
+    const answer = await this.confirm(caller, 'agent_create', { workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'create', create: draft })
     if (answer === 'deny') return `The user declined creating agent "${draft.name}". Do not retry; ask the user what they want instead.`
     if (answer === 'timeout') return `Nobody confirmed creating agent "${draft.name}" in stag.ai in time. Tell the user to look at the confirm card, or try again when they are ready.`
 
@@ -1202,7 +1249,8 @@ export class AgentService {
       adapterId: draft.adapterId,
       name: draft.name,
       role: draft.role,
-      permissionMode: draft.permissionMode
+      permissionMode: draft.permissionMode,
+      ...(target ? { projectId: target.id } : {})
     })
     if (isCliKind(draft.kind) && (draft.model || draft.effort)) {
       const one = { ...(draft.model ? { model: draft.model } : {}), ...(draft.effort ? { effort: draft.effort } : {}) }
@@ -1215,10 +1263,97 @@ export class AgentService {
     const m = isCliKind(draft.kind) ? this.settings.modelFor(draft.kind, agent) : null
     const what = `${draft.kindLabel}${m ? `, model ${m.model || 'default (CLI config)'}${m.effort ? `, effort ${m.effort}` : ''}` : ''}, permission ${agent.permissionMode}`
     const opened = draft.open
-      ? ' Its cell was added next to yours and its session starts now (if the user is looking at another workspace, it starts when they open this one).'
+      ? ` Its cell was added ${cellWhere(cur, caller, agent)}.`
       : ' Its cell is not open; the user (or agent_open later) can open it from the agent list.'
     const task = draft.task ? ' It will start with the task you gave it.' : ''
-    return `Created agent "${agent.name}" (${what}).${opened}${task} Tell the user.`
+    const place = draft.project === undefined ? '' : draft.project ? ` in project "${draft.project.name}"` : ' at the workspace root ("Chung")'
+    return `Created agent "${agent.name}"${place} (${what}).${opened}${task} Tell the user.`
+  }
+
+  // ---- Agent API: project (tool project_list, project_create, project_update; xoá project chỉ người dùng làm) ----
+
+  /** Tool project_list: Chung + các project của workspace, kèm agent ở mỗi chỗ và chỗ của agent đang hỏi. */
+  private projectList(ws0: Workspace, caller: Agent): ProjectInfo[] {
+    const ws = this.workspaces.get(ws0.id) ?? ws0
+    const agents = this.data.agents.filter((a) => a.workspaceId === ws.id)
+    const at = (id: string | null): string[] => agents.filter((a) => (projectOf(ws, a)?.id ?? null) === id).map((a) => a.name)
+    const mine = projectOf(ws, caller)?.id ?? null
+    const chung: ProjectInfo = { name: 'Chung', chung: true, folder: '', path: ws.path, goal: '', note: null, agents: at(null), mine: mine === null }
+    return [
+      chung,
+      ...(ws.projects ?? []).map((p) => ({
+        name: p.name,
+        chung: false,
+        folder: p.folder,
+        path: joinRoot(ws.path, p.folder),
+        goal: p.goal,
+        note: joinRoot(ws.vaultPath, p.note),
+        agents: at(p.id),
+        mine: mine === p.id
+      }))
+    ]
+  }
+
+  /**
+   * Tool project_create: kiểm tra như hộp tạo project (tên, thư mục, đội), hỏi người dùng theo cùng công tắc với
+   * agent_create, rồi tạo bằng ProjectService. Đội được thêm vào danh sách, chưa mở ô / phiên.
+   */
+  private async apiProjectCreate(caller: Agent, ws: Workspace, input: ProjectCreateInput): Promise<string> {
+    const run = this.running.get(caller.id)
+    if (!run) throw new Error('Your session is not running in stag.ai.')
+    if (!this.projects) throw new Error('This stag.ai build cannot create projects from an agent.')
+    const preset = parseTeamPreset(input.team)
+    if (!preset) throw new Error(`Unknown team "${input.team}". Use "none", "solo", "duo" or "team".`)
+    const name = input.name.trim()
+    const goal = (input.goal ?? '').trim()
+    const team = teamPreset(preset, name)
+    const req = { workspaceId: ws.id, name, goal, folder: await this.projects.folderChoice(ws.id, input.folder), team }
+    const plan = await this.projects.plan(req)
+    const s = this.settings.get()
+    // Đội mẫu toàn Claude Code, tạo với quyền mặc định của app (như ProjectService.create).
+    const teamPermission = s.app.adapters.claude.defaultPermission
+    const draft: ProjectCreateDraft = {
+      name: plan.name,
+      folder: plan.folder,
+      createFolder: plan.created,
+      goal,
+      team: team.map((m) => ({ name: m.name, role: m.role, kindLabel: ADAPTER_LABEL[m.kind] })),
+      teamPermission,
+      callerPermission: caller.permissionMode,
+      note: plan.note
+    }
+    // Hỏi theo công tắc "Hỏi bạn trước…" của Cài đặt → Agent API (xem confirm); tắt thì tạo luôn.
+    const answer = await this.confirm(caller, 'project_create', { workspaceId: ws.id, fromAgentId: caller.id, fromName: caller.name, action: 'project', project: draft })
+    if (answer !== 'allow') return AgentService.declined(answer, `creating project "${plan.name}"; nothing was created`)
+
+    // Thư mục đã chốt trên thẻ hỏi (tên tự đặt cũng vậy); create kiểm tra lại phòng khi đĩa vừa đổi.
+    const res = await this.projects.create({ ...req, folder: plan.created ? { mode: 'new', name: plan.folder } : { mode: 'existing', path: plan.folder } })
+    for (const agent of res.agents) {
+      const event: AgentCreatedEvent = { agent, nearAgentId: null, open: false }
+      if (!run.owner.isDestroyed()) run.owner.send(IPC.agentCreated, event)
+    }
+    const p = res.project
+    const where = `code folder ${joinRoot(res.workspace.path, p.folder)} (${res.createdFolder ? 'new folder' : 'existing folder'})`
+    const teamText = res.agents.length
+      ? ` Team: ${res.agents.map((a) => `"${a.name}"${a.role ? ` (${a.role})` : ''}`).join(', ')}. Their cells are not open; start one with agent_open(name, task?) if the user wants.`
+      : ' No agents yet; add some with agent_create(…, project: "' + p.name + '") if the user wants.'
+    return `Created project "${p.name}": ${where}, vault note ${joinRoot(res.workspace.vaultPath, p.note)}. It has its own tab in the app.${teamText} Tell the user.`
+  }
+
+  /** Tool project_update: đổi tên / mục tiêu (thư mục code, note vault, tên agent giữ nguyên). */
+  private async apiProjectUpdate(ws0: Workspace, input: ProjectUpdateInput): Promise<string> {
+    if (!this.projects) throw new Error('This stag.ai build cannot change projects from an agent.')
+    if (input.new_name === undefined && input.goal === undefined) throw new Error('Nothing to change: pass new_name and/or goal.')
+    const ws = this.workspaces.get(ws0.id) ?? ws0
+    const p = projectByName(ws, input.name)
+    const next = await this.projects.update(ws.id, p.id, {
+      ...(input.new_name !== undefined ? { name: input.new_name } : {}),
+      ...(input.goal !== undefined ? { goal: input.goal } : {})
+    })
+    const now = next.projects?.find((x) => x.id === p.id) ?? p
+    const changes = [now.name !== p.name ? `renamed to "${now.name}"` : '', now.goal !== p.goal ? (now.goal ? `goal: ${now.goal}` : 'goal cleared') : ''].filter(Boolean)
+    if (!changes.length) return `Project "${p.name}" already had these values; nothing changed.`
+    return `Project "${p.name}" ${changes.join(', ')}. Its code folder (${p.folder}), vault note (${p.note}) and agent names stay the same. Tell the user.`
   }
 
   // ---- Agent API A3: đổi / mở / dừng / nhắn / xoá agent khác (tool agent_update, agent_open, agent_stop, agent_send, agent_delete) ----
@@ -1249,6 +1384,9 @@ export class AgentService {
 
   /** Hỏi người dùng trong app; trong lúc chờ, agent đã xin hiện "chờ duyệt" (thông báo chờ như thường). */
   private async confirm(caller: Agent, tool: string, req: AgentRequestInput): Promise<AgentRequestAnswer> {
+    // Cài đặt → Agent API tắt "Hỏi bạn trước…" (khoá confirmCreate): mọi thẻ hỏi của agent (tạo / dừng / xoá / đổi
+    // quyền agent, tạo project, gửi việc sang project khác hay cho agent quyền cao hơn, chạy dev server) cho luôn.
+    if (!resolveAgentApi(this.settings.get(), req.workspaceId, caller.id).confirmCreate) return 'allow'
     const run = this.running.get(caller.id)
     this.board.setActivity(caller, 'waiting', { reason: 'permission', tool })
     const answer = await this.requests.ask(req)
@@ -1276,6 +1414,34 @@ export class AgentService {
     if (answer === 'allow') return null
     const what = tool === 'send' ? 'sending this message to' : tool === 'open' ? 'opening with this task' : 'handing your task over to'
     return AgentService.declined(answer, `${what} "${target.name}", which has a higher permission mode (${target.permissionMode}) than yours (${caller.permissionMode}); nothing was sent`)
+  }
+
+  /**
+   * Gửi việc sang agent của project KHÁC (agent_send / agent_open kèm việc / agent_handoff): hỏi người dùng (Cho gửi /
+   * Luôn cho giữa 2 project này / Không). Trong cùng project, từ Chung, hay vào Chung: không hỏi. null = được làm tiếp.
+   */
+  private async approveCross(caller: Agent, ws: Workspace, target: Agent, tool: 'send' | 'open' | 'handoff', text: string): Promise<string | null> {
+    const cross = crossProjectAsk(this.workspaces.get(ws.id) ?? ws, caller, target)
+    if (!cross) return null
+    const pick = (p: { id: string; name: string; color: number }) => ({ id: p.id, name: p.name, color: p.color })
+    const answer = await this.confirm(caller, `agent_${tool}`, {
+      workspaceId: ws.id,
+      fromAgentId: caller.id,
+      fromName: caller.name,
+      action: 'cross',
+      tool,
+      target: this.targetInfo(target),
+      text,
+      fromProject: pick(cross.from),
+      toProject: pick(cross.to)
+    })
+    if (answer === 'always') {
+      const key = projectPair(cross.from.id, cross.to.id)
+      await this.workspaces.update(ws.id, (w) => ({ ...w, projectLinks: [...new Set([...(w.projectLinks ?? []), key])] })).catch((e) => console.error('[projects]', e))
+    }
+    if (answer === 'allow' || answer === 'always') return null
+    const what = tool === 'send' ? 'sending this message to' : tool === 'open' ? 'opening with this task' : 'handing your task over to'
+    return AgentService.declined(answer, `${what} "${target.name}", which belongs to another project ("${cross.to.name}"); nothing was sent`)
   }
 
   private static declined(answer: AgentRequestAnswer, what: string): string {
@@ -1375,12 +1541,12 @@ export class AgentService {
     }
     if (task && agentKind(target) === 'terminal') throw new Error('A terminal cell cannot receive a task.')
     if (task) {
-      const no = await this.approveDrive(caller, ws, target, 'open', task)
+      const no = (await this.approveCross(caller, ws, target, 'open', task)) ?? (await this.approveDrive(caller, ws, target, 'open', task))
       if (no) return no
     }
     if (task) this.firstTasks.set(target.id, { from: caller.name, task, created: false })
     this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
-    return `Opening "${target.name}" in a new session next to your cell${task ? ', starting with your task' : ''} (if the user is looking at another workspace, it starts when they open this one).`
+    return `Opening "${target.name}" in a new session${task ? ' that starts with your task' : ''}: its cell is ${cellWhere(this.workspaces.get(ws.id) ?? ws, caller, target)}.`
   }
 
   private async apiStop(caller: Agent, ws: Workspace, input: { name: string }): Promise<string> {
@@ -1401,7 +1567,7 @@ export class AgentService {
     const text = input.text.trim()
     if (!text) throw new Error('text is empty.')
     if (text.length > MESSAGE_MAX) throw new Error(`text is too long (max ${MESSAGE_MAX} characters).`)
-    const no = await this.approveDrive(caller, ws, target, 'send', text)
+    const no = (await this.approveCross(caller, ws, target, 'send', text)) ?? (await this.approveDrive(caller, ws, target, 'send', text))
     if (no) return no
     this.mail.enqueue(target.id, { fromId: caller.id, fromName: caller.name, text, at: Date.now() })
     this.deliverMail()
@@ -1480,11 +1646,11 @@ export class AgentService {
       throw new Error(
         `"${target.name}" still has an open task "${busy.title}" (scope: ${busy.scope || 'not set'}). Nothing was handed off. Tell the user; ${target.name} can finish it with task_done first, or use agent_send for a small request.`
       )
-    const no = await this.approveDrive(caller, ws, target, 'handoff', summary)
+    const no = (await this.approveCross(caller, ws, target, 'handoff', summary)) ?? (await this.approveDrive(caller, ws, target, 'handoff', summary))
     if (no) return no
 
     const card = await this.board.transferTask(ws, caller.id, target, run?.sessionId ?? '', summary, input.title)
-    const body = handoffBody(caller.name, summary, card)
+    const body = handoffBody(caller.name, summary, card, agentFolder(this.workspaces.get(ws.id) ?? ws, target))
     if (run) {
       if (card && run.sessionFile) await this.writeSessionFile(run.sessionFile, run.vars, card).catch(() => {})
       this.mail.enqueue(target.id, { fromId: caller.id, fromName: caller.name, text: body, at: now, handoff: true })
@@ -1500,7 +1666,7 @@ export class AgentService {
       ? this.mail.pending(target.id)
         ? `Your handoff is queued and will be typed into the session of "${target.name}" when it is idle.`
         : `Your handoff was typed into the session of "${target.name}".`
-      : `"${target.name}" was not running: a new session is opening next to your cell, starting from your handoff (if the user is looking at another workspace, it starts when they open this one).`
+      : `"${target.name}" was not running: a new session that starts from your handoff is opening, its cell ${cellWhere(this.workspaces.get(ws.id) ?? ws, caller, target)}.`
     return `${moved} ${how} Stop working on this task now; tell the user in one sentence.`
   }
 
@@ -1569,7 +1735,7 @@ export class AgentService {
     if (path && !path.endsWith('.rollout-pending') && (await exists(path))) return path
     if (!agent.lastSessionId) return null
     if (agentKind(agent) === 'codex') return findCodexRollout(agent.lastSessionId, new Date(), codexHome(), 60)
-    const guess = transcriptPath(ws.path, agent.lastSessionId)
+    const guess = transcriptPath(this.cwdOf(agent, ws), agent.lastSessionId)
     if (await exists(guess)) return guess
     // Đường dẫn dự án rất dài: Claude Code có thể đặt tên thư mục khác cách đoán → tìm theo tên file.
     const root = join(homedir(), '.claude', 'projects')
@@ -1759,11 +1925,11 @@ export class AgentService {
 
   /**
    * Xoá agent: dừng phiên, chuyển note bộ nhớ `60 Agents/<tên>.md` vào Thùng rác (khôi phục được),
-   * bỏ thẻ việc đang dở. Lịch sử việc đã xong trên kanban được giữ.
+   * bỏ thẻ việc đang dở. Lịch sử việc đã xong được giữ. `keepNote` (xoá cả project): note giữ nguyên trong vault.
    */
-  async remove(agentId: string): Promise<void> {
+  async remove(agentId: string, opts: { keepNote?: boolean } = {}): Promise<void> {
     const ctx = this.context(agentId)
-    if (ctx) {
+    if (ctx && !opts.keepNote) {
       // Chuyển note trước: không chuyển được (bị khoá…) thì báo lỗi và chưa xoá gì cả.
       const note = join(ctx.ws.vaultPath, '60 Agents', `${ctx.agent.name}.md`)
       if (await exists(note)) {
@@ -1808,9 +1974,52 @@ export class AgentService {
     await this.save()
   }
 
-  async saveLayout(workspaceId: string, layout: CanvasLayout): Promise<void> {
-    this.data.layouts[workspaceId] = normalizeLayout(layout)
+  /** Lưu bố cục canvas của tab Chung (`projectId` vắng) hoặc tab của một project. */
+  async saveLayout(workspaceId: string, layout: CanvasLayout, projectId?: string | null): Promise<void> {
+    // Project đã xoá (renderer còn lưu muộn canvas của tab vừa đóng): bỏ qua, không để lại khoá mồ côi.
+    if (projectId && projectId !== CHUNG && !this.workspaces.get(workspaceId)?.projects?.some((p) => p.id === projectId)) return
+    this.data.layouts[layoutKey(workspaceId, projectId)] = normalizeLayout(layout)
     await this.save()
+  }
+
+  /** Project bị xoá: bỏ canvas của nó (agent đã xoá trước đó). */
+  async forgetProject(workspaceId: string, projectId: string): Promise<void> {
+    delete this.data.layouts[layoutKey(workspaceId, projectId)]
+    await this.save()
+  }
+
+  /** Agent của một project (đội của nó). */
+  projectAgents(workspaceId: string, projectId: string): Agent[] {
+    return this.data.agents.filter((a) => a.workspaceId === workspaceId && a.projectId === projectId)
+  }
+
+  /**
+   * "Nhân bản sang <project>": agent mới cùng loại / vai trò / quyền / giao diện ô và cùng ghi đè cài đặt (model, skill,
+   * connector…) ở project `toProjectId` (null = Chung), phiên trống. Tên `<vai trò> · <nơi>` (thêm số nếu trùng), hoặc `name`.
+   */
+  async clone(agentId: string, toProjectId: string | null, name?: string): Promise<Agent> {
+    const src = this.data.agents.find((a) => a.id === agentId)
+    if (!src) throw new Error('Agent không tồn tại')
+    if (agentKind(src) === 'terminal') throw new Error('Ô terminal không nhân bản được')
+    const ws = this.workspaces.get(src.workspaceId)
+    const to = toProjectId ? ws?.projects?.find((p) => p.id === toProjectId) : undefined
+    if (toProjectId && !to) throw new Error('Project này không còn trong workspace')
+    const place = to ? to.name : 'Chung'
+    const base = `${src.role.trim() || src.name.split(' · ')[0]} · ${place}`
+    const taken = (n: string): boolean => this.data.agents.some((a) => a.workspaceId === src.workspaceId && sameAgentName(a.name, n))
+    const agent = await this.create({
+      workspaceId: src.workspaceId,
+      kind: agentKind(src),
+      adapterId: src.adapterId,
+      name: name?.trim() || uniqueAgentName(base, taken),
+      role: src.role,
+      permissionMode: src.permissionMode,
+      cell: src.cell,
+      ...(to ? { projectId: to.id } : {})
+    })
+    const over = this.settings.get().agents[src.id]
+    if (over) await this.settings.setOverrides('agent', agent.id, { ...over })
+    return agent
   }
 
   /** Thoát app: dừng mọi phiên và xoá file phiên ngay (không chờ sự kiện thoát). */
@@ -1913,6 +2122,46 @@ function userLanguage(): string {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Project của agent cho agent_list (null = ở gốc workspace). */
+function projectInfo(p: { name: string; folder: string } | undefined): { name: string; folder: string } | null {
+  return p ? { name: p.name, folder: p.folder } : null
+}
+
+/**
+ * Câu trả lời cho agent: ô của `target` hiện ở đâu và phiên của nó chạy khi nào. Cùng chỗ (tab) với agent gọi → cạnh
+ * ô của nó, chạy ngay; khác chỗ → ô nằm ở tab kia và phiên chỉ chạy khi người dùng mở tab đó (Tester B2).
+ */
+export function cellWhere(ws: Workspace, caller: Pick<Agent, 'projectId'>, target: Pick<Agent, 'projectId'>): string {
+  const there = projectOf(ws, target)
+  if ((there?.id ?? CHUNG) === placeOf(ws, caller))
+    return 'next to your cell and its session starts now (if the user is looking at another workspace, it starts when they open this one)'
+  const tab = there ? `project "${there.name}"` : '"Chung" (workspace root)'
+  return `in the ${tab} tab of the app, not next to yours; its session starts only when the user opens that tab, so tell them`
+}
+
+/** Project theo tên (không phân biệt hoa thường) trong tham số của tool; không có thì lỗi kèm danh sách tên. */
+function projectByName(ws: Workspace, name: string): Project {
+  const p = ws.projects?.find((x) => x.name.toLowerCase() === name.trim().toLowerCase())
+  if (!p) {
+    const names = (ws.projects ?? []).map((x) => `"${x.name}"`).join(', ')
+    throw new Error(`No project named "${name.trim()}" in this workspace. ${names ? `Projects: ${names}.` : 'It has no projects yet.'} See project_list.`)
+  }
+  return p
+}
+
+/** Chỗ đặt agent mới của agent_create: `raw` = tên project / "Chung"; vắng = chỗ của agent đang xin. null = Chung. */
+export function targetProject(ws: Workspace, caller: Pick<Agent, 'projectId'>, raw: string | undefined): Project | null {
+  const name = raw?.trim()
+  if (!name) return projectOf(ws, caller) ?? null
+  if (isChungName(name)) return null
+  return projectByName(ws, name)
+}
+
+/** Khoá bố cục canvas: tab Chung = id workspace, tab project = `<id workspace>#<id project>`. */
+function layoutKey(workspaceId: string, projectId?: string | null): string {
+  return projectId && projectId !== CHUNG ? `${workspaceId}#${projectId}` : workspaceId
 }
 
 /** File phiên trong .sessions/: file phiên + luật phiên (adapter ngoài) + cấu hình MCP / settings riêng (connector). */

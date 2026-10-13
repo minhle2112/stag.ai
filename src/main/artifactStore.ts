@@ -186,7 +186,7 @@ export class ArtifactStore {
   }
 
   private async doPublish(ws: Workspace, agent: Agent, task: Task | null, input: PublishInput, cwd: string): Promise<string> {
-    if (!task) throw new Error('You have no task on the kanban. Call task_start first: artifacts are grouped under your task.')
+    if (!task) throw new Error('You have no open task in the task list. Call task_start first: artifacts are grouped under your task.')
     const title = clean(input.title, MAX_TITLE)
     const description = clean(input.description, MAX_DESC)
     if (!title) throw new Error('title is empty.')

@@ -85,10 +85,9 @@ function PaletteBody(): React.JSX.Element {
     }
     const cmds: Cmd[] = [
       { id: 'v-agents', group: 'Màn hình', label: 'Agent', hint: 'Ctrl 1', icon: 'grid', run: go(() => setTab('agents')), keywords: 'luoi cell' },
-      { id: 'v-kanban', group: 'Màn hình', label: 'Kanban', hint: 'Ctrl 2', icon: 'kanban', run: go(() => setTab('kanban')), keywords: 'viec cho ban' },
-      { id: 'v-artifacts', group: 'Màn hình', label: 'Sản phẩm', hint: 'Ctrl 3', icon: 'fdiff', run: go(() => setTab('artifacts')), keywords: 'san pham artifacts tep file bao cao gop y' },
-      { id: 'v-vault', group: 'Màn hình', label: 'Vault (bộ nhớ)', hint: 'Ctrl 4', icon: 'vault', run: go(() => setTab('vault')), keywords: 'note do thi graph bo nho memory obsidian' },
-      { id: 'v-log', group: 'Màn hình', label: 'Nhật ký & bộ nhớ', hint: 'Ctrl 5', icon: 'brain', run: go(() => setTab('log')), keywords: 'log memory' }
+      { id: 'v-artifacts', group: 'Màn hình', label: 'Sản phẩm', hint: 'Ctrl 2', icon: 'fdiff', run: go(() => setTab('artifacts')), keywords: 'san pham artifacts tep file bao cao gop y' },
+      { id: 'v-vault', group: 'Màn hình', label: 'Vault (bộ nhớ)', hint: 'Ctrl 3', icon: 'vault', run: go(() => setTab('vault')), keywords: 'note do thi graph bo nho memory obsidian' },
+      { id: 'v-log', group: 'Màn hình', label: 'Nhật ký & bộ nhớ', hint: 'Ctrl 4', icon: 'brain', run: go(() => setTab('log')), keywords: 'log memory' }
     ]
     for (const { plugin, slot } of slotsOf(pluginItems, settingsValue, 'page', active?.id))
       cmds.push({
@@ -112,6 +111,27 @@ function PaletteBody(): React.JSX.Element {
           setNewAgent({ wsId: active.id })
         })
       },
+      {
+        id: 'a-newproject',
+        group: 'Hành động',
+        label: 'Tạo project…',
+        hint: 'Ctrl Shift P',
+        icon: 'folder',
+        keywords: 'project du an doi agent team monorepo',
+        run: go(() => active && useUi.getState().setNewProject({ wsId: active.id }))
+      },
+      ...(active?.projects ?? []).map((p) => ({
+        id: `p-${p.id}`,
+        group: 'Hành động',
+        label: `Mở project ${p.name}`,
+        hint: p.folder,
+        icon: 'folder' as IconName,
+        keywords: 'project du an tab',
+        run: go(() => {
+          setTab('agents')
+          useAgents.getState().setPlace(active!.id, p.id)
+        })
+      })),
       {
         id: 'a-broadcast',
         group: 'Hành động',
@@ -146,7 +166,7 @@ function PaletteBody(): React.JSX.Element {
           id: `ag-${a.id}`,
           group: 'Agent',
           label: `@${a.name}`,
-          hint: `${workspaces.length > 1 ? `${w.name} · ` : ''}${view.label}`,
+          hint: `${workspaces.length > 1 ? `${w.name} · ` : ''}${w.projects?.length ? `${w.projects.find((p) => p.id === a.projectId)?.name ?? 'Chung'} · ` : ''}${view.label}`,
           icon: 'bot',
           run: go(() => {
             setActive(w.id)

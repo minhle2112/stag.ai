@@ -111,7 +111,7 @@ export function GeneralSection(): React.JSX.Element {
         <Row label="Khi agent chờ bạn" desc="Agent hết lượt, hỏi bạn, hoặc xin quyền. Chỉ báo khi bạn không ở cửa sổ stag.ai.">
           <Switch label="Báo khi agent chờ bạn" checked={g.notifyWaiting} onChange={(notifyWaiting) => set({ notifyWaiting })} />
         </Row>
-        <Row label="Khi agent xong việc" desc="Agent đánh dấu xong một việc trên kanban.">
+        <Row label="Khi agent xong việc" desc="Agent đánh dấu xong một việc (task_done).">
           <Switch label="Báo khi agent xong việc" checked={g.notifyTaskDone} onChange={(notifyTaskDone) => set({ notifyTaskDone })} />
         </Row>
         <Row label="Âm thanh">

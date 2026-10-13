@@ -195,6 +195,27 @@ describe('Board: việc (task)', () => {
     expect((await fresh.snapshot(ws)).tasks).toEqual([done])
   })
 
+  it('agent của project: việc ghi thư mục project (base) và project; bàn giao giữ base, nhận project của người nhận', async () => {
+    const board = new Board(() => {})
+    const pws: Workspace = {
+      ...ws,
+      projects: [
+        { id: 'pw', name: 'web', folder: 'apps/web', goal: '', color: 0, note: '70 Projects/web/web.md', createdAt: '' },
+        { id: 'pm', name: 'mobile', folder: 'apps/mobile', goal: '', color: 1, note: '70 Projects/mobile/mobile.md', createdAt: '' }
+      ]
+    }
+    const a = { ...agent('a'), projectId: 'pw' }
+    const b = { ...agent('b'), projectId: 'pm' }
+    const t = await board.startTask(pws, a, 's', 'Giỏ hàng', 'src/cart/')
+    expect(t).toMatchObject({ scope: 'src/cart/', base: 'apps/web', projectId: 'pw' })
+    const moved = await board.transferTask(pws, 'a', b, 's2', 'tiếp đi')
+    expect(moved).toMatchObject({ agentId: 'b', base: 'apps/web', projectId: 'pm' })
+    // Agent ở Chung: không có base / projectId.
+    const c = await board.startTask(pws, agent('c'), 's', 'Docs', 'docs/')
+    expect(c.base).toBeUndefined()
+    expect(c.projectId).toBeUndefined()
+  })
+
   it('hai task_start song song của cùng agent: chỉ mở được một việc', async () => {
     const board = new Board(() => {})
     const a = agent('a')

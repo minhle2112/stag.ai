@@ -4,7 +4,8 @@ import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
+import { IPC } from '@shared/ipc'
 import type { CreateWorkspaceRequest, CreateWorkspaceResult, Workspace, WorkspaceInspection } from '@shared/types'
 import { exists, isDir, mentionsPath, readText, samePath, today, writeIfMissing } from './fsutil'
 import { copyVaultTemplate, readTemplate, type TemplateVars } from './templates'
@@ -67,6 +68,26 @@ export class WorkspaceStore {
     const tmp = `${this.file}.tmp`
     await fs.writeFile(tmp, JSON.stringify(this.items, null, 2), 'utf8')
     await fs.rename(tmp, this.file)
+  }
+
+  /** Đổi một workspace (project, gợi ý monorepo…) rồi lưu; trả về bản mới. */
+  async update(id: string, fn: (w: Workspace) => Workspace): Promise<Workspace> {
+    const cur = this.items.find((w) => w.id === id)
+    if (!cur) throw new Error('Workspace không tồn tại')
+    const next = fn(cur)
+    this.items = this.items.map((w) => (w.id === id ? next : w))
+    await this.save()
+    this.announce(next)
+    return next
+  }
+
+  /** Báo cửa sổ app workspace vừa đổi (không có cửa sổ, vd. khi chạy test, thì thôi). */
+  private announce(ws: Workspace): void {
+    try {
+      for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(IPC.wsChanged, ws)
+    } catch {
+      // Chưa có / không có cửa sổ.
+    }
   }
 
   /** Bỏ workspace khỏi app. Không xoá file nào trên đĩa. */

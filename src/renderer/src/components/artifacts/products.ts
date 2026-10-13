@@ -1,11 +1,13 @@
-// Cột trái tab "Sản phẩm": gom sản phẩm theo việc trên kanban, nhóm theo ngày, lọc agent, tìm kiếm.
+// Cột trái tab "Sản phẩm": gom sản phẩm theo việc của agent, nhóm theo ngày, lọc project / agent, tìm kiếm.
 import { dayBucket, needsYou, unseenVersions, type ArtifactRecord, type ArtifactsSnapshot, type DayBucket, type PublishFailure } from '@shared/artifacts'
 import type { Task } from '@shared/types'
 import { fold } from '../vault/highlight'
 
 export interface TaskEntry {
-  /** Id việc trên kanban (việc đã bị xoá khỏi kanban vẫn giữ id cũ, lấy tên từ sản phẩm). */
+  /** Id việc (việc đã bị xoá vẫn giữ id cũ, lấy tên từ sản phẩm). */
   id: string
+  /** Project của agent lúc nhận việc (vắng = Chung, hoặc việc cũ / không gắn việc: xem theo agent). */
+  projectId?: string
   title: string
   agentId: string
   agentName: string
@@ -30,7 +32,7 @@ export const BUCKETS: Array<{ id: DayBucket; label: string }> = [
 /** Mỗi lần "Tải thêm" ở nhóm Cũ hơn. */
 export const OLDER_PAGE = 20
 
-/** Việc trên kanban + sản phẩm của từng việc. Sản phẩm gắn với việc không còn trên kanban → một việc "giữ chỗ". */
+/** Việc + sản phẩm của từng việc. Sản phẩm gắn với việc không còn → một việc "giữ chỗ". */
 export function buildEntries(tasks: readonly Task[], snap: ArtifactsSnapshot | undefined, now: Date = new Date()): TaskEntry[] {
   const arts = (snap?.artifacts ?? []).filter((a) => !a.hidden && a.versions.length)
   const byTask = new Map<string, ArtifactRecord[]>()
@@ -43,6 +45,7 @@ export function buildEntries(tasks: readonly Task[], snap: ArtifactsSnapshot | u
   const newest = (list: ArtifactRecord[]): ArtifactRecord[] => [...list].sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))
   const out: TaskEntry[] = tasks.map((t) => ({
     id: t.id,
+    ...(t.projectId ? { projectId: t.projectId } : {}),
     title: t.title,
     agentId: t.agentId,
     agentName: t.agentName,

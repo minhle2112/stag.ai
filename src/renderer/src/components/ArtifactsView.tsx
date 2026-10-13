@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { inboxOf, latestVersion } from '@shared/artifacts'
-import type { AgentStatus, Workspace } from '@shared/types'
+import type { AgentStatus, Project, Workspace } from '@shared/types'
+import { CHUNG } from '@shared/projects'
 import { useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
 import { useProducts } from '../store/artifacts'
@@ -11,6 +12,7 @@ import { buildEntries, emptyCount, entryBadges, groupEntries, OLDER_PAGE, search
 import { TaskPage } from './artifacts/TaskPage'
 import { BTN, Mi, ProductAvatar, shortWhen, Switch, useToast } from './artifacts/ui'
 import { Icon } from './Icon'
+import { ProjectMark } from './projects/ProjectMark'
 
 const EMPTY_KEY = 'stag.products.showEmpty'
 
@@ -30,7 +32,7 @@ export function deliveryOf(running: boolean, status: AgentStatus | undefined): D
   return 'busy'
 }
 
-/** Tab "Sản phẩm": thứ agent tự nộp (artifact_publish), gom theo việc trên kanban, có phiên bản và góp ý. */
+/** Tab "Sản phẩm": thứ agent tự nộp (artifact_publish), gom theo việc của agent, có phiên bản và góp ý. Có project → lọc theo project. */
 export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): React.JSX.Element {
   const snap = useProducts((s) => s.byWs[ws.id])
   const loadProducts = useProducts((s) => s.load)
@@ -40,6 +42,9 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
   const [sel, setSel] = useState<Sel>({ task: null, art: null, focus: null, n: 0 })
   const [q, setQ] = useState('')
   const [agentF, setAgentF] = useState<string | null>(null)
+  // Workspace có project: lọc theo project, mặc định là tab đang mở ở màn Agent.
+  const projects = ws.projects ?? []
+  const [projF, setProjF] = useState<string>(() => (projects.length ? (useAgents.getState().byWs[ws.id]?.place ?? 'all') : 'all'))
   const [showEmpty, setShowEmpty] = useState(() => {
     try {
       return localStorage.getItem(EMPTY_KEY) === '1'
@@ -64,7 +69,16 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
     return () => clearInterval(t)
   }, [])
 
-  const entries = useMemo(() => buildEntries(board?.tasks ?? [], snap, new Date()), [board?.tasks, snap, tick])
+  const allEntries = useMemo(() => buildEntries(board?.tasks ?? [], snap, new Date()), [board?.tasks, snap, tick])
+  // Chỗ của một việc: project của nó (project đã xoá → Chung); việc cũ / không gắn việc thì theo agent.
+  const entries = useMemo(() => {
+    if (!projects.length || projF === 'all') return allEntries
+    const placeOfEntry = (e: TaskEntry): string => {
+      const pid = e.projectId ?? agentsWs?.agents.find((a) => a.id === e.agentId)?.projectId
+      return pid && projects.some((p) => p.id === pid) ? pid : CHUNG
+    }
+    return allEntries.filter((e) => placeOfEntry(e) === projF)
+  }, [allEntries, projects, projF, agentsWs?.agents])
   const arts = useMemo(() => new Map((snap?.artifacts ?? []).map((a) => [a.id, a])), [snap])
   const entryOfArt = (id: string): TaskEntry | undefined => entries.find((e) => e.artifacts.some((a) => a.id === id))
   const visible = useMemo(() => visibleEntries(entries, { agentId: agentF, showEmpty }), [entries, agentF, showEmpty])
@@ -74,7 +88,11 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
     for (const e of entries) if (e.artifacts.length || e.status === 'open') seen.set(e.agentId, e.agentName)
     return [...seen].map(([id, name]) => ({ id, name }))
   }, [entries])
-  const inbox = useMemo(() => inboxOf(snap?.artifacts ?? []).filter((x) => !agentF || arts.get(x.artifactId)?.agentId === agentF), [snap, agentF, arts])
+  const shownArts = useMemo(() => new Set(entries.flatMap((e) => e.artifacts.map((a) => a.id))), [entries])
+  const inbox = useMemo(
+    () => inboxOf(snap?.artifacts ?? []).filter((x) => (!agentF || arts.get(x.artifactId)?.agentId === agentF) && (projF === 'all' || !projects.length || shownArts.has(x.artifactId))),
+    [snap, agentF, arts, projF, projects.length, shownArts]
+  )
   const hits = useMemo(() => (q.trim() ? searchArtifacts(entries, q, agentF) : []), [entries, q, agentF])
 
   // Chưa chọn gì: việc đầu tiên có sản phẩm (không có thì việc đầu tiên).
@@ -124,6 +142,24 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
             </button>
           )}
         </label>
+        {projects.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1 px-2.5 pb-1.5" aria-label="Lọc theo project">
+            {[{ id: 'all', label: 'Tất cả', p: undefined as Project | null | undefined }, { id: CHUNG, label: 'Chung', p: null }, ...projects.map((p) => ({ id: p.id, label: p.name, p }))].map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => {
+                  setProjF(o.id)
+                  setAgentF(null)
+                }}
+                className={`flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11.5px] ${projF === o.id ? 'border-line-3 bg-panel-2 text-fg' : 'border-transparent text-muted hover:text-fg'}`}
+              >
+                {o.p !== undefined && <ProjectMark project={o.p} size={8} />}
+                {o.label}
+              </button>
+            ))}
+          </div>
+        )}
         {agentList.length > 1 && (
           <div className="flex flex-wrap items-center gap-1 px-2.5 pb-1.5">
             <button
@@ -243,7 +279,7 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
               ))}
               {!loading && !groups.length && !inbox.length && (
                 <div className="mx-3 my-10 text-center leading-relaxed text-dim">
-                  {agentF ? 'Agent này chưa có việc nào có sản phẩm.' : 'Chưa có việc nào trên kanban.'}
+                  {agentF ? 'Agent này chưa có việc nào có sản phẩm.' : 'Chưa có việc nào.'}
                 </div>
               )}
             </>
@@ -291,7 +327,7 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
             ) : noneAtAll ? (
               <>
                 <b className="mb-1.5 block text-[14px] text-fg">Chưa có sản phẩm nào</b>
-                Khi agent làm xong một thứ cho bạn xem (báo cáo, mockup, ảnh, video…), agent nộp nó bằng tool <code className="font-mono text-accent">artifact_publish</code> và sản phẩm hiện ở đây, gom theo việc trên Kanban. Code agent sửa không hiện ở đây.
+                Khi agent làm xong một thứ cho bạn xem (báo cáo, mockup, ảnh, video…), agent nộp nó bằng tool <code className="font-mono text-accent">artifact_publish</code> và sản phẩm hiện ở đây, gom theo việc agent đang làm. Code agent sửa không hiện ở đây.
               </>
             ) : (
               'Chọn một việc ở cột trái.'
@@ -400,7 +436,7 @@ function Help({ onClose }: { onClose: () => void }): React.JSX.Element {
       className="absolute top-9 right-3 z-30 max-h-[calc(100%-48px)] w-[400px] overflow-auto rounded-[10px] border border-line-2 bg-pop px-4 py-3.5 leading-relaxed text-muted shadow-pop select-text"
     >
       <h3 className="mb-1 text-[13px] font-semibold text-fg">Tab Sản phẩm chỉ có thứ agent tự nộp</h3>
-      Code đã sửa, file tạm, config không hiện ở đây (xem trong Kanban → thẻ việc). Khi có thứ cho bạn xem, agent gọi tool của stag:
+      Code đã sửa, file tạm, config không hiện ở đây. Khi có thứ cho bạn xem, agent gọi tool của stag:
       <pre className="mt-1.5 rounded-md border border-line bg-bg0 px-2.5 py-2 font-mono text-[11.5px] whitespace-pre-wrap text-muted">
         {`artifact_publish(
   file: "docs/reports/smoke-0.1.2.md",
@@ -409,7 +445,7 @@ function Help({ onClose }: { onClose: () => void }): React.JSX.Element {
   note: "Sửa theo 2 góp ý…",   // từ lần nộp thứ 2
   fixes: ["c2"])                // góp ý đã sửa`}
       </pre>
-      Sản phẩm gắn vào việc đang mở của agent đó trên Kanban.
+      Sản phẩm gắn vào việc đang mở của agent đó (task_start).
       <h3 className="mt-3 mb-1 text-[13px] font-semibold text-fg">Phiên bản</h3>
       Nộp lại cùng file → v2, v3… App chụp lại file mỗi lần nộp (<code className={code}>.stag/artifacts/</code>), nên file gốc bị xoá hay sửa tiếp vẫn xem lại được từng bản. Tài liệu so sánh được hai bản bất kỳ, tô tới từng chữ; ảnh so sánh đặt cạnh nhau.
       <h3 className="mt-3 mb-1 text-[13px] font-semibold text-fg">Góp ý</h3>

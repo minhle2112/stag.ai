@@ -66,6 +66,14 @@ describe('agentApiRules / permissionAbove', () => {
     expect(agentApiRules({ manage: true, message: true, read: false })).not.toContain('agent_status')
   })
 
+  it('câu về thẻ xác nhận theo công tắc "Hỏi bạn trước…" (confirmCreate)', () => {
+    expect(agentApiRules({ manage: true, message: true })).toContain('stag.ai shows the user a confirm card')
+    expect(agentApiRules({ manage: true, message: true, confirmCreate: true })).toContain('stag.ai shows the user a confirm card')
+    const off = agentApiRules({ manage: true, message: true, confirmCreate: false })
+    expect(off).not.toContain('shows the user a confirm card')
+    expect(off).toContain('act right away without asking')
+  })
+
   it('luật phiên theo nhóm bật', () => {
     const all = agentApiRules({ manage: true, message: true })
     expect(all).toContain('agent_create(')

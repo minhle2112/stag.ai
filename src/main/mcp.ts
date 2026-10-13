@@ -3,7 +3,7 @@ import * as z from 'zod'
 import { BROWSER_TOOLS_OFF } from '@shared/browser'
 import { DEFAULT_SCOPE, type Agent, type MemoryToolsMode, type ScopeLockSettings, type Task, type Workspace } from '@shared/types'
 import { overlapsOf, scopeLocks, unlocked } from '@shared/scope'
-import type { AgentCreateInput, AgentUpdateInput } from '@shared/agentApi'
+import type { AgentCreateInput, AgentUpdateInput, ProjectCreateInput, ProjectUpdateInput } from '@shared/agentApi'
 import type { Board } from './board'
 import { BROWSER_KEYS, type BrowserService } from './browser'
 import type { DevServerAgentApi } from './devServer'
@@ -72,6 +72,25 @@ export interface AgentInfo {
   activity: string | null
   /** Phần cửa sổ context phiên đang chạy đã dùng (0–100), null = không biết. */
   context?: number | null
+  /** Project của agent (thư mục), vắng = ở gốc workspace ("Chung"). Chỉ có khi workspace có project. */
+  project?: { name: string; folder: string } | null
+}
+
+/** Một chỗ làm việc trong workspace cho project_list: "Chung" (gốc workspace) hoặc một project. */
+export interface ProjectInfo {
+  name: string
+  /** true = "Chung", gốc workspace (không phải project). */
+  chung: boolean
+  /** Thư mục code tương đối so với gốc workspace ('' = gốc) và đường dẫn đầy đủ. */
+  folder: string
+  path: string
+  goal: string
+  /** Đường dẫn đầy đủ của note project trong vault; null = Chung. */
+  note: string | null
+  /** Tên các agent / ô ở chỗ này. */
+  agents: string[]
+  /** Agent đang gọi ở chỗ này. */
+  mine: boolean
 }
 
 /** Một loại agent tạo được (adapter có sẵn hoặc adapter ngoài đã cài). */
@@ -103,6 +122,11 @@ export interface TeamApi {
   /** agent_status / agent_log (nhóm `read`). */
   status(input: { name: string }): Promise<string>
   log(input: AgentLogInput): Promise<string>
+  /** project_list (luôn có): Chung + các project của workspace. */
+  projects(): ProjectInfo[]
+  /** project_create / project_update (nhóm `manage`). */
+  createProject(input: ProjectCreateInput): Promise<string>
+  updateProject(input: ProjectUpdateInput): Promise<string>
 }
 
 export interface AgentLogInput {
@@ -139,7 +163,7 @@ type ToolResult = {
 
 /** Lỗi khi gọi tool của nhóm đang tắt trong Cài đặt → Agent API. */
 export const AGENT_API_OFF = {
-  manage: 'Creating, changing, opening, stopping and deleting agents is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there.',
+  manage: 'Creating, changing, opening, stopping and deleting agents (and creating or changing projects) is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there.',
   message: 'Messaging other agents is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there.',
   read: "Reading other agents' status and session logs is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there."
 } as const
@@ -154,7 +178,7 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
 const fail = (e: unknown): ToolResult => ({ content: [{ type: 'text', text: String((e as Error)?.message ?? e) }], isError: true })
 
 function describe(t: Task): string {
-  return `"${t.title}" — scope: ${t.scope || '(not set)'}`
+  return `"${t.title}" — scope: ${t.scope || '(not set)'}${t.base && t.scope ? ` (relative to ${t.base}/)` : ''}`
 }
 
 /**
@@ -173,7 +197,12 @@ export async function overlapWarning(board: Board, ws: Workspace, task: Task, cf
       : cfg.mode === 'warn'
         ? "stag.ai will not stop you from editing files in another agent's scope, so agree first."
         : "Before you edit a file in another agent's scope, stag.ai asks the user for permission."
-  return `\n\nWARNING — your scope overlaps with other agents' open tasks:\n${lines.join('\n')}\nTell the user now and agree on who edits what (narrow your scope with task_update if possible). ${guard}`
+  // Chặn luôn: agent tự bàn với agent kia, không kéo người dùng vào.
+  const agree =
+    cfg.mode === 'block'
+      ? 'Do not ask the user: agree with those agents yourself (agent_status / agent_send) on who edits what, and narrow your scope with task_update if possible.'
+      : 'Tell the user now and agree on who edits what (narrow your scope with task_update if possible).'
+  return `\n\nWARNING — your scope overlaps with other agents' open tasks:\n${lines.join('\n')}\n${agree} ${guard}`
 }
 
 /** Máy chủ MCP "stag" cho một agent: các tool để agent tự đưa việc của mình lên kanban. */
@@ -186,9 +215,9 @@ export function createStagMcp(ctx: McpContext): McpServer {
     {
       title: 'Start task',
       description:
-        'Call as soon as the task the user gave you is clear. Creates a card on the stag.ai kanban ("working" column) and writes Task/Scope into your session file. Only one open task at a time.',
+        'Call as soon as the task the user gave you is clear. Adds it to the stag.ai task list (shown on your cell as "Đang làm") and writes Task/Scope into your session file. Only one open task at a time.',
       inputSchema: {
-        title: z.string().min(1).max(120).describe('Short task title in the conversation language (shown to the user on the kanban), e.g. "Fix Google sign-in bug"'),
+        title: z.string().min(1).max(120).describe('Short task title in the conversation language (shown to the user on your cell), e.g. "Fix Google sign-in bug"'),
         scope: z.string().min(1).max(500).describe('Folders/files you will edit, relative to the project folder, comma-separated, e.g. "src/auth/, tests/auth/*.test.ts". stag.ai locks them for you while the task is open.')
       }
     },
@@ -229,7 +258,7 @@ export function createStagMcp(ctx: McpContext): McpServer {
     {
       title: 'Finish task',
       description:
-        'Call when your open task is done and the vault is updated. The card moves to the "done" column; the summary goes into the Handoff section of your session file.',
+        'Call when your open task is done and the vault is updated. The task is closed; the summary goes into the Handoff section of your session file.',
       inputSchema: {
         summary: z.string().min(1).max(2000).describe('Handoff summary in the conversation language: what was done, what is left, what the next person needs to know'),
         log: z
@@ -267,7 +296,8 @@ export function createStagMcp(ctx: McpContext): McpServer {
         const open = tasks.filter((t) => t.status === 'open')
         const lines = ctx.teammates().map(({ agent: a, running }) => {
           const t = open.find((x) => x.agentId === a.id)
-          const who = `${a.name}${a.id === agent.id ? ' (you)' : ''}${a.role ? ` [${a.role}]` : ''}${running ? '' : ' — session stopped'}`
+          const p = ws.projects?.length ? (ws.projects.find((x) => x.id === a.projectId)?.name ?? 'Chung') : ''
+          const who = `${a.name}${a.id === agent.id ? ' (you)' : ''}${a.role ? ` [${a.role}]` : ''}${p ? ` {${p}}` : ''}${running ? '' : ' — session stopped'}`
           return `- ${who}: ${t ? describe(t) : 'no task yet'}`
         })
         return ok(lines.length ? lines.join('\n') : 'The workspace has no agents yet.')
@@ -338,7 +368,7 @@ function registerArtifactTools(server: McpServer, api: NonNullable<McpContext['a
     {
       title: 'Publish an artifact',
       description:
-        'Publish a file you made for the user to review (report, doc, mockup, image, video, PDF, spreadsheet…) in the stag.ai "Sản phẩm" (Artifacts) tab, under your open kanban task. Only deliverables: not code edits, temp files or config. Publishing the same file again creates a new version (v2, v3…) with a diff; stag.ai keeps a snapshot of each version. The user can comment on passages; comments arrive in your session as "[stag.ai] Comments from the user…".',
+        'Publish a file you made for the user to review (report, doc, mockup, image, video, PDF, spreadsheet…) in the stag.ai "Sản phẩm" (Artifacts) tab, under your open task. Only deliverables: not code edits, temp files or config. Publishing the same file again creates a new version (v2, v3…) with a diff; stag.ai keeps a snapshot of each version. The user can comment on passages; comments arrive in your session as "[stag.ai] Comments from the user…".',
       inputSchema: {
         file: z.string().min(1).max(500).describe('Path of the file inside the project (relative to the project folder or absolute)'),
         title: z.string().min(1).max(120).describe('Short title in the conversation language, e.g. "Báo cáo smoke test 0.1.2"'),
@@ -436,7 +466,19 @@ export function describeAgent(a: AgentInfo, selfId: string): string {
   const kind = a.kind === 'terminal' ? 'plain terminal' : `${a.kindLabel} [kind: ${a.kind}], ${modelText(a.model, a.effort)}, permission: ${a.permissionMode}`
   const state = [a.activity, a.context != null ? `context ${a.context}% full` : ''].filter(Boolean).join(', ')
   const session = a.running ? `session running${state ? ` (${state})` : ''}` : 'session stopped'
-  return `- ${who}${role} — ${kind} — ${session}`
+  const place = a.project === undefined ? '' : a.project ? ` — project "${a.project.name}" (${a.project.folder})` : ' — workspace root ("Chung")'
+  return `- ${who}${role}${place} — ${kind} — ${session}`
+}
+
+/** Một dòng mô tả chỗ làm việc cho project_list. */
+export function describeProject(p: ProjectInfo): string {
+  const who = p.chung ? '"Chung" (workspace root, not a project)' : `project "${p.name}"`
+  const here = p.mine ? ' ← you are here' : ''
+  const folder = p.chung ? ` — folder ${p.path}` : ` — code folder ${p.folder} (${p.path})`
+  const goal = p.goal ? ` — goal: ${p.goal}` : ''
+  const note = p.note ? ` — vault note: ${p.note}` : ''
+  const team = p.agents.length ? ` — ${p.agents.length} agent(s): ${p.agents.map((n) => `"${n}"`).join(', ')}` : ' — no agents'
+  return `- ${who}${here}${folder}${goal}${note}${team}`
 }
 
 /** Một khối mô tả loại agent cho adapter_models. */
@@ -513,6 +555,29 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
     }
   )
 
+  server.registerTool(
+    'project_list',
+    {
+      title: 'Projects in workspace',
+      description:
+        'List the projects of this stag.ai workspace: each project has its own code folder, vault note, goal and agent team. Also lists "Chung" (the workspace root, for agents outside any project) and marks where you are. ' +
+        'Use it when the user asks about projects, before project_create / project_update, or to pick the `project` of agent_create.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true }
+    },
+    async () => {
+      if (!ctx.team) return noApi()
+      try {
+        const list = ctx.team.projects()
+        const n = list.filter((p) => !p.chung).length
+        const head = n ? `Workspace "${ws.name}" — ${n} project(s):` : `Workspace "${ws.name}" has no projects yet (every agent works at the workspace root). The user, or you with project_create when they ask, can add one.`
+        return ok(`${head}\n${list.map(describeProject).join('\n')}`)
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
   manage.push(server.registerTool(
     'agent_create',
     {
@@ -520,7 +585,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
       description:
         'Create a new agent (or plain terminal cell) in this stag.ai workspace, only when the user asks you to (e.g. "create an agent named Tester using Codex model X to write tests"). ' +
         'Call adapter_models first if the user names a model, and agent_list to avoid a name that already exists. ' +
-        'stag.ai shows the user a confirm card and this call waits for their answer (up to ~5 minutes). On approval the agent is created with its own vault memory note, its cell opens next to yours and its session starts; `task` becomes its first instruction.',
+        'stag.ai may show the user a confirm card (Settings → Agent API) and this call then waits for their answer (up to ~5 minutes). The new agent gets its own vault memory note, its cell opens next to yours and its session starts; `task` becomes its first instruction.',
       inputSchema: {
         name: z.string().min(1).max(100).describe('Agent name (also its memory note file name), e.g. "Tester"'),
         kind: z.string().min(1).describe('"claude" (Claude Code), "codex", "terminal" (plain shell, no AI) or "external:<adapter id>" — see adapter_models'),
@@ -533,7 +598,12 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
           .max(4000)
           .optional()
           .describe('First task for the new agent, in the conversation language, with enough context to start (files, goal, constraints). Omit = it greets the user and waits'),
-        open: z.boolean().optional().describe('Open its cell and start its session now (default true)')
+        open: z.boolean().optional().describe('Open its cell and start its session now (default true)'),
+        project: z
+          .string()
+          .max(100)
+          .optional()
+          .describe('Project to put the new agent in (name from project_list), or "Chung" for the workspace root. Omit = the same place as you')
       }
     },
     call('manage', (team, input: AgentCreateInput) => team.create(input))
@@ -547,14 +617,14 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
       title: 'Change agent',
       description:
         'Change another agent (or yourself) when the user asks: rename, role, model, effort, permission mode. Only the fields you pass change. ' +
-        'A permission mode change asks the user in stag.ai first. A running session keeps its old model / permission / role until its next session.',
+        'A permission mode change may ask the user in stag.ai first (Settings → Agent API). A running session keeps its old model / permission / role until its next session.',
       inputSchema: {
         name: nameArg,
         new_name: z.string().min(1).max(100).optional().describe('New name (its memory note is renamed too)'),
         role: z.string().max(300).optional().describe('New role ("" = none)'),
         model: z.string().max(100).optional().describe('Model id from adapter_models; "default" = back to the workspace default'),
         effort: z.string().max(20).optional().describe('Effort (low, medium, high, xhigh, max…); "default" = back to the default'),
-        permission_mode: z.string().optional().describe('default | acceptEdits | auto | plan (asks the user)')
+        permission_mode: z.string().optional().describe('default | acceptEdits | auto | plan (may ask the user)')
       }
     },
     call('manage', (team, args: AgentUpdateInput) => team.update(args))
@@ -579,7 +649,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
     'agent_stop',
     {
       title: 'Stop agent session',
-      description: "Stop another agent's running session when the user asks (stag.ai asks the user to confirm). Its open task stays open.",
+      description: "Stop another agent's running session when the user asks (stag.ai may ask the user to confirm, per Settings → Agent API). Its open task stays open.",
       inputSchema: { name: nameArg }
     },
     call('manage', (team, args: { name: string }) => team.stop(args))
@@ -605,7 +675,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
     {
       title: 'Hand work over to agent',
       description:
-        'Hand your current work over to another agent when the user asks (e.g. "give this to Tester to continue"). stag.ai closes your open task, moves its kanban card + scope (the locked files) to that agent, and gives it your summary: ' +
+        'Hand your current work over to another agent when the user asks (e.g. "give this to Tester to continue"). stag.ai closes your open task, moves the task + scope (the locked files) to that agent, and gives it your summary: ' +
         'typed into its session when it is idle if it is running, otherwise a new session is opened for it next to your cell, starting from the summary. Fails if that agent still has an open task of its own. ' +
         'The summary is all the other agent gets (it cannot read your session), so make it self-contained but short. If its session has a long context (agent_list shows "context N% full") and the user agrees, agent_stop it first so it starts fresh. After this call, stop working on that task.',
       inputSchema: {
@@ -632,10 +702,50 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
     {
       title: 'Delete agent',
       description:
-        'Delete another agent when the user asks (stag.ai always asks the user to confirm): its session stops, its memory note goes to the Recycle Bin, its unfinished task card is dropped.',
+        'Delete another agent when the user asks (stag.ai may ask the user to confirm, per Settings → Agent API): its session stops, its memory note goes to the Recycle Bin, its unfinished task card is dropped.',
       inputSchema: { name: nameArg }
     },
     call('manage', (team, args: { name: string }) => team.remove(args))
+  ))
+
+  manage.push(server.registerTool(
+    'project_create',
+    {
+      title: 'Create project',
+      description:
+        'Create a project in this stag.ai workspace, only when the user asks you to: its code folder, a vault note "70 Projects/<name>/<name>.md", and optionally a starter team of agents. It gets its own tab in the app. ' +
+        'Call project_list first to avoid an existing name or folder. stag.ai may show the user a confirm card (Settings → Agent API) and this call then waits for their answer (up to ~5 minutes). ' +
+        "The team's cells are not opened: use agent_open(name, task?) afterwards if the user wants them to start.",
+      inputSchema: {
+        name: z.string().min(1).max(60).describe('Project name (also its vault note folder name), e.g. "web-shop"'),
+        folder: z
+          .string()
+          .max(200)
+          .optional()
+          .describe('Code folder relative to the workspace root, e.g. "apps/web". An existing folder is used as is; a missing one is created. Omit = a new folder named after the project'),
+        goal: z.string().max(500).optional().describe('One-line goal of the project, in the conversation language'),
+        team: z
+          .string()
+          .optional()
+          .describe('Starter team: "none" (default), "solo" (Dev), "duo" (Dev + Tester) or "team" (Lead + Dev + Tester); agents are named "<role> · <project>"')
+      }
+    },
+    call('manage', (team, input: ProjectCreateInput) => team.createProject(input))
+  ))
+
+  manage.push(server.registerTool(
+    'project_update',
+    {
+      title: 'Change project',
+      description:
+        'Rename a project or change its goal when the user asks. Only the fields you pass change. The code folder and the vault note path stay the same. Deleting a project is not possible from here (the user does it in the app).',
+      inputSchema: {
+        name: z.string().min(1).max(100).describe('Current project name (see project_list)'),
+        new_name: z.string().min(1).max(60).optional().describe('New name'),
+        goal: z.string().max(500).optional().describe('New goal ("" = none)')
+      }
+    },
+    call('manage', (team, input: ProjectUpdateInput) => team.updateProject(input))
   ))
 
   read.push(server.registerTool(
@@ -803,7 +913,7 @@ function registerDevServerTools(server: McpServer, dev: DevServerAgentApi): void
       title: 'Start dev server',
       description:
         "Start the project's dev server in a stag.ai terminal cell the user can see (nothing is started if its port is already open), wait until the port opens, and return the URL. " +
-        'The first time a command runs, stag.ai shows the user a confirm card and this call waits for their answer. ' +
+        'The first time a command runs, stag.ai may show the user a confirm card (Settings → Agent API) and this call then waits for their answer. ' +
         'Use this instead of running the dev server in your own shell. Without arguments it starts the only known server; pass name to pick one from preview_list. ' +
         'To add a new one, pass name + command + port (saved to .stag/launch.json). Then open the URL with browser_navigate.',
       inputSchema: {
@@ -854,6 +964,8 @@ const versionArg = z.string().max(40).optional().describe('version from your las
 function registerMemoryTools(server: McpServer, ctx: McpContext): { read: RegisteredTool[]; write: RegisteredTool[] } {
   const mem = ctx.memory!
   const vault = ctx.workspace.vaultPath
+  // Agent của project: note trong thư mục của project (70 Projects/<tên>/) được xếp lên đầu kết quả tìm.
+  const projectNotes = ctx.workspace.projects?.find((p) => p.id === ctx.agent.projectId)?.note.replace(/\/[^/]*$/, '')
   const run =
     <A>(kind: 'read' | 'write', fn: (svc: MemoryService, args: A) => Promise<MemoryResult>) =>
     async (args: A): Promise<ToolResult> => {
@@ -905,7 +1017,8 @@ function registerMemoryTools(server: McpServer, ctx: McpContext): { read: Regist
     {
       title: 'Search vault',
       description:
-        'Full-text search over the vault (case and accent insensitive; every word must appear in the note name or content). Returns note paths with matching lines (line numbers), title matches first.',
+        'Full-text search over the vault (case and accent insensitive; every word must appear in the note name or content). Returns note paths with matching lines (line numbers), title matches first' +
+        (projectNotes ? `; notes of your project (${projectNotes}/) come before the rest.` : '.'),
       inputSchema: {
         query: z.string().min(1).max(200).describe('Words to find'),
         folder: z.string().max(200).optional().describe('Only notes in this folder, e.g. "50 Decisions"'),
@@ -913,7 +1026,7 @@ function registerMemoryTools(server: McpServer, ctx: McpContext): { read: Regist
       },
       annotations: ro
     },
-    run('read', (svc, a: { query: string; folder?: string; limit?: number }) => svc.search(vault, a.query, a))
+    run('read', (svc, a: { query: string; folder?: string; limit?: number }) => svc.search(vault, a.query, { ...a, prefer: projectNotes }))
   ))
 
   read.push(server.registerTool(

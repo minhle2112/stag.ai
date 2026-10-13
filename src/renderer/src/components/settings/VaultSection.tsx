@@ -111,7 +111,7 @@ export function VaultSection(): React.JSX.Element {
       <Group title="Nhật ký việc">
         <Row
           label="Ghi việc xong vào nhật ký ngày"
-          desc={`Mỗi việc agent làm xong (task_done), giao cho agent khác (agent_handoff) hoặc bạn đánh dấu xong trên kanban → một dòng trong 40 Log/<ngày>.md của vault, mục "Agent work (auto)": tên việc, agent, giờ, một dòng tiếng Anh agent viết, phạm vi. Chỉ ghi vào vault có cấu trúc của stag.ai.`}
+          desc={`Mỗi việc agent làm xong (task_done), giao cho agent khác (agent_handoff) hoặc bạn đánh dấu xong (menu ⋯ của agent) → một dòng trong 40 Log/<ngày>.md của vault, mục "Agent work (auto)": tên việc, agent, giờ, một dòng tiếng Anh agent viết, phạm vi. Chỉ ghi vào vault có cấu trúc của stag.ai.`}
           override={override('workLog', onOff)}
         >
           <Switch label="Ghi việc xong vào nhật ký ngày" checked={effective.workLog} onChange={(v) => setField('workLog', v)} />

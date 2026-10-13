@@ -1,5 +1,5 @@
 import { DEFAULT_SCOPE, type Agent, type AgentKind, type ScopeLockSettings, type Task, type Workspace } from '@shared/types'
-import { covers, entryHas, isUnlocked, lockHolder, parseScope, projectRel, scopeLocks, unlocked, type ScopeEntry, type ScopeLock } from '@shared/scope'
+import { covers, entryHas, isUnlocked, lockHolder, parseScope, projectRel, scopeLocks, taskBase, unlocked, type ScopeEntry, type ScopeLock } from '@shared/scope'
 import type { Board, HookPayload } from './board'
 
 /** Tool sửa file của Claude Code: đường dẫn ở `tool_input.file_path` (NotebookEdit: `notebook_path`). */
@@ -208,11 +208,18 @@ export class ScopeGuard {
     try {
       hits = await this.hits(ws, agent, p, cfg)
     } catch (e) {
-      // Không đọc được bảng việc (.stag/tasks.json hỏng / bị khoá): đừng lặng lẽ cho qua một lần sửa file. Claude Code
-      // hỏi người dùng trong terminal; Codex không có 'ask' (hỏi trong app cũng cần bảng việc) → cho qua, ghi log.
+      // Không đọc được bảng việc (.stag/tasks.json hỏng / bị khoá): đừng lặng lẽ cho qua một lần sửa file. Chế độ chặn
+      // → từ chối (không kéo người dùng vào); chỉ cảnh báo → cho qua. Chế độ hỏi: Claude Code hỏi người dùng trong
+      // terminal; Codex không có 'ask' (hỏi trong app cũng cần bảng việc) → cho qua, ghi log.
       console.error('[scope]', e)
       const writes = !!files?.length || (!!cmd && looksLikeWrite(withoutDataHeredocs(cmd)))
-      if (cfg.mode === 'warn' || kind === 'codex' || !writes) return undefined
+      if (cfg.mode === 'warn' || !writes) return undefined
+      if (cfg.mode === 'block')
+        return reply(
+          'deny',
+          `stag.ai scope lock: could not read the task board to check the scope lock (${(e as Error).message}), and stag.ai is set to block edits in another agent's scope, so this ${cmd ? 'command' : 'edit'} is refused for now. Do not change it in any other way and do not ask the user: retry in a moment, and meanwhile work on another part of your task. If it keeps failing, mention it in your final reply.`
+        )
+      if (kind === 'codex') return undefined
       return reply('ask', `stag.ai: không đọc được bảng việc để kiểm khoá phạm vi (${(e as Error).message}). Cho ${agent.name} ${cmd ? 'chạy lệnh này' : 'sửa file này'}?`)
     }
     if (cfg.mode !== 'block') hits = hits.filter((h) => !this.grants.get(agent.id)?.has(h.grant))
@@ -239,7 +246,9 @@ export class ScopeGuard {
       conflict('blocked')
       return reply(
         'deny',
-        `stag.ai scope lock: you may not ${cmd ? `run this command, which may modify ${target}` : `edit ${target}`} — it is in the scope of ${owner}, and stag.ai is set to block edits in another agent's scope. Do not change it in any other way. Tell the user, or check task_list and agree on who edits what (the other agent can narrow its scope with task_update or finish its task).`
+        `stag.ai scope lock: you may not ${cmd ? `run this command, which may modify ${target}` : `edit ${target}`} — it is in the scope of ${owner}, and stag.ai is set to block edits in another agent's scope. ` +
+          `Do not change it in any other way, and do not ask the user: sort it out with that agent yourself. Call agent_status("${first.task.agentName}") to see what it is doing; if you need this file, ask it with agent_send to narrow its scope (task_update) or to tell you when its task is done. ` +
+          'Meanwhile work on other parts of your own task, and retry once its scope no longer covers the file (task_list shows the scopes).'
       )
     }
     if (kind !== 'codex') {
@@ -291,7 +300,7 @@ export class ScopeGuard {
     const free = unlocked(ws.path, ws.vaultPath, cfg.exempt)
     const own = await this.board.openTask(ws, agent.id)
     if (!own) return
-    const declared = parseScope(own.scope, ws.path)
+    const declared = parseScope(own.scope, ws.path, taskBase(own, ws.path))
     const record: string[] = []
     for (const f of files) {
       const rel = projectRel(f, ws.path, p.cwd ?? ws.path)

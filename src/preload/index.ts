@@ -62,7 +62,11 @@ import type {
   VaultNode,
   VaultSearchHit,
   Workspace,
-  WorkspaceInspection
+  WorkspaceFolder,
+  WorkspaceInspection,
+  CreateProjectRequest,
+  CreateProjectResult,
+  ProjectDeleteInfo
 } from '@shared/types'
 
 const api = {
@@ -131,8 +135,11 @@ const api = {
     start: (req: StartAgentRequest): Promise<AgentRun> => ipcRenderer.invoke(IPC.agentStart, req),
     stop: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentStop, agentId),
     remove: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.agentRemove, agentId),
-    saveLayout: (workspaceId: string, layout: CanvasLayout): Promise<void> =>
-      ipcRenderer.invoke(IPC.agentLayout, workspaceId, layout),
+    /** Lưu canvas của tab Chung (`projectId` vắng) hoặc của một project. */
+    saveLayout: (workspaceId: string, layout: CanvasLayout, projectId?: string | null): Promise<void> =>
+      ipcRenderer.invoke(IPC.agentLayout, workspaceId, layout, projectId ?? null),
+    /** "Nhân bản sang <project>" (null = Chung): agent mới cùng vai trò / model / skill / connector, phiên trống. */
+    clone: (agentId: string, toProjectId: string | null): Promise<Agent> => ipcRenderer.invoke(IPC.agentClone, agentId, toProjectId),
     rename: (agentId: string, name: string): Promise<Agent> => ipcRenderer.invoke(IPC.agentRename, agentId, name),
     /** Thứ tự agent của workspace ở thanh bên. */
     reorder: (workspaceId: string, orderedIds: string[]): Promise<void> => ipcRenderer.invoke(IPC.agentReorder, workspaceId, orderedIds),
@@ -152,7 +159,8 @@ const api = {
     },
     /** Yêu cầu của agent chờ bạn xác nhận (vd. tạo agent mới). */
     requests: (): Promise<AgentRequest[]> => ipcRenderer.invoke(IPC.agentRequestList),
-    answerRequest: (id: string, allow: boolean): Promise<void> => ipcRenderer.invoke(IPC.agentRequestAnswer, id, allow),
+    /** 'always' = "Luôn cho giữa 2 project này" (thẻ gửi việc khác project). */
+    answerRequest: (id: string, allow: boolean | 'always'): Promise<void> => ipcRenderer.invoke(IPC.agentRequestAnswer, id, allow),
     onRequests(cb: (list: AgentRequest[]) => void): () => void {
       const fn = (_e: IpcRendererEvent, list: AgentRequest[]): void => cb(list)
       ipcRenderer.on(IPC.agentRequests, fn)
@@ -246,7 +254,25 @@ const api = {
     pick: (): Promise<string | null> => ipcRenderer.invoke(IPC.wsPick),
     inspect: (path: string): Promise<WorkspaceInspection> => ipcRenderer.invoke(IPC.wsInspect, path),
     create: (req: CreateWorkspaceRequest): Promise<CreateWorkspaceResult> => ipcRenderer.invoke(IPC.wsCreate, req),
-    remove: (id: string): Promise<void> => ipcRenderer.invoke(IPC.wsRemove, id)
+    remove: (id: string): Promise<void> => ipcRenderer.invoke(IPC.wsRemove, id),
+    /** Một workspace đổi ở main (project, liên kết giữa project…). */
+    onChanged(cb: (ws: Workspace) => void): () => void {
+      const fn = (_e: IpcRendererEvent, ws: Workspace): void => cb(ws)
+      ipcRenderer.on(IPC.wsChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.wsChanged, fn)
+    }
+  },
+  project: {
+    /** Thư mục ở gốc workspace (+ apps/*, packages/*) cho hộp tạo project. */
+    folders: (workspaceId: string): Promise<WorkspaceFolder[]> => ipcRenderer.invoke(IPC.projectFolders, workspaceId),
+    create: (req: CreateProjectRequest): Promise<CreateProjectResult> => ipcRenderer.invoke(IPC.projectCreate, req),
+    update: (workspaceId: string, projectId: string, patch: { name?: string; goal?: string }): Promise<Workspace> =>
+      ipcRenderer.invoke(IPC.projectUpdate, workspaceId, projectId, patch),
+    deleteInfo: (workspaceId: string, projectId: string): Promise<ProjectDeleteInfo> => ipcRenderer.invoke(IPC.projectDeleteInfo, workspaceId, projectId),
+    /** Xoá project và agent của nó; `deleteFolder` = thư mục code vào Thùng rác. */
+    remove: (workspaceId: string, projectId: string, deleteFolder: boolean): Promise<Workspace> =>
+      ipcRenderer.invoke(IPC.projectRemove, workspaceId, projectId, deleteFolder),
+    hideHint: (workspaceId: string): Promise<Workspace> => ipcRenderer.invoke(IPC.projectHideHint, workspaceId)
   },
   vault: {
     tree: (vaultPath: string): Promise<VaultNode[]> => ipcRenderer.invoke(IPC.vaultTree, vaultPath),

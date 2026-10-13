@@ -26,6 +26,25 @@ export interface AgentCreateDraft {
   task: string
   /** Mở ô + chạy phiên ngay. */
   open: boolean
+  /** Chỗ của agent mới: project, null = Chung. Vắng = workspace chưa có project (thẻ hỏi không hiện dòng này). */
+  project?: CrossProject | null
+}
+
+/** Project mà một agent xin tạo (tool project_create, đã kiểm tra, chờ người dùng xác nhận). */
+export interface ProjectCreateDraft {
+  name: string
+  /** Thư mục code, tương đối so với gốc workspace. */
+  folder: string
+  /** true = thư mục chưa có, app tạo mới; false = dùng thư mục có sẵn. */
+  createFolder: boolean
+  goal: string
+  /** Đội mẫu (tên, vai trò, loại); trống = không tạo agent. */
+  team: Array<{ name: string; role: string; kindLabel: string }>
+  /** Quyền mặc định của đội (Cài đặt → Claude Code) và của agent đang xin, để thẻ hỏi nói rõ khi đội được quyền cao hơn. */
+  teamPermission: PermissionMode
+  callerPermission: PermissionMode
+  /** Note của project trong vault (tương đối so với vault). */
+  note: string
 }
 
 /** Agent bị một yêu cầu tác động (dừng / xoá / đổi quyền). */
@@ -49,12 +68,22 @@ interface AgentRequestBase {
 export type AgentRequest = AgentRequestBase &
   (
     | { action: 'create'; create: AgentCreateDraft }
+    | { action: 'project'; project: ProjectCreateDraft }
     | { action: 'stop' | 'delete'; target: AgentTargetInfo }
     | { action: 'permission'; target: AgentTargetInfo; from: PermissionMode; to: PermissionMode }
     | { action: 'devserver'; dev: DevServerApproval }
     /** Agent quyền thấp (`from`) gửi việc cho agent quyền cao hơn (`to`): agent_send / agent_open kèm việc / agent_handoff. */
     | { action: 'drive'; tool: 'send' | 'open' | 'handoff'; target: AgentTargetInfo; text: string; from: PermissionMode; to: PermissionMode }
+    /** Agent của một project gửi việc cho agent của project KHÁC: agent_send / agent_open kèm việc / agent_handoff. */
+    | { action: 'cross'; tool: 'send' | 'open' | 'handoff'; target: AgentTargetInfo; text: string; fromProject: CrossProject; toProject: CrossProject }
   )
+
+/** Project trong thẻ hỏi gửi việc khác project. */
+export interface CrossProject {
+  id: string
+  name: string
+  color: number
+}
 
 /** Agent xin chạy một dev server (preview_start): lệnh chạy ngoài sandbox của agent nên người dùng duyệt trước. */
 export interface DevServerApproval {
@@ -97,6 +126,40 @@ export interface AgentCreateInput {
   permission_mode?: string
   task?: string
   open?: boolean
+  /** Tên project đặt agent mới vào, hoặc "Chung" (gốc workspace); vắng = chỗ của agent đang xin. */
+  project?: string
+}
+
+/** Tham số tool project_create. */
+export interface ProjectCreateInput {
+  name: string
+  /** Thư mục code (tương đối so với gốc workspace); vắng = thư mục mới đặt theo tên project. */
+  folder?: string
+  goal?: string
+  /** Đội mẫu: none | solo | duo | team (mặc định none). */
+  team?: string
+}
+
+/** Tham số tool project_update. */
+export interface ProjectUpdateInput {
+  name: string
+  new_name?: string
+  goal?: string
+}
+
+/** `team` của tool project_create → đội mẫu (nhận cả tên tiếng Việt trong hộp tạo project); null = sai. */
+export function parseTeamPreset(raw: string | undefined): 'none' | 'solo' | 'duo' | 'team' | null {
+  const k = (raw ?? '').trim().toLowerCase()
+  if (!k || k === 'none' || k === 'empty' || k === 'để trống') return 'none'
+  if (k === 'solo') return 'solo'
+  if (k === 'duo' || k === 'đôi') return 'duo'
+  if (k === 'team' || k === 'đội') return 'team'
+  return null
+}
+
+/** Tên chỗ "Chung" (gốc workspace) trong tham số `project` của agent_create. */
+export function isChungName(raw: string): boolean {
+  return raw.trim().toLowerCase() === 'chung'
 }
 
 /** Tham số tool agent_update. */
@@ -191,9 +254,15 @@ export function agentMessage(fromName: string, text: string): string {
  * Nội dung bàn giao (agent_handoff) cho agent nhận: thẻ việc nào đã chuyển sang nó (nếu có) + bản tóm tắt.
  * Dùng chung cho tin gõ vào phiên đang chạy (`handoffMessage`) và lời mở phiên mới (`handoffOpening`).
  */
-export function handoffBody(fromName: string, summary: string, card?: { title: string; scope: string }): string {
+export function handoffBody(fromName: string, summary: string, card?: { title: string; scope: string; base?: string }, toFolder = ''): string {
+  // Phạm vi của việc tính từ thư mục lúc khai (project của agent giao); agent nhận ở thư mục khác thì phải nói rõ.
+  const from = card?.base ?? ''
+  const where =
+    card?.scope && from !== toFolder
+      ? ` Its scope paths are relative to ${from ? `the "${from}/" folder of the workspace` : 'the workspace root'} (where they were declared), not to your own working folder; stag.ai locks them there.`
+      : ''
   const task = card
-    ? `Its task card "${card.title}" (scope: ${card.scope || 'not set'}) is now yours and open — do not call task_start; call task_done when you finish.`
+    ? `Its task card "${card.title}" (scope: ${card.scope || 'not set'}) is now yours and open — do not call task_start; call task_done when you finish.${where}`
     : 'It had no open task card; call task_start once the task and scope are clear.'
   return `Agent "${fromName}" handed its work over to you (the user asked it to). ${task}\n\nHandoff:\n${summary}`
 }
@@ -224,9 +293,9 @@ export function permissionAbove(a: PermissionMode, b: PermissionMode): boolean {
 }
 
 /** Mục OTHER AGENTS trong luật phiên ({{AGENT_API}} của agent/rules.md), theo Cài đặt → Agent API của agent đó. */
-export function agentApiRules(cfg: { manage: boolean; message: boolean; read?: boolean }): string {
+export function agentApiRules(cfg: { manage: boolean; message: boolean; read?: boolean; confirmCreate?: boolean }): string {
   const lines = [
-    '- agent_list() shows every agent / terminal cell in this workspace (role, kind, model, running or not); adapter_models() shows which agent kinds and model ids exist on this machine. Use them instead of guessing.'
+    '- agent_list() shows every agent / terminal cell in this workspace (role, kind, model, running or not); adapter_models() shows which agent kinds and model ids exist on this machine; project_list() shows the projects of this workspace (each with its own code folder and agent team) and which one you are in. Use them instead of guessing.'
   ]
   if (cfg.read !== false)
     lines.push(
@@ -235,7 +304,10 @@ export function agentApiRules(cfg: { manage: boolean; message: boolean; read?: b
   if (cfg.manage)
     lines.push(
       '- When the user asks you to create, change, open, stop or delete an agent, do it yourself: agent_create(name, kind, role?, model?, effort?, permission_mode?, task?), agent_update(name, …), agent_open(name, task?), agent_stop(name), agent_delete(name). Check adapter_models for model ids and agent_list for names first. Give a new agent a self-contained first `task` when the user described the work.',
-      '- Only when the user asked. stag.ai shows the user a confirm card for risky changes and your call waits for the answer; if the user declines, do not retry or work around it.'
+      '- When the user asks you to create a project or rename / re-goal one: project_create(name, folder?, goal?, team?) (team = none | solo | duo | team), project_update(name, new_name?, goal?). agent_create(…, project?) puts the new agent in a project ("Chung" = workspace root; omitted = your own place). Deleting a project is only done by the user in the app.',
+      cfg.confirmCreate === false
+        ? '- Only when the user asked. The user turned off confirm cards (Settings → Agent API), so these calls act right away without asking them: double-check names before stopping, deleting or changing permissions.'
+        : '- Only when the user asked. stag.ai shows the user a confirm card for risky changes and your call waits for the answer; if the user declines, do not retry or work around it.'
     )
   if (cfg.message)
     lines.push(

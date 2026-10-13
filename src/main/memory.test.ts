@@ -37,12 +37,18 @@ afterEach(async () => {
   await fs.rm(vault, { recursive: true, force: true })
 })
 
-async function connect(mode: MemoryToolsMode = 'full'): Promise<{ client: Client; touched: Touch[] }> {
+async function connect(mode: MemoryToolsMode = 'full', projectId?: string): Promise<{ client: Client; touched: Touch[] }> {
   const touched: Touch[] = []
   const service = new MemoryService(new VaultIndexer(), new NoteWriter(), () => [SECRET])
   const server = createStagMcp({
-    agent: { id: 'a1', name: 'A', workspaceId: 'w1' } as Agent,
-    workspace: { id: 'w1', name: 'W', path: vault, vaultPath: vault } as Workspace,
+    agent: { id: 'a1', name: 'A', workspaceId: 'w1', ...(projectId ? { projectId } : {}) } as Agent,
+    workspace: {
+      id: 'w1',
+      name: 'W',
+      path: vault,
+      vaultPath: vault,
+      projects: [{ id: 'pw', name: 'web', folder: 'apps/web', goal: '', color: 0, note: '70 Projects/web/web.md', createdAt: '' }]
+    } as Workspace,
     board: {} as Board,
     browser: {} as BrowserService,
     teammates: () => [],
@@ -124,6 +130,14 @@ describe('tool memory_* đọc', () => {
     expect(r.text).toContain('30 Features/Kanban.md\n  L13: ## Kế hoạch')
     expect((await call(client, 'memory_search', { query: 'kanban', folder: '50 Decisions' })).text).toMatch(/^50 Decisions\/2026-10-08 Drop tickets\.md/)
     expect((await call(client, 'memory_search', { query: 'zzz' })).text).toMatch(/No notes match/)
+  })
+
+  it('memory_search của agent project: note trong thư mục project lên đầu', async () => {
+    await put('70 Projects/web/web.md', '# web\n\nKanban của đội web.\n')
+    const plain = (await call((await connect()).client, 'memory_search', { query: 'kanban' })).text
+    expect(plain.split('\n')[0]).not.toBe('70 Projects/web/web.md')
+    const mine = (await call((await connect('full', 'pw')).client, 'memory_search', { query: 'kanban' })).text
+    expect(mine.split('\n')[0]).toBe('70 Projects/web/web.md')
   })
 
   it('memory_query: type, tag, field, links_to, linked_from, ngày', async () => {

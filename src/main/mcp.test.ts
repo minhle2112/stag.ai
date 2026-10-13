@@ -5,7 +5,7 @@ import { BROWSER_TOOLS_OFF } from '@shared/browser'
 import type { Agent, Workspace } from '@shared/types'
 import type { BrowserService } from './browser'
 import type { Board } from './board'
-import type { AgentCreateInput } from '@shared/agentApi'
+import type { AgentCreateInput, ProjectCreateInput, ProjectUpdateInput } from '@shared/agentApi'
 import { AGENT_API_OFF, createStagMcp, type TeamApi } from './mcp'
 
 // browser.ts dùng Electron; test chỉ cần danh sách phím.
@@ -92,7 +92,17 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     }),
     remove: vi.fn(async (i: { name: string }) => `remove ${i.name}`),
     status: vi.fn(async (i: { name: string }) => `status ${i.name}`),
-    log: vi.fn(async (i: { name: string; last?: number }) => `log ${i.name} ${i.last ?? ''}`)
+    log: vi.fn(async (i: { name: string; last?: number }) => `log ${i.name} ${i.last ?? ''}`),
+    projects: () => [
+      { name: 'Chung', chung: true, folder: '', path: 'C:/p', goal: '', note: null, agents: ['Agent 1', 'Shell'], mine: true },
+      { name: 'web-shop', chung: false, folder: 'apps/web', path: 'C:/p/apps/web', goal: 'Bán hàng', note: 'C:/p/vault/70 Projects/web-shop/web-shop.md', agents: ['Dev · web-shop'], mine: false },
+      { name: 'docs', chung: false, folder: 'docs', path: 'C:/p/docs', goal: '', note: 'C:/p/vault/70 Projects/docs/docs.md', agents: [], mine: false }
+    ],
+    createProject: vi.fn(async (i: ProjectCreateInput) => {
+      if (i.name === 'web-shop') throw new Error('Đã có project tên này')
+      return `Created project "${i.name}"`
+    }),
+    updateProject: vi.fn(async (i: ProjectUpdateInput) => `updated ${i.name}`)
   }
 
   const sync = vi.fn(async () => {})
@@ -210,6 +220,51 @@ describe('tool agent_list / adapter_models (Agent API A1)', () => {
     expect(list).not.toContain('agent_log')
     expect(list).toContain('agent_send')
     expect(text(await off.callTool({ name: 'agent_log', arguments: { name: 'Tester' } }))).toBe(AGENT_API_OFF.read)
+  })
+
+  it('project_list: Chung + project, chỗ của mình, thư mục / mục tiêu / note / agent; luôn có (cả khi tắt manage)', async () => {
+    const c = await client(true, { manage: false, message: false, read: false })
+    expect(await names(c)).toContain('project_list')
+    const t = text(await c.callTool({ name: 'project_list', arguments: {} }))
+    expect(t).toContain('Workspace "W" — 2 project(s):')
+    expect(t).toContain('- "Chung" (workspace root, not a project) ← you are here — folder C:/p — 2 agent(s): "Agent 1", "Shell"')
+    expect(t).toContain(
+      '- project "web-shop" — code folder apps/web (C:/p/apps/web) — goal: Bán hàng — vault note: C:/p/vault/70 Projects/web-shop/web-shop.md — 1 agent(s): "Dev · web-shop"'
+    )
+    expect(t).toContain('- project "docs" — code folder docs (C:/p/docs) — vault note: C:/p/vault/70 Projects/docs/docs.md — no agents')
+  })
+
+  it('project_list: workspace chưa có project', async () => {
+    const one = { ...team, projects: () => [team.projects()[0]] }
+    const server = createStagMcp({ agent, workspace, board: {} as Board, browser: {} as BrowserService, teammates: () => [], syncSessionFile: sync, handoff: async () => {}, team: one })
+    const [a, b] = InMemoryTransport.createLinkedPair()
+    const c = new Client({ name: 'test', version: '0' })
+    await Promise.all([server.connect(a), c.connect(b)])
+    expect(text(await c.callTool({ name: 'project_list', arguments: {} }))).toContain('Workspace "W" has no projects yet')
+  })
+
+  it('project_create / project_update / agent_create(project): chuyển tham số, lỗi thành isError, nhóm manage', async () => {
+    const c = await client(true)
+    const input = { name: 'mobile', folder: 'apps/mobile', goal: 'App điện thoại', team: 'duo' }
+    const r = await c.callTool({ name: 'project_create', arguments: input })
+    expect(r.isError).toBeFalsy()
+    expect(text(r)).toBe('Created project "mobile"')
+    expect(team.createProject).toHaveBeenCalledWith(input)
+    const dup = await c.callTool({ name: 'project_create', arguments: { name: 'web-shop' } })
+    expect(dup.isError).toBe(true)
+    expect(text(dup)).toContain('Đã có project')
+    expect(text(await c.callTool({ name: 'project_update', arguments: { name: 'docs', new_name: 'handbook', goal: '' } }))).toBe('updated docs')
+    expect(team.updateProject).toHaveBeenCalledWith({ name: 'docs', new_name: 'handbook', goal: '' })
+    await c.callTool({ name: 'agent_create', arguments: { name: 'QA', kind: 'claude', project: 'web-shop' } })
+    expect(team.create).toHaveBeenLastCalledWith({ name: 'QA', kind: 'claude', project: 'web-shop' })
+    // Không có tool xoá project cho agent.
+    expect((await names(c)).some((n) => n.startsWith('project_') && /delete|remove/.test(n))).toBe(false)
+
+    const off = await client(true, { manage: false, message: true })
+    const list = await names(off)
+    expect(list).not.toContain('project_create')
+    expect(list).not.toContain('project_update')
+    expect(text(await off.callTool({ name: 'project_create', arguments: { name: 'x' } }))).toBe(AGENT_API_OFF.manage)
   })
 
   it('không có team API → lỗi rõ ràng', async () => {

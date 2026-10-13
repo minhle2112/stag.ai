@@ -4,7 +4,7 @@ import type { AgentRequest } from '@shared/agentApi'
 interface AgentRequestsState {
   /** Yêu cầu của agent chờ bạn xác nhận (Agent API), cũ nhất trước. */
   list: AgentRequest[]
-  answer: (id: string, allow: boolean) => void
+  answer: (id: string, allow: boolean | 'always') => void
 }
 
 export const useAgentRequests = create<AgentRequestsState>((set) => {

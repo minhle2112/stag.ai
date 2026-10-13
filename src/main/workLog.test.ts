@@ -47,6 +47,11 @@ describe('dòng nhật ký', () => {
     expect(workDoneLine(h)).toContain('— handed off to [[Coder]] — Goal: tests')
     expect(logLine({ task: task({ summary: undefined }), how: 'manual' })).toMatch(/— marked done by the user \d\d:\d\d · scope: src\/auth\/$/)
   })
+
+  it('việc của project: thẻ "· project: [[note]]" trước phạm vi', () => {
+    const l = logLine({ task: task({ log: 'Cart button' }), how: 'done', project: 'web-shop' })
+    expect(l).toMatch(/— Cart button · project: \[\[web-shop\]\] · scope: src\/auth\/$/)
+  })
 })
 
 describe('insertInSection', () => {

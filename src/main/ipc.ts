@@ -15,7 +15,7 @@ import { readSkillDir, scanSkills, type SkillLibrary } from './skills'
 import type { PluginCallContext, PluginHost } from './plugins'
 import type { PluginInstallRequest, PluginScaffoldRequest } from '@shared/plugins'
 import type { ChatPermissionAnswer, ChatSendRequest } from '@shared/chat'
-import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, BroadcastRequest, CreateAgentRequest, CreateWorkspaceRequest, CanvasLayout, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
+import type { AdapterInstallRequest, AppMeta, InstalledAdapterPatch, AppSettingsPatch, BroadcastRequest, CreateAgentRequest, CreateProjectRequest, CreateWorkspaceRequest, CanvasLayout, OverrideLevel, SettingsOverridesPatch, StartAgentRequest, ViewRect, Workspace } from '@shared/types'
 import type { AdapterService } from './adapters'
 import type { AgentService } from './agents'
 import type { ExternalAdapterStore } from './externalAdapters'
@@ -35,6 +35,7 @@ import { createNote, inspectVaultDir, readNote, vaultTree, writeNote } from './v
 import type { VaultActivityLog } from './vaultActivity'
 import { VaultIndexer, VaultWatchers } from './vaultIndex'
 import type { WorkspaceStore } from './workspace'
+import { ProjectService } from './projects'
 import type { VoiceService } from './voice'
 import type { VocabCache } from './voiceVocab'
 import type { CloudUsage, VoiceCloud } from './voiceCloud'
@@ -90,6 +91,15 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     await settings.forget('workspace', [id])
   })
 
+  const projects = new ProjectService(workspaces, agents, settings)
+  ipcMain.handle(IPC.projectFolders, (_e, workspaceId: string) => projects.folders(workspaceId))
+  ipcMain.handle(IPC.projectCreate, (_e, req: CreateProjectRequest) => projects.create(req))
+  ipcMain.handle(IPC.projectUpdate, (_e, workspaceId: string, projectId: string, patch: { name?: string; goal?: string }) => projects.update(workspaceId, projectId, patch))
+  ipcMain.handle(IPC.projectDeleteInfo, (_e, workspaceId: string, projectId: string) => projects.deleteInfo(workspaceId, projectId))
+  ipcMain.handle(IPC.projectRemove, (_e, workspaceId: string, projectId: string, deleteFolder: boolean) => projects.remove(workspaceId, projectId, !!deleteFolder))
+  ipcMain.handle(IPC.projectHideHint, (_e, workspaceId: string) => projects.hideHint(workspaceId))
+  ipcMain.handle(IPC.agentClone, (_e, agentId: string, toProjectId: string | null) => agents.clone(agentId, toProjectId))
+
   ipcMain.handle(IPC.vaultTree, (_e, vaultPath: string) => vaultTree(vaultPath))
   ipcMain.handle(IPC.vaultRead, (_e, vaultPath: string, rel: string) => readNote(vaultPath, rel))
   ipcMain.handle(IPC.vaultWrite, (_e, vaultPath: string, rel: string, text: string, base: string | null) => writeNote(vaultPath, rel, text, base))
@@ -113,9 +123,9 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     await agents.remove(agentId)
     await settings.forget('agent', [agentId])
   })
-  ipcMain.handle(IPC.agentLayout, (_e, workspaceId: string, layout: CanvasLayout) => agents.saveLayout(workspaceId, layout))
+  ipcMain.handle(IPC.agentLayout, (_e, workspaceId: string, layout: CanvasLayout, projectId?: string | null) => agents.saveLayout(workspaceId, layout, projectId))
   ipcMain.handle(IPC.agentRequestList, () => agents.requests.list())
-  ipcMain.handle(IPC.agentRequestAnswer, (_e, id: string, allow: boolean) => agents.requests.answer(id, allow))
+  ipcMain.handle(IPC.agentRequestAnswer, (_e, id: string, allow: boolean | 'always') => agents.requests.answer(id, allow === 'always' ? 'always' : !!allow))
 
   const ws = (id: string): Workspace => {
     const w = workspaces.get(id)

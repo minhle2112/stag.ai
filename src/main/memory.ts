@@ -189,9 +189,13 @@ export class MemoryService {
     }
   }
 
-  async search(vaultPath: string, query: string, o: { folder?: string; limit?: number } = {}): Promise<MemoryResult> {
+  /** `prefer` = thư mục được xếp lên đầu (agent của project: thư mục note của project), thứ tự còn lại giữ nguyên. */
+  async search(vaultPath: string, query: string, o: { folder?: string; limit?: number; prefer?: string } = {}): Promise<MemoryResult> {
     const folder = normFolder(o.folder)
-    const hits = (await this.indexer.search(vaultPath, query)).filter((h) => !folder || h.rel.toLowerCase().startsWith(folder))
+    const prefer = normFolder(o.prefer)
+    const found = (await this.indexer.search(vaultPath, query)).filter((h) => !folder || h.rel.toLowerCase().startsWith(folder))
+    const mine = (rel: string): boolean => !!prefer && rel.toLowerCase().startsWith(prefer)
+    const hits = prefer ? [...found.filter((h) => mine(h.rel)), ...found.filter((h) => !mine(h.rel))] : found
     const limit = clampLimit(o.limit)
     if (!hits.length) return { text: `No notes match "${query}".`, touched: [] }
     const lines = hits.slice(0, limit).flatMap((h) => [h.rel, ...h.matches.map((m) => `  L${m.line}: ${m.text}`)])

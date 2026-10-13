@@ -19,6 +19,17 @@ export const IPC = {
   wsInspect: 'workspace:inspect',
   wsCreate: 'workspace:create',
   wsRemove: 'workspace:remove',
+  /** Project trong workspace (xem main/projects.ts). */
+  projectFolders: 'project:folders',
+  projectCreate: 'project:create',
+  projectUpdate: 'project:update',
+  projectDeleteInfo: 'project:delete-info',
+  projectRemove: 'project:remove',
+  projectHideHint: 'project:hide-hint',
+  /** main → renderer: một workspace vừa đổi ở main (project, "Luôn cho" giữa 2 project…), kèm bản mới. */
+  wsChanged: 'workspace:changed',
+  /** "Nhân bản sang <project>". */
+  agentClone: 'agent:clone',
   vaultTree: 'vault:tree',
   vaultPick: 'vault:pick',
   vaultRead: 'vault:read',

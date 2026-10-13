@@ -37,7 +37,7 @@ const MONO = 'break-all font-mono text-[11px]'
 /** Khả năng của từng adapter trong stag.ai (Connector / Skill là việc của S2 / S3). */
 export const FEATURES: Array<{ label: string; claude: string; codex: string; terminal: string }> = [
   { label: 'Luật phiên + bộ nhớ vault', claude: '✓', codex: '✓ developer_instructions', terminal: '—' },
-  { label: 'MCP stag (kanban, trình duyệt, bàn giao)', claude: '✓', codex: '✓', terminal: '—' },
+  { label: 'MCP stag (việc, trình duyệt, bàn giao)', claude: '✓', codex: '✓', terminal: '—' },
   { label: 'Trạng thái qua hook (đang làm / chờ bạn)', claude: '✓', codex: '✓ (curl)', terminal: '—' },
   { label: 'Tiếp tục phiên trước', claude: '✓ --resume', codex: '✓ codex resume', terminal: '—' },
   { label: '% context + tự bàn giao', claude: '✓ statusLine', codex: '✓ rollout', terminal: '—' },
@@ -452,7 +452,7 @@ export function TerminalDetail(): React.JSX.Element {
         ))}
       </Group>
       <Note>
-        Ô Terminal không có luật phiên, bộ nhớ hay kanban. Chạy <code>claude</code> / <code>codex</code> bên trong vẫn là một phiên độc lập (app bỏ biến môi
+        Ô Terminal không có luật phiên, bộ nhớ hay việc. Chạy <code>claude</code> / <code>codex</code> bên trong vẫn là một phiên độc lập (app bỏ biến môi
         trường "phiên con" trước khi mở shell).
       </Note>
     </>

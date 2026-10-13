@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { resolveMemory } from '@shared/settings'
-import { agentKind, type Agent, type Workspace } from '@shared/types'
+import { CHUNG, filterWorkLog, placeOf } from '@shared/projects'
+import { agentKind, type Agent, type Project, type Workspace } from '@shared/types'
 import { localDay } from '../status'
 import { useAgents } from '../store/agents'
 import { useSettings } from '../store/settings'
@@ -10,6 +11,7 @@ import { Icon } from './Icon'
 import { AgentAvatar } from './ui/AgentAvatar'
 import { Seg } from './ui/Seg'
 import { renderNote } from './vault/markdown'
+import { ProjectMark } from './projects/ProjectMark'
 
 /** Một note đọc từ vault: `text` null = chưa có (agent chưa ghi gì). */
 interface Doc {
@@ -34,12 +36,19 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
   const [pick, setPick] = useState<string | null>(null)
   const [today, setToday] = useState<Doc | null>(null)
   const [notes, setNotes] = useState<Record<string, Doc>>({})
+  // Workspace có project: lọc nhật ký và danh sách agent theo project (mặc định: tab đang mở ở màn Agent).
+  const projects = workspace.projects ?? []
+  const [projF, setProjF] = useState<string>(() => (projects.length ? (useAgents.getState().byWs[workspace.id]?.place ?? 'all') : 'all'))
+  const filtering = projects.length > 0 && projF !== 'all'
 
   useEffect(() => {
     if (!useAgents.getState().byWs[workspace.id]) loadAgents(workspace.id)
   }, [workspace.id, loadAgents])
 
-  const agents = useMemo<Agent[]>(() => (agentsState?.agents ?? []).filter((a) => agentKind(a) !== 'terminal'), [agentsState])
+  const agents = useMemo<Agent[]>(
+    () => (agentsState?.agents ?? []).filter((a) => agentKind(a) !== 'terminal' && (!filtering || placeOf(workspace, a) === projF)),
+    [agentsState, filtering, projF, workspace]
+  )
   const names = agents.map((a) => a.name).join('\n')
   const date = localDay(new Date())
   const logRel = `40 Log/${date}.md`
@@ -66,7 +75,8 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
   }, [vaultPath, logRel, names, tick])
 
   const shownAgent = agents.find((a) => a.id === pick) ?? agents[0]
-  const doc = mode === 'today' ? today : shownAgent ? (notes[`60 Agents/${shownAgent.name}.md`] ?? null) : null
+  const todayShown = useMemo(() => (today && today.text != null && filtering ? { ...today, text: filterWorkLog(today.text, projF, projects) } : today), [today, filtering, projF, projects])
+  const doc = mode === 'today' ? todayShown : shownAgent ? (notes[`60 Agents/${shownAgent.name}.md`] ?? null) : null
   const html = useMemo(() => (doc?.text != null ? renderNote(doc.text, { current: doc.rel, notes: null }).html : ''), [doc])
 
   return (
@@ -80,6 +90,21 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
             { value: 'agent', label: 'Theo agent' }
           ]}
         />
+        {projects.length > 0 && (
+          <div className="ml-2 flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="Lọc theo project">
+            {[{ id: 'all', label: 'Tất cả', p: undefined as Project | null | undefined }, { id: CHUNG, label: 'Chung', p: null }, ...projects.map((p) => ({ id: p.id, label: p.name, p }))].map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => setProjF(o.id)}
+                className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11.5px] ${projF === o.id ? 'border-line-3 bg-panel-2 text-fg' : 'border-transparent text-muted hover:text-fg'}`}
+              >
+                {o.p !== undefined && <ProjectMark project={o.p} size={8} />}
+                {o.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex-1" />
         <button
           type="button"

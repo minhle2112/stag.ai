@@ -3,6 +3,7 @@
 // Dùng chung main (quyết định ở hook) và renderer (dấu ⚠ trên kanban).
 
 import type { Task } from './types'
+import { joinRoot } from './projects'
 
 /** Một mục phạm vi: thư mục/file (so theo ranh giới thư mục) hoặc mẫu glob. */
 export interface ScopeEntry {
@@ -139,8 +140,9 @@ const pathLike = (t: string): boolean => /[/\\*]/.test(t) || /\.[a-z0-9]{1,8}$/i
  * Tách phạm vi agent khai (chữ tự do, vd. "src/auth/, tests/auth/*.test.ts (đăng nhập)") thành các mục.
  * Phân cách bằng dấu phẩy, chấm phẩy, xuống dòng; ghi chú trong ngoặc tròn bị bỏ; `…` (backtick) giữ nguyên
  * cả khoảng trắng. Một cụm có khoảng trắng chỉ giữ các chữ trông như đường dẫn. "." / "*" = cả dự án.
+ * `base` = thư mục đường dẫn tương đối tính từ đó (agent của project: thư mục project); khoá vẫn tính từ `root`.
  */
-export function parseScope(scope: string, root: string): ScopeEntry[] {
+export function parseScope(scope: string, root: string, base = root): ScopeEntry[] {
   const tokens: string[] = []
   const rest = scope.replace(/`([^`]+)`/g, (_m, inner: string) => {
     tokens.push(inner.trim())
@@ -156,20 +158,20 @@ export function parseScope(scope: string, root: string): ScopeEntry[] {
   for (const label of tokens) {
     const t = norm(label).replace(/^["']|["']$/g, '')
     if (/^(\.|\.\/|\*|\*\*|\*\*\/\*|\/)$/.test(t)) {
-      entries.push({ key: '', label })
+      entries.push({ key: projectRel('.', root, base) ?? '', label })
       continue
     }
     const wild = t.search(WILDCARD)
     if (wild < 0) {
-      const key = projectRel(t.replace(/\/+$/, ''), root)
+      const key = projectRel(t.replace(/\/+$/, ''), root, base)
       if (key !== null) entries.push({ key, label })
       continue
     }
-    const full = projectRel(t, root)
+    const full = projectRel(t, root, base)
     if (full === null) continue
     const head = norm(t).slice(0, wild)
     const prefix = head.includes('/') ? head.slice(0, head.lastIndexOf('/')) : ''
-    const key = prefix ? projectRel(prefix, root) : projectRel('.', root)
+    const key = prefix ? projectRel(prefix, root, base) : projectRel('.', root, base)
     if (key === null) continue
     const glob = globRegex(full)
     entries.push(glob ? { key, label, glob } : { key, label })
@@ -192,6 +194,11 @@ export function entriesOverlap(a: ScopeEntry, b: ScopeEntry): boolean {
 
 const looksLikeFile = (rel: string): boolean => /\.[a-z0-9]{1,8}$/i.test(rel.slice(rel.lastIndexOf('/') + 1))
 
+/** Thư mục tuyệt đối mà phạm vi của việc tính từ đó (agent của project: thư mục project lúc nhận việc). */
+export function taskBase(task: Pick<Task, 'base'>, root: string): string {
+  return task.base ? joinRoot(root, task.base) : root
+}
+
 /** Vùng khoá của một việc đang mở. */
 export interface ScopeLock {
   task: Task
@@ -205,7 +212,7 @@ export function scopeLocks(tasks: Task[], root: string): ScopeLock[] {
     .map((task) => ({
       task,
       entries: [
-        ...parseScope(task.scope, root),
+        ...parseScope(task.scope, root, taskBase(task, root)),
         ...(task.files ?? []).flatMap((f) => {
           const key = projectRel(f, root)
           return key === null ? [] : [{ key, label: f }]

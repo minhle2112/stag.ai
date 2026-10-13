@@ -26,7 +26,7 @@ export const PLUGIN_CAPABILITIES = {
     'Nhận sự kiện của app (phiên agent mở / đóng, agent chờ bạn, việc bắt đầu / xong, agent tạo / sửa file, note vault đổi, bàn giao phiên, đụng phạm vi việc của agent khác)',
   'agents.read': 'Xem danh sách workspace, agent và trạng thái của họ',
   'agent.sessions.send': 'Gõ chữ vào terminal của agent đang chạy',
-  'board.read': 'Xem các việc trên kanban',
+  'board.read': 'Xem danh sách việc của agent',
   'vault.read': 'Đọc note trong vault của workspace',
   'vault.write': 'Ghi note vào vault của workspace',
   'plugin.state.read': 'Đọc dữ liệu riêng của plugin',

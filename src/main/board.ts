@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, HandoffState, ScopeAsk, Task, WaitReason, Workspace } from '@shared/types'
+import { agentFolder, joinRoot, projectNoteName, projectOf } from '@shared/projects'
 import { readText } from './fsutil'
 import type { ClosedTask } from './workLog'
 import { ensureIgnored } from './workspace'
@@ -9,6 +10,12 @@ import { ensureIgnored } from './workspace'
 interface TasksFile {
   version: 1
   tasks: Task[]
+}
+
+/** Project của việc cho nhật ký vault: tên note project (`70 Projects/<tên>/<tên>.md` → `<tên>`). */
+function projectTag(ws: Workspace, task: Task): { project?: string } {
+  const p = task.projectId ? ws.projects?.find((x) => x.id === task.projectId) : undefined
+  return p ? { project: projectNoteName(p) } : {}
 }
 
 /** Phần dữ liệu hook Claude Code gửi về mà bảng cần (xem docs Claude Code: hooks). */
@@ -284,15 +291,20 @@ export class Board {
         )
     }
     busy(await this.openTask(ws, agent.id))
+    // Agent của project: phạm vi tính từ thư mục project (ghi lại thư mục đó vào việc).
+    const base = agentFolder(ws, agent)
+    const project = projectOf(ws, agent)
     const task: Task = {
       id: randomUUID(),
       agentId: agent.id,
       agentName: agent.name,
       sessionId,
       title: title.trim(),
-      scope: await quoteSpacedPaths(scope.trim(), ws.path),
+      scope: await quoteSpacedPaths(scope.trim(), joinRoot(ws.path, base)),
       status: 'open',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      ...(base ? { base } : {}),
+      ...(project ? { projectId: project.id } : {})
     }
     // Xét lại ngay trước khi thêm (không còn await xen giữa): hai lần task_start song song không mở được hai việc.
     const list = await this.tasks(ws)
@@ -307,7 +319,7 @@ export class Board {
     const task = await this.openTask(ws, agentId)
     if (!task) throw new Error('You have no open task. Call task_start first.')
     if (change.title?.trim()) task.title = change.title.trim()
-    if (change.scope?.trim()) task.scope = await quoteSpacedPaths(change.scope.trim(), ws.path)
+    if (change.scope?.trim()) task.scope = await quoteSpacedPaths(change.scope.trim(), joinRoot(ws.path, task.base ?? ''))
     await this.save(ws)
     return task
   }
@@ -376,7 +388,7 @@ export class Board {
     if (log?.trim()) task.log = log.trim()
     await this.save(ws)
     this.events({ kind: 'taskDone', workspaceId: ws.id, agentId, agentName: task.agentName, title: task.title })
-    this.closed(ws, { task: { ...task }, how: 'done' })
+    this.closed(ws, { task: { ...task }, how: 'done', ...projectTag(ws, task) })
     return task
   }
 
@@ -403,13 +415,16 @@ export class Board {
       scope: from.scope,
       status: 'open',
       createdAt: now,
-      ...(from.files?.length ? { files: [...from.files] } : {})
+      ...(from.files?.length ? { files: [...from.files] } : {}),
+      // Phạm vi vẫn tính từ thư mục lúc khai; việc thuộc project của agent nhận.
+      ...(from.base ? { base: from.base } : {}),
+      ...(projectOf(ws, to) ? { projectId: to.projectId } : {})
     }
     ;(await this.tasks(ws)).push(task)
     await this.save(ws)
     this.events({ kind: 'taskDone', workspaceId: ws.id, agentId: fromId, agentName: from.agentName, title: from.title })
     this.events({ kind: 'taskStarted', workspaceId: ws.id, agentId: to.id, agentName: to.name, title: task.title, scope: task.scope })
-    this.closed(ws, { task: { ...from }, how: 'handoff', to: to.name })
+    this.closed(ws, { task: { ...from }, how: 'handoff', to: to.name, ...projectTag(ws, from) })
     return task
   }
 
@@ -421,7 +436,7 @@ export class Board {
     task.doneAt = new Date().toISOString()
     task.manual = true
     await this.save(ws)
-    if (status === 'done') this.closed(ws, { task: { ...task }, how: 'manual' })
+    if (status === 'done') this.closed(ws, { task: { ...task }, how: 'manual', ...projectTag(ws, task) })
     return task
   }
 

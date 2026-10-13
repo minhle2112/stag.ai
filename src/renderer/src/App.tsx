@@ -5,7 +5,6 @@ import { BrowserAskDialog, BrowserDock } from './components/BrowserPane'
 import { agentKind, type AgentKind } from '@shared/types'
 import { BroadcastDialog } from './components/BroadcastDialog'
 import { CreateAgentDialog } from './components/CreateAgentDialog'
-import { Kanban } from './components/Kanban'
 import { LogView } from './components/LogView'
 import { ScopeAskDialog } from './components/ScopeAskDialog'
 import { AgentRequestDialog } from './components/AgentRequestDialog'
@@ -22,6 +21,8 @@ import { StatusBar } from './components/shell/StatusBar'
 import { TitleBar } from './components/shell/TitleBar'
 import { Tooltips } from './components/shell/Tooltips'
 import { WorkspaceFlowDialogs } from './components/shell/WorkspaceFlowDialogs'
+import { CreateProjectDialog } from './components/projects/CreateProjectDialog'
+import { DeleteProjectDialog } from './components/projects/DeleteProjectDialog'
 import { openAgent, useAgents } from './store/agents'
 import { pageTab, slotsOf, usePlugins } from './store/plugins'
 import { useSettings } from './store/settings'
@@ -31,8 +32,8 @@ import { startThemeBus } from './store/theme'
 import { useBrowserOpen, useSidebarOpen, useUi, type MainTab } from './store/ui'
 import { useActiveWorkspace, useWorkspaces } from './store/workspaces'
 
-/** Ctrl+1…5 → màn hình tương ứng ở thanh icon bên trái. */
-const VIEW_KEYS: Record<string, MainTab> = { '1': 'agents', '2': 'kanban', '3': 'artifacts', '4': 'vault', '5': 'log' }
+/** Ctrl+1…4 → màn hình tương ứng ở thanh icon bên trái. */
+const VIEW_KEYS: Record<string, MainTab> = { '1': 'agents', '2': 'artifacts', '3': 'vault', '4': 'log' }
 
 export function App(): React.JSX.Element {
   const tab = useUi((s) => s.tab)
@@ -109,7 +110,15 @@ export function App(): React.JSX.Element {
         else ui.setMaxCell(wsId, ui.maxCell[wsId] ? null : (sel ?? null))
       }
       else if (e.shiftKey && key === 'l') void window.stag.theme.toggle()
-      else if (e.shiftKey && key === 'p') ui.setPalette(true)
+      else if (e.shiftKey && key === 'p') {
+        // Ctrl+Shift+P: project mới trong workspace đang xem.
+        const wsId = useWorkspaces.getState().activeId
+        if (!wsId) handled = false
+        else {
+          ui.closeSettings()
+          ui.setNewProject({ wsId })
+        }
+      }
       else if (!e.shiftKey && key === 'k' && !inTerminal) ui.setPalette(!ui.palette)
       else if (!e.shiftKey && key === 'b' && !inTerminal) ui.toggleSidebar()
       else handled = false
@@ -167,7 +176,6 @@ export function App(): React.JSX.Element {
               <ArtifactsView key={active.id} workspace={active} />
             </div>
           )}
-          {active && main === 'kanban' && <Kanban key={active.id} workspace={active} />}
           {active && main === 'log' && <LogView key={active.id} workspace={active} />}
           {active && main?.startsWith('plugin:') && (
             <div className="absolute inset-0">
@@ -192,6 +200,8 @@ export function App(): React.JSX.Element {
       <ApprovalToast />
       <PluginToast />
       <NewAgentDialog />
+      <CreateProjectDialog />
+      <DeleteProjectDialog />
       <BroadcastDialog />
       <WorkspaceFlowDialogs />
       <CommandPalette />
@@ -206,8 +216,11 @@ function NewAgentDialog(): React.JSX.Element | null {
   const target = useUi((s) => s.newAgent)
   const setNewAgent = useUi((s) => s.setNewAgent)
   const agents = useAgents((s) => (target ? s.byWs[target.wsId]?.agents : undefined))
+  const place = useAgents((s) => (target ? s.byWs[target.wsId]?.place : undefined))
+  const ws = useWorkspaces((s) => s.items.find((w) => w.id === target?.wsId))
   const create = useAgents((s) => s.create)
   if (!target) return null
+  const project = ws?.projects?.find((p) => p.id === place)
   const taken = new Set((agents ?? []).map((a) => a.name.toLowerCase()))
   const suggestName = (kind: AgentKind): string => {
     const base = kind === 'terminal' ? 'Terminal' : 'Agent'
@@ -220,6 +233,7 @@ function NewAgentDialog(): React.JSX.Element | null {
       initialKind={target.kind}
       suggestName={suggestName}
       takenNames={(agents ?? []).map((a) => a.name)}
+      where={ws?.projects?.length ? (project ? { name: project.name, folder: project.folder } : { name: 'Chung', folder: null }) : undefined}
       onCancel={() => setNewAgent(null)}
       onSubmit={async (v) => {
         await create({ workspaceId: target.wsId, ...v }, target.at ? { at: target.at } : {})

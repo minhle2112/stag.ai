@@ -21,8 +21,8 @@ interface KindOption {
 }
 
 const KINDS: KindOption[] = [
-  { key: 'claude', kind: 'claude', label: 'Claude Code', hint: 'Agent có vai trò, bộ nhớ riêng, lên kanban.' },
-  { key: 'codex', kind: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI, cũng có vai trò, bộ nhớ, kanban.' },
+  { key: 'claude', kind: 'claude', label: 'Claude Code', hint: 'Agent có vai trò, bộ nhớ riêng, nhận việc.' },
+  { key: 'codex', kind: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI, cũng có vai trò, bộ nhớ, nhận việc.' },
   { key: 'terminal', kind: 'terminal', label: 'Terminal', hint: 'Shell trong thư mục dự án, không có bộ nhớ.' }
 ]
 
@@ -33,6 +33,8 @@ interface Props {
   suggestName: (kind: AgentKind) => string
   /** Tên các agent đã có trong workspace, để báo trùng ngay khi gõ. */
   takenNames: string[]
+  /** Workspace có project: agent mới thuộc chỗ này (project, `folder` = thư mục; Chung = folder null). */
+  where?: { name: string; folder: string | null }
   onCancel: () => void
   onSubmit: (v: {
     kind: AgentKind
@@ -53,7 +55,7 @@ const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
 const FIELD = 'w-full rounded-md border border-line-2 bg-bg px-2 py-1.5 outline-none focus:border-accent'
 
-export function CreateAgentDialog({ initialKind, suggestName, takenNames, onCancel, onSubmit }: Props): React.JSX.Element {
+export function CreateAgentDialog({ initialKind, suggestName, takenNames, where, onCancel, onSubmit }: Props): React.JSX.Element {
   const adapters = useSettings((s) => s.value.app.adapters)
   const external = useExternalAdapters((s) => s.items)
   // Adapter tắt ở Cài đặt → Adapter không hiện ở đây. Tắt hết thì vẫn hiện đủ (không để hộp này cụt).
@@ -136,7 +138,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, onCanc
 
   return (
     <Modal
-      title={terminal ? 'Thêm terminal' : 'Thêm agent'}
+      title={`${terminal ? 'Thêm terminal' : 'Thêm agent'}${where ? ` · ${where.name}` : ''}`}
       width="w-[520px]"
       onClose={busy ? undefined : onCancel}
       footer={
@@ -316,6 +318,19 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, onCanc
           <p className="text-[12px] text-muted">
             Khi mở, agent sẽ đọc vault rồi hỏi bạn muốn nó giúp gì trong workspace này. Bộ nhớ riêng của agent nằm ở{' '}
             <code>60 Agents/{trimmed || '…'}.md</code> trong vault.
+          </p>
+        )}
+        {where && (
+          <p className="mt-2 text-[12px] text-muted">
+            {where.folder ? (
+              <>
+                Thuộc project <b className="text-fg">{where.name}</b>: mở phiên trong thư mục <code>{where.folder}</code>, phạm vi tính từ đó.
+              </>
+            ) : (
+              <>
+                Thuộc <b className="text-fg">Chung</b> (thư mục gốc): thấy mọi project, giao việc cho mọi đội.
+              </>
+            )}
           </p>
         )}
         {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}

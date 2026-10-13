@@ -19,10 +19,12 @@ export const WORK_DONE_SECTION = 'Work done'
 /** Một việc vừa đóng. */
 export interface ClosedTask {
   task: Task
-  /** done = agent gọi task_done; handoff = agent_handoff sang agent khác; manual = người dùng đánh dấu xong trên kanban. */
+  /** done = agent gọi task_done; handoff = agent_handoff sang agent khác; manual = người dùng đánh dấu xong (menu agent). */
   how: 'done' | 'handoff' | 'manual'
   /** Tên agent nhận (how = handoff). */
   to?: string
+  /** Project của việc: tên note project trong vault (`[[…]]`, giữ nguyên khi đổi tên project). Vắng = Chung. */
+  project?: string
 }
 
 const pad = (n: number): string => String(n).padStart(2, '0')
@@ -63,7 +65,8 @@ export function logLine(c: ClosedTask): string {
   const note = noteOf(c)
   const files = t.files?.length ? ` + ${t.files.slice(0, 3).join(', ')}${t.files.length > 3 ? ` (+${t.files.length - 3})` : ''}` : ''
   const scope = t.scope ? ` · scope: ${oneLine(t.scope, 120)}${files}` : files ? ` · files:${files.slice(2)}` : ''
-  return `- [x] "${oneLine(t.title, 120)}" — [[${t.agentName}]] — ${status}${note ? ` — ${note}` : ''}${scope}`
+  const project = c.project ? ` · project: [[${c.project}]]` : ''
+  return `- [x] "${oneLine(t.title, 120)}" — [[${t.agentName}]] — ${status}${note ? ` — ${note}` : ''}${project}${scope}`
 }
 
 /** Dòng trong mục "Work done" của note agent. */

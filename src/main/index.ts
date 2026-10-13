@@ -389,7 +389,7 @@ async function requestQuit(): Promise<void> {
       cancelId: 1,
       title: 'stag.ai',
       message: `Còn ${n} agent / terminal đang chạy`,
-      detail: 'Thoát app sẽ dừng tất cả các phiên này. Việc trên kanban và bộ nhớ vault vẫn giữ nguyên.',
+      detail: 'Thoát app sẽ dừng tất cả các phiên này. Việc đang mở và bộ nhớ vault vẫn giữ nguyên.',
       checkboxLabel: 'Không hỏi lại'
     }
     const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)

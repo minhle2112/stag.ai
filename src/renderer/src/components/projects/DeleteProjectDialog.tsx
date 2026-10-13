@@ -1,0 +1,145 @@
+import { useEffect, useState } from 'react'
+import { joinRoot } from '@shared/projects'
+import type { ProjectDeleteInfo } from '@shared/types'
+import { useAgents } from '../../store/agents'
+import { useBoard } from '../../store/board'
+import { useUi } from '../../store/ui'
+import { useWorkspaces } from '../../store/workspaces'
+import { Button, Modal } from '../Modal'
+import { ProjectMark } from './ProjectMark'
+
+function errMsg(e: unknown): string {
+  return String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+}
+
+/** Hộp "Xoá project": xoá luôn agent của nó; tick "Xoá cả thư mục code" thì thư mục vào Thùng rác. Note vault giữ nguyên. */
+export function DeleteProjectDialog(): React.JSX.Element | null {
+  const target = useUi((s) => s.deleteProject)
+  if (!target) return null
+  return <Dialog key={target.projectId} wsId={target.wsId} projectId={target.projectId} />
+}
+
+function Dialog({ wsId, projectId }: { wsId: string; projectId: string }): React.JSX.Element | null {
+  const ws = useWorkspaces((s) => s.items.find((w) => w.id === wsId))
+  const state = useAgents((s) => s.byWs[wsId])
+  const statuses = useBoard((s) => s.byWs[wsId]?.statuses)
+  const close = (): void => useUi.getState().setDeleteProject(null)
+  const [delDir, setDelDir] = useState(false)
+  const [info, setInfo] = useState<ProjectDeleteInfo | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const p = ws?.projects?.find((x) => x.id === projectId)
+
+  useEffect(() => {
+    let alive = true
+    window.stag.project
+      .deleteInfo(wsId, projectId)
+      .then((i) => alive && setInfo(i))
+      .catch(() => alive && setInfo(null))
+    return () => {
+      alive = false
+    }
+  }, [wsId, projectId])
+
+  if (!ws || !p) return null
+  const team = (state?.agents ?? []).filter((a) => a.projectId === p.id)
+  const stateOf = (id: string): 'work' | 'wait' | 'idle' => {
+    if (!state?.running[id]) return 'idle'
+    return statuses?.find((s) => s.agentId === id)?.activity === 'waiting' ? 'wait' : 'work'
+  }
+  // Ô terminal không có việc: chạy shell không tính là "làm dở".
+  const busyAgents = team.filter((a) => a.kind !== 'terminal' && stateOf(a.id) !== 'idle')
+
+  async function confirm(): Promise<void> {
+    setBusy(true)
+    setError(null)
+    try {
+      const next = await window.stag.project.remove(wsId, projectId, delDir)
+      useAgents.getState().dropProject(wsId, projectId)
+      useWorkspaces.getState().replace(next)
+      close()
+    } catch (e) {
+      setError(errMsg(e))
+      setBusy(false)
+    }
+  }
+
+  const label = team.length && delDir ? `Xoá project, ${team.length} agent và thư mục` : team.length ? `Xoá project và ${team.length} agent` : delDir ? 'Xoá project và thư mục' : 'Xoá project'
+
+  return (
+    <Modal
+      title={
+        <span className="flex items-center gap-2">
+          <ProjectMark project={p} />
+          Xoá project "{p.name}"?
+        </span>
+      }
+      width="w-[520px]"
+      onClose={busy ? undefined : close}
+      footer={
+        <>
+          <Button onClick={close} disabled={busy}>
+            Huỷ
+          </Button>
+          <Button primary variant="danger" onClick={() => void confirm()} disabled={busy}>
+            {busy ? 'Đang xoá…' : label}
+          </Button>
+        </>
+      }
+    >
+      {team.length ? (
+        <>
+          <div className="text-[12.5px] text-muted">
+            Xoá luôn <b className="text-fg">{team.length} agent</b> của project: dừng phiên và bỏ khỏi app.
+          </div>
+          <div className="mt-2 rounded-lg border border-line-2 px-2.5 py-0.5">
+            {team.map((a) => {
+              const st = stateOf(a.id)
+              return (
+                <div key={a.id} className="flex h-[30px] items-center gap-2">
+                  <span className={`sdot ${st === 'work' ? 'ok' : st === 'wait' ? 'wa' : 'off'}`} />
+                  <b className="font-medium">{a.name}</b>
+                  <span className={`ml-auto text-[12px] ${st === 'idle' ? 'text-dim' : 'text-wait-text'}`}>{st === 'work' ? 'đang chạy' : st === 'wait' ? 'đang chờ bạn' : 'rảnh'}</span>
+                </div>
+              )
+            })}
+          </div>
+          {busyAgents.length > 0 && (
+            <div className="mt-2.5 rounded-md border border-wait/40 bg-wait/10 px-3 py-2 text-[12.5px] text-wait-text">
+              <b>{busyAgents.length} agent đang làm dở.</b> Việc đang mở của chúng bị bỏ; phần đã sửa trong code vẫn còn trên đĩa.
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-[12.5px] text-muted">Project chưa có agent.</div>
+      )}
+
+      <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-lg border border-line-2 p-2.5 hover:bg-panel-2">
+        <input type="checkbox" checked={delDir} onChange={(e) => setDelDir(e.target.checked)} className="mt-0.5" />
+        <div className="min-w-0">
+          <b className="font-semibold">
+            Xoá cả thư mục code <code>{p.folder}\</code>
+          </b>
+          <div className="mt-0.5 text-[12px] text-muted">
+            {!delDir ? (
+              'Không tick: thư mục code giữ nguyên trên đĩa.'
+            ) : info && !info.exists ? (
+              'Thư mục không còn trên đĩa.'
+            ) : (
+              <>
+                Thư mục{info?.files != null ? ` (${info.files}${info.more ? '+' : ''} file)` : ''} chuyển vào <b className="text-fg">Thùng rác</b> của Windows, lấy lại được từ đó.
+                {info?.dirty ? <span className="text-danger-text"> Có {info.dirty} file đã sửa chưa commit.</span> : null}
+              </>
+            )}
+          </div>
+          {delDir && <div className="mt-0.5 truncate font-mono text-[11px] text-dim" title={joinRoot(ws.path, p.folder)}>{joinRoot(ws.path, p.folder)}</div>}
+        </div>
+      </label>
+
+      <div className="mt-3 rounded-md bg-panel-2 px-3 py-2 text-[12px] text-muted">
+        Note <code>{p.note}</code> và note của từng agent trong <code>60 Agents/</code> luôn giữ nguyên. Sản phẩm và nhật ký cũ vẫn xem được, nhãn chuyển sang "Chung".
+      </div>
+      {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}
+    </Modal>
+  )
+}

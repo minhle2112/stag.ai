@@ -57,6 +57,15 @@
   --font-mono: 'JetBrains Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
 }
 
+/* Màu nhận diện project (ô vuông trên tab / thanh bên), xoay vòng. Ngoài @theme: chỉ dùng qua var() trong style nên
+   Tailwind sẽ bỏ nếu khai trong @theme. Chế độ sáng đổi giá trị ở khối bên dưới. */
+:root {
+  --color-p1: #a78bfa;
+  --color-p2: #60a5fa;
+  --color-p3: #f472b6;
+  --color-p4: #c4b5fd;
+}
+
 /* Chế độ sáng: nền trắng, chữ đậm, teal sẫm (#2de2c0 trên trắng chỉ ~1.6:1). Mọi cặp chữ / nền ≥ 4.5:1. */
 :root[data-theme='light'] {
   --color-bg0: #e8ebef;
@@ -87,6 +96,10 @@
   --color-danger-text: #b42318;
   --color-danger-soft: #fdecea;
   --color-info: #1f5fcc;
+  --color-p1: #7c3aed;
+  --color-p2: #2563eb;
+  --color-p3: #db2777;
+  --color-p4: #8b5cf6;
   --color-neutral: #6b7480;
   --color-scroll: #c9cfd6;
   --color-scrim: rgba(16, 24, 40, 0.32);

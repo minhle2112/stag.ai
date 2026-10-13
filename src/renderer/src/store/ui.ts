@@ -3,14 +3,14 @@ import type { Point } from '@shared/canvas'
 import type { AdapterId, AgentKind } from '@shared/types'
 
 /** Màn hình chính, chọn ở thanh icon bên trái. `plugin:<id>/<slot>` = trang riêng của plugin (slot page). */
-export type MainTab = 'kanban' | 'agents' | 'artifacts' | 'vault' | 'log' | `plugin:${string}`
+export type MainTab = 'agents' | 'artifacts' | 'vault' | 'log' | `plugin:${string}`
 
 /**
- * Thanh bên và pane trình duyệt nhớ bật / tắt riêng cho hai nhóm màn hình: "main" (Agent, Kanban: cần thấy agent)
+ * Thanh bên và pane trình duyệt nhớ bật / tắt riêng cho hai nhóm màn hình: "main" (Agent: cần thấy agent)
  * và "other" (Artifacts, Vault, Nhật ký, Cài đặt…: ưu tiên chỗ cho nội dung).
  */
 export type ViewClass = 'main' | 'other'
-export const viewClassOf = (tab: MainTab, settingsOpen: boolean): ViewClass => (!settingsOpen && (tab === 'agents' || tab === 'kanban') ? 'main' : 'other')
+export const viewClassOf = (tab: MainTab, settingsOpen: boolean): ViewClass => (!settingsOpen && tab === 'agents' ? 'main' : 'other')
 
 const PANES_KEY = 'stag.panes'
 interface PanePrefs {
@@ -45,6 +45,12 @@ export interface NewAgentTarget {
   at?: Point
   /** Chọn sẵn loại ô trong hộp thoại (vd. 'terminal' từ menu chuột phải "Terminal mới"). */
   kind?: AgentKind
+}
+
+/** Hộp thoại tạo project (`folder` = chọn sẵn thư mục có sẵn, vd. từ thẻ gợi ý monorepo). */
+export interface NewProjectTarget {
+  wsId: string
+  folder?: string
 }
 
 /** Các mục của trang Settings, theo thứ tự trên menu trái. */
@@ -107,6 +113,11 @@ interface UiState {
   modals: number
   newAgent: NewAgentTarget | null
   setNewAgent: (target: NewAgentTarget | null) => void
+  newProject: NewProjectTarget | null
+  setNewProject: (target: NewProjectTarget | null) => void
+  /** Hộp thoại xoá project. */
+  deleteProject: { wsId: string; projectId: string } | null
+  setDeleteProject: (target: { wsId: string; projectId: string } | null) => void
   setTab: (tab: MainTab) => void
   toggleSidebar: () => void
   toggleBrowser: () => void
@@ -135,6 +146,10 @@ export const useUi = create<UiState>((set, get) => ({
   modals: 0,
   newAgent: null,
   setNewAgent: (newAgent) => set({ newAgent }),
+  newProject: null,
+  setNewProject: (newProject) => set({ newProject }),
+  deleteProject: null,
+  setDeleteProject: (deleteProject) => set({ deleteProject }),
   // Chọn màn hình thì đóng trang Cài đặt (Cài đặt là một màn hình trong vùng chính).
   setTab: (tab) => set({ tab, settings: null, settingsFocus: null }),
   toggleSidebar: () => {

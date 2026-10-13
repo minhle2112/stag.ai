@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { agentKind, type Agent, type AgentStatus, type CanvasCell, type Workspace } from '@shared/types'
+import { agentFolder, placeOf } from '@shared/projects'
 import { widgetKey } from '../layout'
 import { useAgents, type WorkspaceAgents } from '../store/agents'
 import { useExternalAdapters } from '../store/externalAdapters'
@@ -20,6 +21,7 @@ import { SkillAvatar } from './settings/SkillsSection'
 import { AdapterTile } from './ui/AdapterTile'
 import { CanvasBoard } from './canvas/CanvasBoard'
 import { Popover, useFrame } from './canvas/frame'
+import { ProjectTabs } from './projects/ProjectTabs'
 
 /** Màu chữ trạng thái ở tiêu đề ô theo dấu trạng thái. */
 const MARK_TEXT: Record<StatusMark, string> = { ok: 'text-work', in: 'text-info', wa: 'text-wait', off: 'text-dim', tm: 'text-muted' }
@@ -44,9 +46,33 @@ export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.El
     return agent ? <AgentCell key={agent.id} ws={workspace} agent={agent} state={state} /> : null
   }
 
+  // Workspace có project: mỗi tab (Chung / project) một canvas riêng, chỉ ô của agent thuộc tab đó.
+  const projects = workspace.projects ?? []
+  const project = state ? projects.find((p) => p.id === state.place) : undefined
+  const here = state ? state.agents.filter((a) => placeOf(workspace, a) === state.place).length : 0
+
   return (
-    <div className="relative h-full">
-      {state && <CanvasBoard ws={workspace} layout={state.layout} hasAgents={state.agents.length > 0} renderCell={renderCell} />}
+    <div className="flex h-full flex-col">
+      <ProjectTabs ws={workspace} />
+      <div className="relative min-h-0 flex-1">
+        {state && (
+          <CanvasBoard
+            key={state.place}
+            ws={workspace}
+            layout={state.layout}
+            hasAgents={here > 0}
+            renderCell={renderCell}
+            emptyTitle={project ? `${project.name} chưa có agent.` : projects.length ? 'Chung chưa có agent.' : undefined}
+            emptyHint={
+              project
+                ? `Agent tạo ở đây mở phiên trong ${project.folder}. Chuột phải vào đây → Agent mới, hoặc bấm "+ Agent" ở thanh trên.`
+                : projects.length
+                  ? 'Agent ở Chung làm ở thư mục gốc, thấy mọi project. Chuột phải vào đây → Agent mới.'
+                  : undefined
+            }
+          />
+        )}
+      </div>
       {/* Agent vừa tạo tự mở phiên khi ô của nó đã có kích thước thật — xem AgentCell. */}
       <AutoStarter wsId={wsId} state={state} start={start} />
     </div>
@@ -239,6 +265,7 @@ function AgentCell({ ws, agent, state }: { ws: Workspace; agent: Agent; state: W
           <AgentMenuPanel ws={ws} agent={agent} hideBrowser onClose={() => setMenu(false)} onRename={() => setRenaming(true)} />
         </Popover>
       )}
+      {!terminal && <DoingLine ws={ws} agent={agent} />}
 
       {chat ? (
         <div className="relative min-h-0 flex-1 bg-panel" data-cell-body>
@@ -270,6 +297,33 @@ function AgentCell({ ws, agent, state }: { ws: Workspace; agent: Agent; state: W
       <CellBorder focused={focused} />
 
       {renaming && <RenameAgentDialog wsId={ws.id} agentId={agent.id} onClose={() => setRenaming(false)} />}
+    </div>
+  )
+}
+
+/** Dòng "Đang làm" dưới tiêu đề ô: việc đang mở của agent (task_start) + phạm vi đang khoá (thay cho thẻ Kanban cũ). */
+function DoingLine({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Element {
+  const task = useBoard((s) => s.byWs[ws.id]?.tasks.find((t) => t.agentId === agent.id && t.status === 'open'))
+  if (!task)
+    return <div className="flex h-6 shrink-0 items-center border-b border-line px-2.5 text-[12px] text-dim @max-[220px]/cell:hidden">Chưa có việc</div>
+  const base = task.base ?? agentFolder(ws, agent)
+  const files = task.files?.length ? `\n+ ${task.files.length} file đã sửa ngoài phạm vi: ${task.files.slice(-8).join(', ')}` : ''
+  return (
+    <div
+      className="flex h-6 shrink-0 items-center gap-1.5 overflow-hidden border-b border-line bg-panel-2 px-2.5 text-[12px] whitespace-nowrap text-muted"
+      data-tip={`Đang làm: ${task.title}${task.scope ? `\nPhạm vi đang khoá: ${task.scope} (tính từ ${base || 'thư mục gốc'})` : ''}${files}`}
+    >
+      <span className="flex shrink-0 text-work">
+        <Icon name="check" size="s" />
+      </span>
+      <span className="shrink-0 @max-[260px]/cell:hidden">Đang làm:</span>
+      <b className="min-w-0 truncate font-medium text-fg">{task.title}</b>
+      {task.scope && (
+        <span className="ml-auto flex min-w-0 shrink items-center gap-1 font-mono text-[11px] text-dim @max-[340px]/cell:hidden">
+          <Icon name="lock" size={11} />
+          <span className="truncate">{task.scope}</span>
+        </span>
+      )}
     </div>
   )
 }

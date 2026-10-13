@@ -27,10 +27,15 @@ interface WorkspaceState {
   load: () => Promise<void>
   setActive: (id: string) => void
   add: (ws: Workspace) => void
+  /** Bản mới của một workspace (main đổi project…). */
+  replace: (ws: Workspace) => void
   remove: (id: string) => Promise<void>
 }
 
 export const useWorkspaces = create<WorkspaceState>((set, get) => ({
+  replace(ws) {
+    set((s) => ({ items: s.items.map((w) => (w.id === ws.id ? ws : w)) }))
+  },
   items: [],
   activeId: null,
   loaded: false,
@@ -61,3 +66,6 @@ export const useWorkspaces = create<WorkspaceState>((set, get) => ({
 export function useActiveWorkspace(): Workspace | undefined {
   return useWorkspaces((s) => s.items.find((w) => w.id === s.activeId))
 }
+
+// Main đổi workspace (tạo / xoá project, "Luôn cho" giữa 2 project…): cập nhật bản trong store.
+window.stag.workspace.onChanged((ws) => useWorkspaces.getState().replace(ws))

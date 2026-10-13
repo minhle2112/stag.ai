@@ -370,7 +370,7 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
 
   const caps: Array<[string, string]> = [
     ['Luật phiên + bộ nhớ vault', m.rules ? ('flag' in m.rules ? `✓ ${m.rules.flag} <file>` : `✓ biến ${m.rules.env}`) : '—'],
-    ['MCP stag (kanban, trình duyệt, bàn giao)', m.mcpConfigFlag ? `✓ ${m.mcpConfigFlag}` : '—'],
+    ['MCP stag (việc, trình duyệt, bàn giao)', m.mcpConfigFlag ? `✓ ${m.mcpConfigFlag}` : '—'],
     ['Lời mở phiên', m.prompt ? ('flag' in m.prompt ? `✓ ${m.prompt.flag}` : '✓ tham số cuối') : '—'],
     ['Chọn model', m.modelFlag ? `✓ ${m.modelFlag}` : '—'],
     ['Trạng thái qua hook (đang làm / chờ bạn)', '—'],

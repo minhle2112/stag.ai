@@ -224,7 +224,7 @@ describe('helpers', () => {
   })
   it('failureReason', () => {
     expect(failureReason('File "x.json" does not exist in the project. Write it first, then publish.')).toBe('file không có trong dự án')
-    expect(failureReason('You have no task on the kanban. Call task_start first: …')).toBe('agent chưa mở việc nào trên Kanban')
+    expect(failureReason('You have no open task in the task list. Call task_start first: …')).toBe('agent chưa mở việc nào (task_start)')
     expect(failureReason('weird')).toMatch(/lỗi khác/)
   })
   it('initials, doc files, plain text, labels', () => {

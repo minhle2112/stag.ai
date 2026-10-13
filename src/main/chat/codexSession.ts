@@ -205,7 +205,7 @@ export class CodexChatSession extends ChatSessionBase {
     } catch (e) {
       console.error('[codex-chat] hooks/list', e)
     }
-    if (!trust.length) this.queue(this.model.addNotice('warn', 'Codex chưa tin cậy hook của stag.ai: kanban, khoá phạm vi và artifact của phiên này có thể không cập nhật.'))
+    if (!trust.length) this.queue(this.model.addNotice('warn', 'Codex chưa tin cậy hook của stag.ai: việc đang làm, khoá phạm vi và sản phẩm của phiên này có thể không cập nhật.'))
     this.spawnProcess([...o.args, ...codexHookTrustArgs(trust), 'app-server'])
     await this.request('initialize', { clientInfo: CLIENT_INFO, capabilities: CAPABILITIES })
     this.notify('initialized')

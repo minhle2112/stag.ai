@@ -8,6 +8,76 @@ export interface Workspace {
   /** Thư mục vault (tuyệt đối). */
   vaultPath: string
   createdAt: string
+  /**
+   * Project trong workspace, mỗi project một đội agent (xem shared/projects.ts). Không có / rỗng = app như cũ: mọi agent
+   * ở "Chung" (thư mục gốc).
+   */
+  projects?: Project[]
+  /** Người dùng bấm "Để sau" ở thẻ gợi ý tách monorepo thành project: không hiện lại. */
+  projectHintOff?: boolean
+  /** Cặp project đã chọn "Luôn cho" gửi việc qua lại (`<id nhỏ>|<id lớn>`, xem projectPair). */
+  projectLinks?: string[]
+}
+
+/** Một project trong workspace: thư mục code riêng + đội agent riêng (Agent.projectId). */
+export interface Project {
+  id: string
+  name: string
+  /** Thư mục code, tương đối so với thư mục workspace, phân cách '/' (vd. `apps/web`). */
+  folder: string
+  /** Mục tiêu (không bắt buộc). */
+  goal: string
+  /** Màu nhận diện (chỉ số xoay vòng trong PROJECT_COLORS). */
+  color: number
+  /** Note của project trong vault, tương đối so với vault (giữ nguyên khi đổi tên project). */
+  note: string
+  createdAt: string
+}
+
+/** Thư mục code của project mới: tạo thư mục mới (`name` trống = theo tên project) hoặc dùng thư mục có sẵn. */
+export type ProjectFolderChoice = { mode: 'new'; name: string } | { mode: 'existing'; path: string }
+
+/** Một agent của đội mẫu khi tạo project. */
+export interface ProjectTeamMember {
+  name: string
+  role: string
+  kind: 'claude' | 'codex'
+  model?: string
+  /** Nhân bản agent này ("Chép đội"): cùng loại / vai trò / quyền / ô / ghi đè cài đặt. */
+  cloneOf?: string
+}
+
+export interface CreateProjectRequest {
+  workspaceId: string
+  name: string
+  goal: string
+  folder: ProjectFolderChoice
+  team: ProjectTeamMember[]
+}
+
+export interface CreateProjectResult {
+  workspace: Workspace
+  project: Project
+  agents: Agent[]
+  /** Đã tạo thư mục mới (không phải dùng thư mục có sẵn). */
+  createdFolder: boolean
+}
+
+/** Thông tin để hỏi trước khi xoá project. */
+export interface ProjectDeleteInfo {
+  /** Số file trong thư mục code (null = không đếm được / quá nhiều, xem `more`). */
+  files: number | null
+  more?: boolean
+  /** Số file đã sửa chưa commit (null = không phải repo git / không đọc được). */
+  dirty: number | null
+  /** Thư mục còn tồn tại. */
+  exists: boolean
+}
+
+/** Thư mục ở gốc workspace (cho hộp tạo project): `pkg` = có package.json (gợi ý monorepo). */
+export interface WorkspaceFolder {
+  path: string
+  pkg: boolean
 }
 
 export type VaultKind = 'stag' | 'other'
@@ -172,6 +242,8 @@ export interface Agent {
   adapterId?: string
   /** Giao diện ô: 'cli' = terminal (mặc định), 'chat' = ô chat (chỉ Claude Code, xem shared/chat.ts). */
   cell?: AgentCell
+  /** Project của agent (mở phiên trong thư mục project); thiếu = "Chung" (thư mục gốc của workspace). Không đổi được. */
+  projectId?: string
 }
 
 /** Giao diện của ô agent. */
@@ -225,8 +297,11 @@ export interface AgentRun {
 
 export interface AgentsSnapshot {
   agents: Agent[]
+  /** Canvas của tab Chung (workspace chưa có project: canvas duy nhất). */
   layout: CanvasLayout
   running: AgentRun[]
+  /** Canvas của từng project đã lưu (theo id project). */
+  projectLayouts?: Record<string, CanvasLayout>
 }
 
 export interface CreateAgentRequest {
@@ -246,6 +321,8 @@ export interface CreateAgentRequest {
   firstTask?: string
   /** Phạm vi làm việc dự kiến (thư mục / glob), kèm vào lời mở để agent dùng khi task_start. */
   scope?: string
+  /** Project của agent mới (thiếu = Chung). */
+  projectId?: string
 }
 
 /** Người dùng phát một tin cho nhiều agent trong một workspace (gõ như người dùng gõ vào từng ô). */
@@ -750,6 +827,13 @@ export interface Task {
   manual?: boolean
   /** File agent đã sửa trong lúc việc mở (tương đối so với dự án, '/'), cũng thuộc vùng khoá của việc (xem scope.ts). */
   files?: string[]
+  /**
+   * Thư mục project của agent lúc nhận việc (tương đối so với thư mục workspace, '/'): `scope` tính từ đây. Thiếu = gốc
+   * workspace (agent ở Chung). `files` luôn tính từ gốc workspace.
+   */
+  base?: string
+  /** Project của agent lúc nhận việc (lọc Sản phẩm / Nhật ký theo project). Thiếu = Chung. */
+  projectId?: string
 }
 
 /**

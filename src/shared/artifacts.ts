@@ -496,7 +496,7 @@ export function dayBucket(task: { status: string; doneAt?: string; createdAt: st
 
 /** Lý do nộp không thành, nói với người dùng (lỗi gốc viết cho agent bằng tiếng Anh, xem main/artifactStore.ts). */
 export function failureReason(error: string): string {
-  if (/call task_start/i.test(error)) return 'agent chưa mở việc nào trên Kanban'
+  if (/call task_start/i.test(error)) return 'agent chưa mở việc nào (task_start)'
   if (/does not exist/i.test(error)) return 'file không có trong dự án'
   if (/outside the project/i.test(error)) return 'file nằm ngoài thư mục dự án'
   if (/cannot be published/i.test(error)) return 'file nằm trong thư mục không nộp được (.stag, .git, .sessions, node_modules)'

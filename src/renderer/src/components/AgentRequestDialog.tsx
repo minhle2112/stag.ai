@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react'
-import type { AgentCreateDraft, AgentRequest } from '@shared/agentApi'
+import { permissionAbove, type AgentCreateDraft, type AgentRequest, type ProjectCreateDraft } from '@shared/agentApi'
+import { CHUNG, joinRoot, placeOf } from '@shared/projects'
 import type { AgentKind } from '@shared/types'
 import { useAgentRequests } from '../store/agentRequests'
 import { useAgents } from '../store/agents'
 import { useWorkspaces } from '../store/workspaces'
 import { permissionModes } from '../permissionModes'
 import { Button, Modal } from './Modal'
+import { ProjectMark } from './projects/ProjectMark'
 
 function Row({ label, children }: { label: string; children: ReactNode }): React.JSX.Element {
   return (
@@ -30,7 +32,7 @@ function Permission({ kind, mode }: { kind: AgentKind; mode: string }): React.JS
   )
 }
 
-function CreateBody({ d, fromName }: { d: AgentCreateDraft; fromName: string }): React.JSX.Element {
+function CreateBody({ d, fromName, fromPlace }: { d: AgentCreateDraft; fromName: string; fromPlace: string }): React.JSX.Element {
   const cli = d.kind === 'claude' || d.kind === 'codex'
   return (
     <Grid>
@@ -38,6 +40,18 @@ function CreateBody({ d, fromName }: { d: AgentCreateDraft; fromName: string }):
         <b>{d.name}</b>
       </Row>
       <Row label="Loại">{d.kindLabel}</Row>
+      {d.project !== undefined && (
+        <Row label="Project">
+          {d.project ? (
+            <span className="inline-flex items-center gap-1.5">
+              <ProjectMark project={d.project} size={9} />
+              <b>{d.project.name}</b>
+            </span>
+          ) : (
+            <span>Chung (thư mục gốc workspace)</span>
+          )}
+        </Row>
+      )}
       {cli && <Row label="Model">{d.model ?? <span className="text-muted">mặc định</span>}</Row>}
       {cli && <Row label="Mức suy nghĩ">{d.effort ?? <span className="text-muted">mặc định</span>}</Row>}
       {cli && (
@@ -55,13 +69,60 @@ function CreateBody({ d, fromName }: { d: AgentCreateDraft; fromName: string }):
           )}
         </Row>
       )}
-      <Row label="Mở ngay">{d.open ? `Có — thêm ô cạnh ô của ${fromName} và chạy phiên` : 'Không — chỉ thêm vào danh sách agent'}</Row>
+      <Row label="Mở ngay">
+        {!d.open
+          ? 'Không — chỉ thêm vào danh sách agent'
+          : d.project !== undefined && (d.project?.id ?? CHUNG) !== fromPlace
+            ? `Có — thêm ô vào tab ${d.project ? `project ${d.project.name}` : 'Chung'}; phiên chạy khi bạn mở tab đó`
+            : `Có — thêm ô cạnh ô của ${fromName} và chạy phiên`}
+      </Row>
+    </Grid>
+  )
+}
+
+function ProjectBody({ d, wsPath, fromName }: { d: ProjectCreateDraft; wsPath: string | undefined; fromName: string }): React.JSX.Element {
+  const full = wsPath ? joinRoot(wsPath, d.folder) : d.folder
+  return (
+    <Grid>
+      <Row label="Tên">
+        <b>{d.name}</b>
+      </Row>
+      <Row label="Thư mục code">
+        <code className="break-all">{full}</code>
+        <div className="text-[12px] text-muted">{d.createFolder ? 'Thư mục mới, app sẽ tạo' : 'Thư mục có sẵn, giữ nguyên nội dung'}</div>
+      </Row>
+      <Row label="Mục tiêu">{d.goal || <span className="text-muted">(chưa có)</span>}</Row>
+      <Row label="Đội">
+        {d.team.length ? (
+          <ul className="space-y-0.5">
+            {d.team.map((m) => (
+              <li key={m.name}>
+                <b>{m.name}</b> <span className="text-muted">· {m.kindLabel}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-muted">Không tạo agent nào</span>
+        )}
+        {d.team.length > 0 && <div className="text-[12px] text-muted">Chỉ thêm vào danh sách, chưa mở ô hay chạy phiên</div>}
+      </Row>
+      {d.team.length > 0 && (
+        <Row label="Quyền của đội">
+          <Permission kind="claude" mode={d.teamPermission} />
+          {permissionAbove(d.teamPermission, d.callerPermission) && (
+            <div className="text-[12px] font-semibold text-wait">Cao hơn quyền của {fromName} ({d.callerPermission})</div>
+          )}
+        </Row>
+      )}
+      <Row label="Note vault">
+        <code className="break-all">{d.note}</code>
+      </Row>
     </Grid>
   )
 }
 
 /** Tiêu đề, câu hỏi, nút đồng ý theo loại yêu cầu. */
-function view(req: AgentRequest, kindOf: (id: string) => AgentKind): { title: string; lead: ReactNode; body: ReactNode; ok: string } {
+function view(req: AgentRequest, kindOf: (id: string) => AgentKind, wsPath: string | undefined, fromPlace: string): { title: string; lead: ReactNode; body: ReactNode; ok: string } {
   const from = <b>{req.fromName}</b>
   switch (req.action) {
     case 'create':
@@ -72,8 +133,19 @@ function view(req: AgentRequest, kindOf: (id: string) => AgentKind): { title: st
             Agent {from} muốn tạo {req.create.kind === 'terminal' ? 'một ô terminal' : 'một agent'} mới
           </>
         ),
-        body: <CreateBody d={req.create} fromName={req.fromName} />,
+        body: <CreateBody d={req.create} fromName={req.fromName} fromPlace={fromPlace} />,
         ok: 'Tạo agent'
+      }
+    case 'project':
+      return {
+        title: 'Agent muốn tạo project mới',
+        lead: (
+          <>
+            Agent {from} muốn tạo project <b>{req.project.name}</b>
+          </>
+        ),
+        body: <ProjectBody d={req.project} wsPath={wsPath} fromName={req.fromName} />,
+        ok: 'Tạo project'
       }
     case 'stop':
       return {
@@ -173,6 +245,38 @@ function view(req: AgentRequest, kindOf: (id: string) => AgentKind): { title: st
         ok: req.tool === 'send' ? 'Gửi' : req.tool === 'open' ? 'Mở và giao việc' : 'Bàn giao'
       }
     }
+    case 'cross': {
+      const verb = req.tool === 'send' ? 'gửi tin cho' : req.tool === 'open' ? 'mở phiên và giao việc cho' : 'bàn giao việc cho'
+      const chip = (name: string, p: { name: string; color: number }): React.JSX.Element => (
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-line-2 bg-panel-2 px-1.5 py-0.5">
+          <b className="font-semibold">{name}</b>
+          <span className="text-dim">·</span>
+          <ProjectMark project={p} size={9} />
+          {p.name}
+        </span>
+      )
+      return {
+        title: 'Gửi việc sang project khác?',
+        lead: (
+          <>
+            Agent {from} (project <b>{req.fromProject.name}</b>) muốn {verb} <b>{req.target.name}</b> của project <b>{req.toProject.name}</b>
+          </>
+        ),
+        body: (
+          <>
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
+              {chip(req.fromName, req.fromProject)}→{chip(req.target.name, req.toProject)}
+            </div>
+            <Grid>
+              <Row label="Nội dung">
+                <div className="max-h-48 overflow-y-auto whitespace-pre-wrap">{req.text}</div>
+              </Row>
+            </Grid>
+          </>
+        ),
+        ok: 'Cho gửi'
+      }
+    }
   }
 }
 
@@ -183,11 +287,13 @@ function view(req: AgentRequest, kindOf: (id: string) => AgentKind): { title: st
 export function AgentRequestDialog(): React.JSX.Element | null {
   const req = useAgentRequests((s) => s.list[0])
   const answer = useAgentRequests((s) => s.answer)
-  const wsName = useWorkspaces((s) => s.items.find((w) => w.id === req?.workspaceId)?.name)
+  const ws = useWorkspaces((s) => s.items.find((w) => w.id === req?.workspaceId))
   const agents = useAgents((s) => (req ? s.byWs[req.workspaceId]?.agents : undefined))
   if (!req) return null
+  const wsName = ws?.name
   const kindOf = (id: string): AgentKind => agents?.find((a) => a.id === id)?.kind ?? 'claude'
-  const v = view(req, kindOf)
+  const from = agents?.find((a) => a.id === req.fromAgentId)
+  const v = view(req, kindOf, ws?.path, from ? placeOf(ws, from) : CHUNG)
   const minutes = Math.max(1, Math.round((Date.parse(req.until) - Date.now()) / 60_000))
   return (
     <Modal
@@ -198,8 +304,9 @@ export function AgentRequestDialog(): React.JSX.Element | null {
       footer={
         <>
           <Button variant="ghost" onClick={() => answer(req.id, false)}>
-            Từ chối
+            {req.action === 'cross' ? 'Không' : 'Từ chối'}
           </Button>
+          {req.action === 'cross' && <Button onClick={() => answer(req.id, 'always')}>Luôn cho giữa 2 project này</Button>}
           <Button primary onClick={() => answer(req.id, true)}>
             {v.ok}
           </Button>

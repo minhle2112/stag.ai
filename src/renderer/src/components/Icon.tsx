@@ -5,7 +5,7 @@ export type { IconName }
 const SIZE = { s: 14, m: 16, l: 18 } as const
 
 /**
- * Icon của app (nét 1.5px ở mọi cỡ). `s` = 14px, `m` = 16px (mặc định), `l` = 18px.
+ * Icon của app (bộ Lucide, nét 1.5px ở mọi cỡ thay vì 2px mặc định của Lucide). `s` = 14px, `m` = 16px (mặc định), `l` = 18px.
  * Màu theo `currentColor`: đặt màu bằng class `text-*` của phần tử cha.
  */
 export function Icon({ name, size = 'm', className = '' }: { name: IconName; size?: keyof typeof SIZE | number; className?: string }): React.JSX.Element {

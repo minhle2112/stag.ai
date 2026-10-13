@@ -61,6 +61,9 @@ interface Props {
   /** Có agent nào trong workspace không (để chọn lời nhắc khi canvas trống). */
   hasAgents: boolean
   renderCell: (cell: CanvasCell) => ReactNode
+  /** Lời nhắc khi chỗ này chưa có agent (tab project): thay câu mặc định "Workspace này chưa có agent." */
+  emptyTitle?: string
+  emptyHint?: string
 }
 
 /**
@@ -71,7 +74,7 @@ interface Props {
  * Camera không nằm trong store (đổi mỗi khung hình khi kéo): giữ trong ref, gắn thẳng vào style của lớp "thế giới",
  * lưu vào bố cục khi đã đứng yên.
  */
-export function CanvasBoard({ ws, layout, hasAgents, renderCell }: Props): React.JSX.Element {
+export function CanvasBoard({ ws, layout, hasAgents, renderCell, emptyTitle, emptyHint }: Props): React.JSX.Element {
   const wsId = ws.id
   const boxRef = useRef<HTMLDivElement>(null)
   const worldRef = useRef<HTMLDivElement>(null)
@@ -476,9 +479,9 @@ export function CanvasBoard({ ws, layout, hasAgents, renderCell }: Props): React
       {!layout.cells.length && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-dim">
           <Icon name="grid" size={28} />
-          <div>{hasAgents ? 'Không có ô nào đang mở.' : 'Workspace này chưa có agent.'}</div>
+          <div>{hasAgents ? 'Không có ô nào đang mở.' : (emptyTitle ?? 'Workspace này chưa có agent.')}</div>
           <div className="text-[12px]">
-            {hasAgents ? 'Bấm agent ở thanh bên để mở lại ô của nó, hoặc chuột phải vào đây để tạo agent mới.' : 'Chuột phải vào đây → Agent mới (hoặc Ctrl+K).'}
+            {hasAgents ? 'Bấm agent ở thanh bên để mở lại ô của nó, hoặc chuột phải vào đây để tạo agent mới.' : (emptyHint ?? 'Chuột phải vào đây → Agent mới (hoặc Ctrl+K).')}
           </div>
         </div>
       )}

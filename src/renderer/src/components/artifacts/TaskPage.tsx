@@ -35,9 +35,6 @@ export function TaskPage({ ws, entry: t, running, onOpen }: { ws: Workspace; ent
               )}
             </div>
           </div>
-          <button type="button" className={BTN_GHOST} onClick={() => setTab('kanban')}>
-            Mở trên Kanban
-          </button>
           <button
             type="button"
             className={BTN}
@@ -94,7 +91,7 @@ export function TaskPage({ ws, entry: t, running, onOpen }: { ws: Workspace; ent
         ) : (
           <div className="mx-auto mt-16 max-w-[420px] text-center leading-relaxed text-dim">
             <b className="mb-1.5 block text-[14px] text-fg">Việc này không có sản phẩm</b>
-            Agent chỉ sửa code. Những file đó xem ở Kanban → thẻ việc.
+            Agent chỉ sửa code, không nộp gì cho bạn xem.
           </div>
         )}
       </div>

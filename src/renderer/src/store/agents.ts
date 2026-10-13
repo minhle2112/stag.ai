@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { emptyCanvas, type CellSizeKind } from '@shared/canvas'
+import { CHUNG, placeOf } from '@shared/projects'
 import { agentKind, type Agent, type AgentCell, type AgentRun, type CanvasLayout, type CanvasView, type CreateAgentRequest } from '@shared/types'
 import { revealCell, viewCenter } from '../canvasBus'
 import { addCell, cells, findCell, leaves, reconcile, removeCell, toFront, widgetKey, type Placement } from '../layout'
@@ -8,8 +9,14 @@ import { useUi } from './ui'
 import { useWorkspaces } from './workspaces'
 
 export interface WorkspaceAgents {
+  /** Mọi agent của workspace (mọi project), theo thứ tự ở thanh bên. */
   agents: Agent[]
+  /** Canvas của chỗ đang xem (`place`): tab Chung, hoặc tab của một project. */
   layout: CanvasLayout
+  /** Chỗ đang xem: CHUNG hoặc id project. Workspace chưa có project luôn là CHUNG. */
+  place: string
+  /** Canvas của các chỗ khác (không gồm `place`), theo chỗ. */
+  layouts: Record<string, CanvasLayout>
   running: Record<string, AgentRun>
   /** Agent đang khởi động (chờ main tạo tiến trình). */
   starting: Record<string, boolean>
@@ -26,20 +33,63 @@ const firstCell = (layout: CanvasLayout): string | null => leaves(layout)[0] ?? 
 /** Cỡ ô mặc định theo loại agent. */
 const sizeKind = (agent: Agent | undefined): CellSizeKind => (agent && agentKind(agent) === 'terminal' ? 'terminal' : 'agent')
 
-const empty = (): WorkspaceAgents => ({ agents: [], layout: emptyCanvas(), running: {}, starting: {}, autoStart: {}, errors: {}, focused: null })
+const empty = (): WorkspaceAgents => ({ agents: [], layout: emptyCanvas(), place: CHUNG, layouts: {}, running: {}, starting: {}, autoStart: {}, errors: {}, focused: null })
+
+const PLACE_KEY = 'stag.place'
+
+/** Tab project lần trước của từng workspace (chỉ là tiện ích, không lưu được thì về Chung). */
+function readPlaces(): Record<string, string> {
+  try {
+    return (JSON.parse(localStorage.getItem(PLACE_KEY) ?? 'null') as Record<string, string> | null) ?? {}
+  } catch {
+    return {}
+  }
+}
+
+function writePlace(wsId: string, place: string): void {
+  try {
+    localStorage.setItem(PLACE_KEY, JSON.stringify({ ...readPlaces(), [wsId]: place }))
+  } catch {
+    // Không lưu được thì thôi.
+  }
+}
+
+/** Workspace (bản mới nhất trong store workspace). */
+const wsOf = (wsId: string) => useWorkspaces.getState().items.find((w) => w.id === wsId)
+
+/** Chỗ còn tồn tại: project đã bị xoá → Chung. */
+function validPlace(wsId: string, place: string | undefined): string {
+  return place && place !== CHUNG && wsOf(wsId)?.projects?.some((p) => p.id === place) ? place : CHUNG
+}
+
+/** Chỗ của agent (project của nó, hoặc Chung). */
+export function agentPlace(wsId: string, agent: Pick<Agent, 'projectId'>): string {
+  return placeOf(wsOf(wsId), agent)
+}
+
+/** Lưu canvas của một chỗ ở main. */
+function persist(wsId: string, place: string, layout: CanvasLayout): void {
+  void window.stag.agent.saveLayout(wsId, layout, place === CHUNG ? null : place)
+}
 
 interface AgentsState {
   byWs: Record<string, WorkspaceAgents>
   load: (wsId: string) => Promise<void>
-  /** Tạo agent, đặt ô theo `place` (không có gì → giữa vùng đang nhìn). */
+  /** Tạo agent ở chỗ đang xem (hoặc `req.projectId`), đặt ô theo `place` (không có gì → giữa vùng đang nhìn). */
   create: (req: CreateAgentRequest, place?: Placement) => Promise<Agent>
+  /** Agent mới do main tạo (tạo project, nhân bản): thêm vào danh sách và mở ô ở chỗ của nó; `show` = chuyển sang chỗ đó. */
+  adopt: (wsId: string, agents: Agent[], opts?: { open?: boolean; show?: boolean }) => void
   start: (wsId: string, agentId: string, resume: boolean) => Promise<void>
   stop: (agentId: string) => Promise<void>
   remove: (wsId: string, agentId: string) => Promise<void>
-  /** Hiện ô của agent trên canvas (đã đóng thì mở lại đúng chỗ cũ), chọn nó và đưa camera tới. */
+  /** Project vừa bị xoá ở main: bỏ agent của nó khỏi danh sách (main đã dừng phiên) và canvas của nó. */
+  dropProject: (wsId: string, projectId: string) => void
+  /** Hiện ô của agent trên canvas (đã đóng thì mở lại đúng chỗ cũ; khác tab thì chuyển tab), chọn nó và đưa camera tới. */
   show: (wsId: string, agentId: string) => void
   /** Đóng ô của agent. Phiên (nếu có) vẫn chạy; agent vẫn ở thanh bên. */
   hide: (wsId: string, agentId: string) => void
+  /** Chuyển tab (Chung / project) của workspace. */
+  setPlace: (wsId: string, place: string) => void
   setLayout: (wsId: string, layout: CanvasLayout, persist?: boolean) => void
   /** Lưu camera của canvas (gọi thưa: sau khi kéo / cuộn xong). */
   setView: (wsId: string, view: CanvasView) => void
@@ -68,6 +118,26 @@ export const useAgents = create<AgentsState>((set, get) => {
       return { byWs: { ...s.byWs, [wsId]: { ...cur, ...fn(cur) } } }
     })
 
+  /** Canvas của chỗ `place`. */
+  const layoutAt = (w: WorkspaceAgents, place: string): CanvasLayout => (place === w.place ? w.layout : (w.layouts[place] ?? emptyCanvas()))
+
+  /** Đặt canvas của chỗ `place` (chỗ đang xem → `layout`, chỗ khác → `layouts`) rồi lưu ở main. */
+  const putLayout = (wsId: string, place: string, layout: CanvasLayout, save = true): void => {
+    patch(wsId, (cur) => (place === cur.place ? { layout } : { layouts: { ...cur.layouts, [place]: layout } }))
+    if (save) persist(wsId, place, layout)
+  }
+
+  /** Thêm ô agent vào canvas của chỗ nó (không đổi tab). Trả về true nếu vừa thêm ô ở chỗ đang xem. */
+  const placeCell = (wsId: string, agent: Agent, where: Placement): boolean => {
+    const w = get().byWs[wsId]
+    if (!w) return false
+    const place = agentPlace(wsId, agent)
+    const cur = layoutAt(w, place)
+    if (leaves(cur).includes(agent.id)) return false
+    putLayout(wsId, place, addCell(cur, { type: 'leaf', agentId: agent.id }, sizeKind(agent), place === w.place ? where : {}))
+    return place === w.place
+  }
+
   startTerminalBus()
   // Agent đã bàn giao, phiên cũ vừa đóng: mở phiên mới trong cùng ô (phiên mới tự đọc bản bàn giao).
   window.stag.agent.onRestart((agentId) => {
@@ -91,11 +161,11 @@ export const useAgents = create<AgentsState>((set, get) => {
     const w = get().byWs[wsId]
     if (!w) return
     const agents = w.agents.some((a) => a.id === agent.id) ? w.agents : [...w.agents, agent]
-    if (!open || leaves(w.layout).includes(agent.id)) return patch(wsId, () => ({ agents }))
-    const layout = addCell(w.layout, { type: 'leaf', agentId: agent.id }, sizeKind(agent), { near: nearAgentId })
-    patch(wsId, (cur) => ({ agents, layout, autoStart: { ...cur.autoStart, [agent.id]: true } }))
-    window.stag.agent.saveLayout(wsId, layout)
-    revealCell(wsId, agent.id, false)
+    patch(wsId, () => ({ agents }))
+    if (!open) return
+    const here = placeCell(wsId, agent, { near: nearAgentId })
+    patch(wsId, (cur) => ({ autoStart: { ...cur.autoStart, [agent.id]: true } }))
+    if (here) revealCell(wsId, agent.id, false)
   })
   // Agent khác làm thay người dùng (Agent API): đổi thông tin, mở ô + phiên, hoặc đã xoá agent ở main.
   window.stag.agent.onApiEvent(async (e) => {
@@ -110,33 +180,15 @@ export const useAgents = create<AgentsState>((set, get) => {
     if (!w) return
     if (e.type === 'open') {
       const agent = w.agents.find((a) => a.id === e.agentId)
-      const layout = addCell(w.layout, { type: 'leaf', agentId: e.agentId }, sizeKind(agent), { near: e.nearAgentId })
+      if (!agent) return
       const fresh = !w.running[e.agentId] && !w.starting[e.agentId]
-      patch(e.workspaceId, (cur) => ({ layout, ...(fresh ? { autoStart: { ...cur.autoStart, [e.agentId]: true } } : {}) }))
-      if (layout !== w.layout) {
-        window.stag.agent.saveLayout(e.workspaceId, layout)
-        revealCell(e.workspaceId, e.agentId, false)
-      }
+      const here = placeCell(e.workspaceId, agent, { near: e.nearAgentId })
+      if (fresh) patch(e.workspaceId, (cur) => ({ autoStart: { ...cur.autoStart, [e.agentId]: true } }))
+      if (here) revealCell(e.workspaceId, e.agentId, false)
       return
     }
     // removed: như remove() nhưng main đã xoá xong.
-    disposeTerminal(e.agentId)
-    const layout = removeCell(w.layout, e.agentId, true)
-    const without = <T,>(rec: Record<string, T>): Record<string, T> => {
-      const next = { ...rec }
-      delete next[e.agentId]
-      return next
-    }
-    patch(e.workspaceId, (cur) => ({
-      agents: cur.agents.filter((a) => a.id !== e.agentId),
-      layout,
-      running: without(cur.running),
-      starting: without(cur.starting),
-      autoStart: without(cur.autoStart),
-      errors: without(cur.errors),
-      focused: cur.focused === e.agentId ? firstCell(layout) : cur.focused
-    }))
-    window.stag.agent.saveLayout(e.workspaceId, layout)
+    forget(e.workspaceId, [e.agentId])
   })
   // Ô chat không có pty nên không có sự kiện thoát của pty: tiến trình thoát thì main báo phase 'off'.
   window.stag.chat.onEvent((e) => {
@@ -163,6 +215,35 @@ export const useAgents = create<AgentsState>((set, get) => {
     }
   })
 
+  /** Bỏ agent khỏi mọi bảng và mọi canvas (đã xoá ở main). */
+  function forget(wsId: string, ids: string[]): void {
+    const gone = new Set(ids)
+    for (const id of ids) disposeTerminal(id)
+    const w = get().byWs[wsId]
+    if (!w) return
+    const without = <T>(rec: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(rec).filter(([k]) => !gone.has(k)))
+    let layout = w.layout
+    for (const id of ids) layout = removeCell(layout, id, true)
+    const layouts: Record<string, CanvasLayout> = {}
+    for (const [place, l] of Object.entries(w.layouts)) {
+      let next = l
+      for (const id of ids) next = removeCell(next, id, true)
+      layouts[place] = next
+      if (next !== l) persist(wsId, place, next)
+    }
+    patch(wsId, (cur) => ({
+      agents: cur.agents.filter((a) => !gone.has(a.id)),
+      layout,
+      layouts,
+      running: without(cur.running),
+      starting: without(cur.starting),
+      autoStart: without(cur.autoStart),
+      errors: without(cur.errors),
+      focused: cur.focused && gone.has(cur.focused) ? firstCell(layout) : cur.focused
+    }))
+    if (layout !== w.layout) persist(wsId, w.place, layout)
+  }
+
   return {
     byWs: {},
 
@@ -174,26 +255,56 @@ export const useAgents = create<AgentsState>((set, get) => {
         const agent = snap.agents.find((a) => a.id === r.agentId)
         if (r.mode !== 'chat') bindPty(r.agentId, r.ptyId, agent ? agentKind(agent) : 'terminal')
       }
-      const layout = reconcile(snap.layout, snap.agents.map((a) => a.id))
-      patch(wsId, () => ({ agents: snap.agents, layout, running, focused: firstCell(layout) }))
-      if (JSON.stringify(layout) !== JSON.stringify(snap.layout)) window.stag.agent.saveLayout(wsId, layout)
+      const ws = wsOf(wsId)
+      const idsAt = (place: string): string[] => snap.agents.filter((a) => placeOf(ws, a) === place).map((a) => a.id)
+      // Canvas từng chỗ chỉ giữ ô của agent thuộc chỗ đó.
+      const all: Record<string, CanvasLayout> = { [CHUNG]: reconcile(snap.layout, idsAt(CHUNG)) }
+      if (JSON.stringify(all[CHUNG]) !== JSON.stringify(snap.layout)) persist(wsId, CHUNG, all[CHUNG])
+      for (const p of ws?.projects ?? []) {
+        const saved = snap.projectLayouts?.[p.id] ?? emptyCanvas()
+        all[p.id] = reconcile(saved, idsAt(p.id))
+        if (snap.projectLayouts?.[p.id] && all[p.id] !== saved) persist(wsId, p.id, all[p.id])
+      }
+      const place = validPlace(wsId, get().byWs[wsId]?.place ?? readPlaces()[wsId])
+      const { [place]: layout, ...layouts } = all
+      patch(wsId, () => ({ agents: snap.agents, layout: layout ?? emptyCanvas(), layouts, place, running, focused: firstCell(layout ?? emptyCanvas()) }))
     },
 
-    async create(req, place = {}) {
-      const agent = await window.stag.agent.create(req)
+    async create(req, where = {}) {
       const wsId = req.workspaceId
+      const cur = get().byWs[wsId]
+      // Agent mới thuộc tab đang xem (trừ khi hộp thoại nói rõ project).
+      const projectId = req.projectId ?? (cur && cur.place !== CHUNG ? cur.place : undefined)
+      const agent = await window.stag.agent.create({ ...req, ...(projectId ? { projectId } : {}) })
+      const place = agentPlace(wsId, agent)
+      if (place !== get().byWs[wsId]?.place) get().setPlace(wsId, place)
       // Không nói đặt đâu (Ctrl+K, Ctrl+Shift+N) → giữa vùng đang nhìn.
-      const center = place.at || place.center || place.near ? place.center : (viewCenter(wsId) ?? undefined)
-      const layout = addCell(get().byWs[wsId]?.layout ?? emptyCanvas(), { type: 'leaf', agentId: agent.id }, sizeKind(agent), { ...place, center })
-      patch(wsId, (cur) => ({
-        agents: [...cur.agents, agent],
+      const center = where.at || where.center || where.near ? where.center : (viewCenter(wsId) ?? undefined)
+      const layout = addCell(get().byWs[wsId]?.layout ?? emptyCanvas(), { type: 'leaf', agentId: agent.id }, sizeKind(agent), { ...where, center })
+      patch(wsId, (c) => ({
+        agents: [...c.agents, agent],
         layout,
-        autoStart: { ...cur.autoStart, [agent.id]: true },
+        autoStart: { ...c.autoStart, [agent.id]: true },
         focused: agent.id
       }))
-      window.stag.agent.saveLayout(wsId, layout)
+      persist(wsId, place, layout)
       revealCell(wsId, agent.id)
       return agent
+    },
+
+    adopt(wsId, list, opts = {}) {
+      const w = get().byWs[wsId]
+      if (!w) return
+      const fresh = list.filter((a) => !w.agents.some((x) => x.id === a.id))
+      patch(wsId, (cur) => ({ agents: [...cur.agents, ...fresh] }))
+      if (opts.show && list[0]) get().setPlace(wsId, agentPlace(wsId, list[0]))
+      if (opts.open === false) return
+      for (const a of list) placeCell(wsId, a, { near: get().byWs[wsId]?.focused ?? null })
+      const focused = list[0] && agentPlace(wsId, list[0]) === get().byWs[wsId]?.place ? list[0].id : undefined
+      if (focused) {
+        patch(wsId, () => ({ focused }))
+        revealCell(wsId, focused)
+      }
     },
 
     async start(wsId, agentId, resume) {
@@ -237,51 +348,70 @@ export const useAgents = create<AgentsState>((set, get) => {
 
     async remove(wsId, agentId) {
       await window.stag.agent.remove(agentId)
-      disposeTerminal(agentId)
-      const layout = removeCell(get().byWs[wsId]?.layout ?? emptyCanvas(), agentId, true)
       // Terminal đã gỡ nên sự kiện thoát của phiên sẽ không tới đây: tự bỏ agent khỏi các bảng trạng thái.
-      const without = <T>(rec: Record<string, T>): Record<string, T> => {
-        const next = { ...rec }
-        delete next[agentId]
-        return next
-      }
-      patch(wsId, (cur) => ({
-        agents: cur.agents.filter((a) => a.id !== agentId),
-        layout,
-        running: without(cur.running),
-        starting: without(cur.starting),
-        autoStart: without(cur.autoStart),
-        errors: without(cur.errors),
-        focused: cur.focused === agentId ? firstCell(layout) : cur.focused
-      }))
-      window.stag.agent.saveLayout(wsId, layout)
+      forget(wsId, [agentId])
+    },
+
+    dropProject(wsId, projectId) {
+      const w = get().byWs[wsId]
+      if (!w) return
+      const ids = w.agents.filter((a) => a.projectId === projectId).map((a) => a.id)
+      // Bỏ canvas của project TRƯỚC khi bỏ agent: forget() lưu lại canvas nào có ô bị gỡ, không được ghi lại canvas này.
+      if (w.place === projectId) get().setPlace(wsId, CHUNG)
+      patch(wsId, (cur) => {
+        const layouts = { ...cur.layouts }
+        delete layouts[projectId]
+        return { layouts }
+      })
+      forget(wsId, ids)
+    },
+
+    setPlace(wsId, raw) {
+      const w = get().byWs[wsId]
+      const place = validPlace(wsId, raw)
+      writePlace(wsId, place)
+      if (!w || w.place === place) return
+      const layouts = { ...w.layouts, [w.place]: w.layout }
+      const layout = layouts[place] ?? emptyCanvas()
+      delete layouts[place]
+      patch(wsId, () => ({ place, layout, layouts, focused: firstCell(layout) }))
+      useUi.getState().setMaxCell(wsId, null)
     },
 
     show(wsId, agentId) {
-      const w = get().byWs[wsId]
-      if (!w || !w.agents.some((a) => a.id === agentId)) return
+      const w0 = get().byWs[wsId]
+      const agent = w0?.agents.find((a) => a.id === agentId)
+      if (!w0 || !agent) return
+      // Agent ở tab khác: chuyển sang tab đó trước.
+      const place = agentPlace(wsId, agent)
+      if (place !== w0.place) get().setPlace(wsId, place)
+      const w = get().byWs[wsId]!
       if (leaves(w.layout).includes(agentId)) {
         get().focus(wsId, agentId)
         return revealCell(wsId, agentId)
       }
-      const agent = w.agents.find((a) => a.id === agentId)
       const layout = addCell(w.layout, { type: 'leaf', agentId }, sizeKind(agent), { near: w.focused })
       patch(wsId, () => ({ layout, focused: agentId }))
-      window.stag.agent.saveLayout(wsId, layout)
+      persist(wsId, w.place, layout)
       revealCell(wsId, agentId)
     },
 
     hide(wsId, agentId) {
       const w = get().byWs[wsId]
       if (!w) return
-      const layout = removeCell(w.layout, agentId)
-      patch(wsId, (cur) => ({ layout, focused: cur.focused === agentId ? firstCell(layout) : cur.focused }))
-      window.stag.agent.saveLayout(wsId, layout)
+      const agent = w.agents.find((a) => a.id === agentId)
+      const place = agent ? agentPlace(wsId, agent) : w.place
+      const cur = layoutAt(w, place)
+      const layout = removeCell(cur, agentId)
+      if (layout === cur) return
+      putLayout(wsId, place, layout)
+      if (place === w.place) patch(wsId, (c) => ({ focused: c.focused === agentId ? firstCell(layout) : c.focused }))
     },
 
-    setLayout(wsId, layout, persist = true) {
+    setLayout(wsId, layout, save = true) {
+      const w = get().byWs[wsId]
       patch(wsId, () => ({ layout }))
-      if (persist) window.stag.agent.saveLayout(wsId, layout)
+      if (save) persist(wsId, w?.place ?? CHUNG, layout)
     },
 
     setView(wsId, view) {
@@ -289,7 +419,7 @@ export const useAgents = create<AgentsState>((set, get) => {
       if (!w) return
       const layout = { ...w.layout, view }
       patch(wsId, () => ({ layout }))
-      window.stag.agent.saveLayout(wsId, layout)
+      persist(wsId, w.place, layout)
     },
 
     focus(wsId, key) {
@@ -298,21 +428,21 @@ export const useAgents = create<AgentsState>((set, get) => {
       const layout = toFront(w.layout, key)
       if (w.focused === key && layout === w.layout) return
       patch(wsId, () => ({ focused: key, layout }))
-      if (layout !== w.layout) window.stag.agent.saveLayout(wsId, layout)
+      if (layout !== w.layout) persist(wsId, w.place, layout)
     },
 
-    openWidget(wsId, widget, place) {
+    openWidget(wsId, widget, where) {
       const w = get().byWs[wsId]
       if (!w) return
       const key = widgetKey(widget)
-      // Mỗi widget chỉ một ô trong một workspace.
+      // Mỗi widget chỉ một ô trong một tab.
       if (findCell(w.layout, key)) {
         get().focus(wsId, key)
         return revealCell(wsId, key)
       }
-      const layout = addCell(w.layout, { type: 'widget', widget }, 'widget', place ?? { near: w.focused })
+      const layout = addCell(w.layout, { type: 'widget', widget }, 'widget', where ?? { near: w.focused })
       patch(wsId, () => ({ layout, focused: key }))
-      window.stag.agent.saveLayout(wsId, layout)
+      persist(wsId, w.place, layout)
       revealCell(wsId, key)
     },
 
@@ -322,7 +452,7 @@ export const useAgents = create<AgentsState>((set, get) => {
       const key = widgetKey(widget)
       const layout = removeCell(w.layout, key)
       patch(wsId, (cur) => ({ layout, focused: cur.focused === key ? firstCell(layout) : cur.focused }))
-      window.stag.agent.saveLayout(wsId, layout)
+      persist(wsId, w.place, layout)
     },
 
     async rename(wsId, agentId, name) {
@@ -349,7 +479,7 @@ export const useAgents = create<AgentsState>((set, get) => {
   }
 })
 
-/** Mở agent cho người dùng xem: chuyển workspace + tab Agents, hiện ô (nếu đã đóng) và đặt con trỏ vào terminal. */
+/** Mở agent cho người dùng xem: chuyển workspace + tab Agents (+ tab project của agent), hiện ô và đặt con trỏ vào terminal. */
 export function openAgent(wsId: string, agentId: string): void {
   useWorkspaces.getState().setActive(wsId)
   useUi.getState().setTab('agents')

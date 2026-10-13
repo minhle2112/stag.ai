@@ -70,7 +70,7 @@ export function HandoffSection(): React.JSX.Element {
     <>
       <SectionTitle
         title="Agent & bàn giao"
-        desc="Khi context của một phiên agent đạt ngưỡng và agent đang chờ bạn (hết lượt, bạn không gõ phím vài giây), app nhờ agent ghi vault và viết bản bàn giao, rồi đóng phiên và mở phiên mới đọc tiếp từ bản bàn giao đó. Việc đang làm trên kanban vẫn giữ nguyên."
+        desc="Khi context của một phiên agent đạt ngưỡng và agent đang chờ bạn (hết lượt, bạn không gõ phím vài giây), app nhờ agent ghi vault và viết bản bàn giao, rồi đóng phiên và mở phiên mới đọc tiếp từ bản bàn giao đó. Việc đang làm của agent vẫn giữ nguyên."
         right={<LevelBar level={level} setLevel={setLevel} has={(o) => !!o?.handoff} />}
       />
       <ErrorBar error={error} />

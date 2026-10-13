@@ -15,8 +15,12 @@ const MODES: Array<{ value: ScopeMode; label: string; desc: string }> = [
     label: 'Hỏi bạn',
     desc: 'Claude hỏi ngay trong terminal của nó (hộp xin quyền, kèm lý do); Codex: app hiện hộp thoại, chờ bạn cho sửa hay từ chối.'
   },
-  { value: 'block', label: 'Chặn luôn', desc: 'Không hỏi: agent bị từ chối, kèm lời nhắn bàn với bạn hoặc với agent kia trước.' },
-  { value: 'warn', label: 'Chỉ cảnh báo', desc: 'Cho sửa. Vẫn cảnh báo agent khi nhận việc trùng phạm vi và hiện ⚠ trên kanban.' },
+  {
+    value: 'block',
+    label: 'Chặn luôn',
+    desc: 'Không bao giờ hỏi bạn: agent bị từ chối và tự bàn với agent kia (xem việc của nó, nhắn nhờ thu hẹp phạm vi hay báo khi xong), trong lúc chờ thì làm phần khác của việc mình.'
+  },
+  { value: 'warn', label: 'Chỉ cảnh báo', desc: 'Cho sửa. Vẫn cảnh báo agent khi nhận việc trùng phạm vi.' },
   { value: 'off', label: 'Tắt', desc: 'Không khoá, không cảnh báo.' }
 ]
 const modeLabel = (m: ScopeMode): string => MODES.find((x) => x.value === m)!.label
@@ -56,7 +60,7 @@ export function ScopeSection(): React.JSX.Element {
     <>
       <SectionTitle
         title="Khoá phạm vi"
-        desc="Mỗi việc đang mở trên kanban giữ một vùng code: phạm vi agent khai khi nhận việc (task_start) cộng các file agent đó đã sửa. Agent khác định sửa vào vùng đó thì app làm theo chế độ dưới đây; việc xong hoặc bị bỏ thì nhả khoá. Thay đổi có tác dụng ngay, cả với phiên đang chạy."
+        desc="Mỗi việc đang mở của agent giữ một vùng code: phạm vi agent khai khi nhận việc (task_start) cộng các file agent đó đã sửa. Agent khác định sửa vào vùng đó thì app làm theo chế độ dưới đây; việc xong hoặc bị bỏ thì nhả khoá. Thay đổi có tác dụng ngay, cả với phiên đang chạy."
         right={<LevelBar level={level} setLevel={setLevel} has={(o) => !!o?.scope} />}
       />
       <ErrorBar error={error} />
@@ -64,7 +68,7 @@ export function ScopeSection(): React.JSX.Element {
       <Group>
         <Row
           label="Khi agent định sửa vào phạm vi của agent khác"
-          desc="Chế độ tính theo agent đang định sửa; dấu ⚠ trên kanban theo cấp workspace. Rê chuột vào từng chế độ để xem nghĩa."
+          desc="Chế độ tính theo agent đang định sửa. Rê chuột vào từng chế độ để xem nghĩa."
           override={
             cur.lvl === 'app' ? undefined : { on: !!own.mode, onReset: () => setField('mode', undefined), parent: modeLabel(parent.mode) }
           }

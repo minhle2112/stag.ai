@@ -9,7 +9,7 @@ const ITEMS: Array<{ key: keyof AgentApiSettings; label: string; desc: string }>
   {
     key: 'manage',
     label: 'Cho agent quản lý agent khác',
-    desc: 'Bạn nhắn agent "tạo agent tên…, dùng model…, làm việc…" là nó làm được: tạo, đổi tên / vai trò / model / quyền, mở, dừng, xoá agent (agent_create, agent_update, agent_open, agent_stop, agent_delete). Dừng, xoá, đổi quyền luôn hỏi bạn trước.'
+    desc: 'Bạn nhắn agent "tạo agent tên…, dùng model…, làm việc…" là nó làm được: tạo, đổi tên / vai trò / model / quyền, mở, dừng, xoá agent (agent_create, agent_update, agent_open, agent_stop, agent_delete); tạo project, đổi tên / mục tiêu project (project_create, project_update; agent không xoá được project). Có hỏi bạn trước hay không: xem công tắc "Hỏi bạn trước…" bên dưới.'
   },
   {
     key: 'message',
@@ -23,8 +23,8 @@ const ITEMS: Array<{ key: keyof AgentApiSettings; label: string; desc: string }>
   },
   {
     key: 'confirmCreate',
-    label: 'Hỏi bạn trước khi agent tạo agent mới',
-    desc: 'Hiện thẻ xác nhận (tên, loại, model, quyền, việc đầu tiên). Tắt thì agent tạo luôn, trừ khi agent mới được quyền cao hơn agent tạo nó — lúc đó vẫn hỏi.'
+    label: 'Hỏi bạn trước khi agent tạo, dừng, xoá, đổi quyền agent / project, gửi việc sang project khác hoặc chạy dev server',
+    desc: 'Bật: hiện thẻ xác nhận khi agent tạo agent hoặc project, dừng / xoá agent, đổi quyền agent, gửi việc sang agent của project khác (từ Chung, vào Chung, hay cặp project đã "Luôn cho" thì không hỏi), gửi việc cho agent có quyền cao hơn nó, hoặc chạy dev server lần đầu (preview_start). Tắt: agent làm luôn mọi việc trên, không hỏi gì. Khoá phạm vi (sửa file của agent khác) có cài đặt riêng: Cài đặt → Khoá phạm vi.'
   }
 ]
 

@@ -252,6 +252,21 @@ describe('Cài đặt khoá phạm vi', () => {
     expect(await broken.preToolUse(ws, B, 'codex', login())).toBeUndefined()
   })
 
+  it('không đọc được bảng việc: "Chặn luôn" từ chối (không hỏi người dùng), "Chỉ cảnh báo" cho qua', async () => {
+    const broken = new ScopeGuard({ snapshot: async () => Promise.reject(new Error('EBUSY')) } as unknown as Board, () => cfg)
+    cfg.mode = 'block'
+    for (const kind of ['claude', 'codex'] as const) {
+      const r = await broken.preToolUse(ws, B, kind, login())
+      expect(r?.hookSpecificOutput.permissionDecision).toBe('deny')
+      expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('EBUSY')
+      expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('do not ask the user')
+    }
+    expect(await broken.preToolUse(ws, B, 'claude', sh('git status'))).toBeUndefined()
+    cfg.mode = 'warn'
+    expect(await broken.preToolUse(ws, B, 'claude', login())).toBeUndefined()
+    cfg.mode = 'ask'
+  })
+
   it('cấp quyền lệnh shell theo từng mẫu glob: hai mẫu cùng thư mục gốc không dùng chung một lần cho qua', async () => {
     await board.finishTask(ws, 'a', 'x')
     await board.startTask(ws, A, 's2', 'Glob', 'src/*.ts, src/*.md')
@@ -294,6 +309,10 @@ describe('Cài đặt khoá phạm vi', () => {
     expect(r?.hookSpecificOutput.permissionDecision).toBe('deny')
     expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('set to block')
     expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('Agent a')
+    // Chặn luôn không kéo người dùng vào: agent tự bàn với agent kia.
+    expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('do not ask the user')
+    expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('agent_status("Agent a")')
+    expect(r?.hookSpecificOutput.permissionDecisionReason).not.toContain('Tell the user')
     const c = await guard.preToolUse(ws, B, 'codex', patch('src/auth/x.ts'))
     expect(c?.hookSpecificOutput.permissionDecision).toBe('deny')
     expect((await board.snapshot(ws)).scopeAsks).toEqual([])
@@ -346,7 +365,11 @@ describe('cảnh báo task_start / task_update theo cài đặt', () => {
     const ask = await overlapWarning(board, ws, task)
     expect(ask).toContain('WARNING — your scope overlaps')
     expect(ask).toContain('asks the user for permission')
-    expect(await overlapWarning(board, ws, task, { ...DEFAULT_SCOPE, mode: 'block' })).toContain('blocks your edits')
+    const block = await overlapWarning(board, ws, task, { ...DEFAULT_SCOPE, mode: 'block' })
+    expect(block).toContain('blocks your edits')
+    expect(block).toContain('Do not ask the user')
+    expect(block).not.toContain('Tell the user')
+    expect(ask).toContain('Tell the user now')
     expect(await overlapWarning(board, ws, task, { ...DEFAULT_SCOPE, mode: 'warn' })).toContain('will not stop you')
     expect(await overlapWarning(board, ws, task, { ...DEFAULT_SCOPE, exempt: ['src/auth/login.ts'] })).toBe('')
   })
