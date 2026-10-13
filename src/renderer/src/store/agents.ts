@@ -171,7 +171,8 @@ export const useAgents = create<AgentsState>((set, get) => {
       const running: Record<string, AgentRun> = {}
       for (const r of snap.running) {
         running[r.agentId] = r
-        if (r.mode !== 'chat') bindPty(r.agentId, r.ptyId)
+        const agent = snap.agents.find((a) => a.id === r.agentId)
+        if (r.mode !== 'chat') bindPty(r.agentId, r.ptyId, agent ? agentKind(agent) : 'terminal')
       }
       const layout = reconcile(snap.layout, snap.agents.map((a) => a.id))
       patch(wsId, () => ({ agents: snap.agents, layout, running, focused: firstCell(layout) }))
@@ -207,7 +208,8 @@ export const useAgents = create<AgentsState>((set, get) => {
       })
       try {
         const run = await window.stag.agent.start({ agentId, resume, ...terminalSize(agentId) })
-        if (run.mode !== 'chat') bindPty(agentId, run.ptyId)
+        const agent = get().byWs[wsId]?.agents.find((a) => a.id === agentId)
+        if (run.mode !== 'chat') bindPty(agentId, run.ptyId, agent ? agentKind(agent) : 'terminal')
         patch(wsId, (cur) => ({
           running: { ...cur.running, [agentId]: run },
           // Id để "tiếp tục phiên" do main giữ (Codex: thread id, biết sau qua sự kiện 'updated').

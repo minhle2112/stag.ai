@@ -2,6 +2,8 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { composerFor } from './store/chat'
 import { TERMINAL_PALETTES, type Theme } from '@shared/theme'
+import type { AgentKind } from '@shared/types'
+import { isSoftNewlineKey, SOFT_NEWLINE, wantsSoftNewline } from './terminalKeys'
 
 /**
  * Terminal của từng agent sống ngoài React: khi ô gắn lại (đóng / mở ô, đổi workspace), phần tử DOM của terminal
@@ -17,6 +19,8 @@ interface Entry {
   /** Kích thước đã báo cho tiến trình gần nhất, và hẹn giờ báo kích thước mới. */
   sent: { cols: number; rows: number } | null
   resizeTimer: ReturnType<typeof setTimeout> | null
+  /** Ô Claude / Codex: Shift+Enter xuống dòng thay vì gửi tin (xem terminalKeys.ts). */
+  softNewline: boolean
 }
 
 /** Chờ người dùng ngừng kéo (pane browser, cạnh ô trên canvas) rồi mới báo kích thước cho tiến trình. */
@@ -144,9 +148,10 @@ function entry(agentId: string): Entry {
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.attachCustomKeyEventHandler((ev) => clipboardKey(term, ev))
-    e = { term, fit, el, opened: false, ptyId: null, input: null, sent: null, resizeTimer: null }
-    entries.set(agentId, e)
+    const created: Entry = { term, fit, el, opened: false, ptyId: null, input: null, sent: null, resizeTimer: null, softNewline: false }
+    term.attachCustomKeyEventHandler((ev) => clipboardKey(term, ev) && newlineKey(created, ev))
+    entries.set(agentId, created)
+    e = created
   }
   return e
 }
@@ -175,6 +180,18 @@ function clipboardKey(term: Terminal, ev: KeyboardEvent): boolean {
       else term.paste(/\s/.test(clip.imagePath) ? `"${clip.imagePath}"` : clip.imagePath)
     })
   }
+  return false
+}
+
+/**
+ * Shift+Enter trong ô Claude / Codex: gửi Alt+Enter (ESC CR) để CLI xuống dòng; mặc định xterm gửi '\r' như Enter nên
+ * tin bị gửi luôn. Ô Terminal (PowerShell…) giữ nguyên. Trả false = xterm bỏ qua phím này.
+ */
+function newlineKey(e: Entry, ev: KeyboardEvent): boolean {
+  if (!e.softNewline || !isSoftNewlineKey(ev)) return true
+  // Như clipboardKey: chặn cả keypress / keyup, chỉ gửi ở keydown.
+  ev.preventDefault()
+  if (ev.type === 'keydown' && e.ptyId) window.stag.pty.write(e.ptyId, SOFT_NEWLINE)
   return false
 }
 
@@ -223,8 +240,9 @@ export function terminalSize(agentId: string): { cols: number; rows: number } {
 }
 
 /** Nối terminal của agent với một tiến trình đang chạy. */
-export function bindPty(agentId: string, ptyId: string): void {
+export function bindPty(agentId: string, ptyId: string, kind: AgentKind): void {
   const e = entry(agentId)
+  e.softNewline = wantsSoftNewline(kind)
   if (e.ptyId === ptyId) return
   e.input?.dispose()
   e.ptyId = ptyId
