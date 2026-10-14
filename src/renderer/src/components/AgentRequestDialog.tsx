@@ -277,6 +277,38 @@ function view(req: AgentRequest, kindOf: (id: string) => AgentKind, wsPath: stri
         ok: 'Cho gửi'
       }
     }
+    case 'credential': {
+      const c = req.credential
+      return {
+        title: `${req.fromName} muốn đăng nhập`,
+        lead: (
+          <>
+            Agent {from} xin stag.ai điền {c.step === 'totp' ? 'mã 2FA' : 'tên đăng nhập và mật khẩu'} của mục <b>{c.name}</b> vào trang trong ô Browser
+          </>
+        ),
+        body: (
+          <>
+            <Grid>
+              <Row label="Mục">
+                <b>{c.name}</b>
+              </Row>
+              <Row label="Trang">
+                <code>{c.host}</code>
+              </Row>
+              <Row label="Tài khoản">
+                {c.username || <span className="text-muted">(không có tên đăng nhập)</span>}
+                {c.hasTotp ? ' · có 2FA' : ''}
+              </Row>
+            </Grid>
+            <p className="mt-2 text-[12px] text-muted">
+              Tên miền khớp với mục đã lưu ✓ · Agent không thấy mật khẩu hay mã 2FA · “Cho phép 1 lần” có hiệu lực 2 phút cho cả lượt đăng nhập (gồm bước 2FA) · Đổi ở Cài
+              đặt → Mật khẩu
+            </p>
+          </>
+        ),
+        ok: 'Cho phép 1 lần'
+      }
+    }
   }
 }
 
@@ -298,7 +330,7 @@ export function AgentRequestDialog(): React.JSX.Element | null {
   return (
     <Modal
       title={v.title}
-      icon="code"
+      icon={req.action === 'credential' ? 'key' : 'code'}
       tone="accent"
       width="w-[560px]"
       footer={
@@ -307,6 +339,7 @@ export function AgentRequestDialog(): React.JSX.Element | null {
             {req.action === 'cross' ? 'Không' : 'Từ chối'}
           </Button>
           {req.action === 'cross' && <Button onClick={() => answer(req.id, 'always')}>Luôn cho giữa 2 project này</Button>}
+          {req.action === 'credential' && req.credential.canAlways && <Button onClick={() => answer(req.id, 'always')}>Luôn cho agent này</Button>}
           <Button primary onClick={() => answer(req.id, true)}>
             {v.ok}
           </Button>
@@ -325,7 +358,7 @@ export function AgentRequestDialog(): React.JSX.Element | null {
       </p>
       {v.body}
       <p className="mt-3 text-[12px] text-muted">
-        Chỉ đồng ý nếu chính bạn đã nhờ {req.fromName} làm việc này. {req.fromName} đang chờ bạn trả lời (tự từ chối sau khoảng {minutes} phút).
+        {req.action === 'credential' ? 'Chỉ cho phép nếu bạn đã nhờ ' + req.fromName + ' đăng nhập trang này.' : `Chỉ đồng ý nếu chính bạn đã nhờ ${req.fromName} làm việc này.`} {req.fromName} đang chờ bạn trả lời (tự từ chối sau khoảng {minutes} phút).
       </p>
     </Modal>
   )

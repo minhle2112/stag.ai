@@ -2,12 +2,12 @@ import { create } from 'zustand'
 import type { InstalledPlugin, PluginSlot } from '@shared/plugins'
 import { pluginOn } from '@shared/settings'
 import type { Settings } from '@shared/types'
+import { fetchThenListen } from './sync'
 import { useUi } from './ui'
 
 /** Plugin đã cài + trạng thái worker (main báo lại mỗi khi đổi). */
 export const usePlugins = create<{ items: InstalledPlugin[]; loaded: boolean; set: (l: InstalledPlugin[]) => void }>((set) => {
-  window.stag.plugins.list().then((items) => set({ items, loaded: true }))
-  window.stag.plugins.onChanged((items) => set({ items, loaded: true }))
+  fetchThenListen(window.stag.plugins.list, window.stag.plugins.onChanged, (items) => set({ items, loaded: true }))
   return { items: [], loaded: false, set: (items) => set({ items, loaded: true }) }
 })
 

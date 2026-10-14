@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, safeStorage, session, shell, Tray, utilityProcess } from 'electron'
+import { pathToFileURL } from 'node:url'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, powerMonitor, protocol, safeStorage, session, shell, Tray, utilityProcess } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AdapterService } from './adapters'
 import { AgentService } from './agents'
@@ -8,6 +9,9 @@ import { ExternalAdapterStore } from './externalAdapters'
 import { ArtifactLog, serveArtifact } from './artifacts'
 import { ArtifactStore } from './artifactStore'
 import { InspectService } from './inspect'
+import { CredentialStore } from './credentialStore'
+import { CredentialService } from './credentials'
+import { CRED_IPC } from '@shared/credentials'
 import { detectSetup, installSetup, removeWordpress, setupMessage } from './inspectSetup'
 import { Board } from './board'
 import { BrowserService } from './browser'
@@ -28,7 +32,7 @@ import { independentSessionEnv } from './adapters'
 import { onUserNoteWrite, putNote, readNote } from './vault'
 import { agentKind } from '@shared/types'
 import type { PluginEvent } from '@shared/plugins'
-import type { InspectAction, SourceKind } from '@shared/inspect'
+import { PAGE_IPC, type InspectAction, type SourceKind } from '@shared/inspect'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
 import { VaultIndexer } from './vaultIndex'
@@ -46,6 +50,7 @@ import { ClaudeUsageService, registerClaudeUsageIpc } from './claudeUsage'
 import { registerThemeIpc, ThemeService } from './theme'
 import { WINDOW_BG } from '@shared/theme'
 import { homedir } from 'node:os'
+import { AppContents, guardAppSession, guardIpc, guardOtherSession, isAppFrame, type AppPage } from './appSecurity'
 
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
 // Phải đặt trước khi tạo các service vì chúng đọc đường dẫn userData lúc khởi tạo.
@@ -60,6 +65,14 @@ if (process.env.STAG_FAKE_MIC) {
 // Một bản chạy cho mỗi thư mục dữ liệu (khoá theo userData nên phải sau setPath): mở stag.ai lần nữa (vd. lúc
 // đang nằm dưới khay) thì hiện cửa sổ đang có, không chạy bản thứ hai ghi chồng lên workspaces.json / agents.json.
 const primary = app.requestSingleInstanceLock()
+
+/** Trang của app (bản build: file renderer; bản dev: dev server của electron-vite). */
+const appPage: AppPage = { file: pathToFileURL(join(__dirname, '../renderer/index.html')).href, dev: process.env.ELECTRON_RENDERER_URL }
+/** WebContents của cửa sổ app: chỉ chúng được gọi IPC của app. */
+const appContents = new AppContents()
+// Một chốt cho mọi IPC (đăng ký sau dòng này): chỉ khung chính của cửa sổ app, không phải tab của ô Browser hay iframe
+// plugin / xem trước. Kênh của lớp Soi trong tab Browser (PAGE_IPC) tự kiểm tra tab gửi nên để nguyên.
+guardIpc(ipcMain, (e) => appContents.has(e.sender) && isAppFrame(e.senderFrame, appPage), new Set<string>([...Object.values(PAGE_IPC), ...Object.values(CRED_IPC)]))
 
 // Ảnh / video agent tạo ra (tab Artifacts): `stag-file://<workspaceId>/<đường dẫn trong dự án>`. Phải đăng ký trước khi app sẵn sàng.
 // Trang của plugin (iframe cách ly): `stag-plugin://<id plugin>/<file trong entrypoints.ui>`.
@@ -309,7 +322,9 @@ agents.attachDevServers(devServers)
 /** Sản phẩm agent nộp (tab Sản phẩm): artifact_publish / artifact_reply + góp ý gửi vào phiên agent. */
 const products = new ArtifactStore(
   (workspaceId) => send(IPC.productsChanged, workspaceId),
-  (agentId) => agents.kickComments(agentId)
+  (agentId) => agents.kickComments(agentId),
+  // Việc của chủ sản phẩm còn mở → agent khác không được nộp đè (artifactStore.ts, publish).
+  async (ws, taskId) => (await board.snapshot(ws)).tasks.some((t) => t.id === taskId && t.status === 'open')
 )
 agents.attachProducts(products)
 /** Chế độ Soi của ô Browser: bình luận ghim lên phần tử trang → agent sửa (tool inspect_reply). */
@@ -320,6 +335,27 @@ const inspect = new InspectService(browser, (id) => workspaces.get(id), {
 })
 inspect.attachTeam((wsId) => agents.inspectTeam(wsId))
 agents.attachInspect(inspect)
+/** Kho mật khẩu cho agent: app tự điền trang trong ô Browser, agent không thấy giá trị (credential_list / credential_fill). */
+const credentialStore = new CredentialStore(
+  join(app.getPath('userData'), 'credentials.json'),
+  join(app.getPath('userData'), 'credentials-log.jsonl'),
+  {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (s) => safeStorage.encryptString(s),
+    decrypt: (b) => safeStorage.decryptString(b)
+  },
+  (s) => send(IPC.credChanged, s)
+)
+const credentials = new CredentialService({
+  store: credentialStore,
+  browser,
+  ask: (agent, req) => agents.askCredential(agent, req),
+  team: (wsId) => agents.inspectTeam(wsId).map((a) => ({ id: a.id, name: a.name })),
+  tell: (agentId, text) => agents.tellApp(agentId, text),
+  notice: (n) => send(IPC.credNotice, n)
+})
+browser.attachCredentials(credentials)
+agents.attachCredentials(credentials)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
@@ -466,6 +502,7 @@ function createWindow(): void {
     }
   })
 
+  appContents.add(win.webContents)
   win.once('ready-to-show', () => win.show())
   browser.attachWindow(win)
   // Renderer tải lại / chết giữa lúc đang nói: không còn ai báo "xong" → gỡ Esc toàn hệ thống, ẩn ô nổi, bỏ chạy nền.
@@ -500,10 +537,8 @@ function createWindow(): void {
     }
     void requestQuit()
   })
-  // Windows đăng xuất / tắt máy: không chặn đóng cửa sổ.
-  win.on('session-end', () => {
-    quitting = true
-  })
+  // Windows đăng xuất / tắt máy: không chặn đóng cửa sổ; ghi nốt dữ liệu, dừng phiên.
+  win.on('session-end', onSessionEnd)
 
   // Link ngoài mở bằng trình duyệt hệ thống, không mở cửa sổ Electron mới.
   // Chỉ http(s)/mailto: link trong note của vault có thể là `file:` hay giao thức lạ.
@@ -534,6 +569,17 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   if (!primary) return
+  // Quyền trình duyệt: Electron mặc định cho tất cả. Cửa sổ app chỉ được micro / ghi clipboard / toàn màn hình;
+  // session khác (ô Browser…) từ chối hết (xem appSecurity.ts).
+  guardAppSession(session.defaultSession, appPage)
+  app.on('session-created', (ses) => {
+    if (ses !== session.defaultSession) guardOtherSession(ses)
+  })
+  // Linux / macOS tắt máy (Windows dùng 'session-end' của cửa sổ, xem createWindow).
+  powerMonitor.on('shutdown', () => {
+    onSessionEnd()
+    app.quit()
+  })
   await step('Danh sách workspace', () => workspaces.load())
   await step('Cài đặt', () => settings.load())
   browser.setSettings(settings.get().app.browser)
@@ -543,6 +589,7 @@ app.whenReady().then(async () => {
   browser.themeToggle = () => void theme.toggle()
   await step('Adapter ngoài', () => external.load())
   await step('Bí mật (connector)', () => secrets.load())
+  await step('Kho mật khẩu', () => credentialStore.load())
   await step('Dọn skill của phiên cũ', () => skills.cleanAllSessions())
   await step('Giọng nói', () => voice.load())
   await step('Chi phí giọng nói', () => cloudUsage.load())
@@ -604,6 +651,8 @@ app.whenReady().then(async () => {
   // Góp ý còn trong hàng chờ từ lần chạy trước: nạp sẵn để được gửi khi agent rảnh, kể cả khi chưa mở tab.
   for (const w of workspaces.list()) void products.warm(w).catch(() => {})
   inspect.register()
+  credentials.register()
+  credentials.registerUi()
   ipcMain.handle(IPC.inspectSnapshot, (_e, workspaceId: string) => inspect.snapshot(String(workspaceId)))
   ipcMain.handle(IPC.inspectAct, (_e, workspaceId: string, action: InspectAction) => inspect.act(String(workspaceId), action))
   for (const w of workspaces.list()) void inspect.warm(w).catch(() => {})
@@ -670,24 +719,66 @@ else {
   app.quit()
 }
 
-app.on('before-quit', () => {
-  quitting = true
+/** Thời gian tối đa chờ ghi nốt dữ liệu / dừng plugin lúc thoát. */
+const QUIT_FLUSH_MS = 4000
+/** Đã dọn xong (hoặc đang dọn) cho lần thoát này: before-quit lần hai (app.quit() sau khi dọn) cho thoát luôn. */
+let cleanedUp = false
+
+/** Dừng mọi thứ chạy ngầm (phiên agent, terminal / dev server, hub, giọng nói…). Đồng bộ, gọi nhiều lần không sao. */
+function stopEverything(): void {
   tray?.destroy()
   tray = null
-  void artifacts.flush()
-  void products.flush()
   browser.shutdown()
   webhooks.stop()
-  void plugins.shutdown()
   voice.shutdown()
   voiceCloud.shutdown()
   claudeUsage.shutdown()
   globalVoice.dispose()
   keySender.dispose()
   overlay.dispose()
+  // Ô terminal của dev server (preview_*) là phiên agent: dừng ở đây để không giữ cổng sau khi thoát.
   agents.shutdown()
+  ptys.killAll()
   hub.stop()
+}
+
+/** Thoát: ghi nốt Sản phẩm / artifact, chờ plugin dừng (tối đa QUIT_FLUSH_MS), rồi mới thoát thật. */
+async function cleanUp(): Promise<void> {
+  for (const w of BrowserWindow.getAllWindows()) w.hide()
+  const hadSessions = agents.runningCount() > 0
+  const work = Promise.allSettled([artifacts.flush(), products.flush(), plugins.shutdown()])
+  stopEverything()
+  // node-pty dừng cả cây tiến trình của terminal bất đồng bộ (dò danh sách tiến trình của console): chờ một chút.
+  const settle = hadSessions ? new Promise((r) => setTimeout(r, 1200)) : Promise.resolve()
+  await Promise.race([Promise.all([work, settle]), new Promise((r) => setTimeout(r, QUIT_FLUSH_MS))])
+}
+
+app.on('before-quit', (e) => {
+  quitting = true
+  // Bản chạy thứ hai (chỉ để báo bản đang chạy hiện cửa sổ) không có gì để dọn.
+  if (cleanedUp || !primary) return
+  cleanedUp = true
+  e.preventDefault()
+  void cleanUp()
+    .catch((err) => console.error('[quit]', err))
+    .finally(() => app.quit())
 })
+
+/**
+ * Windows đăng xuất / tắt máy: không có before-quit, tiến trình bị tắt ngay sau sự kiện → ghi đồng bộ những gì còn
+ * hẹn giờ (danh sách artifact), dừng phiên / terminal. Sản phẩm ghi ngay mỗi lần đổi nên không còn gì treo.
+ */
+function onSessionEnd(): void {
+  quitting = true
+  if (cleanedUp) return
+  cleanedUp = true
+  try {
+    artifacts.flushSync()
+  } catch (err) {
+    console.error('[session-end]', err)
+  }
+  stopEverything()
+}
 
 app.on('window-all-closed', () => {
   agents.shutdown()

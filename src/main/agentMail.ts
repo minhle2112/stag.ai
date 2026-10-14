@@ -11,6 +11,8 @@ export interface MailItem {
   handoff?: boolean
   /** Người dùng phát lệnh (Broadcast): gõ nguyên văn như người dùng gõ, không bọc "tin từ agent". */
   user?: boolean
+  /** Dòng của chính app ("[stag.ai] …", vd. kho mật khẩu báo bạn đã đăng nhập): gõ nguyên văn. */
+  app?: boolean
 }
 
 /** Mỗi agent nhận giữ tối đa chừng này tin chưa gõ. */

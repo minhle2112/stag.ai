@@ -311,6 +311,10 @@ export class SkillLibrary {
    */
   async prepareSession(sessionId: string, names: string[]): Promise<{ dir: string | null; skills: SessionSkill[] }> {
     const base = this.sessionDir(sessionId)
+    return this.onSession(sessionId, () => this.copySession(base, names))
+  }
+
+  private async copySession(base: string, names: string[]): Promise<{ dir: string | null; skills: SessionSkill[] }> {
     await fs.rm(base, { recursive: true, force: true })
     if (!names.length) return { dir: null, skills: [] }
     const skills: SessionSkill[] = []
@@ -326,7 +330,25 @@ export class SkillLibrary {
   }
 
   async cleanSession(sessionId: string): Promise<void> {
-    await fs.rm(this.sessionDir(sessionId), { recursive: true, force: true }).catch(() => {})
+    const base = this.sessionDir(sessionId)
+    await this.onSession(sessionId, () => fs.rm(base, { recursive: true, force: true })).catch(() => {})
+  }
+
+  /**
+   * Việc trên thư mục của một phiên (chép / dọn) chạy lần lượt theo thứ tự gọi: dọn chạy nền của phiên vừa đóng xong
+   * hẳn rồi mới chép cho lần tiếp tục phiên ngay sau (Claude tiếp tục phiên dùng lại id phiên → cùng thư mục), không
+   * xoá nhầm bản chép mới.
+   */
+  private sessionOps = new Map<string, Promise<unknown>>()
+
+  private onSession<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    const p = (this.sessionOps.get(sessionId) ?? Promise.resolve()).then(fn)
+    const tail = p.catch(() => {})
+    this.sessionOps.set(sessionId, tail)
+    void tail.then(() => {
+      if (this.sessionOps.get(sessionId) === tail) this.sessionOps.delete(sessionId)
+    })
+    return p
   }
 
   /** Lúc mở app: phiên cũ không còn chạy (pty chết theo app) → bỏ hết bản chép. */
@@ -515,18 +537,62 @@ export function codexSkillConfigEntries(toml: string): Array<{ path?: string; na
     if (!/^\s*\[\[\s*skills\s*\.\s*config\s*\]\]\s*(#.*)?$/.test(lines[i])) continue
     const e: { path?: string; name?: string; enabled: boolean } = { enabled: true }
     for (i++; i < lines.length && !/^\s*\[/.test(lines[i]); i++) {
-      const m = /^\s*(path|name|enabled)\s*=\s*(.+?)\s*(#.*)?$/.exec(lines[i])
-      if (!m) continue
-      if (m[1] === 'enabled') e.enabled = m[2] !== 'false'
-      else {
-        const v = m[2]
-        e[m[1] as 'path' | 'name'] = v.startsWith('"') ? (JSON.parse(v) as string) : v.replace(/^'|'$/g, '')
-      }
+      const m = /^\s*(path|name|enabled)\s*=\s*(.*)$/.exec(lines[i])
+      const v = m && tomlValue(m[2])
+      // Giá trị sai cú pháp: bỏ trường đó (trước đây ném lỗi làm hỏng mọi lần mở Codex).
+      if (!m || v === null) continue
+      if (m[1] === 'enabled') e.enabled = v !== 'false'
+      else e[m[1] as 'path' | 'name'] = v
     }
     i--
     if (e.path || e.name) out.push(e)
   }
   return out
+}
+
+const TOML_ESCAPES: Record<string, string> = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', e: '\x1b', '"': '"', '\\': '\\' }
+
+/**
+ * Giá trị TOML một dòng (phần sau `=`): chuỗi "…" (có escape), chuỗi '…' (nguyên văn) hoặc giá trị trần (true, số…),
+ * sau đó chỉ được có comment `#`. `#` nằm trong chuỗi (vd. đường dẫn `C:\dự án #2\…`) là chữ, không phải comment.
+ * Sai cú pháp (chuỗi chưa đóng, escape lạ, rác sau giá trị) → null.
+ */
+export function tomlValue(raw: string): string | null {
+  const s = raw.trimStart()
+  let value: string
+  let i: number
+  if (s.startsWith('"')) {
+    value = ''
+    for (i = 1; i < s.length && s[i] !== '"'; i++) {
+      if (s[i] !== '\\') {
+        value += s[i]
+        continue
+      }
+      const c = s[++i]
+      if (c === 'u' || c === 'U') {
+        const hex = s.slice(i + 1, i + (c === 'u' ? 5 : 9))
+        if (!/^[0-9A-Fa-f]+$/.test(hex) || hex.length !== (c === 'u' ? 4 : 8)) return null
+        const cp = parseInt(hex, 16)
+        if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return null
+        value += String.fromCodePoint(cp)
+        i += hex.length
+      } else if (c !== undefined && c in TOML_ESCAPES) value += TOML_ESCAPES[c]
+      else return null
+    }
+    if (i >= s.length) return null
+    i++
+  } else if (s.startsWith("'")) {
+    i = s.indexOf("'", 1)
+    if (i < 0) return null
+    value = s.slice(1, i)
+    i++
+  } else {
+    const m = /^[^\s#"']+/.exec(s)
+    if (!m) return null
+    value = m[0]
+    i = m[0].length
+  }
+  return /^\s*(#.*)?$/.test(s.slice(i)) ? value : null
 }
 
 /** Tham số Codex tắt skill có sẵn (theo tên), giữ mục của người dùng. Không tắt gì → không đụng tới. */

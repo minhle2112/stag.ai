@@ -179,7 +179,8 @@ export function writeField(md: string, key: string, value: string | null): strin
     if (line === null) return md
     return `---${nl}${line}${nl}---${nl}${md}`
   }
-  const lines = frontmatter.split(/\r?\n/)
+  // Frontmatter rỗng (`---\n---`): không bắt đầu bằng một dòng trống.
+  const lines = frontmatter ? frontmatter.split(/\r?\n/) : []
   const r = fieldRange(lines, key)
   if (r) lines.splice(r.start, r.end - r.start, ...(line === null ? [] : [line]))
   else if (line !== null) lines.push(line)

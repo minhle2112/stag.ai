@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { AgentRequest } from '@shared/agentApi'
+import { fetchThenListen } from './sync'
 
 interface AgentRequestsState {
   /** Yêu cầu của agent chờ bạn xác nhận (Agent API), cũ nhất trước. */
@@ -8,8 +9,7 @@ interface AgentRequestsState {
 }
 
 export const useAgentRequests = create<AgentRequestsState>((set) => {
-  window.stag.agent.onRequests((list) => set({ list }))
-  void window.stag.agent.requests().then((list) => set({ list }))
+  fetchThenListen(window.stag.agent.requests, window.stag.agent.onRequests, (list) => set({ list }))
   return {
     list: [],
     answer(id, allow) {

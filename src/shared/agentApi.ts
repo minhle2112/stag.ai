@@ -76,7 +76,22 @@ export type AgentRequest = AgentRequestBase &
     | { action: 'drive'; tool: 'send' | 'open' | 'handoff'; target: AgentTargetInfo; text: string; from: PermissionMode; to: PermissionMode }
     /** Agent của một project gửi việc cho agent của project KHÁC: agent_send / agent_open kèm việc / agent_handoff. */
     | { action: 'cross'; tool: 'send' | 'open' | 'handoff'; target: AgentTargetInfo; text: string; fromProject: CrossProject; toProject: CrossProject }
+    /** Agent xin app điền mật khẩu / mã 2FA vào trang (credential_fill). */
+    | { action: 'credential'; credential: CredentialAsk }
   )
+
+/** Thẻ hỏi credential_fill: mục nào, trên trang nào. Không có mật khẩu. */
+export interface CredentialAsk {
+  id: string
+  name: string
+  username: string
+  hasTotp: boolean
+  /** Host thật của trang (đã khớp tên miền của mục). */
+  host: string
+  step: 'login' | 'totp'
+  /** Có nút "Luôn cho agent này" (mục không ở chế độ Hỏi mỗi lần). */
+  canAlways: boolean
+}
 
 /** Project trong thẻ hỏi gửi việc khác project. */
 export interface CrossProject {

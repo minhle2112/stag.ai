@@ -1,10 +1,10 @@
-import { createReadStream, promises as fs } from 'node:fs'
-import { dirname, extname, join, resolve, sep } from 'node:path'
+import { createReadStream, mkdirSync, promises as fs, renameSync, writeFileSync } from 'node:fs'
+import { dirname, extname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { projectRel } from '@shared/scope'
 import type { Agent, ArtifactEvent, ArtifactStat, ArtifactText, Workspace } from '@shared/types'
 import type { HookPayload } from './board'
-import { readText } from './fsutil'
+import { readText, realPathInside } from './fsutil'
 import { looksLikeWrite, shellCommand } from './scopeGuard'
 import { ensureIgnored } from './workspace'
 
@@ -104,12 +104,14 @@ export function isRunnableFile(path: string): boolean {
   return RUNNABLE.test(path.replace(/[\s.]+$/, ''))
 }
 
-/** Đường dẫn tuyệt đối của `rel` trong dự án; chặn đường dẫn thoát ra ngoài. */
-export function artifactPath(ws: Workspace, rel: string): string {
-  const root = resolve(ws.path)
-  const full = resolve(root, rel)
-  if (!full.startsWith(root + sep)) throw new Error('Đường dẫn nằm ngoài dự án')
-  return full
+/**
+ * Đường dẫn thật của `rel` trong dự án (đã giải symlink / junction); chặn đường dẫn thoát ra ngoài, kể cả qua
+ * junction trỏ ra ngoài. File chưa có: lỗi ENOENT, trừ khi `missingOk` (khi đó vẫn kiểm tra thư mục cha).
+ */
+export async function artifactPath(ws: Workspace, rel: string, missingOk = false): Promise<string> {
+  // Rỗng / "." = chính thư mục dự án, không phải file artifact.
+  if (!String(rel ?? '').split(/[\\/]+/).some((s) => s && s !== '.')) throw new Error('Đường dẫn nằm ngoài dự án')
+  return realPathInside(ws.path, String(rel), missingOk)
 }
 
 const MIME: Record<string, string> = {
@@ -145,7 +147,7 @@ const MIME: Record<string, string> = {
 export async function serveArtifact(ws: Workspace, rel: string, range: string | null): Promise<Response> {
   let full: string
   try {
-    full = artifactPath(ws, rel)
+    full = await artifactPath(ws, rel, true)
   } catch {
     return new Response('Forbidden', { status: 403 })
   }
@@ -182,6 +184,8 @@ export async function serveArtifact(ws: Workspace, rel: string, range: string | 
 /** Nhật ký output (file agent tạo / sửa / xoá trong dự án), theo workspace, lưu ở `.stag/artifacts.json`. */
 export class ArtifactLog {
   private lists = new Map<string, Promise<ArtifactEvent[]>>()
+  /** Danh sách đã đọc xong (cho flushSync, không chờ được promise). */
+  private loaded = new Map<string, ArtifactEvent[]>()
   private saveTimers = new Map<string, NodeJS.Timeout>()
   private writing = new Map<string, Promise<void>>()
   private pending = new Map<string, NodeJS.Timeout>()
@@ -204,6 +208,11 @@ export class ArtifactLog {
     if (!list) {
       list = this.read(ws)
       this.lists.set(ws.id, list)
+      const id = ws.id
+      const mine = list
+      void list.then((l) => {
+        if (this.lists.get(id) === mine) this.loaded.set(id, l)
+      })
     }
     return list
   }
@@ -264,7 +273,7 @@ export class ArtifactLog {
       if (!rel || out.some((o) => o.rel.toLowerCase() === rel.toLowerCase())) continue
       let full: string
       try {
-        full = artifactPath(ws, rel)
+        full = await artifactPath(ws, rel, true)
       } catch {
         continue
       }
@@ -288,7 +297,7 @@ export class ArtifactLog {
     await Promise.all(
       rels.map(async (rel) => {
         try {
-          const st = await fs.stat(artifactPath(ws, rel))
+          const st = await fs.stat(await artifactPath(ws, rel))
           out[rel] = st.isFile() ? { size: st.size, mtime: st.mtime.toISOString() } : null
         } catch {
           out[rel] = null
@@ -302,7 +311,7 @@ export class ArtifactLog {
   async text(ws: Workspace, rel: string, max = MAX_TEXT): Promise<ArtifactText> {
     let handle: fs.FileHandle
     try {
-      handle = await fs.open(artifactPath(ws, rel), 'r')
+      handle = await fs.open(await artifactPath(ws, rel), 'r')
     } catch {
       return { status: 'missing' }
     }
@@ -321,7 +330,7 @@ export class ArtifactLog {
 
   /** Cả nội dung file, để renderer tự hiện (PDF, Word, Excel, PowerPoint, zip, font). null = không còn file. */
   async bytes(ws: Workspace, rel: string): Promise<Uint8Array | null> {
-    const full = artifactPath(ws, rel)
+    const full = await artifactPath(ws, rel, true)
     let size: number
     try {
       size = (await fs.stat(full)).size
@@ -354,11 +363,30 @@ export class ArtifactLog {
 
   forgetWorkspace(workspaceId: string): void {
     this.lists.delete(workspaceId)
+    this.loaded.delete(workspaceId)
     this.paths.delete(workspaceId)
     // Lần lưu đang hẹn sẽ ghi lại `.stag/` vào thư mục vừa gỡ khỏi app.
     const t = this.saveTimers.get(workspaceId)
     if (t) clearTimeout(t)
     this.saveTimers.delete(workspaceId)
+  }
+
+  /**
+   * Windows đăng xuất / tắt máy: tiến trình bị tắt ngay, không chờ được việc bất đồng bộ → ghi đồng bộ các danh sách
+   * còn đang hẹn giờ lưu.
+   */
+  flushSync(): void {
+    for (const [id, t] of this.saveTimers) {
+      clearTimeout(t)
+      this.saveTimers.delete(id)
+      const ws = this.paths.get(id)
+      const list = this.loaded.get(id)
+      if (!ws || !list) continue
+      const file = this.file(ws)
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(`${file}.tmp`, JSON.stringify({ version: 1, events: list } satisfies ArtifactsFile, null, 2), 'utf8')
+      renameSync(`${file}.tmp`, file)
+    }
   }
 
   /** Đợi mọi lần ghi xuống đĩa (khi tắt app). */

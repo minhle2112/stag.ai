@@ -160,4 +160,53 @@ describe('ArtifactStore comments', () => {
     expect(await again.publish(ws, agent, task, { file: 'docs/r.md', title: 'Report', description: '' })).toMatch(/shown again/)
     await again.flush()
   })
+
+  it('chỉ agent sở hữu được trả lời góp ý; agent khác nộp đè khi việc của chủ còn mở → bị từ chối, việc đã đóng → nhận quyền', async () => {
+    const other: Agent = { ...agent, id: 'ag2', name: 'Other' }
+    const otherTask: Task = { ...task, id: 't2', agentId: 'ag2', agentName: 'Other' }
+    await store.addComment(ws, 'a1', { v: 1, anchor: { type: 'general' }, text: 'Why?', send: true })
+    await store.delivered(ws, ['c1'])
+    await expect(store.reply(ws, other, { id: 'c1', text: 'Because.' })).rejects.toThrow(/belongs to Tester, whose task "Smoke test" is still open\. Only Tester can reply/)
+
+    // Không có cách biết việc còn mở (taskOpen) → coi như còn mở.
+    await write('docs/r.md', '# Report\n\nTwo.\n')
+    await expect(store.publish(ws, other, otherTask, { file: 'docs/r.md', title: 'Mine', description: '' })).rejects.toThrow(/still open/)
+
+    const open = new Set(['t1'])
+    const s2 = new ArtifactStore(() => {}, (id) => queued.push(id), async (_w, id) => open.has(id))
+    await expect(s2.publish(ws, other, otherTask, { file: 'docs/r.md', title: 'Mine', description: '' })).rejects.toThrow(/still open/)
+    open.delete('t1')
+    await s2.addComment(ws, 'a1', { v: 1, anchor: { type: 'general' }, text: 'Queued for the owner', send: true })
+    queued.length = 0
+    expect(await s2.publish(ws, other, otherTask, { file: 'docs/r.md', title: 'Mine', description: '' })).toMatch(/took over this artifact from Tester/)
+    const a = (await s2.snapshot(ws)).artifacts[0]
+    expect([a.agentId, a.versions.length]).toEqual(['ag2', 2])
+    expect(queued).toContain('ag2')
+    expect(await s2.reply(ws, other, { id: 'c1', text: 'Done.' })).toMatch(/Reply added/)
+    // Trả lời góp ý của sản phẩm mà việc của chủ đã đóng (vd. sau bàn giao): nhận quyền luôn.
+    const third: Agent = { ...agent, id: 'ag3', name: 'Third' }
+    open.add('t2')
+    await expect(s2.reply(ws, third, { id: 'c1', text: 'Hi' })).rejects.toThrow(/belongs to Other/)
+    open.delete('t2')
+    expect(await s2.reply(ws, third, { id: 'c1', text: 'Hi' })).toMatch(/took over artifact a1 from Other/)
+    expect((await s2.snapshot(ws)).artifacts[0].agentId).toBe('ag3')
+    await s2.flush()
+  })
+
+  it('index.json đổi trên đĩa (bản app khác / git checkout) → đọc lại trước khi sửa, không ghi đè mất', async () => {
+    const a = new ArtifactStore(() => {})
+    const b = new ArtifactStore(() => {})
+    await a.snapshot(ws)
+    await b.snapshot(ws)
+    await a.addComment(ws, 'a1', { v: 1, anchor: { type: 'general' }, text: 'from A', send: false })
+    await a.flush()
+    await b.addComment(ws, 'a1', { v: 1, anchor: { type: 'general' }, text: 'from B', send: false })
+    await b.flush()
+    const c = new ArtifactStore(() => {})
+    const comments = (await c.snapshot(ws)).artifacts[0].comments
+    expect(comments.map((x) => [x.id, x.thread[0].text])).toEqual([
+      ['c1', 'from A'],
+      ['c2', 'from B']
+    ])
+  })
 })

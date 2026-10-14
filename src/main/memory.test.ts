@@ -8,7 +8,7 @@ import type { Agent, MemoryToolsMode, Workspace } from '@shared/types'
 import type { Board } from './board'
 import type { BrowserService } from './browser'
 import { createStagMcp, MEMORY_TOOLS_OFF } from './mcp'
-import { MemoryService, memoryToolRules, toRel, versionOf, type Touch } from './memory'
+import { localStamp, MemoryService, memoryToolRules, parseSince, toRel, versionOf, type Touch } from './memory'
 import { VaultIndexer } from './vaultIndex'
 import { NoteWriter } from './workLog'
 
@@ -157,6 +157,18 @@ describe('tool memory_* đọc', () => {
   })
 })
 
+describe('giờ sửa note', () => {
+  it('giờ địa phương kèm múi giờ; modified_since YYYY-MM-DD tính từ nửa đêm giờ địa phương', () => {
+    const d = new Date(2026, 9, 14, 1, 35)
+    const off = -d.getTimezoneOffset()
+    const hm = (n: number): string => String(n).padStart(2, '0')
+    expect(localStamp(d.getTime())).toBe(`2026-10-14 01:35 ${off < 0 ? '-' : '+'}${hm(Math.floor(Math.abs(off) / 60))}:${hm(Math.abs(off) % 60)}`)
+    expect(parseSince('2026-10-14')).toBe(new Date(2026, 9, 14).getTime())
+    expect(parseSince('2026-10-14T00:00:00Z')).toBe(Date.UTC(2026, 9, 14))
+    expect(parseSince('hôm qua')).toBeNaN()
+  })
+})
+
 describe('tool memory_* ghi', () => {
   it('memory_write: tạo note mới (nhắc frontmatter); ghi đè cần if_version đúng', async () => {
     const { client, touched } = await connect()
@@ -217,6 +229,52 @@ describe('tool memory_* ghi', () => {
     expect(await read('50 Decisions/2026-10-08 Drop tickets.md')).toContain('Related: [[Board]]')
     expect(touched.map((t) => t.rel)).toContain('30 Features/Board.md')
     expect((await call(client, 'memory_move', { note: 'Board', to: 'Workspace and Vault' })).text).toMatch(/already exists/)
+  })
+
+  it('memory_patch field trên frontmatter rỗng (LF / CRLF): không sinh frontmatter thứ hai', async () => {
+    const { client } = await connect()
+    await put('Empty.md', '---\n---\n# Empty\n')
+    await put('EmptyCrlf.md', '---\r\n---\r\n# E\r\n')
+    expect((await call(client, 'memory_patch', { note: 'Empty', field: 'type', content: 'feature' })).error).toBe(false)
+    expect((await call(client, 'memory_patch', { note: 'EmptyCrlf', field: 'type', content: 'log' })).error).toBe(false)
+    const a = await read('Empty.md')
+    expect(a.match(/^---$/gm)).toHaveLength(2)
+    expect(a).toMatch(/^---\n(\n)?type: feature\n---\n# Empty\n$/)
+    const b = await read('EmptyCrlf.md')
+    expect(b.match(/^---\r?$/gm)).toHaveLength(2)
+    expect(b.endsWith('type: log\r\n---\r\n# E\r\n')).toBe(true)
+  })
+
+  it('memory_move: không đè file đã có trên đĩa mà chỉ mục không thấy', async () => {
+    const { client } = await connect()
+    // Thư mục node_modules chỉ mục bỏ qua, nhưng đường dẫn vẫn hợp lệ.
+    await put('node_modules/Board.md', 'của người khác\n')
+    const r = await call(client, 'memory_move', { note: 'Kanban', to: 'node_modules/Board' })
+    expect(r.error).toBe(true)
+    expect(r.text).toMatch(/already exists/)
+    expect(await read('node_modules/Board.md')).toBe('của người khác\n')
+    expect(await read('30 Features/Kanban.md')).toContain('# Kanban')
+    // Đổi hoa thường tên (cùng một file trên Windows) vẫn được.
+    expect((await call(client, 'memory_move', { note: 'Kanban', to: 'kanban' })).error).toBe(false)
+  })
+
+  it('chặn ghi qua junction trỏ ra ngoài vault', async () => {
+    const outside = await fs.mkdtemp(join(tmpdir(), 'stag-mem-out-'))
+    try {
+      await fs.symlink(outside, join(vault, 'linked'), 'junction')
+      const { client } = await connect()
+      for (const [tool, args] of [
+        ['memory_write', { note: 'linked/Evil', content: '# x' }],
+        ['memory_append', { note: 'linked/sub/Evil', content: '- x' }]
+      ] as const) {
+        const r = await call(client, tool, args)
+        expect(r.error).toBe(true)
+        expect(r.text).toMatch(/outside the vault/)
+      }
+      expect(await fs.readdir(outside)).toEqual([])
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true })
+    }
   })
 
   it('memory_delete: chuyển vào .trash, báo note còn link; note ẩn không thấy nữa', async () => {

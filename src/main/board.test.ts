@@ -457,3 +457,24 @@ describe('quoteSpacedPaths: phạm vi có đường dẫn chứa khoảng trắn
     expect((await board.updateTask(ws, 'a', { scope: 'src, Demo memory/40 Log/' })).scope).toBe('src, `Demo memory/40 Log/`')
   })
 })
+
+describe('tasks.json đổi trên đĩa (bản app khác / git checkout)', () => {
+  it('đọc lại trước khi dùng: không ghi đè mất việc của bên kia, object việc đang giữ vẫn đúng', async () => {
+    const a = new Board(() => {})
+    const b = new Board(() => {})
+    await a.snapshot(ws)
+    await b.snapshot(ws)
+    const ta = await a.startTask(ws, agent('a'), 's1', 'Việc A', 'src')
+    // B đã nạp danh sách rỗng từ trước: vẫn thấy việc A, mở việc B không làm mất việc A.
+    expect((await b.openTask(ws, 'a'))?.id).toBe(ta.id)
+    await b.startTask(ws, agent('b'), 's2', 'Việc B', 'docs')
+    // A đóng việc của mình: giữ việc B do bản kia ghi.
+    await a.finishTask(ws, 'a', 'xong')
+    const onDisk = JSON.parse(await fs.readFile(tasksFile(), 'utf8')).tasks as Array<{ title: string; status: string }>
+    expect(onDisk.map((t) => [t.title, t.status])).toEqual([
+      ['Việc A', 'done'],
+      ['Việc B', 'open']
+    ])
+    expect((await b.snapshot(ws)).tasks.map((t) => t.status)).toEqual(['done', 'open'])
+  })
+})

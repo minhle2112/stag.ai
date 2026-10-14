@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentRequest, AgentRequestInput } from '@shared/agentApi'
 
-/** 'always' = cho, và nhớ luôn (chỉ thẻ hỏi gửi việc khác project: "Luôn cho giữa 2 project này"). */
+/** 'always' = cho, và nhớ luôn (thẻ hỏi gửi việc khác project: "Luôn cho giữa 2 project này"; mật khẩu: "Luôn cho agent này"). */
 export type AgentRequestAnswer = 'allow' | 'always' | 'deny' | 'timeout'
 
 /** Chờ người dùng xác nhận tối đa chừng này (Codex được đặt tool_timeout_sec dài hơn, xem codex.ts). */
@@ -38,7 +38,7 @@ export class AgentRequestQueue {
   answer(id: string, allow: boolean | 'always'): void {
     const p = this.pending.get(id)
     if (!p) return
-    p.done(allow === 'always' ? (p.req.action === 'cross' ? 'always' : 'allow') : allow ? 'allow' : 'deny')
+    p.done(allow === 'always' ? (p.req.action === 'cross' || p.req.action === 'credential' ? 'always' : 'allow') : allow ? 'allow' : 'deny')
   }
 
   /** Phiên của agent đã xin đóng / agent bị xoá: bỏ các yêu cầu của nó. */

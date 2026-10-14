@@ -12,6 +12,8 @@ import { isOpen, needsYou, type InspectPin } from '@shared/inspect'
 import { useInspect } from '../store/inspect'
 import { InspectPanel, pagePins } from './inspect/InspectPanel'
 import { SourceSetupDialog } from './inspect/SourceSetupDialog'
+import { hostMatches, hostOf } from '@shared/credentials'
+import { useCredentials } from '../store/credentials'
 
 /**
  * Pane browser của một workspace. Trang thật là WebContentsView do main vẽ đè lên vùng `viewport`;
@@ -427,6 +429,7 @@ function AddressBar({ wsId, tab, children }: { wsId: string; tab: BrowserTab | u
         spellCheck={false}
         className="mx-1 h-7 min-w-0 flex-1 rounded-md border border-line-2 bg-bg0 px-2.5 text-[12.5px] text-fg outline-none select-text placeholder:text-dim focus:border-accent/60"
       />
+      {tab && <KeyButton tab={tab} />}
       {children}
       <button
         type="button"
@@ -439,6 +442,31 @@ function AddressBar({ wsId, tab, children }: { wsId: string; tab: BrowserTab | u
         <Icon name="code" />
       </button>
     </div>
+  )
+}
+
+/**
+ * Nút chìa khoá: số mục trong kho mật khẩu cho tên miền của trang. Bấm: hiện lại bong bóng "Lưu mật khẩu?" đang chờ của
+ * tab, không có thì mở Cài đặt → Mật khẩu lọc theo tên miền.
+ */
+function KeyButton({ tab }: { tab: BrowserTab }): React.JSX.Element | null {
+  const items = useCredentials((s) => s.items)
+  const open = useUi((s) => s.openSettings)
+  const host = hostOf(tab.url)
+  if (!host) return null
+  const n = items.filter((i) => hostMatches(host, i.domains)).length
+  const tip = n ? `${n} mật khẩu cho ${host} trong kho (agent dùng qua credential_fill)` : `Chưa có mật khẩu cho ${host}`
+  return (
+    <button
+      type="button"
+      data-tip={tip}
+      aria-label={tip}
+      onClick={() => void window.stag.credentials.reopen(tab.id).then((shown) => !shown && open('passwords', { credentialSearch: host }))}
+      className={`mr-0.5 inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] hover:bg-panel-3 ${n ? 'text-accent' : 'text-dim hover:text-fg'}`}
+    >
+      <Icon name="key" size="s" />
+      {n > 0 && <span className="font-semibold">{n}</span>}
+    </button>
   )
 }
 

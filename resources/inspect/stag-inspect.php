@@ -2,9 +2,11 @@
 /**
  * Plugin Name: stag-inspect (chỉ bản dev)
  * Description: stag.ai — chế độ Soi: gắn data-stag-src vào HTML để biết phần tử đến từ block nào (bài #ID), file template
- *              nào của theme / plugin (child hay parent theme). Chỉ chạy trên bản local / development hoặc khi WP_DEBUG bật;
- *              trên site thật plugin không làm gì. Tắt page cache khi chạy. Xoá file này là gỡ.
- * Version: 1.0.0
+ *              nào của theme / plugin (child hay parent theme). Chỉ chạy trên bản local: môi trường local / development
+ *              (WP_ENVIRONMENT_TYPE), site chạy ở localhost / *.local / *.test, hoặc khi wp-config.php có
+ *              define('STAG_INSPECT', true). define('STAG_INSPECT', false) tắt hẳn. WP_DEBUG không còn bật plugin (staging
+ *              hay bật WP_DEBUG). Tắt page cache khi chạy. Xoá file này là gỡ.
+ * Version: 1.1.0
  * Author: stag.ai
  */
 
@@ -12,13 +14,30 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-/** Chỉ bản dev: môi trường local / development, hoặc WP_DEBUG. */
+/** Site chạy trên máy này: localhost, 127.x, ::1, hoặc tên miền dev (*.local, *.test, *.localhost). */
+function stag_inspect_local_host() {
+	$host = strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST));
+	$host = trim($host, '[]');
+	if ($host === 'localhost' || $host === '::1' || preg_match('/^127\.\d+\.\d+\.\d+$/', $host)) {
+		return true;
+	}
+	return (bool) preg_match('/\.(local|test|localhost)$/', $host);
+}
+
+/**
+ * Chỉ bản dev, phải bật rõ ràng: STAG_INSPECT (true / false) thắng mọi thứ; không có thì môi trường local /
+ * development, hoặc site ở localhost. Không dựa vào WP_DEBUG: lỡ chép lên staging / production (hay bật WP_DEBUG)
+ * thì không lộ đường dẫn theme.
+ */
 function stag_inspect_enabled() {
 	if (is_admin() || wp_doing_ajax() || wp_doing_cron() || (defined('REST_REQUEST') && REST_REQUEST)) {
 		return false;
 	}
+	if (defined('STAG_INSPECT')) {
+		return (bool) STAG_INSPECT;
+	}
 	$env = function_exists('wp_get_environment_type') ? wp_get_environment_type() : 'production';
-	return in_array($env, array('local', 'development'), true) || (defined('WP_DEBUG') && WP_DEBUG);
+	return in_array($env, array('local', 'development'), true) || stag_inspect_local_host();
 }
 
 if (!stag_inspect_enabled()) {

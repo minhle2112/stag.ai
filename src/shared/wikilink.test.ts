@@ -34,6 +34,12 @@ describe('splitFrontmatter / parseNoteMeta', () => {
     expect(r.body).toBe('Thân')
   })
 
+  it('frontmatter rỗng `---` `---` (cả CRLF, cả khi hết file) là frontmatter rỗng, không phải phần thân', () => {
+    expect(splitFrontmatter('---\n---\n# A\n')).toEqual({ frontmatter: '', body: '# A\n', bodyLine: 3 })
+    expect(splitFrontmatter('---\r\n---\r\n# A')).toEqual({ frontmatter: '', body: '# A', bodyLine: 3 })
+    expect(splitFrontmatter('---\n---')).toEqual({ frontmatter: '', body: '', bodyLine: 2 })
+  })
+
   it('đọc type, aliases, tags ở các kiểu viết', () => {
     expect(parseNoteMeta('type: decision\naliases: [Quyết định A, "B"]\ntags: a, #b')).toEqual({
       type: 'decision',

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import JSZip from 'jszip'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   claudeSkillSettings,
   codexSkillArgs,
@@ -11,7 +11,8 @@ import {
   findSkillDirs,
   scanClaudeSkills,
   skillInstructions,
-  SkillLibrary
+  SkillLibrary,
+  tomlValue
 } from './skills'
 
 let tmp: string
@@ -121,6 +122,29 @@ describe('thư viện skill', () => {
     await expect(fs.stat(r.dir!)).rejects.toThrow()
     await expect(lib.prepareSession('../x', ['good'])).rejects.toThrow(/không hợp lệ/)
   })
+
+  it('dọn nền phiên vừa đóng không xoá bản chép của lần tiếp tục phiên ngay sau (cùng id)', async () => {
+    await lib.create('good', 'Good one')
+    await lib.prepareSession('sess-1', ['good'])
+    // Lần xoá đầu (dọn của phiên vừa đóng) chạy chậm: không xếp hàng thì nó xoá mất bản chép mới.
+    const rm = fs.rm
+    let first = true
+    const spy = vi.spyOn(fs, 'rm').mockImplementation(async (...args: Parameters<typeof fs.rm>) => {
+      if (first) {
+        first = false
+        await new Promise((r) => setTimeout(r, 80))
+      }
+      return rm(...args)
+    })
+    try {
+      const clean = lib.cleanSession('sess-1')
+      const r = await lib.prepareSession('sess-1', ['good'])
+      await clean
+      expect(await fs.readFile(r.skills[0].path, 'utf8')).toContain('name: good')
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })
 
 describe('skill có sẵn của Claude Code', () => {
@@ -211,6 +235,47 @@ describe('Codex', () => {
         '-c',
         'skills.config=[{path="C:/a/SKILL.md",enabled=false},{name="keep-me",enabled=true},{name="seo",enabled=false},{name="imagegen",enabled=false}]'
       ])
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_HOME
+      else process.env.CODEX_HOME = prev
+    }
+  })
+
+  it('giá trị TOML: # trong chuỗi không phải comment, escape, chuỗi nguyên văn', () => {
+    expect(tomlValue('"C:\\\\dự án #2\\\\SKILL.md" # ghi chú')).toBe('C:\\dự án #2\\SKILL.md')
+    expect(tomlValue("'C:\\x #1\\SKILL.md'   ")).toBe('C:\\x #1\\SKILL.md')
+    expect(tomlValue('"a\\"b\\u00e9\\U0001F600\\t"')).toBe('a"b\u00e9\u{1F600}\t')
+    expect(tomlValue('false # tắt')).toBe('false')
+    expect(tomlValue('"chưa đóng')).toBeNull()
+    expect(tomlValue('"escape \\q lạ"')).toBeNull()
+    expect(tomlValue('"a" rác')).toBeNull()
+  })
+
+  it('đường dẫn có # trong config.toml của Codex không bị cắt, Codex vẫn mở được', async () => {
+    const toml = [
+      '[[skills.config]]',
+      'path = "C:\\\\Users\\\\me\\\\dự án #2\\\\a\\\\SKILL.md" # của tôi',
+      'enabled = false',
+      '[[skills.config]]',
+      "path = 'D:\\b#c\\SKILL.md'",
+      'enabled = true',
+      '[[skills.config]]',
+      'name = "hỏng',
+      'enabled = false'
+    ].join('\n')
+    expect(codexSkillConfigEntries(toml)).toEqual([
+      { path: 'C:\\Users\\me\\dự án #2\\a\\SKILL.md', enabled: false },
+      { path: 'D:\\b#c\\SKILL.md', enabled: true }
+    ])
+    const home = join(tmp, 'codex-home')
+    await write(join(home, 'config.toml'), toml)
+    const prev = process.env.CODEX_HOME
+    process.env.CODEX_HOME = home
+    try {
+      const args = await codexSkillArgs(['seo'], tmp)
+      expect(args[1]).toBe('skills.config=[{path="C:\\\\Users\\\\me\\\\dự án #2\\\\a\\\\SKILL.md",enabled=false},{path="D:\\\\b#c\\\\SKILL.md",enabled=true},{name="seo",enabled=false}]')
+      // Codex đọc lại chuỗi TOML ra đúng đường dẫn gốc.
+      expect(tomlValue(args[1].slice('skills.config=[{path='.length).split(',enabled')[0])).toBe('C:\\Users\\me\\dự án #2\\a\\SKILL.md')
     } finally {
       if (prev === undefined) delete process.env.CODEX_HOME
       else process.env.CODEX_HOME = prev

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { CloudUsage, cloudError, sonioxConfig, toPcm16, VoiceCloud, type WsFactory, type WsLike } from './voiceCloud'
+import { CloudUsage, cloudError, monthKey, sonioxConfig, toPcm16, VoiceCloud, type WsFactory, type WsLike } from './voiceCloud'
 
 /** WebSocket giả: ghi lại mọi thứ gửi đi, test tự đẩy câu trả lời của "Soniox". */
 class FakeWs implements WsLike {
@@ -157,14 +157,30 @@ describe('CloudUsage', () => {
       const file = join(dir, 'voice', 'cloud-usage.json')
       const u = new CloudUsage(file)
       await u.load()
-      const oct = new Date('2026-10-09T10:00:00Z')
+      const oct = new Date(2026, 9, 9, 10)
       await u.add(30, oct)
       await u.add(12.5, oct)
-      await u.add(99, new Date('2026-11-01T10:00:00Z'))
+      await u.add(99, new Date(2026, 10, 1, 10))
       const again = new CloudUsage(file)
       await again.load()
       expect(again.month(oct)).toBe(42.5)
-      expect(again.month(new Date('2026-12-01T00:00:00Z'))).toBe(0)
+      expect(again.month(new Date(2026, 11, 1))).toBe(0)
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('tính theo tháng giờ máy, không theo UTC', async () => {
+    expect(monthKey(new Date(2026, 0, 1, 0, 5))).toBe('2026-01')
+    expect(monthKey(new Date(2026, 11, 31, 23, 55))).toBe('2026-12')
+    const dir = await fs.mkdtemp(join(tmpdir(), 'stag-cloud-'))
+    try {
+      const u = new CloudUsage(join(dir, 'cloud-usage.json'))
+      // 00:30 ngày 1/11 giờ máy (ở VN theo UTC vẫn là 31/10): tính vào tháng 11.
+      await u.add(20, new Date(2026, 10, 1, 0, 30))
+      await u.add(5, new Date(2026, 9, 31, 23, 30))
+      expect(u.month(new Date(2026, 10, 15))).toBe(20)
+      expect(u.month(new Date(2026, 9, 15))).toBe(5)
     } finally {
       await fs.rm(dir, { recursive: true, force: true })
     }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { agentKind, type Agent, type AgentStatus, type CanvasCell, type Workspace } from '@shared/types'
 import { agentFolder, placeOf } from '@shared/projects'
 import { findCell, widgetKey } from '../layout'
@@ -29,7 +29,9 @@ const MARK_TEXT: Record<StatusMark, string> = { ok: 'text-work', in: 'text-info'
 export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const wsId = workspace.id
   const state = useAgents((s) => s.byWs[wsId])
-  const { load, start } = useAgents()
+  // Selector hẹp: useAgents() không selector làm component render lại mỗi khi bất kỳ workspace nào đổi.
+  const load = useAgents((s) => s.load)
+  const start = useAgents((s) => s.start)
   const loadBoard = useBoard((s) => s.load)
 
   useEffect(() => {
@@ -40,10 +42,10 @@ export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.El
 
   const renderCell = (c: CanvasCell): React.ReactNode => {
     if (!state) return null
-    if (c.type === 'widget') return <WidgetCell ws={workspace} widget={c.widget} state={state} />
+    if (c.type === 'widget') return <WidgetCell ws={workspace} widget={c.widget} />
     const agent = state.agents.find((a) => a.id === c.agentId)
     // key theo agent: ô gắn lại đúng terminal của mình (terminals.ts chỉ chuyển phần tử DOM).
-    return agent ? <AgentCell key={agent.id} ws={workspace} agent={agent} state={state} /> : null
+    return agent ? <AgentCell key={agent.id} ws={workspace} agent={agent} /> : null
   }
 
   // Workspace có project: mỗi tab (Chung / project) một canvas riêng, chỉ ô của agent thuộc tab đó.
@@ -203,17 +205,19 @@ function CtxMeter({ agentId, status }: { agentId: string; status: AgentStatus | 
   )
 }
 
-function AgentCell({ ws, agent, state }: { ws: Workspace; agent: Agent; state: WorkspaceAgents }): React.JSX.Element {
+/** memo + selector theo agent: ô chỉ render lại khi phần của chính agent đó đổi, không theo cả workspace. */
+const AgentCell = memo(function AgentCell({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const menuBtn = useRef<HTMLButtonElement>(null)
-  const { start, focus } = useAgents()
+  const start = useAgents((s) => s.start)
+  const focus = useAgents((s) => s.focus)
   const [renaming, setRenaming] = useState(false)
   const [menu, setMenu] = useState(false)
-  const running = !!state.running[agent.id]
-  const starting = !!state.starting[agent.id]
-  const pendingAuto = !!state.autoStart[agent.id]
-  const error = state.errors[agent.id]
-  const focused = state.focused === agent.id
+  const running = useAgents((s) => !!s.byWs[ws.id]?.running[agent.id])
+  const starting = useAgents((s) => !!s.byWs[ws.id]?.starting[agent.id])
+  const pendingAuto = useAgents((s) => !!s.byWs[ws.id]?.autoStart[agent.id])
+  const error = useAgents((s) => s.byWs[ws.id]?.errors[agent.id])
+  const focused = useAgents((s) => s.byWs[ws.id]?.focused === agent.id)
   const status = useBoard((s) => s.byWs[ws.id]?.statuses.find((x) => x.agentId === agent.id))
   const kind = agentKind(agent)
   const terminal = kind === 'terminal'
@@ -302,7 +306,7 @@ function AgentCell({ ws, agent, state }: { ws: Workspace; agent: Agent; state: W
       {renaming && <RenameAgentDialog wsId={ws.id} agentId={agent.id} onClose={() => setRenaming(false)} />}
     </div>
   )
-}
+})
 
 /** Dòng "Đang làm" dưới tiêu đề ô: việc đang mở của agent (task_start) + phạm vi đang khoá (thay cho thẻ Kanban cũ). */
 function DoingLine({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Element {
@@ -341,7 +345,7 @@ function CloseBtn({ wsId, agentId, running }: { wsId: string; agentId: string; r
  * là trang của plugin trong khung cách ly theo workspace này. Plugin đã gỡ / tắt / không chạy → ô vẫn giữ chỗ, hiện
  * lời nhắc.
  */
-function WidgetCell({ ws, widget, state }: { ws: Workspace; widget: string; state: WorkspaceAgents }): React.JSX.Element {
+const WidgetCell = memo(function WidgetCell({ ws, widget }: { ws: Workspace; widget: string }): React.JSX.Element {
   const boxRef = useRef<HTMLDivElement>(null)
   const focus = useAgents((s) => s.focus)
   const closeWidget = useAgents((s) => s.closeWidget)
@@ -350,7 +354,7 @@ function WidgetCell({ ws, widget, state }: { ws: Workspace; widget: string; stat
   const settings = useSettings((s) => s.value)
   const settingsLoaded = useSettings((s) => s.loaded)
   const key = widgetKey(widget)
-  const focused = state.focused === key
+  const focused = useAgents((s) => s.byWs[ws.id]?.focused === key)
   const { pluginId, slotId } = parseWidgetId(widget)
   const live = widgetsOf(items, settings, ws.id).find((x) => x.id === widget)
   const installed = items.find((p) => p.manifest.id === pluginId)
@@ -403,4 +407,4 @@ function WidgetCell({ ws, widget, state }: { ws: Workspace; widget: string; stat
       <CellBorder focused={focused} />
     </div>
   )
-}
+})

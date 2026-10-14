@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, HandoffState, ScopeAsk, Task, WaitReason, Workspace } from '@shared/types'
 import { agentFolder, joinRoot, projectNoteName, projectOf } from '@shared/projects'
+import { fileStamp } from './fileStamp'
 import { readText } from './fsutil'
 import { renameRetry } from './jsonFile'
 import type { ClosedTask } from './workLog'
@@ -80,6 +81,9 @@ export class Board {
   private status = new Map<string, AgentStatus & { workspaceId: string }>()
   private lists = new Map<string, Promise<Task[]>>()
   private writing = new Map<string, Promise<void>>()
+  /** Dấu của tasks.json lúc đọc / ghi cuối (xem fileStamp) và số lần ghi đang chạy của mỗi workspace. */
+  private stamps = new Map<string, string>()
+  private inflight = new Map<string, number>()
   private ignored = new Set<string>()
   private pending = new Map<string, NodeJS.Timeout>()
   /** Lần cuối người dùng gửi lời nhắn cho agent (ms, theo hook UserPromptSubmit). */
@@ -230,6 +234,7 @@ export class Board {
 
   private async read(ws: Workspace): Promise<Task[]> {
     const file = this.file(ws)
+    this.stamps.set(ws.id, await fileStamp(file))
     const raw = await readText(file)
     if (!raw) return []
     let data: Partial<TasksFile> | null = null
@@ -251,19 +256,31 @@ export class Board {
   }
 
   private async save(ws: Workspace, retry = true): Promise<void> {
-    const list = await this.tasks(ws)
+    // Đếm ngay (trước mọi await): từ lúc này tới khi ghi xong, fresh() không đọc lại đè lên thay đổi chưa ghi.
+    this.inflight.set(ws.id, (this.inflight.get(ws.id) ?? 0) + 1)
+    const done = (): void => void this.inflight.set(ws.id, Math.max(0, (this.inflight.get(ws.id) ?? 1) - 1))
+    let list: Task[]
+    try {
+      list = await this.tasks(ws)
+    } catch (e) {
+      done()
+      throw e
+    }
     const file = this.file(ws)
     const prev = this.writing.get(ws.id) ?? Promise.resolve()
-    const next = prev.then(async () => {
-      await fs.mkdir(dirname(file), { recursive: true })
-      if (!this.ignored.has(ws.id)) {
-        await ensureIgnored(ws.path, ['.stag/'], 'stag.ai kanban data')
-        this.ignored.add(ws.id)
-      }
-      const data: TasksFile = { version: 1, tasks: list }
-      await fs.writeFile(`${file}.tmp`, JSON.stringify(data, null, 2), 'utf8')
-      await renameRetry(`${file}.tmp`, file)
-    })
+    const next = prev
+      .then(async () => {
+        await fs.mkdir(dirname(file), { recursive: true })
+        if (!this.ignored.has(ws.id)) {
+          await ensureIgnored(ws.path, ['.stag/'], 'stag.ai kanban data')
+          this.ignored.add(ws.id)
+        }
+        const data: TasksFile = { version: 1, tasks: list }
+        await fs.writeFile(`${file}.tmp`, JSON.stringify(data, null, 2), 'utf8')
+        await renameRetry(`${file}.tmp`, file)
+        this.stamps.set(ws.id, await fileStamp(file))
+      })
+      .finally(done)
     this.writing.set(
       ws.id,
       next.catch(() => {})
@@ -279,16 +296,49 @@ export class Board {
     this.notify(ws.id)
   }
 
+  /**
+   * Danh sách việc, đọc lại nếu tasks.json đổi trên đĩa từ lần đọc / ghi cuối (bản app khác, `git checkout`…).
+   * Gộp tại chỗ theo id (giữ nguyên mảng và object việc đang có): thao tác đang dở vẫn sửa đúng việc, lần ghi sau
+   * giữ cả thay đổi của bên kia. Đang ghi / file mất / hỏng: dùng bản trong bộ nhớ.
+   */
+  private async fresh(ws: Workspace): Promise<Task[]> {
+    const list = await this.tasks(ws)
+    if (this.inflight.get(ws.id)) return list
+    const file = this.file(ws)
+    const stamp = await fileStamp(file)
+    if (!stamp || stamp === this.stamps.get(ws.id) || this.inflight.get(ws.id)) return list
+    let disk: unknown
+    try {
+      disk = (JSON.parse((await readText(file)) ?? '') as Partial<TasksFile> | null)?.tasks
+    } catch {
+      return list
+    }
+    if (!Array.isArray(disk) || this.inflight.get(ws.id)) return list
+    this.stamps.set(ws.id, stamp)
+    const mine = new Map(list.map((t) => [t.id, t]))
+    const onDisk = new Set<string>()
+    const merged = (disk as Task[]).map((d) => {
+      onDisk.add(d.id)
+      const cur = mine.get(d.id)
+      if (!cur) return d
+      for (const k of Object.keys(cur)) if (!(k in d)) delete (cur as unknown as Record<string, unknown>)[k]
+      return Object.assign(cur, d)
+    })
+    // Việc chỉ có trong bộ nhớ (vừa tạo, chưa kịp ghi): giữ.
+    list.splice(0, list.length, ...merged, ...list.filter((t) => !onDisk.has(t.id)))
+    return list
+  }
+
   async snapshot(ws: Workspace): Promise<BoardSnapshot> {
     const statuses = [...this.status.values()]
       .filter((s) => s.workspaceId === ws.id)
       .map(({ workspaceId: _ws, ...s }) => s)
     const scopeAsks = [...this.asks.values()].filter((a) => a.workspaceId === ws.id).map((a) => a.ask)
-    return { statuses, tasks: await this.tasks(ws), scopeAsks }
+    return { statuses, tasks: await this.fresh(ws), scopeAsks }
   }
 
   async openTask(ws: Workspace, agentId: string): Promise<Task | undefined> {
-    return (await this.tasks(ws)).find((t) => t.agentId === agentId && t.status === 'open')
+    return (await this.fresh(ws)).find((t) => t.agentId === agentId && t.status === 'open')
   }
 
   async startTask(ws: Workspace, agent: Agent, sessionId: string, title: string, scope: string): Promise<Task> {
@@ -438,7 +488,7 @@ export class Board {
 
   /** Người dùng đánh dấu xong / bỏ thẻ bằng tay. */
   async closeTask(ws: Workspace, taskId: string, status: 'done' | 'dropped'): Promise<Task | undefined> {
-    const task = (await this.tasks(ws)).find((t) => t.id === taskId && t.status === 'open')
+    const task = (await this.fresh(ws)).find((t) => t.id === taskId && t.status === 'open')
     if (!task) return undefined
     task.status = status
     task.doneAt = new Date().toISOString()
@@ -462,7 +512,7 @@ export class Board {
 
   /** Agent đổi tên: thẻ việc của nó (cả lịch sử đã xong) hiện tên mới. */
   async renameAgent(ws: Workspace, agentId: string, name: string): Promise<void> {
-    const mine = (await this.tasks(ws)).filter((t) => t.agentId === agentId && t.agentName !== name)
+    const mine = (await this.fresh(ws)).filter((t) => t.agentId === agentId && t.agentName !== name)
     if (!mine.length) return
     for (const t of mine) t.agentName = name
     await this.save(ws)

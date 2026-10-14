@@ -71,6 +71,7 @@ import { ChatSession, type ChatSessionBase, type ChatSessionOptions } from './ch
 import { CodexChatSession } from './chat/codexSession'
 import { loadCodexHistory } from './chat/codexHistory'
 import { AgentRequestQueue, type AgentRequestAnswer } from './agentRequests'
+import type { CredentialService } from './credentials'
 import { createStagMcp, describeAgent, type AdapterInfo, type AgentInfo, type AgentLogInput, type ExtraTool, type ProjectInfo } from './mcp'
 import type { ProjectService } from './projects'
 import { formatEntries, parseClaudeLog, parseCodexLog, readTailLines, redact, secretParts } from './sessionLog'
@@ -105,6 +106,16 @@ interface Handoff {
   at: string
 }
 
+/** Việc đầu của agent chưa chạy (hộp tạo agent, agent_create / agent_open / agent_handoff): lời mở của phiên mới đầu tiên. */
+interface FirstTask {
+  from: string
+  task: string
+  created: boolean
+  handoff?: boolean
+  user?: boolean
+  scope?: string
+}
+
 interface StoreFile {
   agents: Agent[]
   /**
@@ -114,6 +125,13 @@ interface StoreFile {
   layouts: Record<string, CanvasLayout>
   /** Theo agentId. Lưu file để app tắt giữa chừng thì phiên sau vẫn nhận được bản bàn giao. */
   handoffs?: Record<string, Handoff>
+  /** Theo agentId. Lưu file để thoát app trước khi mở ô của agent đó thì việc / bản bàn giao vẫn còn. */
+  firstTasks?: Record<string, FirstTask>
+  /**
+   * Phiên đang mở (đã ghi file trong `.sessions/`). App tắt đột ngột → lần mở sau dọn theo đây: id phiên Codex (và
+   * Claude sau /clear) khác lastSessionId nên không đoán được tên file từ agent.
+   */
+  openSessions?: Array<{ workspaceId: string; sessionId: string }>
 }
 
 interface Running extends AgentRun {
@@ -168,12 +186,12 @@ export class AgentService {
   readonly requests = new AgentRequestQueue((list) => {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(IPC.agentRequests, list)
   })
-  /** Việc đầu tiên agent khác giao cho agent mới tạo (agent_create): thành lời mở của phiên mới đầu tiên. */
   /** Ô terminal chạy dev server: lệnh gõ sẵn khi phiên của nó mở (xem devTerminal). */
   private pendingInput = new Map<string, string>()
   /** pty gần nhất của mỗi ô terminal (đọc log cả khi phiên đã đóng). */
   private lastPty = new Map<string, string>()
-  private firstTasks = new Map<string, { from: string; task: string; created: boolean; handoff?: boolean; user?: boolean; scope?: string }>()
+  /** Phiên đang mở dở (chưa vào `running`): mở lỗi thì start() dọn file phiên + bản chép skill theo đây. */
+  private startingFiles = new Map<string, { sessionId: string; sessionFile: string }>()
   /** Tin nhắn giữa agent (agent_send) chờ gõ vào terminal của agent nhận. */
   private mail = new AgentMail()
   private handoffTimer: NodeJS.Timeout | null = null
@@ -280,6 +298,29 @@ export class AgentService {
     this.inspect = svc
   }
 
+  /** Kho mật khẩu (tool credential_list / credential_fill). */
+  private credentials: CredentialService | null = null
+
+  attachCredentials(svc: CredentialService): void {
+    this.credentials = svc
+  }
+
+  /** Thẻ hỏi credential_fill: luôn hỏi theo cài đặt của mục (không theo công tắc "Hỏi bạn trước…" của Agent API). */
+  askCredential(caller: Agent, req: AgentRequestInput): Promise<AgentRequestAnswer> {
+    return this.confirm(caller, 'credential_fill', req, true)
+  }
+
+  /** Gõ một dòng của app ("[stag.ai] …") vào phiên đang chạy của agent khi nó rảnh. Phiên đóng thì bỏ. */
+  tellApp(agentId: string, text: string): void {
+    if (!this.running.has(agentId)) return
+    try {
+      this.mail.enqueue(agentId, { fromId: `stag:${agentId}`, fromName: 'stag.ai', text, at: Date.now(), app: true })
+    } catch {
+      return
+    }
+    this.deliverMail()
+  }
+
   /** Tạo / đổi project (tool project_create / project_update); ProjectService tự gắn vào khi được tạo. */
   private projects: ProjectService | null = null
 
@@ -337,14 +378,54 @@ export class AgentService {
     for (const [wsId, l] of Object.entries(this.data.layouts ?? {})) layouts[wsId] = normalizeLayout(l)
     this.data.layouts = layouts
     // Lúc khởi động chưa phiên nào chạy: file phiên còn lại là do app bị tắt đột ngột (crash, kill).
+    let dirty = false
+    for (const s of this.data.openSessions ?? []) {
+      const ws = this.workspaces.get(s.workspaceId)
+      if (ws && SESSION_ID_RE.test(s.sessionId)) removeSessionFiles(join(ws.path, '.sessions', `${s.sessionId}.md`))
+      dirty = true
+    }
+    delete this.data.openSessions
+    // Bản cũ chưa ghi danh sách trên: đoán theo lastSessionId (chỉ đúng với Claude).
     for (const agent of this.data.agents) {
       const ws = this.workspaces.get(agent.workspaceId)
       if (ws && agent.lastSessionId) removeQuietly(join(ws.path, '.sessions', `${agent.lastSessionId}.md`))
     }
+    // Việc đầu của agent không còn (sửa tay agents.json…): bỏ.
+    for (const id of Object.keys(this.data.firstTasks ?? {}))
+      if (!this.has(id)) {
+        delete this.data.firstTasks![id]
+        dirty = true
+      }
+    if (dirty) await this.save().catch((e) => console.error('[agents] save', e))
   }
 
   private save(): Promise<void> {
     return this.file.write(this.data)
+  }
+
+  /** Đặt việc đầu cho agent chưa chạy và lưu file (thoát app trước khi mở ô đó không mất). */
+  private setFirstTask(agentId: string, t: FirstTask): Promise<void> {
+    const all = (this.data.firstTasks ??= {})
+    all[agentId] = t
+    return this.save()
+  }
+
+  /** Bỏ phiên khỏi danh sách phiên đang mở (đã dọn file của nó). */
+  private untrackSession(sessionId: string): void {
+    const list = this.data.openSessions
+    if (!list?.some((s) => s.sessionId === sessionId)) return
+    this.data.openSessions = list.filter((s) => s.sessionId !== sessionId)
+    void this.save().catch((e) => console.error('[agents] save', e))
+  }
+
+  /** Mở phiên lỗi (sau khi đã chép skill / ghi file phiên): dọn hết, không để file mồ côi trong `.sessions/`. */
+  private dropFailedStart(agentId: string): void {
+    const o = this.startingFiles.get(agentId)
+    if (!o) return
+    this.startingFiles.delete(agentId)
+    removeSessionFiles(o.sessionFile)
+    void this.skills.cleanSession(o.sessionId).catch(() => {})
+    this.untrackSession(o.sessionId)
   }
 
   snapshot(workspaceId: string): AgentsSnapshot {
@@ -393,14 +474,14 @@ export class AgentService {
       ...(req.projectId ? { projectId: req.projectId } : {})
     }
     this.data.agents.push(agent)
+    const task = (req.firstTask ?? '').trim()
+    const scope = (req.scope ?? '').trim()
+    if (!terminal && (task || scope)) (this.data.firstTasks ??= {})[agent.id] = { from: '', task, created: true, user: true, ...(scope ? { scope } : {}) }
     await this.save()
     if (cli && (model || effort)) {
       const one = { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
       await this.settings.setOverrides('agent', agent.id, { models: { [req.kind]: one } })
     }
-    const task = (req.firstTask ?? '').trim()
-    const scope = (req.scope ?? '').trim()
-    if (!terminal && (task || scope)) this.firstTasks.set(agent.id, { from: '', task, created: true, user: true, ...(scope ? { scope } : {}) })
     return agent
   }
 
@@ -411,6 +492,10 @@ export class AgentService {
     if (cur) return cur
     this.stopAfterStart.delete(id)
     const p = this.doStart(owner, req)
+      .catch((e) => {
+        this.dropFailedStart(id)
+        throw e
+      })
       .then((run) => {
         if (this.stopAfterStart.delete(id)) this.stop(id)
         return run
@@ -461,18 +546,20 @@ export class AgentService {
     const open = await this.board.openTask(ws, agent.id)
     // Phiên trước đã bàn giao: phiên mới (không phải tiếp tục phiên cũ) làm tiếp từ bản bàn giao.
     const handoff = resume ? undefined : this.data.handoffs?.[agent.id]
-    const first = resume || handoff ? undefined : this.firstTasks.get(agent.id)
+    const first = resume || handoff ? undefined : this.data.firstTasks?.[agent.id]
     // Claude Code: id phiên của app = id phiên Claude (đặt trước được). Codex tự sinh thread id (biết qua
     // hook SessionStart, lưu vào lastSessionId để resume), nên phiên của app luôn có id riêng.
     const sessionId = resume && kind === 'claude' ? agent.lastSessionId! : randomUUID()
     const codexResume = resume && kind === 'codex' ? agent.lastSessionId : undefined
+    const sessionFile = join(ws.path, '.sessions', `${sessionId}.md`)
+    // Từ đây mở lỗi thì start() dọn file phiên + bản chép skill (dropFailedStart).
+    this.startingFiles.set(agent.id, { sessionId, sessionFile })
     // Skill bật cho agent: bản chép riêng của phiên (Claude nạp qua --add-dir, CLI khác đọc theo luật phiên).
     const sk = effectiveSkills(this.settings.get(), await this.skills.usable(), agent.workspaceId, agent.id)
     // Claude tắt skill theo tên (skillOverrides) nên không tách được hai skill cùng tên: trùng với skill Claude Code
     // tự nạp (user / claude.ai / project) thì phiên Claude dùng bản của Claude Code, không chép bản thư viện.
     const claudeOwn = kind === 'claude' ? new Set((await scanClaudeSkills(cwd, homedir(), this.claudeEnv())).filter((s) => s.scope !== 'plugin').map((s) => s.name)) : null
     const sessionSkills = await this.skills.prepareSession(sessionId, claudeOwn ? sk.library.filter((n) => !claudeOwn.has(n)) : sk.library)
-    const sessionFile = join(ws.path, '.sessions', `${sessionId}.md`)
     const agentNote = join(ws.vaultPath, '60 Agents', `${agent.name}.md`)
     const structured = await exists(join(ws.vaultPath, '_INDEX.md'))
     // Note agent quá hạn mức: cất mục "Work done" cũ trước; vẫn quá thì luật phiên nhờ agent viết gọn.
@@ -528,6 +615,9 @@ export class AgentService {
       void this.skills.cleanSession(sessionId)
       throw new Error('Agent đã bị xoá')
     }
+    // Ghi danh sách phiên đang mở trước khi tạo file trong .sessions/: app tắt đột ngột thì lần mở sau còn biết mà dọn.
+    if (!this.data.openSessions?.some((s) => s.sessionId === sessionId)) (this.data.openSessions ??= []).push({ workspaceId: ws.id, sessionId })
+    await this.save()
     await this.writeSessionFile(sessionFile, vars, open)
     await writeIfMissing(agentNote, await readTemplate('agent/agent-note.md', vars))
     await ensureIgnored(ws.path, ['.sessions/'], 'stag.ai agent sessions')
@@ -690,7 +780,9 @@ export class AgentService {
     }
     if (chat) this.chats.set(agent.id, chat)
     this.running.set(agent.id, run)
-    if (first) this.firstTasks.delete(agent.id)
+    this.startingFiles.delete(agent.id)
+    // Việc đầu đã thành lời mở: dùng một lần (việc khác đặt vào trong lúc đang mở thì giữ cho lần sau).
+    if (first && this.data.firstTasks?.[agent.id] === first) delete this.data.firstTasks[agent.id]
     // Phiên mới: chờ hook đầu tiên (lời mở đầu). Tiếp tục phiên: Claude Code đứng chờ người dùng gõ.
     if (resume) this.board.setActivity(agent, 'waiting', { reason: 'turn' })
     else this.board.setActivity(agent, 'starting')
@@ -863,6 +955,7 @@ export class AgentService {
     if (run.sessionFile) {
       removeSessionFiles(run.sessionFile)
       void this.skills.cleanSession(run.sessionId)
+      this.untrackSession(run.sessionId)
     }
     const agent = this.data.agents.find((a) => a.id === agentId)
     // Agent bị xoá khi phiên còn đang mở: bỏ trạng thái phiên mở dở đặt lại sau lúc xoá (không để "starting" ma).
@@ -879,7 +972,8 @@ export class AgentService {
     // lời mở của phiên sau (thẻ việc đã chuyển sang agent này rồi). Phiên tự mở lại vì bàn giao thì giữ nguyên hàng chờ.
     if (!restarting)
       for (const m of this.mail.drain(agentId))
-        if (m.handoff && !this.firstTasks.has(agentId)) this.firstTasks.set(agentId, { from: m.fromName, task: m.text, created: false, handoff: true })
+        if (m.handoff && !this.data.firstTasks?.[agentId])
+          void this.setFirstTask(agentId, { from: m.fromName, task: m.text, created: false, handoff: true }).catch((e) => console.error('[agents] save', e))
     if (restarting) {
       setImmediate(() => {
         if (!run.owner.isDestroyed()) run.owner.send(IPC.agentRestart, agentId)
@@ -1146,6 +1240,9 @@ export class AgentService {
           }
         : undefined,
       inspect: this.inspect ? { reply: (input) => this.inspect!.reply(ws, agent, input) } : undefined,
+      credentials: this.credentials
+        ? { list: (domain) => this.credentials!.list(agent, domain), fill: (id) => this.credentials!.fill(agent, id) }
+        : undefined,
       syncSessionFile: async () => {
         const cur = this.running.get(agent.id)
         if (!cur?.sessionFile) return
@@ -1286,7 +1383,7 @@ export class AgentService {
       const one = { ...(draft.model ? { model: draft.model } : {}), ...(draft.effort ? { effort: draft.effort } : {}) }
       await this.settings.setOverrides('agent', agent.id, { models: { [draft.kind]: one } })
     }
-    if (draft.task) this.firstTasks.set(agent.id, { from: caller.name, task: draft.task, created: true })
+    if (draft.task) await this.setFirstTask(agent.id, { from: caller.name, task: draft.task, created: true })
     const event: AgentCreatedEvent = { agent, nearAgentId: caller.id, open: draft.open }
     if (!run.owner.isDestroyed()) run.owner.send(IPC.agentCreated, event)
 
@@ -1413,10 +1510,11 @@ export class AgentService {
   }
 
   /** Hỏi người dùng trong app; trong lúc chờ, agent đã xin hiện "chờ duyệt" (thông báo chờ như thường). */
-  private async confirm(caller: Agent, tool: string, req: AgentRequestInput): Promise<AgentRequestAnswer> {
+  private async confirm(caller: Agent, tool: string, req: AgentRequestInput, always = false): Promise<AgentRequestAnswer> {
     // Cài đặt → Agent API tắt "Hỏi bạn trước…" (khoá confirmCreate): mọi thẻ hỏi của agent (tạo / dừng / xoá / đổi
     // quyền agent, tạo project, gửi việc sang project khác hay cho agent quyền cao hơn, chạy dev server) cho luôn.
-    if (!resolveAgentApi(this.settings.get(), req.workspaceId, caller.id).confirmCreate) return 'allow'
+    // `always` (mật khẩu): vẫn hỏi.
+    if (!always && !resolveAgentApi(this.settings.get(), req.workspaceId, caller.id).confirmCreate) return 'allow'
     const run = this.running.get(caller.id)
     this.board.setActivity(caller, 'waiting', { reason: 'permission', tool })
     const answer = await this.requests.ask(req)
@@ -1581,7 +1679,7 @@ export class AgentService {
         return `"${target.name}" was opened meanwhile: your task was sent into its running session (as with agent_send).`
       }
     }
-    if (task) this.firstTasks.set(target.id, { from: caller.name, task, created: false })
+    if (task) await this.setFirstTask(target.id, { from: caller.name, task, created: false })
     this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
     return `Opening "${target.name}" in a new session${task ? ' that starts with your task' : ''}: its cell is ${cellWhere(this.workspaces.get(ws.id) ?? ws, caller, target)}.`
   }
@@ -1703,7 +1801,7 @@ export class AgentService {
       this.mail.enqueue(target.id, { fromId: caller.id, fromName: caller.name, text: body, at: now, handoff: true })
       this.deliverMail()
     } else {
-      this.firstTasks.set(target.id, { from: caller.name, task: body, created: false, handoff: true })
+      await this.setFirstTask(target.id, { from: caller.name, task: body, created: false, handoff: true })
       this.apiEvent({ type: 'open', workspaceId: ws.id, agentId: target.id, nearAgentId: caller.id })
     }
     const moved = card
@@ -1888,13 +1986,13 @@ export class AgentService {
       if (!item) continue
       typed.add(id)
       this.commentQuiet.set(id, now + MAIL_GAP_MS)
-      const msg = item.user ? item.text : item.handoff ? handoffMessage(item.fromName, item.text) : agentMessage(item.fromName, item.text)
+      const msg = item.user || item.app ? item.text : item.handoff ? handoffMessage(item.fromName, item.text) : agentMessage(item.fromName, item.text)
       // Ô chat hiện tin gốc (không kèm lời đánh dấu); agent nhận vẫn thấy bản có đánh dấu.
       this.submit(run, msg, {
         cli: isCliKind(agentKind(agent)),
-        origin: item.user ? 'user' : 'agent',
+        origin: item.user ? 'user' : item.app ? 'app' : 'agent',
         from: item.fromName || undefined,
-        display: item.user ? undefined : item.text
+        display: item.user ? undefined : item.app ? item.text.replace(/^\[stag\.ai\]\s*/, '') : item.text
       })
     }
     // Góp ý tab Sản phẩm / chế độ Soi: sau tin agent (tin agent vừa gõ thì chờ lần xét sau).
@@ -2007,9 +2105,10 @@ export class AgentService {
     this.data.agents = this.data.agents.filter((a) => a.id !== agentId)
     if (this.data.handoffs) delete this.data.handoffs[agentId]
     this.mail.forget(agentId)
-    this.firstTasks.delete(agentId)
+    if (this.data.firstTasks) delete this.data.firstTasks[agentId]
     this.chats.delete(agentId)
     this.requests.dropTarget(agentId)
+    this.credentials?.forgetAgent(agentId)
     await this.save()
   }
 
@@ -2020,7 +2119,7 @@ export class AgentService {
       this.stop(a.id)
       if (this.data.handoffs) delete this.data.handoffs[a.id]
       this.mail.forget(a.id)
-      this.firstTasks.delete(a.id)
+      if (this.data.firstTasks) delete this.data.firstTasks[a.id]
       this.chats.delete(a.id)
     }
     this.data.agents = this.data.agents.filter((a) => a.workspaceId !== workspaceId)
@@ -2224,6 +2323,9 @@ export function targetProject(ws: Workspace, caller: Pick<Agent, 'projectId'>, r
 function layoutKey(workspaceId: string, projectId?: string | null): string {
   return projectId && projectId !== CHUNG ? `${workspaceId}#${projectId}` : workspaceId
 }
+
+/** Id phiên ghi trong agents.json (openSessions): chỉ dọn tên file hợp lệ trong .sessions/, không theo đường dẫn lạ. */
+const SESSION_ID_RE = /^[A-Za-z0-9-]{1,80}$/
 
 /** File phiên trong .sessions/: file phiên + luật phiên (adapter ngoài) + cấu hình MCP / settings riêng (connector). */
 function removeSessionFiles(sessionFile: string): void {

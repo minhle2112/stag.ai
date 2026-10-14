@@ -1,5 +1,8 @@
+import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { claudeLogin, codexConfigModel, codexLogin, codexModels, independentSessionEnv, modelArgs } from './adapters'
+import { claudeLogin, codexConfigModel, codexLogin, codexModels, independentSessionEnv, modelArgs, runCli } from './adapters'
 import { codexArgs } from './codex'
 
 describe('modelArgs', () => {
@@ -74,5 +77,17 @@ describe('independentSessionEnv', () => {
   it('bỏ dấu phiên con, giữ cấu hình người dùng', () => {
     const env = independentSessionEnv({ CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'x', CLAUDE_CODE_USE_BEDROCK: '1', PATH: 'p' })
     expect(env).toEqual({ CLAUDE_CODE_USE_BEDROCK: '1', PATH: 'p' })
+  })
+})
+
+describe('runCli (nút Kiểm tra)', () => {
+  it.runIf(process.platform === 'win32')('đường dẫn .cmd chạy được qua cmd.exe (không còn spawn EINVAL)', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'stag cli '))
+    const cmd = join(dir, 'fake cli.cmd')
+    await fs.writeFile(cmd, '@echo fake 1.2.3 %*\r\n')
+    const r = await runCli(cmd, ['--version'], process.env)
+    expect(r.ok).toBe(true)
+    expect(r.out.trim()).toBe('fake 1.2.3 "--version"')
+    await fs.rm(dir, { recursive: true, force: true })
   })
 })

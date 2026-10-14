@@ -17,6 +17,7 @@ import {
   type PublishFailure
 } from '@shared/artifacts'
 import type { Agent, Task, Workspace } from '@shared/types'
+import { fileStamp } from './fileStamp'
 import { readText } from './fsutil'
 import { renameRetry } from './jsonFile'
 import { ensureIgnored } from './workspace'
@@ -74,11 +75,15 @@ export class ArtifactStore {
   private ignored = new Set<string>()
   private pending = new Map<string, NodeJS.Timeout>()
   private known = new Map<string, Workspace>()
+  /** Dấu của index.json lúc đọc / ghi cuối (xem fileStamp). */
+  private stamps = new Map<string, string>()
 
   constructor(
     private notify: (workspaceId: string) => void,
     /** Có góp ý mới vào hàng chờ của agent này (gửi ngay nếu agent rảnh). */
-    private onQueued?: (agentId: string) => void
+    private onQueued?: (agentId: string) => void,
+    /** Việc `taskId` còn mở không (chủ sản phẩm còn đang làm nó). Không có → coi như còn mở. */
+    private taskOpen?: (ws: Workspace, taskId: string) => Promise<boolean>
   ) {}
 
   private dir(ws: Workspace): string {
@@ -97,25 +102,38 @@ export class ArtifactStore {
 
   private async read(ws: Workspace): Promise<IndexFile> {
     const file = join(this.dir(ws), 'index.json')
+    // Dấu trước khi đọc: file đổi giữa hai bước thì lần sửa sau đọc lại thêm một lần, không sao.
+    this.stamps.set(ws.id, await fileStamp(file))
     const raw = await readText(file)
-    const empty: IndexFile = { version: 1, next: { a: 1, c: 1 }, artifacts: [], failures: [] }
-    if (!raw) return empty
-    try {
-      const d = JSON.parse(raw) as Partial<IndexFile>
-      if (d && Array.isArray(d.artifacts))
-        return { version: 1, next: { a: d.next?.a ?? 1, c: d.next?.c ?? 1 }, artifacts: d.artifacts, failures: Array.isArray(d.failures) ? d.failures : [] }
-    } catch {
-      // hỏng: cất sang bên cạnh, bắt đầu lại
-    }
+    if (!raw) return { version: 1, next: { a: 1, c: 1 }, artifacts: [], failures: [] }
+    const d = parseIndex(raw)
+    if (d) return d
+    // hỏng: cất sang bên cạnh, bắt đầu lại
     await fs.rename(file, `${file}.broken-${Date.now()}`).catch(() => {})
-    return empty
+    return { version: 1, next: { a: 1, c: 1 }, artifacts: [], failures: [] }
+  }
+
+  /**
+   * Dữ liệu để sửa: index.json đổi trên đĩa từ lần đọc / ghi cuối (bản app khác, `git checkout`…) thì đọc lại trước,
+   * không ghi đè mất thay đổi của họ. File mất / hỏng: giữ bản trong bộ nhớ (lần ghi tới ghi lại).
+   */
+  private async fresh(ws: Workspace): Promise<IndexFile> {
+    const d = await this.load(ws)
+    const file = join(this.dir(ws), 'index.json')
+    const stamp = await fileStamp(file)
+    if (stamp === (this.stamps.get(ws.id) ?? '')) return d
+    const disk = stamp ? parseIndex((await readText(file)) ?? '') : null
+    if (!disk) return d
+    this.stamps.set(ws.id, stamp)
+    this.data.set(ws.id, Promise.resolve(disk))
+    return disk
   }
 
   /** Chạy lần lượt các thay đổi của một workspace, ghi file + báo giao diện sau mỗi lần. */
   private mutate<T>(ws: Workspace, fn: (d: IndexFile) => Promise<T> | T): Promise<T> {
     const prev = this.chain.get(ws.id) ?? Promise.resolve()
     const run = prev.then(async () => {
-      const d = await this.load(ws)
+      const d = await this.fresh(ws)
       const out = await fn(d)
       await this.save(ws, d)
       this.changed(ws.id)
@@ -137,6 +155,7 @@ export class ArtifactStore {
     }
     await fs.writeFile(`${file}.tmp`, JSON.stringify(d, null, 2), 'utf8')
     await renameRetry(`${file}.tmp`, file)
+    this.stamps.set(ws.id, await fileStamp(file))
   }
 
   private changed(workspaceId: string): void {
@@ -208,11 +227,18 @@ export class ArtifactStore {
     const note = clean(input.note ?? '', MAX_DESC)
     const fixes = [...new Set((input.fixes ?? []).map((x) => String(x).trim()).filter(Boolean))]
 
-    return this.mutate(ws, async (d) => {
+    let tookOver = false
+    const result = await this.mutate(ws, async (d) => {
       const key = rel.toLowerCase()
       let a = d.artifacts.find((x) => x.rel.toLowerCase() === key)
       const at = now()
       const isNew = !a
+      // Sản phẩm của agent khác: chỉ nộp đè khi việc của chủ nó đã đóng (xong / bàn giao / bỏ); lúc đó quyền sở hữu chuyển sang.
+      const prevOwner = a && a.agentId !== agent.id ? { name: a.agentName } : null
+      if (a && prevOwner && (await this.ownerBusy(ws, a)))
+        throw new Error(
+          `Artifact ${a.id} (file ${a.rel}) belongs to ${a.agentName}, whose task "${a.taskTitle}" is still open. Only ${a.agentName} can publish new versions of it while that task is open. Publish your work under another file name, or ask ${a.agentName} to publish it.`
+        )
       if (!a) {
         a = {
           id: `a${d.next.a++}`,
@@ -267,6 +293,10 @@ export class ArtifactStore {
         lines.push(`Published "${title}" as v${v} (artifact ${a.id}, file ${rel}) under your task "${task.title}". stag.ai saved a snapshot; the user sees it in the stag.ai "Sản phẩm" (Artifacts) tab${isNew ? '' : ' with a diff against the previous version'}.`)
       }
       if (wasHidden) lines.push('It was hidden from the list before; it is shown again.')
+      if (prevOwner) {
+        tookOver = a.comments.some((c) => c.state === 'queued')
+        lines.push(`You took over this artifact from ${prevOwner.name} (their task is closed): comments on it now come to you.`)
+      }
       // Góp ý đã sửa.
       const done: string[] = []
       const unknown: string[] = []
@@ -293,6 +323,9 @@ export class ArtifactStore {
       if (open.length) lines.push(`Comments still open on this artifact: ${open.map((c) => `${c.id} (${anchorLabel(c.anchor, 40)})`).join('; ')}. Fix them and re-publish with fixes, or answer with artifact_reply.`)
       return lines.join('\n')
     })
+    // Góp ý đang chờ gửi cho chủ cũ: giờ gửi cho agent này.
+    if (tookOver) this.onQueued?.(agent.id)
+    return result
   }
 
   /** artifact_reply: agent trả lời một góp ý (có thể kèm nút trả lời nhanh) → chờ người dùng. */
@@ -300,17 +333,34 @@ export class ArtifactStore {
     const text = clean(input.text, MAX_TEXT, true)
     if (!text) throw new Error('text is empty.')
     const options = (input.options ?? []).map((o) => clean(o, 60)).filter(Boolean).slice(0, 4)
-    return this.mutate(ws, (d) => {
+    return this.mutate(ws, async (d) => {
       const { a, c } = findComment(d, input.id)
       if (c.state === 'draft') throw new Error(`Comment ${c.id} was not sent to you.`)
+      // Cùng luật với publish: góp ý thuộc chủ sản phẩm; việc của chủ đã đóng (vd. bàn giao) thì agent trả lời nhận quyền.
+      let took = ''
+      if (a.agentId !== agent.id) {
+        if (await this.ownerBusy(ws, a))
+          throw new Error(
+            `Comment ${c.id} is on artifact ${a.id} (file ${a.rel}), which belongs to ${a.agentName}, whose task "${a.taskTitle}" is still open. Only ${a.agentName} can reply to it.`
+          )
+        took = ` You took over artifact ${a.id} from ${a.agentName} (their task is closed): its comments now come to you.`
+        a.agentId = agent.id
+        a.agentName = agent.name
+      }
       const msg: CommentMessage = { by: 'agent', name: agent.name, text, at: now(), ...(options.length ? { options } : {}) }
       c.thread.push(msg)
       c.state = 'you'
       delete c.prevState
       c.updatedAt = msg.at
       a.updatedAt = msg.at
-      return `Reply added to ${c.id} on "${a.title}". The user sees it under "Needs you" and answers in the stag.ai "Sản phẩm" (Artifacts) tab; the answer comes back to your session.`
+      return `Reply added to ${c.id} on "${a.title}". The user sees it under "Needs you" and answers in the stag.ai "Sản phẩm" (Artifacts) tab; the answer comes back to your session.${took}`
     })
+  }
+
+  /** Việc của chủ sản phẩm (việc lúc nộp) còn mở: agent khác chưa được nộp đè / trả lời góp ý. Không biết → coi như còn mở. */
+  private async ownerBusy(ws: Workspace, a: ArtifactRecord): Promise<boolean> {
+    if (!a.taskId) return false
+    return this.taskOpen ? this.taskOpen(ws, a.taskId) : true
   }
 
   // ---------- người dùng ----------
@@ -537,6 +587,18 @@ function short(s: string, n: number): string {
 function clean(s: unknown, max: number, multiline = false): string {
   const t = String(s ?? '').replace(/\r\n?/g, '\n')
   return (multiline ? t.trim() : t.replace(/\s+/g, ' ').trim()).slice(0, max)
+}
+
+/** Nội dung index.json → dữ liệu; null = hỏng. */
+function parseIndex(raw: string): IndexFile | null {
+  try {
+    const d = JSON.parse(raw) as Partial<IndexFile>
+    if (d && Array.isArray(d.artifacts))
+      return { version: 1, next: { a: d.next?.a ?? 1, c: d.next?.c ?? 1 }, artifacts: d.artifacts, failures: Array.isArray(d.failures) ? d.failures : [] }
+  } catch {
+    /* hỏng */
+  }
+  return null
 }
 
 function safeId(id: string): string {

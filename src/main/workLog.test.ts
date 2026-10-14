@@ -1,7 +1,7 @@
-import { promises as fs, writeFileSync } from 'node:fs'
+import { promises as fs, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { dirname, join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MEMORY, type MemorySettings, type Task, type Workspace } from '@shared/types'
 import {
   insertInSection,
@@ -88,6 +88,20 @@ describe('touchUpdated / splitWorkDone', () => {
     expect(again.moved).toEqual(['- 3'])
     expect(again.note.match(/Older items/g)).toHaveLength(1)
     expect(splitWorkDone(note, 10, 'T archive')).toEqual({ note, moved: [] })
+  })
+
+  it('chỉ rút mục đã cất: heading con, đoạn văn, mục giữ lại ở nguyên chỗ', () => {
+    const note = '## Work done\nIntro text.\n- 1\n- 2\n\n### Sprint 2\nSprint note.\n- 3\n  more of 3\n- 4\n\n## Next\n'
+    const r = splitWorkDone(note, 2, 'T archive')
+    expect(r.moved).toEqual(['- 1', '- 2'])
+    expect(r.note).toBe('## Work done\nOlder items: [[T archive]]\nIntro text.\n\n### Sprint 2\nSprint note.\n- 3\n  more of 3\n- 4\n\n## Next\n')
+  })
+
+  it('CRLF: mục nhiều dòng trả về nối bằng \\n, note giữ CRLF', () => {
+    const note = '## Work done\r\n- 1\r\n  more of 1\r\n- 2\r\n- 3\r\n'
+    const r = splitWorkDone(note, 2, 'T archive')
+    expect(r.moved).toEqual(['- 1\n  more of 1'])
+    expect(r.note).toBe('## Work done\r\nOlder items: [[T archive]]\r\n- 2\r\n- 3\r\n')
   })
 })
 
@@ -216,6 +230,32 @@ describe('MemoryKeeper (trên đĩa)', () => {
     expect(archive.match(/## 2026-09-01/g)).toHaveLength(1)
   })
 
+  it('note / _INDEX viết CRLF: cất lại (lần trước rút gọn chưa kịp ghi) không chép trùng mục nhiều dòng vào note cất', async () => {
+    cfg = { ...DEFAULT_MEMORY, noteBudgetKb: 1, keepWorkDone: 1 }
+    const items = Array.from({ length: 12 }, (_, i) => `- 2026-01-${String(i + 1).padStart(2, '0')} — "task ${i + 1}" — ${'x'.repeat(60)}\r\n  detail ${i + 1}`)
+    const note = `---\r\ntype: agent\r\n---\r\n# Tester\r\n\r\n## Work done\r\n${items.join('\r\n')}\r\n`
+    await fs.writeFile(vault('60 Agents', 'Tester.md'), note)
+    const k = new MemoryKeeper(() => cfg)
+    await k.compact(ws, 'Tester', cfg)
+    expect(await read('60 Agents', 'Tester.md')).not.toMatch(/[^\r]\n/)
+    await fs.writeFile(vault('60 Agents', 'Tester.md'), note)
+    await k.compact(ws, 'Tester', cfg)
+    const archive = await read('60 Agents', 'Tester archive.md')
+    expect(archive.match(/"task 1"/g)).toHaveLength(1)
+    expect(archive.match(/detail 11\n/g)).toHaveLength(1)
+
+    const old = Array.from({ length: 40 }, (_, i) => `- [x] Done ${i} (2026-01-01) ${'y'.repeat(80)}\r\n  - child ${i}`)
+    const index = `# INDEX\r\n\r\n## Open items\r\n${old.join('\r\n')}\r\n`
+    await fs.writeFile(vault('_INDEX.md'), index)
+    const now = new Date(2026, 9, 11, 12)
+    expect(await k.compactIndex(ws, { ...cfg, indexBudgetKb: 1 }, now)).toBe(40)
+    await fs.writeFile(vault('_INDEX.md'), index)
+    expect(await k.compactIndex(ws, { ...cfg, indexBudgetKb: 1 }, now)).toBe(40)
+    const idxArchive = await read('_INDEX archive.md')
+    expect(idxArchive.match(/- \[x\] Done 0 /g)).toHaveLength(1)
+    expect(idxArchive.match(/ {2}- child 39\n/g)).toHaveLength(1)
+  })
+
   it('"Dọn ngay" (force): dọn cả khi _INDEX chưa quá hạn mức, vẫn theo số ngày', async () => {
     await fs.writeFile(vault('_INDEX.md'), '# INDEX\n\n## Open items\n- [x] Old (2026-01-01)\n- [x] New (2026-10-11)\n- [ ] Open (2026-01-01)\n')
     const k = new MemoryKeeper(() => cfg)
@@ -325,6 +365,9 @@ describe('splitIndexDone / addToIndexArchive', () => {
     const order = ['## Undated', '- [x] U', '## 2026-10-01', '- [x] A', '  - a child', '## 2026-10-05', '- [x] B'].map((s) => a.indexOf(s))
     expect(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1]))).toBe(true)
     expect(addToIndexArchive(a, items, '2026-10-12')).toBeNull()
+    // Note cất CRLF vẫn nhận ra mục đã có; mục là tiền tố của mục khác không bị coi là đã có.
+    expect(addToIndexArchive(a.replace(/\n/g, '\r\n'), items, '2026-10-12')).toBeNull()
+    expect(addToIndexArchive(addToIndexArchive(newIndexArchive('2026-10-11'), [{ date: null, text: '- [x] A2' }], '2026-10-11')!, [{ date: null, text: '- [x] A' }], '2026-10-11')).toContain('- [x] A\n')
     const b = addToIndexArchive(a, [{ date: '2026-10-01', text: '- [x] A2' }], '2026-10-12')!
     expect(b.indexOf('- [x] A2')).toBeLessThan(b.indexOf('## 2026-10-05'))
     expect(b).toContain('updated: 2026-10-12')
@@ -346,6 +389,32 @@ describe('NoteWriter', () => {
       return `${text}app line\n`
     })
     expect(await fs.readFile(file, 'utf8')).toBe('a\nagent edit\napp line\n')
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  it('ghi nguyên tử: ghi file tạm cùng thư mục rồi đổi tên, không để lại file tạm; file chưa có thì tạo cả thư mục', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'stag-notewriter-'))
+    const file = join(dir, 'n.md')
+    await fs.writeFile(file, 'old\n')
+    const writes: string[] = []
+    const spy = vi.spyOn(fs, 'writeFile').mockImplementation(async (p, data) => {
+      writes.push(String(p))
+      // Lúc đang ghi file tạm, note vẫn là bản cũ nguyên vẹn.
+      expect(readFileSync(file, 'utf8')).toBe('old\n')
+      writeFileSync(String(p), data as string, 'utf8')
+    })
+    try {
+      expect(await new NoteWriter().update(file, () => 'new\n')).toBe(true)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).not.toBe(file)
+    expect(dirname(writes[0])).toBe(dir)
+    expect(await fs.readFile(file, 'utf8')).toBe('new\n')
+    expect(await fs.readdir(dir)).toEqual(['n.md'])
+    expect(await new NoteWriter().update(join(dir, 'sub', 'm.md'), () => 'm\n')).toBe(true)
+    expect(await fs.readFile(join(dir, 'sub', 'm.md'), 'utf8')).toBe('m\n')
     await fs.rm(dir, { recursive: true, force: true })
   })
 })

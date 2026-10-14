@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { BrowserPermissionAsk, BrowserState } from '@shared/types'
 import { useSettings } from './settings'
+import { latestWins } from './sync'
 import { useUi } from './ui'
 import { useWorkspaces } from './workspaces'
 
@@ -48,7 +49,12 @@ interface BrowserStore {
 }
 
 export const useBrowser = create<BrowserStore>((set, get) => {
-  window.stag.browser.onChanged((wsId, state) => set((s) => ({ byWs: { ...s.byWs, [wsId]: state } })))
+  const latest = latestWins()
+  // Main đẩy trạng thái mới: lần nạp đang chờ (nếu có) trả về bản không mới hơn → bỏ.
+  window.stag.browser.onChanged((wsId, state) => {
+    latest.bump(wsId)
+    set((s) => ({ byWs: { ...s.byWs, [wsId]: state } }))
+  })
   // Agent vừa mở trang trong workspace đang xem → mở pane để người dùng thấy.
   window.stag.browser.onReveal((wsId) => {
     if (useWorkspaces.getState().activeId === wsId) useUi.getState().setBrowserOpen(true)
@@ -66,7 +72,9 @@ export const useBrowser = create<BrowserStore>((set, get) => {
     setExpanded: (expanded) => set({ expanded }),
 
     async load(wsId) {
+      const fresh = latest.begin(wsId)
       const state = await window.stag.browser.state(wsId)
+      if (!fresh()) return
       set((s) => ({ byWs: { ...s.byWs, [wsId]: state } }))
     },
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Workspace } from '@shared/types'
+import { coalesce } from './sync'
 
 const ACTIVE_KEY = 'stag.activeWorkspace'
 
@@ -32,6 +33,9 @@ interface WorkspaceState {
   remove: (id: string) => Promise<void>
 }
 
+// Gộp lần nạp trùng lúc (StrictMode chạy effect hai lần lúc khởi động).
+const loadOnce = coalesce(() => Promise.all([window.stag.workspace.list(), window.stag.settings.get()]))
+
 export const useWorkspaces = create<WorkspaceState>((set, get) => ({
   replace(ws) {
     set((s) => ({ items: s.items.map((w) => (w.id === ws.id ? ws : w)) }))
@@ -40,7 +44,7 @@ export const useWorkspaces = create<WorkspaceState>((set, get) => ({
   activeId: null,
   loaded: false,
   async load() {
-    const [items, settings] = await Promise.all([window.stag.workspace.list(), window.stag.settings.get()])
+    const [items, settings] = await loadOnce('')
     // Settings → Chung: tắt "mở lại workspace lần trước" thì luôn vào workspace đầu danh sách.
     const saved = settings.app.general.reopenLastWorkspace ? readActive() : null
     const activeId = items.some((w) => w.id === saved) ? saved : (items[0]?.id ?? null)

@@ -176,6 +176,27 @@ export const IPC = {
   secretsSet: 'secrets:set',
   secretsRemove: 'secrets:remove',
   secretsChanged: 'secrets:changed',
+  /** Kho mật khẩu cho agent (Cài đặt → Mật khẩu). Mật khẩu / mã chỉ sang renderer khi bạn bấm Hiện / Chép. */
+  credList: 'cred:list',
+  credSave: 'cred:save',
+  credPatch: 'cred:patch',
+  credRemove: 'cred:remove',
+  credNeverRemove: 'cred:never-remove',
+  credReveal: 'cred:reveal',
+  credCode: 'cred:code',
+  credCopy: 'cred:copy',
+  credLog: 'cred:log',
+  credTotpPreview: 'cred:totp-preview',
+  credScanScreen: 'cred:scan-screen',
+  credScanImage: 'cred:scan-image',
+  credImport: 'cred:import',
+  credImportCommit: 'cred:import-commit',
+  /** Nút chìa khoá của ô Browser: hiện lại bong bóng "Lưu mật khẩu?" của tab. */
+  credReopen: 'cred:reopen',
+  /** main → renderer: CredentialsState mới */
+  credChanged: 'cred:changed',
+  /** main → renderer: CredentialNotice (agent bị chặn điền) */
+  credNotice: 'cred:notice',
   /** Connect từ danh mục (có thể mở trình duyệt đăng nhập OAuth), huỷ đăng nhập đang chờ, đăng nhập lại. */
   connectorConnect: 'connector:connect',
   connectorConnectCancel: 'connector:connect-cancel',

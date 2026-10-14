@@ -9,6 +9,7 @@ import { LogView } from './components/LogView'
 import { ScopeAskDialog } from './components/ScopeAskDialog'
 import { AgentRequestDialog } from './components/AgentRequestDialog'
 import { ApprovalToast } from './components/ApprovalToast'
+import { CredentialToast } from './components/CredentialToast'
 import { PluginToast } from './components/PluginSlots'
 import { PluginFrame } from './components/PluginFrame'
 import { SettingsPage } from './components/settings/SettingsPage'
@@ -198,6 +199,7 @@ export function App(): React.JSX.Element {
       <ScopeAskDialog />
       <AgentRequestDialog />
       <ApprovalToast />
+      <CredentialToast />
       <PluginToast />
       <NewAgentDialog />
       <CreateProjectDialog />

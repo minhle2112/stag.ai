@@ -48,6 +48,11 @@ export interface McpContext {
     publish(input: { file: string; title: string; description: string; note?: string; fixes?: string[] }): Promise<string>
     reply(input: { id: string; text: string; options?: string[] }): Promise<string>
   }
+  /** Tool credential_list / credential_fill (kho mật khẩu, đi cùng tool browser_*); vắng = không có tool. */
+  credentials?: {
+    list(domain?: string): string
+    fill(id: string): Promise<string>
+  }
   /** Tool inspect_reply (chế độ Soi của ô Browser); vắng = không có tool. */
   inspect?: {
     reply(input: { id: number; text: string; changes?: string; ask?: boolean; quick?: string[]; failed?: boolean }): Promise<string>
@@ -883,6 +888,37 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): RegisteredToo
     },
     run(({ only_errors }: { only_errors?: boolean }) => browser.agentConsole(agent, !!only_errors))
   ))
+
+  // Kho mật khẩu: agent nhờ app đăng nhập, không bao giờ thấy mật khẩu / mã 2FA.
+  const cred = ctx.credentials
+  if (cred) {
+    tools.push(server.registerTool(
+      'credential_list',
+      {
+        title: 'List saved logins',
+        description:
+          "List the logins in the user's stag.ai password vault you may use: id, name, domains, a masked username and whether it has 2FA. " +
+          'Never the password or code. Pass domain (e.g. admin.shop.com) to get only the items for that site.',
+        inputSchema: { domain: z.string().max(300).optional().describe('Only items for this domain (host of the login page)') },
+        annotations: { readOnlyHint: true }
+      },
+      run(({ domain }: { domain?: string }) => cred.list(domain))
+    ))
+    tools.push(server.registerTool(
+      'credential_fill',
+      {
+        title: 'Log in with a saved login',
+        description:
+          'Ask stag.ai to fill the login form (username + password) or the 2FA code field on the page open in your Browser tab with the item, then submit it. ' +
+          "You never see the values. Only works when your tab's real domain matches the item (otherwise refused: domain_mismatch — the page may be fake). " +
+          'The user may get a confirm card and the call waits for their answer. Returns { filled, submitted, url, next? }: when next says the page now asks for the 2FA code / password, call credential_fill again. ' +
+          'Returns status "needs_user" when the page needs 2FA stag.ai cannot do (SMS / email code, approving on a phone, passkey): ask the user to finish it in the Browser pane and do other work while you wait. ' +
+          'Never ask the user to paste a password or code into the chat.',
+        inputSchema: { id: z.string().min(1).max(100).describe('Item id from credential_list') }
+      },
+      run(({ id }: { id: string }) => cred.fill(id))
+    ))
+  }
   return tools
 }
 

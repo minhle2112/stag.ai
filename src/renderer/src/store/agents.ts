@@ -5,6 +5,7 @@ import { agentKind, type Agent, type AgentCell, type AgentRun, type CanvasLayout
 import { revealCell, viewCenter } from '../canvasBus'
 import { addCell, cells, findCell, leaves, reconcile, removeCell, toFront, widgetKey, type Placement } from '../layout'
 import { bindPty, disposeTerminal, focusTerminal, onAgentExit, startTerminalBus, terminalSize } from '../terminals'
+import { coalesce } from './sync'
 import { useUi } from './ui'
 import { useWorkspaces } from './workspaces'
 
@@ -263,7 +264,9 @@ export const useAgents = create<AgentsState>((set, get) => {
   return {
     byWs: {},
 
-    async load(wsId) {
+    // Gộp lần nạp trùng lúc (thanh bên + lưới agent + StrictMode cùng gọi lúc khởi động): một snapshot, không để bản
+    // về sau đè bản về trước.
+    load: coalesce(async (wsId) => {
       const snap = await window.stag.agent.snapshot(wsId)
       const running: Record<string, AgentRun> = {}
       for (const r of snap.running) {
@@ -285,7 +288,7 @@ export const useAgents = create<AgentsState>((set, get) => {
       const place = validPlace(wsId, get().byWs[wsId]?.place ?? readPlaces()[wsId])
       const { [place]: layout, ...layouts } = all
       patch(wsId, () => ({ agents: snap.agents, layout: layout ?? emptyCanvas(), layouts, place, running, focused: firstCell(layout ?? emptyCanvas()) }))
-    },
+    }),
 
     async create(req, where = {}) {
       const wsId = req.workspaceId

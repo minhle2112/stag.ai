@@ -50,7 +50,9 @@
         return `${kind} "${clean(input.value) || name}"`
       } else {
         kind = `textbox(${type})`
-        if (type !== 'password' && input.value) extra = ` = "${clean(input.value, 80)}"`
+        // Ô mật khẩu, ô mã 2FA và ô kho mật khẩu của stag.ai đã điền: không đọc giá trị.
+        const secret = type === 'password' || el.hasAttribute('data-stag-secret') || /one-time-code/.test(el.autocomplete || '')
+        if (input.value) extra = secret ? ' = "•••••• (hidden by stag.ai)"' : ` = "${clean(input.value, 80)}"`
       }
     } else if (tag === 'TEXTAREA') {
       kind = 'textbox(multiline)'

@@ -103,6 +103,15 @@ describe('codexConnectorArgs', () => {
       'mcp_servers.old.enabled=false'
     ])
   })
+
+  it('biến mang bí mật: lệnh shell của Codex nhận rỗng (shell_environment_policy.set), giá trị không lên dòng lệnh', () => {
+    const servers = [stdio('a', { env: { GITHUB_TOKEN: { secret: 'GH' } } }), http('b', { bearerSecret: 'API' })]
+    const env = connectorEnv(servers, get)
+    const args = codexConnectorArgs({ servers, denied: { claude: [], codex: [] } }, {}, new Set(), env)
+    expect(args).toContain('shell_environment_policy.set.GITHUB_TOKEN=""')
+    expect(args).toContain('shell_environment_policy.set.STAG_SECRET_API=""')
+    expect(args.join(' ')).not.toMatch(/ghp_1|k-2/)
+  })
 })
 
 describe('codexServerNames', () => {

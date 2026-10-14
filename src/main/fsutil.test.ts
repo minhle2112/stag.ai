@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { exists, isDir, mentionsPath, readText, samePath, today, writeIfMissing } from './fsutil'
+import { exists, isDir, mentionsPath, readText, realPathInside, samePath, today, writeIfMissing } from './fsutil'
 
 describe('samePath', () => {
   it('không phân biệt / và \\', () => {
@@ -105,6 +105,45 @@ describe('ghi / đọc file', () => {
     expect(await isDir(join(dir, 'thư mục'))).toBe(true)
     expect(await isDir(join(dir, 'f.txt'))).toBe(false)
     expect(await isDir(join(dir, 'nope'))).toBe(false)
+  })
+})
+
+describe('realPathInside', () => {
+  let dir: string
+  let root: string
+  let out: string
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(join(tmpdir(), 'stag-realpath-'))
+    root = join(dir, 'vault')
+    out = join(dir, 'outside')
+    await fs.mkdir(join(root, 'a'), { recursive: true })
+    await fs.mkdir(out)
+    await fs.writeFile(join(root, 'a', 'n.md'), 'x', 'utf8')
+    // Junction (Windows, không cần quyền admin) / symlink thư mục trỏ ra ngoài vault.
+    await fs.symlink(out, join(root, 'link'), 'junction')
+  })
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  it('file có sẵn: trả đường dẫn thật; chặn .., đường dẫn tuyệt đối, junction ra ngoài', async () => {
+    expect(samePath(await realPathInside(root, 'a/n.md'), await fs.realpath(join(root, 'a', 'n.md')))).toBe(true)
+    await expect(realPathInside(root, '../outside')).rejects.toMatchObject({ code: 'OUTSIDE' })
+    await expect(realPathInside(root, out)).rejects.toMatchObject({ code: 'OUTSIDE' })
+    await fs.writeFile(join(out, 'x.md'), 'x', 'utf8')
+    await expect(realPathInside(root, 'link/x.md')).rejects.toMatchObject({ code: 'OUTSIDE' })
+    await expect(realPathInside(root, 'a/chưa có.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('missingOk: file / thư mục chưa có thì giải theo thư mục cha gần nhất, vẫn chặn junction ra ngoài', async () => {
+    const p = await realPathInside(root, 'a/mới/chưa có.md', true)
+    expect(samePath(p, join(await fs.realpath(root), 'a', 'mới', 'chưa có.md'))).toBe(true)
+    await expect(realPathInside(root, 'link/mới/x.md', true)).rejects.toMatchObject({ code: 'OUTSIDE' })
+    // Junction trỏ tới chỗ không có: không biết dẫn ra đâu → chặn.
+    await fs.symlink(join(dir, 'gone'), join(root, 'dangling'), 'junction')
+    await expect(realPathInside(root, 'dangling/x.md', true)).rejects.toMatchObject({ code: 'OUTSIDE' })
   })
 })
 

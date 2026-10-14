@@ -122,7 +122,7 @@ export function SourceSetupDialog({ wsId, onClose }: { wsId: string; onClose: ()
             <Row title="WordPress" sub={setup.wordpress.wpContent} done={setup.wordpress.installed} doneText="Đã cài mu-plugin stag-inspect">
               <p className="text-[12px] text-muted">
                 Mu-plugin <span className="font-mono">stag-inspect</span> gắn nguồn cho block Gutenberg (bài #ID), template part và file template của theme (phân biệt child / parent theme), tắt cache trang. Chỉ chạy
-                trên bản local / development hoặc khi bật WP_DEBUG; đừng chép lên site thật. Elementor đọc thẳng <span className="font-mono">data-id</span>, không cần cài.
+                trên bản local / development / localhost, hoặc khi <span className="font-mono">define('STAG_INSPECT', true)</span>; đừng chép lên site thật. Elementor đọc thẳng <span className="font-mono">data-id</span>, không cần cài.
               </p>
               <div className="mt-2 flex gap-1.5">
                 {setup.wordpress.installed ? (

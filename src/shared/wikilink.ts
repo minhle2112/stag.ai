@@ -30,12 +30,15 @@ export function isAttachment(target: string): boolean {
   return ATTACHMENT_EXT.test(target.trim())
 }
 
-/** Tách frontmatter `---` ở đầu note. `bodyLine` là số dòng (từ 1) nơi phần thân bắt đầu. */
+/**
+ * Tách frontmatter `---` ở đầu note. `bodyLine` là số dòng (từ 1) nơi phần thân bắt đầu. Frontmatter rỗng (`---` rồi
+ * `---` ngay dòng sau) → `frontmatter: ''` (không phải null, để ghi trường không sinh thêm một khối thứ hai).
+ */
 export function splitFrontmatter(md: string): { frontmatter: string | null; body: string; bodyLine: number } {
-  const m = /^﻿?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(md)
+  const m = /^﻿?---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/.exec(md)
   if (!m) return { frontmatter: null, body: md, bodyLine: 1 }
   const consumed = m[0]
-  return { frontmatter: m[1], body: md.slice(consumed.length), bodyLine: (consumed.match(/\n/g)?.length ?? 0) + 1 }
+  return { frontmatter: m[1] ?? '', body: md.slice(consumed.length), bodyLine: (consumed.match(/\n/g)?.length ?? 0) + 1 }
 }
 
 function unquote(s: string): string {

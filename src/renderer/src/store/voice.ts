@@ -5,6 +5,7 @@ import { MicCapture } from '../voice/capture'
 import { pasteIntoTerminal, terminalText } from '../terminals'
 import { useAgents } from './agents'
 import { useSettings } from './settings'
+import { fetchThenListen } from './sync'
 import { useWorkspaces } from './workspaces'
 
 /**
@@ -50,8 +51,7 @@ interface VoiceState {
 const CLEAR = { error: '', needsModel: false, level: 0, live: '', livePartial: '', notice: '', aiBusy: false, aiBefore: '' }
 
 export const useVoice = create<VoiceState>((set) => {
-  window.stag.voice.status().then((status) => set({ status }))
-  window.stag.voice.onChanged((status) => set({ status }))
+  fetchThenListen(window.stag.voice.status, window.stag.voice.onChanged, (status) => set({ status }))
   return { status: { model: 'missing', engine: 'off' }, phase: 'idle', target: null, text: '', ...CLEAR, setText: (text) => set({ text }) }
 })
 

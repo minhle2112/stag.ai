@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 export async function exists(p: string): Promise<boolean> {
   try {
@@ -62,19 +62,39 @@ export function isInside(root: string, p: string): boolean {
   return x === r || x.startsWith(r.endsWith(sep) ? r : r + sep)
 }
 
+const outside = (): Error => Object.assign(new Error('Đường dẫn phải nằm trong thư mục dự án'), { code: 'OUTSIDE' })
+
 /**
  * Đường dẫn thật (đã giải symlink / junction) của `rel` trong thư mục `root`. Chặn đường dẫn tuyệt đối, `..`, và
- * symlink trỏ ra ngoài `root`. `rel` rỗng = chính `root`. File không có → ném lỗi ENOENT của fs.
+ * symlink trỏ ra ngoài `root`. `rel` rỗng = chính `root`. File không có → ném lỗi ENOENT của fs, trừ khi `missingOk`:
+ * khi đó giải đường dẫn thật của thư mục cha gần nhất đang có rồi ghép phần còn lại (để kiểm tra file sắp tạo).
  */
-export async function realPathInside(root: string, rel: string): Promise<string> {
-  const outside = (): Error => Object.assign(new Error('Đường dẫn phải nằm trong thư mục dự án'), { code: 'OUTSIDE' })
+export async function realPathInside(root: string, rel: string, missingOk = false): Promise<string> {
   if (rel.includes('\0') || isAbsolute(rel) || /^[A-Za-z]:/.test(rel) || /^[\\/]/.test(rel)) throw outside()
   const parts = rel.split(/[\\/]+/).filter((s) => s && s !== '.')
   if (parts.includes('..')) throw outside()
-  const realRoot = await fs.realpath(resolve(root))
-  const real = await fs.realpath(resolve(realRoot, ...parts))
+  const real_ = missingOk ? realPathNearest : fs.realpath
+  const realRoot = await real_(resolve(root))
+  const real = await real_(resolve(realRoot, ...parts))
   if (!isInside(realRoot, real)) throw outside()
   return real
+}
+
+/** Đường dẫn thật của `p`; phần chưa có thì giải thư mục cha gần nhất đang có rồi ghép phần còn lại vào. */
+async function realPathNearest(p: string): Promise<string> {
+  const rest: string[] = []
+  for (let cur = p; ; ) {
+    try {
+      return resolve(await fs.realpath(cur), ...rest.reverse())
+    } catch (e) {
+      const parent = dirname(cur)
+      if (parent === cur || !['ENOENT', 'ENOTDIR'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e
+      // Symlink / junction trỏ tới chỗ không có: không biết nó dẫn ra đâu → coi như ra ngoài.
+      if (await fs.lstat(cur).then(() => true, () => false)) throw outside()
+      rest.push(basename(cur))
+      cur = parent
+    }
+  }
 }
 
 /** Đường dẫn tương đối dạng "a/b.txt" của `p` so với `root` (p nằm trong root). */

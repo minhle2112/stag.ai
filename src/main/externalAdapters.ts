@@ -124,9 +124,23 @@ export async function resolveCommand(command: string, dir: string, env: NodeJS.P
   return null
 }
 
-/** Một tham số trong dòng lệnh cmd.exe: thêm nháy khi có dấu cách / ký tự đặc biệt; nháy kép bên trong nhân đôi. */
-export function cmdQuote(a: string): string {
-  return a === '' || /[\s"&|<>^()%!,;=]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a
+/** Ký tự đặc biệt của cmd.exe (như cross-spawn), kể cả `%` (khai triển biến), `"` và dấu cách. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g
+
+/**
+ * Một tham số trong dòng lệnh `cmd /d /s /c "…"` (cách của cross-spawn): nháy theo luật MSVCRT (`\"`, nhân đôi `\`
+ * đứng trước nháy), rồi thoát mọi ký tự đặc biệt của cmd bằng `^`, kể cả chính dấu nháy: cmd không bao giờ ở "trong
+ * nháy", nên `&`, `|` không tách lệnh và `%PATH%` không bị khai triển (`%PATH^%` không phải tên biến nào).
+ * `twice`: đích là file .cmd/.bat (shim npm chuyển tiếp `%*`): cmd đọc dòng đó thêm một lần nên thoát hai lần.
+ */
+export function cmdQuote(a: string, twice = false): string {
+  const quoted = `"${a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`.replace(CMD_META, '^$1')
+  return twice ? quoted.replace(CMD_META, '^$1') : quoted
+}
+
+/** Đường dẫn chương trình ở đầu dòng lệnh cmd: thoát ký tự đặc biệt (cả dấu cách) bằng `^`, không thêm nháy. */
+export function cmdCommand(p: string): string {
+  return p.replace(CMD_META, '^$1')
 }
 
 const isBatch = (p: string): boolean => /\.(cmd|bat)$/i.test(p)
@@ -159,7 +173,7 @@ export function spawnSpec(path: string, args: string[], env: NodeJS.ProcessEnv =
     const shim = npmShimTarget(path)
     if (shim) return { command: shim.command, args: [shim.script, ...args] }
   }
-  const line = [path, ...args].map(cmdQuote).join(' ')
+  const line = [cmdCommand(path), ...args.map((a) => cmdQuote(a, true))].join(' ')
   return { command: env.ComSpec || env.COMSPEC || 'cmd.exe', args: `/d /s /c "${line}"` }
 }
 

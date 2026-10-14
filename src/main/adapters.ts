@@ -5,6 +5,7 @@ import { parseEnv, splitArgs } from '@shared/settings'
 import type { AdapterModel, AdapterStatus, CliAdapterId, ModelSettings } from '@shared/types'
 import { codexHome, isCodexSessionVar, resolveCodex } from './codex'
 import { claudeConfigDir } from './context'
+import { spawnSpec } from './externalAdapters'
 import { exists, readText } from './fsutil'
 import type { SettingsStore } from './settings'
 
@@ -154,10 +155,16 @@ interface RunResult {
   err: string
 }
 
-function run(exe: string, args: string[], env: NodeJS.ProcessEnv, timeout = 20_000): Promise<RunResult> {
+/** Chạy CLI lấy phiên bản / trạng thái. File .cmd/.bat (đường dẫn người dùng đặt) đi qua cmd.exe như lúc mở phiên agent (spawnSpec): Node chặn chạy thẳng .cmd (EINVAL). */
+export function runCli(exe: string, args: string[], env: NodeJS.ProcessEnv, timeout = 20_000): Promise<RunResult> {
+  const spec = spawnSpec(exe, args, env)
+  const raw = typeof spec.args === 'string'
   return new Promise((resolve) => {
-    execFile(exe, args, { env, timeout, windowsHide: true, maxBuffer: 1 << 20 }, (error, stdout, stderr) =>
-      resolve({ ok: !error, out: String(stdout), err: String(stderr) || (error ? error.message : '') })
+    execFile(
+      spec.command,
+      raw ? [spec.args as string] : (spec.args as string[]),
+      { env, timeout, windowsHide: true, maxBuffer: 1 << 20, windowsVerbatimArguments: raw },
+      (error, stdout, stderr) => resolve({ ok: !error, out: String(stdout), err: String(stderr) || (error ? error.message : '') })
     )
   })
 }
@@ -221,17 +228,17 @@ export class AdapterService {
       return status
     }
     const env = { ...independentSessionEnv(process.env), ...this.env(id) }
-    const version = await run(status.path, ['--version'], env)
+    const version = await runCli(status.path, ['--version'], env)
     if (!version.ok) {
       status.error = `Chạy "${status.path} --version" lỗi: ${version.err.trim().split(/\r?\n/)[0] || 'không rõ'}`
       return status
     }
     status.version = version.out.trim().split(/\r?\n/)[0] || null
     if (id === 'claude') {
-      const r = await run(status.path, ['auth', 'status', '--json'], env)
+      const r = await runCli(status.path, ['auth', 'status', '--json'], env)
       status.login = claudeLogin(r.out)
     } else {
-      const r = await run(status.path, ['login', 'status'], env)
+      const r = await runCli(status.path, ['login', 'status'], env)
       status.login = codexLogin(`${r.out}\n${r.err}`)
     }
     return status

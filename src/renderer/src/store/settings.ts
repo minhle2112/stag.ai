@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { resolveHandoff } from '@shared/settings'
 import { DEFAULT_SETTINGS, type AppSettingsPatch, type HandoffSettings, type OverrideLevel, type Settings, type SettingsOverridesPatch } from '@shared/types'
 import { useAgents } from './agents'
+import { fetchThenListen } from './sync'
 
 interface SettingsState {
   value: Settings
@@ -14,8 +15,8 @@ interface SettingsState {
 }
 
 export const useSettings = create<SettingsState>((set) => {
-  window.stag.settings.get().then((value) => set({ value, loaded: true }))
-  window.stag.settings.onChanged((value) => set({ value, loaded: true }))
+  // Bản main đẩy tới trước phản hồi get() thì bỏ phản hồi đó (không mới hơn).
+  fetchThenListen(window.stag.settings.get, window.stag.settings.onChanged, (value) => set({ value, loaded: true }))
   return {
     value: DEFAULT_SETTINGS,
     loaded: false,

@@ -112,6 +112,14 @@ describe('ArtifactLog', () => {
     expect((await new ArtifactLog(() => {}).list(ws)).map((e) => e.rel)).toEqual(['out/a.png', 'out/a.png'])
   })
 
+  it('flushSync (Windows tắt máy): ghi đồng bộ danh sách còn đang hẹn giờ lưu', async () => {
+    const log = new ArtifactLog(() => {})
+    await log.onToolUse(ws, agent('a'), { tool_name: 'Write', tool_input: { file_path: join(root, 'out', 'b.png') } })
+    log.flushSync()
+    const saved = JSON.parse(await fs.readFile(join(root, '.stag', 'artifacts.json'), 'utf8'))
+    expect(saved.events.map((e: { rel: string }) => e.rel)).toEqual(['out/b.png'])
+  })
+
   it('lệnh shell: chỉ tính file vừa được ghi; file artifact biến mất sau lệnh xoá = đã xoá', async () => {
     const log = new ArtifactLog(() => {})
     await fs.writeFile(join(root, 'chart.png'), 'x')
@@ -168,6 +176,18 @@ describe('serveArtifact', () => {
     expect((await serveArtifact(ws, 'v.mp4', 'bytes=20-')).status).toBe(416)
     expect((await serveArtifact(ws, '../x.mp4', null)).status).toBe(403)
     expect((await serveArtifact(ws, 'nope.png', null)).status).toBe(404)
+  })
+
+  it('junction / symlink trong dự án trỏ ra ngoài → chặn (403), dù chuỗi đường dẫn nằm trong dự án', async () => {
+    const outside = await fs.mkdtemp(join(tmpdir(), 'stag-outside-'))
+    await fs.writeFile(join(outside, 'secret.png'), 'x')
+    await fs.symlink(outside, join(root, 'link'), 'junction')
+    expect((await serveArtifact(ws, 'link/secret.png', null)).status).toBe(403)
+    const log = new ArtifactLog(() => {})
+    expect(await log.text(ws, 'link/secret.png')).toEqual({ status: 'missing' })
+    expect(await log.stat(ws, ['link/secret.png'])).toEqual({ 'link/secret.png': null })
+    await expect(log.bytes(ws, 'link/secret.png')).rejects.toThrow()
+    await fs.rm(outside, { recursive: true, force: true })
   })
 })
 

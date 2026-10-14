@@ -46,6 +46,16 @@ export interface InspectHooks {
   toggle(wsId: string, tabId: string): void
 }
 
+/** Móc của kho mật khẩu (CredentialService): che bí mật khỏi tool của agent, theo dõi trang đổi / tab đóng. */
+export interface CredentialHooks {
+  /** Bản đọc trang của agent (browser_snapshot): che giá trị bí mật. */
+  scrub(tabId: string, text: string): string
+  /** Lý do từ chối chụp màn hình (trang đang hiện khoá 2FA); null = được chụp. */
+  screenshotRefusal(tabId: string): string | null
+  navigated(wsId: string, tabId: string, url: string, inPage: boolean): void
+  closed(tabId: string): void
+}
+
 interface WsBrowser {
   tabs: Tab[]
   active: string | null
@@ -116,6 +126,8 @@ export class BrowserService {
   private wired = new Set<string>()
   /** Chế độ Soi (gắn sau, xem attachInspect). */
   private inspectHooks: InspectHooks | null = null
+  /** Kho mật khẩu (gắn sau, xem attachCredentials). */
+  private credHooks: CredentialHooks | null = null
   /** Màu app + màu Windows (ThemeService). Trang web giữ màu theo Windows, không theo app. */
   private theme: ThemeState | null = null
   /** Ctrl+Shift+L khi trang đang giữ bàn phím: đổi nhanh sáng / tối như ở trang app. */
@@ -129,6 +141,10 @@ export class BrowserService {
 
   attachInspect(hooks: InspectHooks): void {
     this.inspectHooks = hooks
+  }
+
+  attachCredentials(hooks: CredentialHooks): void {
+    this.credHooks = hooks
   }
 
   /**
@@ -331,6 +347,10 @@ export class BrowserService {
       this.log(tab, 'info', `[stag] Opened ${url}`)
       // Ghim màu trang có thể mất khi trang đổi tiến trình; áp lại (rẻ, không gắn thêm gì nếu không cần).
       void this.pinScheme(tab)
+      this.credHooks?.navigated(tab.wsId, tab.id, url, false)
+    })
+    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (isMainFrame) this.credHooks?.navigated(tab.wsId, tab.id, url, true)
     })
 
     // Agent bấm link / bị chuyển hướng sang origin chưa được phép → chặn, bảo agent xin quyền
@@ -388,6 +408,7 @@ export class BrowserService {
   }
 
   private destroy(tab: Tab): void {
+    this.credHooks?.closed(tab.id)
     this.win?.contentView.removeChildView(tab.view)
     const wc = tab.view.webContents
     if (wc.isDestroyed()) return
@@ -678,13 +699,42 @@ export class BrowserService {
       if (!/ERR_ABORTED/.test(msg)) throw new Error(`Could not open ${url.href}: ${msg}`)
     }
     await settle(wc)
-    return `Opened: ${wc.getURL()}\nTitle: ${wc.getTitle()}\nCall browser_snapshot to read the page and get the [ref] numbers of buttons/inputs.`
+    return this.scrubbed(
+      tab,
+      `Opened: ${wc.getURL()}\nTitle: ${wc.getTitle()}\nCall browser_snapshot to read the page and get the [ref] numbers of buttons/inputs.`
+    )
   }
 
   async agentSnapshot(agent: Agent): Promise<string> {
-    const wc = this.requireAgentTab(agent).view.webContents
+    const tab = this.requireAgentTab(agent)
+    const wc = tab.view.webContents
     await settle(wc, 0)
-    return (await wc.executeJavaScript(`${snapshotSrc}(${SNAPSHOT_MAX})`)) as string
+    const text = (await wc.executeJavaScript(`${snapshotSrc}(${SNAPSHOT_MAX})`)) as string
+    return this.scrubbed(tab, text)
+  }
+
+  /**
+   * Kho mật khẩu: che mật khẩu / mã 2FA đã điền (cả dạng mã hoá URL — form gửi bằng GET đưa mật khẩu vào URL), link
+   * otpauth://, khoá 2FA trên trang thiết lập. Mọi chữ tool browser trả cho agent (URL, tiêu đề, console) đi qua đây.
+   */
+  private scrubbed(tab: Tab, text: string): string {
+    return this.credHooks ? this.credHooks.scrub(tab.id, text) : text
+  }
+
+  /** Tab của agent nhìn từ kho mật khẩu (null = agent chưa mở tab). */
+  agentPage(agent: Agent): PageTab | null {
+    const t = this.agentTab(agent)
+    return t && !t.view.webContents.isDestroyed() ? this.pageOf(t) : null
+  }
+
+  async pressEnter(wsId: string, tabId: string): Promise<void> {
+    await this.key(this.tab(wsId, tabId), 'Enter')
+  }
+
+  /** Chờ trang của tab ổn định sau một thao tác. */
+  async settleTab(wsId: string, tabId: string): Promise<void> {
+    const t = this.byWs.get(wsId)?.tabs.find((x) => x.id === tabId)
+    if (t && !t.view.webContents.isDestroyed()) await settle(t.view.webContents, 600)
   }
 
   private async cdp(tab: Tab, method: string, params: Record<string, unknown> = {}): Promise<unknown> {
@@ -729,7 +779,7 @@ export class BrowserService {
     await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
     await settle(tab.view.webContents)
     const wc = tab.view.webContents
-    return `Clicked [${ref}]. Current page: ${wc.getURL()} — ${wc.getTitle()}` + this.blockedSince(tab, before)
+    return this.scrubbed(tab, `Clicked [${ref}]. Current page: ${wc.getURL()} — ${wc.getTitle()}` + this.blockedSince(tab, before))
   }
 
   async agentType(agent: Agent, ref: number, text: string, submit: boolean): Promise<string> {
@@ -745,7 +795,7 @@ export class BrowserService {
     await this.cdp(tab, 'Input.insertText', { text })
     if (submit) await this.key(tab, 'Enter')
     await settle(tab.view.webContents)
-    return (submit ? `Typed into [${ref}] and pressed Enter.` : `Typed into [${ref}].`) + this.blockedSince(tab, before)
+    return this.scrubbed(tab, (submit ? `Typed into [${ref}] and pressed Enter.` : `Typed into [${ref}].`) + this.blockedSince(tab, before))
   }
 
   async agentPress(agent: Agent, keyName: string): Promise<string> {
@@ -753,7 +803,7 @@ export class BrowserService {
     const before = tab.console.length
     await this.key(tab, keyName)
     await settle(tab.view.webContents)
-    return `Pressed ${keyName}.` + this.blockedSince(tab, before)
+    return this.scrubbed(tab, `Pressed ${keyName}.` + this.blockedSince(tab, before))
   }
 
   private async key(tab: Tab, keyName: string): Promise<void> {
@@ -766,6 +816,8 @@ export class BrowserService {
 
   async agentScreenshot(agent: Agent): Promise<string> {
     const tab = this.requireAgentTab(agent)
+    const refused = this.credHooks?.screenshotRefusal(tab.id)
+    if (refused) throw new Error(refused)
     const res = (await this.cdp(tab, 'Page.captureScreenshot', { format: 'png' })) as { data: string }
     let img = nativeImage.createFromBuffer(Buffer.from(res.data, 'base64'))
     if (img.getSize().width > SCREENSHOT_MAX_WIDTH) img = img.resize({ width: SCREENSHOT_MAX_WIDTH })
@@ -779,7 +831,7 @@ export class BrowserService {
     const entries = tab.console.filter((e) => !onlyErrors || e.level === 'error' || e.level === 'warning')
     tab.console = []
     if (!entries.length) return onlyErrors ? 'No new errors/warnings.' : 'Nothing new in the console.'
-    return entries.map((e) => `${e.at.slice(11, 19)} [${e.level}] ${e.text}`).join('\n')
+    return this.scrubbed(tab, entries.map((e) => `${e.at.slice(11, 19)} [${e.level}] ${e.text}`).join('\n'))
   }
 
   shutdown(): void {

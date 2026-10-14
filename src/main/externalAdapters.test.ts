@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -134,19 +135,43 @@ describe('externalArgs', () => {
 })
 
 describe('chạy file .cmd', () => {
-  it('cmdQuote: nháy khi cần, nhân đôi nháy bên trong', () => {
-    expect(cmdQuote('--flag')).toBe('--flag')
-    expect(cmdQuote('a b')).toBe('"a b"')
-    expect(cmdQuote('say "hi"')).toBe('"say ""hi"""')
-    expect(cmdQuote('a&b')).toBe('"a&b"')
+  it('cmdQuote: nháy kiểu MSVCRT rồi thoát mọi ký tự đặc biệt của cmd bằng ^ (kể cả % và nháy)', () => {
+    expect(cmdQuote('--flag')).toBe('^"--flag^"')
+    expect(cmdQuote('a b')).toBe('^"a^ b^"')
+    expect(cmdQuote('say "hi"')).toBe('^"say^ \\^"hi\\^"^"')
+    expect(cmdQuote('a&b')).toBe('^"a^&b^"')
+    expect(cmdQuote('%PATH%')).toBe('^"^%PATH^%^"')
+    expect(cmdQuote('C:\\dir\\')).toBe('^"C:\\dir\\\\^"')
+    expect(cmdQuote('')).toBe('^"^"')
+    // Đích là .cmd (shim chuyển tiếp %*): thoát hai lần.
+    expect(cmdQuote('%A%', true)).toBe('^^^"^^^%A^^^%^^^"')
   })
 
   it('spawnSpec: .exe chạy thẳng; .cmd qua cmd.exe với dòng lệnh thô', () => {
     expect(spawnSpec('C:/x/aider.exe', ['--a'])).toEqual({ command: 'C:/x/aider.exe', args: ['--a'] })
-    expect(spawnSpec('C:/Program Files/x/aider.cmd', ['--read', 'C:/p q/r.md'], { ComSpec: 'C:/W/cmd.exe' })).toEqual({
+    expect(spawnSpec('C:/Program Files/x/aider.cmd', ['--read'], { ComSpec: 'C:/W/cmd.exe' })).toEqual({
       command: 'C:/W/cmd.exe',
-      args: '/d /s /c ""C:/Program Files/x/aider.cmd" --read "C:/p q/r.md""'
+      args: '/d /s /c "C:/Program^ Files/x/aider.cmd ^^^"--read^^^""'
     })
+  })
+
+  it.runIf(process.platform === 'win32')('spawnSpec: tham số tới .cmd qua cmd.exe giữ nguyên từng chữ (không khai triển %VAR%, không tách lệnh ở &)', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'stag cmd (x) '))
+    await fs.writeFile(join(dir, 'args.js'), 'process.stdout.write(JSON.stringify(process.argv.slice(2)))')
+    const shim = join(dir, 'echo args.cmd')
+    await fs.writeFile(shim, `@"${process.execPath}" "%~dp0args.js" %*\r\n`)
+    const sent = ['%PATH%', '50%', 'a&b', 'say "hi" & echo pwned', 'x^y', 'a|b>c', '(paren)', '!x!', 'C:\\p q\\r.md', 'trail\\', 'q\\"x', '', 'a,b;c=d', 'tiếng Việt']
+    const spec = spawnSpec(shim, sent)
+    expect(typeof spec.args).toBe('string')
+    const out = await new Promise<string>((done, fail) => {
+      const c = spawn(spec.command, [spec.args as string], { windowsVerbatimArguments: true, windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
+      let s = ''
+      c.stdout.on('data', (d) => (s += String(d)))
+      c.on('error', fail)
+      c.on('close', () => done(s))
+    })
+    expect(JSON.parse(out)).toEqual(sent)
+    await fs.rm(dir, { recursive: true, force: true })
   })
 
   it('spawnSpec: tham số nhiều dòng với shim npm → chạy thẳng node + script (cmd.exe cắt ở xuống dòng)', async () => {

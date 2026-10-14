@@ -3,6 +3,7 @@ import { CHUNG, monorepoCandidates, placeOf } from '@shared/projects'
 import { agentKind, type Agent, type Project, type Workspace } from '@shared/types'
 import { leaves } from '../layout'
 import { agentPlace, openAgent, useAgents } from '../store/agents'
+import { groupDropAt, moveIndex } from '../store/agentOrder'
 import { useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { useWorkspaces } from '../store/workspaces'
@@ -85,11 +86,13 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
   const loadBoard = useBoard((s) => s.load)
   const moveAgent = useAgents((s) => s.moveAgent)
   const [menu, setMenu] = useState(false)
-  /** Chỗ sẽ chèn agent đang kéo: trước dòng thứ `dropAt` (= số dòng: cuối danh sách). */
-  const [dropAt, setDropAt] = useState<number | null>(null)
+  /** Chỗ sẽ chèn agent đang kéo: trong nhóm `place`, trước dòng thứ `at` của nhóm (= số dòng của nhóm: cuối nhóm). */
+  const [drop, setDrop] = useState<{ place: string; at: number } | null>(null)
   const count = state?.agents.length ?? 0
   const waiting = state && statuses ? statuses.filter((st) => st.activity === 'waiting' && state.running[st.agentId]).length : 0
-  const markFor = (i: number): 'before' | 'after' | null => (dropAt === i ? 'before' : dropAt === count && i === count - 1 ? 'after' : null)
+  // Vạch thả chỉ vẽ trong nhóm đang thả (chỉ số trong mảng chung có thể rơi vào dòng của nhóm khác).
+  const markFor = (place: string, j: number, n: number): 'before' | 'after' | null =>
+    drop?.place !== place ? null : drop.at === j ? 'before' : drop.at === n && j === n - 1 ? 'after' : null
 
   // Nạp agent + trạng thái để thanh bên có dấu trạng thái cho mọi workspace, kể cả chưa mở.
   useEffect(() => {
@@ -182,40 +185,39 @@ function WorkspaceGroup({ ws, open, onToggle, onRemove }: { ws: Workspace; open:
       {open && state && (
         <div
           onDragLeave={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null)
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null)
           }}
         >
-          {groupsOf(ws, state.agents).map((g) => (
+          {groupsOf(ws, state.agents).map((g) => {
+            const ids = g.agents.map((a) => a.id)
+            return (
             <Fragment key={g.place}>
               {g.head && <PlaceRow ws={ws} project={g.project} agents={g.agents} />}
-              {g.agents.map((a) => {
-                const i = state.agents.indexOf(a)
-                return (
+              {g.agents.map((a, j) => (
             <AgentRow
               key={a.id}
               ws={ws}
               agent={a}
-              mark={markFor(i)}
+              mark={markFor(g.place, j, ids.length)}
               onDragOverRow={(after) => {
-                const from = state.agents.findIndex((x) => x.id === rowDrag?.agentId)
-                const at = i + (after ? 1 : 0)
                 // Thả ngay tại chỗ cũ thì không đổi gì: không hiện vạch.
-                setDropAt(at === from || at === from + 1 ? null : at)
+                const at = rowDrag ? groupDropAt(ids, rowDrag.agentId, j, after) : null
+                setDrop(at === null ? null : { place: g.place, at })
               }}
               onDropRow={() => {
                 const drag = rowDrag
-                setDropAt(null)
-                if (!drag || drag.wsId !== ws.id || dropAt === null) return
-                const from = state.agents.findIndex((x) => x.id === drag.agentId)
-                moveAgent(ws.id, drag.agentId, from < dropAt ? dropAt - 1 : dropAt)
+                setDrop(null)
+                if (!drag || drag.wsId !== ws.id || drop?.place !== g.place) return
+                const index = moveIndex(state.agents.map((x) => x.id), ids, drag.agentId, drop.at)
+                if (index >= 0) moveAgent(ws.id, drag.agentId, index)
               }}
-              onDragDone={() => setDropAt(null)}
+              onDragDone={() => setDrop(null)}
             />
-                )
-              })}
+              ))}
               {g.head && !g.agents.length && <div className="mr-1.5 ml-7 px-2 py-0.5 text-[12px] text-dim">Chưa có agent</div>}
             </Fragment>
-          ))}
+            )
+          })}
           {!state.agents.length && !ws.projects?.length && (
             <div className="mr-1.5 ml-3.5 px-2.5 py-1 text-[12px] text-dim">
               Chưa có agent — chuột phải vào canvas để tạo

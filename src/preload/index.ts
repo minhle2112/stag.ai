@@ -6,6 +6,7 @@ import type { ClaudeUsageState } from '@shared/claudeUsage'
 import type { ThemeState } from '@shared/theme'
 import type { ArtifactComment, ArtifactsSnapshot, CommentAnchor, DocBlock } from '@shared/artifacts'
 import type { InspectAction, InspectActionResult, InspectSnapshot, SourceKind, SourceSetup } from '@shared/inspect'
+import type { CredentialInput, CredentialLogEntry, CredentialNotice, CredentialPatch, CredentialsState, CredentialView, ImportKind, ImportPreview, TotpPreview } from '@shared/credentials'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AppInfo, type PtyExit, type PtySpawnOptions } from '@shared/ipc'
 import type { AgentApiEvent, AgentCreatedEvent, AgentRequest } from '@shared/agentApi'
@@ -476,6 +477,35 @@ const api = {
       const fn = (_e: IpcRendererEvent, list: SecretsList): void => cb(list)
       ipcRenderer.on(IPC.secretsChanged, fn)
       return () => ipcRenderer.removeListener(IPC.secretsChanged, fn)
+    }
+  },
+  /** Kho mật khẩu cho agent (Cài đặt → Mật khẩu). Mật khẩu / mã chỉ sang đây khi bạn bấm Hiện / Chép. */
+  credentials: {
+    list: (): Promise<CredentialsState> => ipcRenderer.invoke(IPC.credList),
+    save: (input: CredentialInput): Promise<CredentialView> => ipcRenderer.invoke(IPC.credSave, input),
+    patch: (id: string, patch: CredentialPatch): Promise<CredentialView> => ipcRenderer.invoke(IPC.credPatch, id, patch),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke(IPC.credRemove, id),
+    neverRemove: (host: string): Promise<void> => ipcRenderer.invoke(IPC.credNeverRemove, host),
+    reveal: (id: string): Promise<string | null> => ipcRenderer.invoke(IPC.credReveal, id),
+    code: (id: string): Promise<{ code: string; left: number; period: number } | null> => ipcRenderer.invoke(IPC.credCode, id),
+    copy: (id: string, field: 'username' | 'password' | 'totp'): Promise<boolean> => ipcRenderer.invoke(IPC.credCopy, id, field),
+    log: (id?: string): Promise<CredentialLogEntry[]> => ipcRenderer.invoke(IPC.credLog, id),
+    totpPreview: (raw: string): Promise<TotpPreview> => ipcRenderer.invoke(IPC.credTotpPreview, raw),
+    scanScreen: (): Promise<TotpPreview> => ipcRenderer.invoke(IPC.credScanScreen),
+    /** Ảnh dán / kéo vào (data URL); vắng = mở hộp chọn file. null = bạn huỷ chọn file. */
+    scanImage: (dataUrl?: string): Promise<TotpPreview | null> => ipcRenderer.invoke(IPC.credScanImage, dataUrl),
+    import: (kind: ImportKind): Promise<ImportPreview | null> => ipcRenderer.invoke(IPC.credImport, kind),
+    importCommit: (token: string, rows: number[]): Promise<{ added: number; updated: number; errors: string[] }> => ipcRenderer.invoke(IPC.credImportCommit, token, rows),
+    reopen: (tabId: string): Promise<boolean> => ipcRenderer.invoke(IPC.credReopen, tabId),
+    onChanged(cb: (s: CredentialsState) => void): () => void {
+      const fn = (_e: IpcRendererEvent, s: CredentialsState): void => cb(s)
+      ipcRenderer.on(IPC.credChanged, fn)
+      return () => ipcRenderer.removeListener(IPC.credChanged, fn)
+    },
+    onNotice(cb: (n: CredentialNotice) => void): () => void {
+      const fn = (_e: IpcRendererEvent, n: CredentialNotice): void => cb(n)
+      ipcRenderer.on(IPC.credNotice, fn)
+      return () => ipcRenderer.removeListener(IPC.credNotice, fn)
     }
   },
   voice: {

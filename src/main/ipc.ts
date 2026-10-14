@@ -168,16 +168,16 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.artifactStat, (_e, workspaceId: string, rels: string[]) => artifacts.stat(ws(workspaceId), rels))
   ipcMain.handle(IPC.artifactText, (_e, workspaceId: string, rel: string, max?: number) => artifacts.text(ws(workspaceId), rel, max))
   ipcMain.handle(IPC.artifactBytes, (_e, workspaceId: string, rel: string) => artifacts.bytes(ws(workspaceId), rel))
-  ipcMain.handle(IPC.artifactThumb, (_e, workspaceId: string, rel: string) => artifactThumb(artifactPath(ws(workspaceId), rel)))
+  ipcMain.handle(IPC.artifactThumb, async (_e, workspaceId: string, rel: string) => artifactThumb(await artifactPath(ws(workspaceId), rel, true)))
   ipcMain.handle(IPC.artifactForget, (_e, workspaceId: string, rel: string) => artifacts.forget(ws(workspaceId), rel))
   ipcMain.handle(IPC.artifactOpen, async (_e, workspaceId: string, rel: string) => {
-    const full = artifactPath(ws(workspaceId), rel)
+    const full = await artifactPath(ws(workspaceId), rel)
     // Chương trình / script: chỉ chỉ ra trong Explorer, không chạy.
     if (isRunnableFile(full)) return shell.showItemInFolder(full)
     const err = await shell.openPath(full)
     if (err) throw new Error(err)
   })
-  ipcMain.handle(IPC.artifactReveal, (_e, workspaceId: string, rel: string) => shell.showItemInFolder(artifactPath(ws(workspaceId), rel)))
+  ipcMain.handle(IPC.artifactReveal, async (_e, workspaceId: string, rel: string) => shell.showItemInFolder(await artifactPath(ws(workspaceId), rel)))
   // Tab Sản phẩm.
   ipcMain.handle(IPC.productList, (_e, workspaceId: string) => products.snapshot(ws(workspaceId)))
   ipcMain.handle(IPC.productBlocks, (_e, workspaceId: string, id: string, v: number) => products.blocks(ws(workspaceId), id, v))
@@ -196,7 +196,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.productSaveAs, async (e, workspaceId: string, snapshot: string) => {
     const w = ws(workspaceId)
     if (!/^\.stag\/artifacts\/a\d+\/[^/]+$/.test(String(snapshot))) throw new Error('Không phải bản chụp sản phẩm')
-    const src = artifactPath(w, snapshot)
+    const src = await artifactPath(w, snapshot)
     const win = BrowserWindow.fromWebContents(e.sender)
     const opts = { defaultPath: join(w.path, basename(snapshot)) }
     const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)

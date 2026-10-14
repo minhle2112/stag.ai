@@ -16,5 +16,5 @@
     }
   },
   "include": ["electron.vite.config.ts", "vitest.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*"],
-  "exclude": ["src/preload/inspect.ts"]
+  "exclude": ["src/preload/inspect.ts", "src/preload/credentials.ts"]
 }

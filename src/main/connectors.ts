@@ -15,11 +15,14 @@ import { readText } from './fsutil'
  * Connector (máy chủ MCP) cho phiên agent: dịch sang cấu hình từng CLI, đưa bí mật qua biến môi trường,
  * quét máy chủ có sẵn của Claude Code / Codex, thử kết nối.
  *
- * Bí mật không bao giờ nằm trong file cấu hình hay dòng lệnh:
+ * Bí mật không nằm trong file cấu hình; dòng lệnh chỉ có tên biến, trừ một chỗ (xem dưới):
  * - stdio: biến `KEY` của máy chủ được đặt thẳng vào môi trường phiên; Claude nhận `"KEY": "${KEY}"`,
  *   Codex nhận `env_vars = ["KEY"]` (chuyển tiếp từ môi trường).
  * - http: bí mật vào biến `STAG_SECRET_<TÊN>`; Claude nhận header `${STAG_SECRET_<TÊN>}`, Codex nhận
  *   `bearer_token_env_var` / `env_http_headers`.
+ * Giới hạn còn lại: Codex không thay biến trong `url`, nên URL chứa token (urlSecret) vẫn đi trên dòng lệnh Codex.
+ * Môi trường phiên mang bí mật: lệnh shell của Codex không thấy (shell_environment_policy.set, xem codexConnectorArgs);
+ * lệnh shell của Claude Code thì vẫn kế thừa (Claude cần biến trong môi trường của chính nó để thay `${…}`).
  */
 
 export const secretEnvName = (name: string): string => `STAG_SECRET_${name.toUpperCase()}`
@@ -176,6 +179,10 @@ export function codexConnectorArgs(eff: EffectiveConnectors, cmds: Commands, exi
     }
   }
   for (const name of eff.denied.codex) if (TOML_KEY.test(name) && existing.has(name)) set(name, 'enabled', 'false')
+  // Bí mật phải nằm trong môi trường của tiến trình Codex (Codex chuyển cho máy chủ MCP qua env_vars /
+  // bearer_token_env_var), nhưng lệnh shell agent chạy (npm script, postinstall của gói lạ…) thì không được thấy:
+  // đặt rỗng qua shell_environment_policy.set (từng khoá một, không đè danh sách exclude của người dùng).
+  for (const k of Object.keys(env)) if (TOML_KEY.test(k)) out.push('-c', `shell_environment_policy.set.${k}=""`)
   return out
 }
 

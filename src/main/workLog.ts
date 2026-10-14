@@ -1,7 +1,9 @@
+import { randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { MemorySettings, Task, Workspace } from '@shared/types'
 import { exists, readText } from './fsutil'
+import { renameRetry } from './jsonFile'
 
 /**
  * Bộ nhớ trong vault do app tự ghi (xem vault "Memory and work log"):
@@ -148,34 +150,55 @@ function findSection(all: string[], section: string): Section | null {
   return { start, end }
 }
 
+/** Bỏ `\r` của CRLF: mục cất luôn nối bằng `\n`, so trùng trên chữ đã chuẩn hoá (note và note cất có thể khác kiểu xuống dòng). */
+const lf = (s: string): string => s.replace(/\r\n/g, '\n')
+
+/** Note `text` đã có mục `item` (nhiều dòng) nguyên vẹn, đúng ranh giới dòng (`- [x] A` không trùng với `- [x] A2`). */
+function hasItem(text: string, item: string): boolean {
+  return `\n${lf(text)}\n`.includes(`\n${lf(item)}\n`)
+}
+
 /**
  * Cất các dòng "Work done" cũ: giữ `keep` mục mới nhất (mục = dòng `- ` ở đầu dòng cùng các dòng tiếp theo thụt vào),
- * trả về note mới + các mục đã lấy ra (cũ trước). Thêm một dòng trỏ tới note cất ngay dưới tiêu đề nếu chưa có.
+ * trả về note mới + các mục đã lấy ra (cũ trước, nối bằng `\n`). Chỉ rút mục đã cất ra; heading con, đoạn văn, mục giữ
+ * lại ở nguyên chỗ. Thêm một dòng trỏ tới note cất ngay dưới tiêu đề nếu chưa có.
  */
 export function splitWorkDone(text: string, keep: number, archive: string): { note: string; moved: string[] } {
   const eol = text.includes('\r\n') ? '\r\n' : '\n'
   const all = text.split(/\r?\n/)
   const sec = findSection(all, WORK_DONE_SECTION)
   if (!sec) return { note: text, moved: [] }
-  const body = all.slice(sec.start + 1, sec.end)
-  const items: string[][] = []
-  const other: string[] = []
-  for (const l of body) {
-    if (/^[-*] /.test(l)) items.push([l])
-    else if (items.length && l.trim() && /^\s/.test(l)) items[items.length - 1].push(l)
-    else if (l.trim()) other.push(l)
+  // Khối: mục (dòng `- ` + dòng con thụt vào, kể cả sau dòng trống) hoặc một dòng khác.
+  const blocks: Array<{ lines: string[]; item: boolean }> = []
+  for (const l of all.slice(sec.start + 1, sec.end)) {
+    if (/^[-*] /.test(l)) {
+      blocks.push({ lines: [l], item: true })
+      continue
+    }
+    if (l.trim() && /^\s/.test(l)) {
+      // Dòng con sau vài dòng trống vẫn thuộc mục ngay trước.
+      let i = blocks.length - 1
+      while (i >= 0 && !blocks[i].item && !blocks[i].lines[0].trim()) i--
+      if (i >= 0 && blocks[i].item) {
+        blocks[i].lines.push(...blocks.splice(i + 1).flatMap((b) => b.lines), l)
+        continue
+      }
+    }
+    blocks.push({ lines: [l], item: false })
   }
+  const items = blocks.filter((b) => b.item)
   if (items.length <= keep) return { note: text, moved: [] }
-  const moved = items.slice(0, items.length - keep)
-  const kept = items.slice(items.length - keep)
-  const link = `Older items: [[${archive}]]`
-  const pointer = other.some((l) => l.includes(`[[${archive}]]`)) ? [] : [link]
-  const next = [...pointer, ...other, ...kept.flat()]
+  const moved = new Set(items.slice(0, items.length - keep))
+  const kept = blocks.filter((b) => !moved.has(b)).flatMap((b) => b.lines)
+  // Dòng trống liền nhau (chỗ mục vừa rút đi) gộp lại một; bỏ dòng trống ở đầu / cuối mục.
+  const body = kept.filter((l, i) => l.trim() || (i > 0 && kept[i - 1].trim()))
+  while (body.length && !body[body.length - 1].trim()) body.pop()
+  if (!body.some((l) => l.includes(`[[${archive}]]`))) body.unshift(`Older items: [[${archive}]]`)
   const tail = all.slice(sec.end)
-  const out = [...all.slice(0, sec.start + 1), ...next, '', ...tail]
+  const out = [...all.slice(0, sec.start + 1), ...body, '', ...tail]
   // Mục ở cuối file: file chỉ kết thúc bằng một lần xuống dòng như cũ.
   if (!tail.length && all[all.length - 1] !== '') out.pop()
-  return { note: out.join(eol), moved: moved.map((m) => m.join(eol)) }
+  return { note: out.join(eol), moved: [...moved].map((m) => m.lines.join('\n')) }
 }
 
 /** Note cất mới của agent. */
@@ -242,7 +265,7 @@ export function splitIndexDone(text: string, keepDays: number, today: string, ar
       const dates = b.lines.join(' ').match(/\b\d{4}-\d{2}-\d{2}\b/g) ?? []
       const date = dates.length ? dates.reduce((a, c) => (c > a ? c : a)) : null
       if (date === null || date < cutoff) {
-        moved.push({ date, text: b.lines.join(eol) })
+        moved.push({ date, text: b.lines.join('\n') })
         continue
       }
     }
@@ -280,14 +303,14 @@ export function newIndexArchive(date: string): string {
 }
 
 /**
- * Thêm mục vào note cất theo nhóm ngày (`## YYYY-MM-DD`, cũ trước; `## Undated` đầu tiên); bỏ mục đã có (so cả chữ).
- * Trả về null nếu không có gì mới.
+ * Thêm mục vào note cất theo nhóm ngày (`## YYYY-MM-DD`, cũ trước; `## Undated` đầu tiên); bỏ mục đã có (so cả chữ,
+ * không tính kiểu xuống dòng). Trả về null nếu không có gì mới.
  */
 export function addToIndexArchive(text: string, items: MovedIndexItem[], today: string): string | null {
   let out = text
   let added = false
   for (const it of items) {
-    if (out.includes(it.text)) continue
+    if (hasItem(out, it.text)) continue
     added = true
     const group = it.date ?? UNDATED
     const eol = out.includes('\r\n') ? '\r\n' : '\n'
@@ -372,11 +395,27 @@ export class NoteWriter {
       if (out === null || out === text) return false
       const now = await stamp(file)
       if ((before?.key ?? null) !== (now?.key ?? null)) continue
-      await fs.mkdir(dirname(file), { recursive: true })
-      await fs.writeFile(file, out, 'utf8')
+      await writeAtomic(file, out)
       return true
     }
     throw new Error(`${file} keeps changing; skipped this update.`)
+  }
+}
+
+/**
+ * Ghi file tạm cùng thư mục rồi đổi tên đè lên: tắt máy / lỗi giữa chừng không để lại note cụt. File tạm ẩn (`.`) và
+ * không có đuôi `.md` nên chỉ mục vault không thấy. Note là symlink thì ghi vào file thật nó trỏ tới (giữ symlink).
+ */
+async function writeAtomic(file: string, text: string): Promise<void> {
+  const target = await fs.realpath(file).catch(() => file)
+  await fs.mkdir(dirname(target), { recursive: true })
+  const tmp = join(dirname(target), `.${basename(target)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`)
+  try {
+    await fs.writeFile(tmp, text, 'utf8')
+    await renameRetry(tmp, target)
+  } catch (e) {
+    await fs.rm(tmp, { force: true }).catch(() => {})
+    throw e
   }
 }
 
@@ -490,7 +529,7 @@ export class MemoryKeeper {
     const saved = new Set<string>()
     const toArchive = async (items: string[]): Promise<void> => {
       await this.writer.update(archiveFile, (text) => {
-        const fresh = items.filter((i) => !text?.includes(i))
+        const fresh = items.filter((i) => text === null || !hasItem(text, i))
         for (const i of items) saved.add(i)
         return fresh.length ? touchUpdated(insertInSection(text ?? newArchive(agentName, date), WORK_DONE_SECTION, fresh), date) : null
       })

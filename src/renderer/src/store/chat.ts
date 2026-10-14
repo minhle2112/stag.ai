@@ -33,6 +33,8 @@ const FLUSH_MS = 30
 
 export const useChat = create<ChatState>((set, get) => {
   const inflight = new Set<string>()
+  /** Số lần main gửi 'reset' (phiên mới / hội thoại mới) theo agent: snapshot gọi trước một reset là bản cũ. */
+  const resets = new Map<string, number>()
   let queue: ChatEvent[] = []
   let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -50,6 +52,7 @@ export const useChat = create<ChatState>((set, get) => {
 
   // Một listener cho cả app (module chỉ được nạp một lần).
   window.stag.chat.onEvent((ev) => {
+    if (ev.type === 'reset') resets.set(ev.agentId, (resets.get(ev.agentId) ?? 0) + 1)
     queue.push(ev)
     if (!timer) timer = setTimeout(flush, FLUSH_MS)
   })
@@ -67,11 +70,14 @@ export const useChat = create<ChatState>((set, get) => {
     ensure(agentId) {
       if (get().byAgent[agentId]?.loaded || inflight.has(agentId)) return
       inflight.add(agentId)
+      const epoch = resets.get(agentId) ?? 0
       window.stag.chat
         .snapshot(agentId)
         .then((snap) => {
-          // Phản hồi tới sau mọi sự kiện đã gửi trước nó (IPC giữ thứ tự) → luôn mới hơn những gì đã áp.
           flush()
+          // Main đọc transcript bất đồng bộ: trong lúc đó phiên mới có thể đã gửi 'reset' (đã áp ở trên) → snapshot
+          // này là hội thoại cũ, bỏ. Không có reset thì phản hồi tới sau mọi sự kiện gửi trước nó → mới nhất.
+          if ((resets.get(agentId) ?? 0) !== epoch) return
           patch(agentId, () => ({ items: snap.items, state: snap.state, loaded: true }))
         })
         .catch(() => {

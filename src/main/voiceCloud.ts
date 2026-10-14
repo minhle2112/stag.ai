@@ -205,6 +205,11 @@ export function sonioxConfig(terms: readonly string[]): Record<string, unknown> 
   }
 }
 
+/** Khoá tháng `YYYY-MM` theo giờ máy (không theo UTC: đầu tháng ở VN là 17h ngày cuối tháng trước theo UTC). */
+export function monthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
 /** Số giây đã gửi lên đám mây theo tháng (userData/voice/cloud-usage.json) để Cài đặt báo chi phí. */
 export class CloudUsage {
   private months: Record<string, number> = {}
@@ -222,11 +227,11 @@ export class CloudUsage {
   }
 
   month(now = new Date()): number {
-    return this.months[now.toISOString().slice(0, 7)] ?? 0
+    return this.months[monthKey(now)] ?? 0
   }
 
   add(seconds: number, now = new Date()): Promise<void> {
-    const k = now.toISOString().slice(0, 7)
+    const k = monthKey(now)
     this.months[k] = (this.months[k] ?? 0) + seconds
     const text = JSON.stringify({ months: this.months })
     this.writing = this.writing.then(async () => {

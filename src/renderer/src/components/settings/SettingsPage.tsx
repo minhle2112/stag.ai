@@ -7,6 +7,7 @@ import { Group, Row, SectionTitle, SmallButton } from './controls'
 import { AdaptersSection } from './AdaptersSection'
 import { ConnectorsSection } from './ConnectorsSection'
 import { SecretsSection } from './SecretsSection'
+import { PasswordsSection } from './PasswordsSection'
 import { SkillsSection } from './SkillsSection'
 import { PluginsSection } from './PluginsSection'
 import { GeneralSection } from './GeneralSection'
@@ -38,7 +39,8 @@ const NAV: NavItem[][] = [
     { id: 'connectors', label: 'Connector (MCP)', icon: 'conn' },
     { id: 'skills', label: 'Skill', icon: 'book' },
     { id: 'plugins', label: 'Plugin', icon: 'plug' },
-    { id: 'secrets', label: 'Kho bí mật', icon: 'key' }
+    { id: 'secrets', label: 'Kho bí mật', icon: 'key' },
+    { id: 'passwords', label: 'Mật khẩu', icon: 'shield' }
   ],
   [
     { id: 'handoff', label: 'Agent & bàn giao', icon: 'bot' },
@@ -103,7 +105,7 @@ export function SettingsPage(): React.JSX.Element {
 
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div
-          className={`mx-auto ${section === 'connectors' || section === 'skills' || section === 'plugins' ? 'max-w-[1000px]' : 'max-w-[760px]'} select-text px-8 pt-[18px] pb-10`}
+          className={`mx-auto ${section === 'connectors' || section === 'skills' || section === 'plugins' || section === 'passwords' ? 'max-w-[1000px]' : 'max-w-[760px]'} select-text px-8 pt-[18px] pb-10`}
         >
           <Section id={section} />
         </div>
@@ -128,6 +130,8 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
       return <PluginsSection />
     case 'secrets':
       return <SecretsSection />
+    case 'passwords':
+      return <PasswordsSection />
     case 'handoff':
       return <HandoffSection />
     case 'scope':

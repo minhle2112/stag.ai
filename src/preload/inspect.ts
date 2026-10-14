@@ -6,8 +6,11 @@ import { ipcRenderer } from 'electron'
 import { agentColor, PAGE_IPC, type AnchorUpdate, type CaptureResult, type InspectGroup, type InspectSource, type InspectTarget, type PageCmd, type PagePin, type PageState, type PinPlace, type SaveInput } from '@shared/inspect'
 import { classKey, parseSrc, tagKey, type StaticTag } from '@shared/inspectSource'
 import { initials } from '@shared/artifacts'
+import { credHost, startCredentials } from './credentials'
 
 if (window.top === window) {
+  // Kho mật khẩu (điền form, hỏi lưu mật khẩu, nhận mã QR 2FA): cùng preload, lớp riêng.
+  startCredentials()
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => start(), { once: true })
   else start()
 }
@@ -181,7 +184,10 @@ const raf = (): Promise<void> =>
   })
 
 function ours(e: Event): boolean {
-  return e.composedPath().includes(host)
+  const path = e.composedPath()
+  const cred = credHost()
+  // Bong bóng của kho mật khẩu cũng là của stag: Soi không chặn bấm vào đó.
+  return path.includes(host) || (!!cred && path.includes(cred))
 }
 
 /** Phần tử của trang bình luận được (bỏ html, body, lớp Soi: bấm vào đó = bấm chỗ trống). */

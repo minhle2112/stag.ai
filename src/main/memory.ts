@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { frontmatterKeys, noteName, outlineText, patchSection, readField, readSection, repointLinks, writeField, type PatchOp } from '@shared/noteSections'
 import { isAttachment, resolveNote, splitFrontmatter } from '@shared/wikilink'
+import { realPathInside } from './fsutil'
 import { findSecrets } from './sessionLog'
 import { fold, type Cached, type VaultIndexer } from './vaultIndex'
 import type { NoteWriter } from './workLog'
@@ -84,14 +85,39 @@ export function toRel(vaultPath: string, note: string): string {
   return segs.join('/')
 }
 
-function fullPath(vaultPath: string, rel: string): string {
+/**
+ * Đường dẫn đầy đủ của note trong vault. Kiểm tra theo đường dẫn thật (junction / symlink trỏ ra ngoài vault bị chặn;
+ * note chưa có thì theo thư mục cha gần nhất), nhưng trả đường dẫn thường để khoá ghi của NoteWriter trùng với nơi khác.
+ */
+async function fullPath(vaultPath: string, rel: string): Promise<string> {
   const root = resolve(vaultPath)
   const full = resolve(root, rel)
   if (!full.startsWith(root + sep)) throw new Error('Path is outside the vault')
+  try {
+    await realPathInside(root, rel, true)
+  } catch (e) {
+    if ((e as { code?: string }).code === 'OUTSIDE') throw new Error(`${rel} is outside the vault (link / junction)`)
+    throw e
+  }
   return full
 }
 
-const day = (ms: number): string => new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
+const pad = (n: number): string => String(n).padStart(2, '0')
+
+/** Giờ địa phương kèm múi giờ, vd `2026-10-14 01:35 +02:00`. */
+export function localStamp(ms: number): string {
+  const d = new Date(ms)
+  const off = -d.getTimezoneOffset()
+  const a = Math.abs(off)
+  const zone = `${off < 0 ? '-' : '+'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())} ${zone}`
+}
+
+/** Mốc `modified_since`: `YYYY-MM-DD` = nửa đêm giờ địa phương (như ngày hiện trong kết quả); dạng khác theo Date.parse. */
+export function parseSince(s: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim())
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : Date.parse(s)
+}
 
 /** Đọc / tìm / sửa note của một vault cho agent. Dùng chung chỉ mục với Vault Viewer và bộ ghi với nhật ký việc. */
 export class MemoryService {
@@ -153,7 +179,7 @@ export class MemoryService {
 
   async read(vaultPath: string, note: string, o: { heading?: string; field?: string } = {}): Promise<MemoryResult> {
     const rel = await this.resolve(vaultPath, note)
-    const text = await fs.readFile(fullPath(vaultPath, rel), 'utf8')
+    const text = await fs.readFile(await fullPath(vaultPath, rel), 'utf8')
     const touched: Touch[] = [{ rel, kind: 'read' }]
     if (o.field) {
       const v = readField(text, o.field)
@@ -167,10 +193,10 @@ export class MemoryService {
     }
     const c = (await this.notes(vaultPath)).get(rel)
     const info = await this.linkInfo(vaultPath, rel)
-    const st = await fs.stat(fullPath(vaultPath, rel))
+    const st = await fs.stat(await fullPath(vaultPath, rel))
     const head = [
       `path: ${rel}`,
-      `version: ${versionOf(text)} · modified ${day(st.mtimeMs)} · ${Math.round(st.size / 102.4) / 10} KB`,
+      `version: ${versionOf(text)} · modified ${localStamp(st.mtimeMs)} · ${Math.round(st.size / 102.4) / 10} KB`,
       c?.meta.tags.length ? `tags: ${c.meta.tags.join(', ')}` : '',
       `links: ${info.links.join(', ') || '(none)'}`,
       `backlinks: ${info.backlinks.join(', ') || '(none)'}`,
@@ -181,7 +207,7 @@ export class MemoryService {
 
   async outline(vaultPath: string, note: string): Promise<MemoryResult> {
     const rel = await this.resolve(vaultPath, note)
-    const text = await fs.readFile(fullPath(vaultPath, rel), 'utf8')
+    const text = await fs.readFile(await fullPath(vaultPath, rel), 'utf8')
     const keys = frontmatterKeys(text)
     return {
       text: `path: ${rel} · version ${versionOf(text)} · ${text.length} chars\nfrontmatter: ${keys.join(', ') || '(none)'}\n\n${outlineText(text) || '(no headings)'}`,
@@ -211,7 +237,7 @@ export class MemoryService {
     const linkedFrom = f.linked_from ? await this.resolve(vaultPath, f.linked_from) : null
     let since: number | null = null
     if (f.modified_since) {
-      since = Date.parse(f.modified_since)
+      since = parseSince(f.modified_since)
       if (Number.isNaN(since)) throw new Error(`Bad date "${f.modified_since}" (use YYYY-MM-DD)`)
     }
     const [fieldKey, fieldVal] = f.field ? splitField(f.field) : [null, null]
@@ -237,7 +263,7 @@ export class MemoryService {
     rows.sort((a, b) => b.c.mtime - a.c.mtime)
     const limit = clampLimit(f.limit)
     if (!rows.length) return { text: 'No notes match.', touched: [] }
-    const lines = rows.slice(0, limit).map(({ rel, c }) => `${rel} · ${c.meta.type ?? '-'} · ${day(c.mtime)}${c.meta.tags.length ? ` · #${c.meta.tags.join(' #')}` : ''}`)
+    const lines = rows.slice(0, limit).map(({ rel, c }) => `${rel} · ${c.meta.type ?? '-'} · ${localStamp(c.mtime)}${c.meta.tags.length ? ` · #${c.meta.tags.join(' #')}` : ''}`)
     return { text: lines.join('\n') + (rows.length > limit ? `\n(${rows.length - limit} more)` : ''), touched: [] }
   }
 
@@ -279,7 +305,7 @@ export class MemoryService {
   /** Đọc → sửa → ghi qua NoteWriter (tuần tự theo file, không đè lên lần ghi xen giữa). `edit` nhận null nếu chưa có file. */
   private async edit(vaultPath: string, rel: string, edit: (text: string | null) => string | null): Promise<string | null> {
     let result: string | null = null
-    await this.writer.update(fullPath(vaultPath, rel), (text) => {
+    await this.writer.update(await fullPath(vaultPath, rel), (text) => {
       result = edit(text)
       return result
     })
@@ -341,18 +367,20 @@ export class MemoryService {
     const dest = toRel(vaultPath, to.includes('/') || to.includes('\\') ? to : `${from.slice(0, from.lastIndexOf('/') + 1)}${to}`)
     if (dest === from) return { text: `${from} is already there.`, touched: [] }
     const cache = await this.notes(vaultPath)
-    const exists = [...cache.keys()].some((r) => r.toLowerCase() === dest.toLowerCase() && r.toLowerCase() !== from.toLowerCase())
-    if (exists) throw new Error(`${dest} already exists`)
+    const taken = [...cache.keys()].some((r) => r.toLowerCase() === dest.toLowerCase() && r.toLowerCase() !== from.toLowerCase())
+    const src = await fullPath(vaultPath, from)
+    const dst = await fullPath(vaultPath, dest)
+    // Cả file trên đĩa mà chỉ mục chưa thấy (vừa tạo, thư mục chỉ mục bỏ qua, thư mục tên `.md`): rename sẽ đè lên nó.
+    if (taken || (await occupied(src, dst))) throw new Error(`${dest} already exists`)
     const before = [...cache.keys()].map((rel) => ({ rel }))
     const moved = (rel: string): string => (rel === from ? dest : rel)
     const after = before.map((n) => ({ rel: moved(n.rel) }))
     const touched: Touch[] = []
     // Link trong chính note (tới nó `[[Tên#mục]]`, link tương đối khi đổi thư mục) sửa trước khi chuyển.
     await this.edit(vaultPath, from, (text) => (text === null ? null : repointLinks(text, from, dest, before, after, moved).text))
-    const src = fullPath(vaultPath, from)
-    const dst = fullPath(vaultPath, dest)
     // Trong chuỗi ghi của hai file: lần ghi đang chờ vào note cũ xong trước, không ai ghi lại chỗ cũ giữa lúc chuyển.
     await this.writer.exclusive([src, dst], async () => {
+      if (await occupied(src, dst)) throw new Error(`${dest} already exists`)
       await fs.mkdir(dirname(dst), { recursive: true })
       await fs.rename(src, dst)
     })
@@ -390,10 +418,11 @@ export class MemoryService {
     const { backlinks } = await this.linkInfo(vaultPath, rel)
     let trashRel = `.trash/${rel}`
     for (let i = 2; await exists(join(resolve(vaultPath), trashRel)); i++) trashRel = `.trash/${rel.replace(/\.md$/i, '')} (${i}).md`
-    const dst = join(resolve(vaultPath), trashRel)
-    await this.writer.exclusive([fullPath(vaultPath, rel), dst], async () => {
+    const src = await fullPath(vaultPath, rel)
+    const dst = await fullPath(vaultPath, trashRel)
+    await this.writer.exclusive([src, dst], async () => {
       await fs.mkdir(dirname(dst), { recursive: true })
-      await fs.rename(fullPath(vaultPath, rel), dst)
+      await fs.rename(src, dst)
     })
     return {
       text: `Moved ${rel} to the vault trash (${trashRel}).${backlinks.length ? ` These notes still link to it: ${backlinks.join(', ')}.` : ''}`,
@@ -418,6 +447,18 @@ async function exists(p: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/** `dst` đã có trên đĩa và không phải chính `src` (đổi hoa thường tên trên Windows thì là cùng một file). */
+async function occupied(src: string, dst: string): Promise<boolean> {
+  const id = (p: string): Promise<string | null> =>
+    fs.lstat(p, { bigint: true }).then(
+      // ino 0 (ổ FAT…): không phân biệt được file → so đường dẫn.
+      (s) => (s.ino ? `${s.dev}:${s.ino}` : p.toLowerCase()),
+      () => null
+    )
+  const d = await id(dst)
+  return d !== null && d !== (await id(src))
 }
 
 function checkVersion(rel: string, text: string, want: string): void {

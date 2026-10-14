@@ -42,6 +42,21 @@ extraResources:
     to: inspect
 
 asar: true
+
+# Electron fuses: tắt tính năng của file chạy mà app không dùng (bị lợi dụng để chạy mã bằng chính stag.ai.exe).
+electronFuses:
+  # Phải giữ bật: node-pty dừng terminal trên Windows bằng child_process.fork (conpty_console_list_agent), mà fork
+  # trong tiến trình chính của Electron cần ELECTRON_RUN_AS_NODE. Tắt thì đóng ô terminal / dev server không dừng
+  # hết tiến trình con (còn giữ cổng).
+  runAsNode: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  # Chỉ nạp app từ app.asar và kiểm tra toàn vẹn (electron-builder ghi hash vào stag.ai.exe; Windows từ Electron 30).
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  enableCookieEncryption: true
+  # grantFileProtocolExtraPrivileges giữ mặc định (bật): trang app tải từ file://.
+
 # Module native (.node, winpty-agent.exe) không nạp/chạy được từ trong asar.
 asarUnpack:
   - node_modules/node-pty/**

@@ -62,6 +62,7 @@ export type SettingsSection =
   | 'skills'
   | 'plugins'
   | 'secrets'
+  | 'passwords'
   | 'handoff'
   | 'scope'
   | 'agentApi'
@@ -85,6 +86,10 @@ export interface SettingsFocus {
   skill?: string
   /** id plugin (mở trang của nó). */
   plugin?: string
+  /** id mục mật khẩu (Cài đặt → Mật khẩu, vd. từ toast "Xem nhật ký"). */
+  credential?: string
+  /** Ô tìm của Cài đặt → Mật khẩu (nút chìa khoá của ô Browser: tên miền của trang). */
+  credentialSearch?: string
 }
 
 interface UiState {
