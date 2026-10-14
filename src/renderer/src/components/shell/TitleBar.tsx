@@ -27,7 +27,7 @@ export function TitleBar(): React.JSX.Element {
   const agentDrives = useBrowser((s) => !!active && !!s.byWs[active.id]?.tabs.some((t) => t.owner.kind === 'agent'))
   const [bell, setBell] = useState(false)
   const theme = useTheme((s) => s.theme)
-  // Bình luận chế độ Soi có trả lời mới của agent (bạn chưa xem): số trên nút Trình duyệt.
+  // Bình luận chế độ Soi có trả lời mới của agent (bạn chưa xem): chỉ ghi trong tooltip nút Trình duyệt, không hiện badge.
   const loadInspect = useInspect((s) => s.load)
   const inspectWaiting = useInspect((s) => (active ? (s.byWs[active.id]?.pins.filter((p) => needsYou(p.state)).length ?? 0) : 0))
   useEffect(() => {
@@ -84,9 +84,7 @@ export function TitleBar(): React.JSX.Element {
             (inspectWaiting ? `\n${inspectWaiting} trả lời mới trong Soi` : '')
           }
           on={browserOpen}
-          // Cả khi pane đang mở: tab hiện tại có thể không phải trang có trả lời mới (hoặc chưa có tab).
-          badge={inspectWaiting}
-          dot={agentDrives && !browserOpen && !inspectWaiting}
+          dot={agentDrives && !browserOpen}
           onClick={toggleBrowser}
         />
         {bell && <WaitingMenu onClose={() => setBell(false)} />}
