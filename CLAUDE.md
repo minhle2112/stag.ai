@@ -11,3 +11,6 @@ App desktop điều hành một đội agent AI viết code như một công ty 
 - Học được điều mới (quy ước, lỗi, quyết định, việc xong) → ghi vào vault theo `stag.ai memory/00 Meta/Memory Protocol.md`.
 - **Vault viết hoàn toàn bằng tiếng Anh** (tên file, thư mục, frontmatter, tiêu đề, nội dung) — người dùng chốt 2026-10-08. Trao đổi với người dùng vẫn bằng tiếng Việt.
 - **Không lưu mật khẩu / API key / token** trong vault.
+
+## GitHub (BẮT BUỘC)
+- **Mọi thứ đưa lên GitHub viết bằng tiếng Anh**: commit message (cả dòng đầu lẫn thân), tên branch, tag, PR, issue, release notes, README — người dùng chốt 2026-10-14. Lịch sử commit cũ bằng tiếng Việt giữ nguyên, không viết lại.
