@@ -1,7 +1,7 @@
 {
   "name": "stag-ai",
   "productName": "stag.ai",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "license": "MIT",
   "description": "Run a team of AI coding agents per workspace, with a markdown vault as their memory",
