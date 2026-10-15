@@ -97,7 +97,7 @@ describe('PluginHost', () => {
   it('cài từ thư mục → chờ duyệt quyền; duyệt → worker chạy; tool, action, sự kiện, dữ liệu riêng', async () => {
     const p = await host.install({ type: 'local', path: HELLO })
     expect(p.status.state).toBe('approval_pending')
-    expect(p.config).toEqual({ greeting: 'Xin chào', maxWords: 500, docsUrl: 'https://example.com' })
+    expect(p.config).toEqual({ greeting: 'Hello', maxWords: 500, docsUrl: 'https://example.com' })
     expect(host.toolsFor('w1', 'a1')).toEqual([])
     await expect(host.runSlot('stag.hello', 'hello', {})).rejects.toThrow(/chưa được duyệt/)
 
@@ -109,13 +109,13 @@ describe('PluginHost', () => {
     expect(tools.map((t) => t.mcpName)).toEqual(['stag_hello__word_count'])
     expect(await host.callTool('stag.hello', 'word_count', { text: 'one two three' }, {})).toEqual({ text: '3 words.', isError: false })
 
-    expect(await host.runSlot('stag.hello', 'hello', { workspaceId: 'w1' })).toEqual({ message: 'Xin chào! Workspace này có 2 agent, 1 đang chạy.' })
+    expect(await host.runSlot('stag.hello', 'hello', { workspaceId: 'w1' })).toEqual({ message: 'Hello! This workspace has 2 agents, 1 running.' })
 
     const ev: PluginEvent = { type: 'task.done', at: new Date().toISOString(), workspaceId: 'w1', agentId: 'a1', agentName: 'Lead', data: { title: 'Fix login' } }
     host.emit(ev)
     host.emit(ev)
-    await until(() => host.list()[0].logs.filter((l) => l.message.includes('xong việc: Fix login')).length === 2)
-    expect(await host.runSlot('stag.hello', 'stats', { agentId: 'a1', agentName: 'Lead' })).toEqual({ message: 'Lead đã xong 2 việc kể từ khi cài Hello.' })
+    await until(() => host.list()[0].logs.filter((l) => l.message.includes('finished: Fix login')).length === 2)
+    expect(await host.runSlot('stag.hello', 'stats', { agentId: 'a1', agentName: 'Lead' })).toEqual({ message: 'Lead has finished 2 tasks since Hello was installed.' })
     expect(JSON.parse(await fs.readFile(join(tmp, 'plugins', 'state', 'stag.hello.json'), 'utf8'))).toEqual({ 'done:a1': 2 })
     expect(host.list()[0].status).toMatchObject({ toolCalls: 1, events: 2 })
   })
@@ -123,8 +123,8 @@ describe('PluginHost', () => {
   it('cấu hình: kiểm theo schema, worker từ chối, worker nhận cấu hình mới', async () => {
     await host.install({ type: 'local', path: HELLO })
     await host.approve('stag.hello')
-    await expect(host.setConfig('stag.hello', { maxWords: 'abc' })).rejects.toThrow(/Giới hạn từ: Cần số nguyên/)
-    await expect(host.setConfig('stag.hello', { greeting: 'x'.repeat(81) })).rejects.toThrow(/dài quá 80/)
+    await expect(host.setConfig('stag.hello', { maxWords: 'abc' })).rejects.toThrow(/Word limit: Cần số nguyên/)
+    await expect(host.setConfig('stag.hello', { greeting: 'x'.repeat(81) })).rejects.toThrow(/longer than 80/)
     await host.setConfig('stag.hello', { greeting: 'Chào bạn', maxWords: 2 })
     expect(await host.callTool('stag.hello', 'word_count', { text: 'a b c' }, {})).toEqual({ text: '3 words — over the limit of 2.', isError: false })
     expect((await host.runSlot('stag.hello', 'hello', { workspaceId: 'w1' })).message).toMatch(/^Chào bạn!/)
@@ -142,7 +142,7 @@ describe('PluginHost', () => {
     await host.applySettings(normalizeSettings({ version: 2, workspaces: { w2: { plugins: { 'stag.hello': false } } }, agents: { a2: { plugins: { 'stag.hello': false } } } }))
     const listed = (await host.bridge('stag.hello', 'agents.list', {}, { workspaceId: 'w1' })) as { agents: Array<{ id: string }> }
     expect(listed.agents.map((a) => a.id)).toEqual(['a1'])
-    await expect(host.bridge('stag.hello', 'agents.list', {}, { workspaceId: 'w2' })).rejects.toThrow(/đang tắt/)
+    await expect(host.bridge('stag.hello', 'agents.list', {}, { workspaceId: 'w2' })).rejects.toThrow(/turned off/)
 
     await host.applySettings(normalizeSettings({ version: 2, app: { plugins: { toggles: { 'stag.hello': false } } } }))
     expect(host.list()[0].status).toMatchObject({ state: 'disabled', pid: null })
@@ -183,7 +183,7 @@ runWorker(definePlugin({ async setup(ctx) {
     await fs.writeFile(join(dir, 'package.json'), manifest(['ui.sidebar.register']))
     await host.install({ type: 'local', path: dir })
     await host.approve('acme.evil')
-    expect(await host.runSlot('acme.evil', 'send', {})).toEqual({ message: 'Plugin chưa được cấp quyền "agent.sessions.send".' })
+    expect(await host.runSlot('acme.evil', 'send', {})).toEqual({ message: 'The plugin has not been granted the "agent.sessions.send" capability.' })
     expect(sent).toEqual([])
 
     const pid = host.list()[0].status.pid
@@ -255,7 +255,7 @@ describe('PluginHost: trang, việc theo lịch, webhook', () => {
       ['stag.hello', 'stats', { agentId: 'a1' }],
       ['stag.hello', 'statusBar', {}]
     ])
-    expect(await host.bridge('stag.hello', 'data.get', { key: 'statusBar' }, ctx)).toEqual({ text: 'Hello · 1 việc xong', tooltip: expect.any(String), tone: 'ok' })
+    expect(await host.bridge('stag.hello', 'data.get', { key: 'statusBar' }, ctx)).toEqual({ text: 'Hello · 1 done', tooltip: expect.any(String), tone: 'ok' })
     expect((await host.uiFile('stag.hello', 'widget.html'))?.path).toBe(join(HELLO, 'ui', 'widget.html'))
     expect(await host.bridge('stag.hello', 'data.get', { key: 'stats' }, ctx)).toEqual({
       agents: [
@@ -265,16 +265,16 @@ describe('PluginHost: trang, việc theo lịch, webhook', () => {
       lastPing: null,
       lastSummary: null
     })
-    expect(await host.bridge('stag.hello', 'action.perform', { key: 'reset' }, ctx)).toEqual({ message: 'Đã đặt lại số việc xong.' })
+    expect(await host.bridge('stag.hello', 'action.perform', { key: 'reset' }, ctx)).toEqual({ message: 'Done counts reset.' })
     await until(() => streams.length === 4)
     await host.bridge('stag.hello', 'state.set', { key: 'k', value: 1 }, ctx)
     expect(await host.bridge('stag.hello', 'state.get', { key: 'k' }, ctx)).toBe(1)
     // Ghi song song nhiều khoá: không mất khoá nào (đọc-sửa-ghi nối đuôi).
     await Promise.all(Array.from({ length: 8 }, (_, i) => host.bridge('stag.hello', 'state.set', { key: `p${i}`, value: i }, ctx)))
     expect(await Promise.all(Array.from({ length: 8 }, (_, i) => host.bridge('stag.hello', 'state.get', { key: `p${i}` }, ctx)))).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
-    await expect(host.bridge('stag.hello', 'vault.read', { workspaceId: 'w1', path: 'a.md' }, ctx)).rejects.toThrow(/chưa được cấp quyền "vault.read"/)
-    await expect(host.bridge('stag.hello', 'shutdown', {}, ctx)).rejects.toThrow(/không gọi được/)
-    await expect(host.bridge('stag.hello', 'data.get', { key: 'nope' }, ctx)).rejects.toThrow(/chưa được đăng ký/)
+    await expect(host.bridge('stag.hello', 'vault.read', { workspaceId: 'w1', path: 'a.md' }, ctx)).rejects.toThrow(/not been granted the "vault.read"/)
+    await expect(host.bridge('stag.hello', 'shutdown', {}, ctx)).rejects.toThrow(/cannot call/)
+    await expect(host.bridge('stag.hello', 'data.get', { key: 'nope' }, ctx)).rejects.toThrow(/is not registered/)
   })
 
   it('việc theo lịch: lần tới, chạy tay, tới giờ thì chạy, không chạy chồng', async () => {
@@ -288,7 +288,7 @@ describe('PluginHost: trang, việc theo lịch, webhook', () => {
 
     const run = await host.runJob('stag.hello', 'summary')
     expect(run).toMatchObject({ key: 'summary', trigger: 'manual', ok: true })
-    expect(host.list()[0].logs.some((l) => l.message === 'Tổng kết (manual): Chưa agent nào xong việc.')).toBe(true)
+    expect(host.list()[0].logs.some((l) => l.message === 'Summary (manual): No agent has finished a task yet.')).toBe(true)
 
     await host.tickJobs(new Date(next - 1000))
     expect(host.list()[0].jobRuns.length).toBe(1) // chưa tới giờ
@@ -357,6 +357,7 @@ describe('PluginHost: plugin kèm app, tạo plugin từ mẫu', () => {
     const cat = await host.catalog()
     expect(cat.map((c) => [c.slug, c.manifest.id, c.installed])).toEqual([
       ['stag-plugin-hello', 'stag.hello', false],
+      ['stag-plugin-clip', 'stag.clip', false],
       ['stag-plugin-task-log', 'stag.task-log', false]
     ])
     const p = await host.install({ type: 'catalog', slug: 'stag-plugin-task-log' })
@@ -367,7 +368,7 @@ describe('PluginHost: plugin kèm app, tạo plugin từ mẫu', () => {
     await host.approve('stag.task-log')
 
     const ctx = { workspaceId: 'w1', workspaceName: 'Proj' }
-    expect(await host.runSlot('stag.task-log', 'today', ctx)).toEqual({ message: 'Hôm nay chưa có việc nào xong, chưa ghi gì.' })
+    expect(await host.runSlot('stag.task-log', 'today', ctx)).toEqual({ message: 'No tasks finished today yet; nothing written.' })
     const now = new Date().toISOString()
     boardTasks = [
       { id: 't1', agentName: 'Lead', title: 'Fix login', scope: 'src/auth', status: 'done', createdAt: now, doneAt: now, summary: 'Token refresh fixed' },
@@ -375,7 +376,7 @@ describe('PluginHost: plugin kèm app, tạo plugin từ mẫu', () => {
       { id: 't3', agentName: 'Coder', title: 'Docs', scope: 'docs', status: 'open', createdAt: now }
     ]
     const day = dayOf(new Date())
-    expect(await host.runSlot('stag.task-log', 'today', ctx)).toEqual({ message: `Đã ghi Task log/${day}.md trong vault.` })
+    expect(await host.runSlot('stag.task-log', 'today', ctx)).toEqual({ message: `Wrote Task log/${day}.md in the vault.` })
     expect(vaultWrites.length).toBe(1)
     expect(vaultWrites[0][0]).toBe('w1')
     expect(vaultWrites[0][2]).toContain('## Done (1)\n- **Lead**: Fix login (scope: src/auth) — Token refresh fixed')
@@ -403,11 +404,11 @@ describe('PluginHost: plugin kèm app, tạo plugin từ mẫu', () => {
     expect(await fs.readFile(join(dir, 'stag-plugin-sdk.mjs'), 'utf8')).toBe(await fs.readFile(SDK, 'utf8'))
     expect(p.manifest.ui.slots.map((s) => s.type)).toEqual(['sidebar', 'page'])
     await host.approve('my.bao-cao')
-    expect(await host.callTool('my.bao-cao', 'hello', { name: 'An' }, {})).toEqual({ text: 'Xin chào, An!', isError: false })
-    expect(await host.runSlot('my.bao-cao', 'click', {})).toEqual({ message: 'Đã bấm 1 lần.' })
+    expect(await host.callTool('my.bao-cao', 'hello', { name: 'An' }, {})).toEqual({ text: 'Hello, An!', isError: false })
+    expect(await host.runSlot('my.bao-cao', 'click', {})).toEqual({ message: 'Clicked 1 time.' })
     expect(await host.bridge('my.bao-cao', 'data.get', { key: 'info' }, { workspaceName: 'Proj' })).toEqual({ clicks: 1, workspace: 'Proj' })
     expect((await host.uiFile('my.bao-cao', 'index.html'))?.path).toBe(join(dir, 'ui', 'index.html'))
-    expect(host.list()[0].logs.some((l) => l.message === 'Báo cáo "tuần" đã sẵn sàng')).toBe(true)
+    expect(host.list()[0].logs.some((l) => l.message === 'Báo cáo "tuần" is ready')).toBe(true)
 
     const b = await host.scaffold({ parentDir: parent, name: 'Gọn', id: 'my.gon', template: 'basic' })
     expect(b.manifest.entrypoints).toEqual({ worker: './worker.mjs' })
@@ -575,9 +576,9 @@ runWorker(definePlugin({ async setup(ctx) {
     const dir = await filesPlugin(join(tmp, 'files'), [])
     await host.install({ type: 'local', path: dir })
     await host.approve('acme.files')
-    expect(await host.runSlot('acme.files', 'ls', ctx)).toEqual({ message: 'ERR Plugin chưa được cấp quyền "files.read".' })
-    await expect(host.bridge('acme.files', 'files.list', { workspaceId: 'w1' }, ctx)).rejects.toThrow(/chưa được cấp quyền "files.read"/)
-    await expect(host.bridge('acme.files', 'files.read', { workspaceId: 'w1', path: 'README.md' }, ctx)).rejects.toThrow(/chưa được cấp quyền "files.read"/)
+    expect(await host.runSlot('acme.files', 'ls', ctx)).toEqual({ message: 'ERR The plugin has not been granted the "files.read" capability.' })
+    await expect(host.bridge('acme.files', 'files.list', { workspaceId: 'w1' }, ctx)).rejects.toThrow(/not been granted the "files.read"/)
+    await expect(host.bridge('acme.files', 'files.read', { workspaceId: 'w1', path: 'README.md' }, ctx)).rejects.toThrow(/not been granted the "files.read"/)
 
     // Xin thêm quyền → chờ duyệt lại → chạy được.
     await filesPlugin(dir, ['files.read'])
@@ -603,25 +604,25 @@ runWorker(definePlugin({ async setup(ctx) {
     await expect(read('escape/secret.txt')).rejects.toThrow(/trong thư mục dự án/)
     await expect(list('escape')).rejects.toThrow(/trong thư mục dự án/)
     // Thư mục của app / git / vault.
-    await expect(read('.git/config')).rejects.toThrow(/dữ liệu của git/)
-    await expect(list('.stag')).rejects.toThrow(/dữ liệu của git/)
+    await expect(read('.git/config')).rejects.toThrow(/git \/ stag.ai data/)
+    await expect(list('.stag')).rejects.toThrow(/git \/ stag.ai data/)
     await expect(read('Proj memory/_INDEX.md')).rejects.toThrow(/vault/)
     // Nhị phân, quá lớn, không phải UTF-8, không có, thư mục.
-    await expect(read('bin.dat')).rejects.toThrow(/nhị phân/)
-    await expect(read('big.txt')).rejects.toThrow(/quá lớn/)
+    await expect(read('bin.dat')).rejects.toThrow(/binary/)
+    await expect(read('big.txt')).rejects.toThrow(/too large/)
     await expect(read('latin1.txt')).rejects.toThrow(/UTF-8/)
-    await expect(read('nope.txt')).rejects.toThrow(/Không thấy/)
-    await expect(read('src')).rejects.toThrow(/không phải file/)
+    await expect(read('nope.txt')).rejects.toThrow(/not found/)
+    await expect(read('src')).rejects.toThrow(/not a file/)
     // File hay chứa mã bí mật: thấy trong danh sách nhưng không đọc được.
     for (const f of ['.env', 'src/.env.local', '.mcp.json', 'deploy.PEM']) {
       await fs.writeFile(join(proj, f), 'TOKEN=abc')
-      await expect(read(f)).rejects.toThrow(/mã bí mật/)
+      await expect(read(f)).rejects.toThrow(/secrets/)
     }
     expect(await list()).toContainEqual({ name: '.env', path: '.env', type: 'file', size: 9 })
-    await expect(list('README.md')).rejects.toThrow(/không phải thư mục/)
+    await expect(list('README.md')).rejects.toThrow(/not a folder/)
     // Workspace không có / plugin tắt ở workspace đó.
-    await expect(host.bridge('acme.files', 'files.list', { workspaceId: 'w9' }, ctx)).rejects.toThrow(/Không có workspace/)
+    await expect(host.bridge('acme.files', 'files.list', { workspaceId: 'w9' }, ctx)).rejects.toThrow(/No such workspace/)
     await host.applySettings(normalizeSettings({ version: 2, workspaces: { w1: { plugins: { 'acme.files': false } } } }))
-    await expect(list()).rejects.toThrow(/tắt ở workspace/)
+    await expect(list()).rejects.toThrow(/turned off for this workspace/)
   })
 })

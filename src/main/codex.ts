@@ -4,6 +4,7 @@ import { delimiter, join } from 'node:path'
 import type { PermissionMode } from '@shared/types'
 import { exists } from './fsutil'
 import type { ContextSample } from './transcript'
+import { t } from '@shared/i18n'
 
 /**
  * Agent chạy Codex CLI (OpenAI, đã kiểm với 0.162.0). Khác Claude Code:
@@ -208,7 +209,7 @@ export async function resolveCodex(env: NodeJS.ProcessEnv = process.env): Promis
     }
   }
   for (const dir of dirs) if (await exists(join(dir, 'codex.exe'))) return join(dir, 'codex.exe')
-  throw new Error('Không tìm thấy Codex CLI (codex) trong PATH. Cài bằng: npm install -g @openai/codex rồi chạy codex một lần để đăng nhập.')
+  throw new Error(t('adapters.error.codexMissing'))
 }
 
 /** Thư mục dữ liệu của Codex (đổi được bằng CODEX_HOME). */

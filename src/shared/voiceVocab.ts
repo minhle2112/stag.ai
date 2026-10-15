@@ -153,7 +153,7 @@ export function applyReplacements(text: string, rules: readonly VoiceReplacement
  */
 export function spokenCommands(text: string): string {
   return text
-    .replace(new RegExp(`[ \\t,.;:]*${L}(?<!(?:ký tự|kí tự|dấu)\\s*)xuống dòng${R}[ \\t,.;:]*`, 'giu'), '\n')
+    .replace(new RegExp(`[ \\t,.;:]*${L}(?<!(?:ký tự|kí tự|dấu)\\s*)xuống dòng${R}[ \\t,.;:]*`, 'giu'), '\n') // i18n-ignore: Vietnamese voice command "xuống dòng"
     .replace(/\n(\p{Ll})/gu, (_m, c: string) => `\n${c.toUpperCase()}`)
 }
 

@@ -30,13 +30,17 @@ import { useSettings } from './store/settings'
 import { startNewWorkspace } from './store/workspaceFlow'
 import { setTerminalFontSize } from './terminals'
 import { startThemeBus } from './store/theme'
+import { startComputerBus } from './store/computer'
+import { CliWindowPicker } from './components/computer/WindowPicker'
 import { useBrowserOpen, useSidebarOpen, useUi, type MainTab } from './store/ui'
 import { useActiveWorkspace, useWorkspaces } from './store/workspaces'
+import { useT } from './i18n'
 
 /** Ctrl+1…4 → màn hình tương ứng ở thanh icon bên trái. */
 const VIEW_KEYS: Record<string, MainTab> = { '1': 'agents', '2': 'artifacts', '3': 'vault', '4': 'log' }
 
 export function App(): React.JSX.Element {
+  const t = useT()
   const tab = useUi((s) => s.tab)
   const { items, loaded, load } = useWorkspaces()
   const active = useActiveWorkspace()
@@ -57,6 +61,7 @@ export function App(): React.JSX.Element {
   }, [load])
 
   useEffect(() => startThemeBus(), [])
+  useEffect(() => startComputerBus(), [])
 
   useEffect(() => setTerminalFontSize(terminalFontSize), [terminalFontSize])
 
@@ -149,12 +154,12 @@ export function App(): React.JSX.Element {
         <main className="relative min-w-0 flex-1 bg-bg">
           {loaded && !active && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center text-muted">
-              <div>Chưa có workspace nào.</div>
+              <div>{t('shell.app.noWorkspace')}</div>
               <button
                 onClick={() => void startNewWorkspace()}
                 className="rounded-md bg-accent px-3 py-1.5 font-medium text-accent-on hover:brightness-110"
               >
-                + Workspace mới
+                {t('shell.app.newWorkspace')}
               </button>
             </div>
           )}
@@ -183,7 +188,7 @@ export function App(): React.JSX.Element {
               {page ? (
                 <PluginFrame plugin={page.plugin} slot={page.slot} workspace={active} />
               ) : (
-                <Placeholder text="Trang này của plugin không còn mở được (plugin đã gỡ, đang tắt hoặc chưa chạy). Xem Cài đặt → Plugin." />
+                <Placeholder text={t('shell.app.pluginPageGone')} />
               )}
             </div>
           )}
@@ -198,6 +203,7 @@ export function App(): React.JSX.Element {
       <BrowserAskDialog />
       <ScopeAskDialog />
       <AgentRequestDialog />
+      <CliWindowPicker />
       <ApprovalToast />
       <CredentialToast />
       <PluginToast />

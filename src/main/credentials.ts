@@ -38,6 +38,8 @@ import {
   type TwoFaKind
 } from '@shared/credentials'
 import { agentColor } from '@shared/inspect'
+import { getLocale, onLocaleChange, t as tr } from '@shared/i18n'
+import { uiName } from '@shared/i18n/uiNames'
 import type { AgentRequestInput } from '@shared/agentApi'
 import type { Agent } from '@shared/types'
 import { IPC } from '@shared/ipc'
@@ -56,6 +58,8 @@ const WAITING_MS = 30 * 60_000
 /** "Mở trang bảo mật để lấy mã QR": chờ mã QR trên trang chừng này. */
 const QR_WATCH_MS = 10 * 60_000
 const CLIP_CLEAR_MS = 30_000
+/** Tên người làm trong nhật ký khi là bạn (không có agentId): Cài đặt → Mật khẩu hiện "Bạn" / "You" theo ngôn ngữ. */
+const USER = 'user'
 const PAGE_REPLY_MS = 2500
 
 export interface CredentialDeps {
@@ -179,7 +183,8 @@ export class CredentialService {
     if (!t) return
     t.ui = ui
     const p = this.d.browser.page(t.wsId, tabId)
-    if (p && !p.wc.isDestroyed()) p.wc.send(CRED_IPC.ui, ui)
+    // Kèm ngôn ngữ giao diện: lớp trang (preload của tab) vẽ bong bóng theo ngôn ngữ của app.
+    if (p && !p.wc.isDestroyed()) p.wc.send(CRED_IPC.ui, { ...ui, locale: getLocale() })
   }
 
   private bubble(tabId: string, b: CredBubble | null): void {
@@ -195,6 +200,10 @@ export class CredentialService {
   // ---------- trang ↔ main ----------
 
   register(): void {
+    // Đổi ngôn ngữ giao diện: vẽ lại bong bóng đang mở trên các trang theo ngôn ngữ mới.
+    onLocaleChange(() => {
+      for (const [id, tc] of this.tabs) if (tc.ui.bubble) this.setUi(id, tc.ui)
+    })
     const page = (e: IpcMainEvent | IpcMainInvokeEvent): PageTab | null => {
       // Chỉ khung chính của tab browser của app.
       if (e.senderFrame && e.senderFrame.parent) return null
@@ -202,8 +211,8 @@ export class CredentialService {
     }
     ipcMain.handle(CRED_IPC.hello, (e) => {
       const p = page(e)
-      if (!p) return { bubble: null }
-      return this.tabs.get(p.tabId)?.ui ?? { bubble: null }
+      if (!p) return { bubble: null, locale: getLocale() }
+      return { ...(this.tabs.get(p.tabId)?.ui ?? { bubble: null }), locale: getLocale() }
     })
     ipcMain.on(CRED_IPC.res, (e, msg: { reqId?: unknown; value?: unknown }) => {
       if (!page(e) || !msg) return
@@ -272,7 +281,7 @@ export class CredentialService {
     if (!items.length) {
       if (host) this.waiting.set(agent.id, { wsId: agent.workspaceId, host, at: Date.now() })
       return host
-        ? `[]   (no saved login for ${host}. Ask the user to log in by hand in the Browser pane — stag.ai will offer to save it — then continue; or ask them to add it in Settings → Mật khẩu.)`
+        ? `[]   (no saved login for ${host}. Ask the user to log in by hand in the "${uiName.browser()}" pane — stag.ai will offer to save it — then continue; or ask them to add it in ${uiName.settings('passwords')}.)`
         : '[]   (the password vault has no item you may use.)'
     }
     return JSON.stringify(
@@ -309,7 +318,7 @@ export class CredentialService {
     if (kind.kind === 'none')
       throw new Error(
         step.frames
-          ? 'No login form on this page itself: it may be inside a frame from another site, which stag.ai does not fill. Ask the user to log in by hand in the Browser pane.'
+          ? `No login form on this page itself: it may be inside a frame from another site, which stag.ai does not fill. Ask the user to log in by hand in the "${uiName.browser()}" pane.`
           : 'No login form or 2FA field found on this page. Open the login page first (browser_snapshot to check), then call credential_fill again.'
       )
     if (kind.kind === 'needs_user') return this.needsUser(agent, item, host, kind.how)
@@ -318,7 +327,7 @@ export class CredentialService {
       if (!item.hasTotp) return this.needsUser(agent, item, host, 'code')
     }
     if ((kind.kind === 'login' || kind.kind === 'password') && !item.hasPassword)
-      throw new Error(`Item "${id}" has no password saved (only a 2FA key). Ask the user to log in by hand in the Browser pane.`)
+      throw new Error(`Item "${id}" has no password saved (only a 2FA key). Ask the user to log in by hand in the "${uiName.browser()}" pane.`)
 
     // Hỏi bạn (theo cài đặt của mục).
     let how: 'once' | 'always' | 'auto' | 'grant' = this.granted(agent.id, item.id) ? 'grant' : 'auto'
@@ -335,7 +344,7 @@ export class CredentialService {
         throw new Error(
           answer === 'timeout'
             ? `denied: the user did not answer in time. Ask the user before trying "${id}" again.`
-            : `denied: the user did not allow using "${id}". Stop here; the user can log in by hand in the Browser pane and you continue from there.`
+            : `denied: the user did not allow using "${id}". Stop here; the user can log in by hand in the "${uiName.browser()}" pane and you continue from there.`
         )
       }
       how = answer === 'always' ? 'always' : 'once'
@@ -394,12 +403,12 @@ export class CredentialService {
       if (n?.kind === 'otp')
         out.next =
           n.via === 'sms' || n.via === 'email'
-            ? `the page asks for ${TWOFA_LABEL[n.via]}: ask the user to type it in the Browser pane, and do other work while you wait`
+            ? `the page asks for ${TWOFA_LABEL[n.via]}: ask the user to type it in the "${uiName.browser()}" pane, and do other work while you wait`
             : item.hasTotp
               ? 'the page now asks for the 2FA code — call credential_fill again'
-              : `the page asks for ${TWOFA_LABEL.code}: ask the user to type it in the Browser pane`
+              : `the page asks for ${TWOFA_LABEL.code}: ask the user to type it in the "${uiName.browser()}" pane`
       else if (n?.kind === 'password') out.next = 'the page now asks for the password — call credential_fill again'
-      else if (n?.kind === 'needs_user') out.next = `the page asks for ${TWOFA_LABEL[n.how]}: ask the user to do it in the Browser pane, and do other work while you wait`
+      else if (n?.kind === 'needs_user') out.next = `the page asks for ${TWOFA_LABEL[n.how]}: ask the user to do it in the "${uiName.browser()}" pane, and do other work while you wait`
       else if (n?.kind === 'login' && filled !== 'totp') out.next = 'the login form is still shown: the login may have failed (wrong password?). Check with browser_snapshot and tell the user.'
     }
     // URL sau khi gửi có thể chứa mật khẩu (form method=GET): che như mọi chữ tool browser.
@@ -428,7 +437,7 @@ export class CredentialService {
       {
         status: 'needs_user',
         twofa: how,
-        message: `The page needs ${TWOFA_LABEL[how]}, which stag.ai cannot do for you. Ask the user to finish this step in the Browser pane (your tab), and do other work while you wait. Do not ask for the code in chat.`
+        message: `The page needs ${TWOFA_LABEL[how]}, which stag.ai cannot do for you. Ask the user to finish this step in the "${uiName.browser()}" pane (your tab), and do other work while you wait. Do not ask for the code in chat.`
       },
       null,
       2
@@ -452,7 +461,7 @@ export class CredentialService {
     // Mật khẩu bạn gõ: che trong mọi chữ agent đọc từ tab này (form GET đưa nó vào URL), kể cả khi không hỏi lưu.
     if (!t.secrets.includes(c.password)) t.secrets.push(c.password)
     if (!c.username && t.lastUser && t.lastUser.host === host && Date.now() - t.lastUser.at < CAPTURE_MS) c = { ...c, username: t.lastUser.username }
-    if (insecurePage(url)) return this.toast(p.tabId, 'stag.ai không lưu mật khẩu cho trang http:// (không mã hoá).')
+    if (insecurePage(url)) return this.toast(p.tabId, tr('passwords.page.insecure'))
     if (store.isNever(host) || !store.available()) return
     // (Giá trị app vừa tự điền: lớp trang tự bỏ qua; mục đã có đúng tên + mật khẩu: bỏ qua ngay dưới.)
     const username = String(c.username ?? '').slice(0, 300)
@@ -523,7 +532,7 @@ export class CredentialService {
       this.waiting.delete(id)
       this.d.tell(
         id,
-        `[stag.ai] The user logged in to ${p.host} in the Browser pane.` +
+        `[stag.ai] The user logged in to ${p.host} in the "${uiName.browser()}" pane.` +
           (saved ? ` New password item "${saved.id}"${saved.totp ? ' (with 2FA)' : ''}: next time call credential_fill("${saved.id}") to log in yourself.` : '') +
           ' Continue your task.'
       )
@@ -588,17 +597,17 @@ export class CredentialService {
             await store.setPassword(pend.updateId, pend.password)
             savedId = pend.updateId
             hasTotp = !!store.get(savedId)?.hasTotp
-            await store.log({ itemId: savedId, itemName: store.get(savedId)?.name ?? savedId, agentName: 'Bạn', host: pend.host, action: 'updated' })
+            await store.log({ itemId: savedId, itemName: store.get(savedId)?.name ?? savedId, agentName: USER, host: pend.host, action: 'updated' })
           } else {
             const agents = (Array.isArray(a.agents) ? a.agents : []).map(String).filter((id) => this.d.team(pend.wsId).some((x) => x.id === id))
             const v = await store.save({ name: nameFromHost(pend.host), domains: [pend.host], username: pend.username, password: pend.password, agents, policy: 'first' })
             // Agent bạn tích ở đây coi như đã cho luôn (không hỏi lần đầu).
             if (agents.length) await store.patch(v.id, { approved: agents })
             savedId = v.id
-            await store.log({ itemId: v.id, itemName: v.name, agentName: 'Bạn', host: pend.host, action: 'saved' })
+            await store.log({ itemId: v.id, itemName: v.name, agentName: USER, host: pend.host, action: 'saved' })
           }
           pend.savedId = savedId
-          this.toast(p.tabId, pend.updateId ? 'Đã cập nhật mật khẩu.' : `Đã lưu “${store.get(savedId)?.name ?? savedId}”. Đổi ở Cài đặt → Mật khẩu.`)
+          this.toast(p.tabId, pend.updateId ? tr('passwords.page.updated') : tr('passwords.page.saved', { name: store.get(savedId)?.name ?? savedId }))
           // Trang vừa hỏi 2FA mà mục chưa có khoá: hỏi lưu khoá 2FA.
           if ((pend.saw2fa || t.seen?.otp) && !hasTotp) {
             this.bubble(p.tabId, { kind: '2fa', itemName: store.get(savedId)?.name ?? savedId, paste: false })
@@ -607,7 +616,7 @@ export class CredentialService {
           this.bubble(p.tabId, null)
           this.finish(p.tabId, { id: savedId, totp: hasTotp })
         } catch (e) {
-          this.toast(p.tabId, `Không lưu được: ${(e as Error).message}`)
+          this.toast(p.tabId, tr('passwords.page.saveFailed', { message: (e as Error).message }))
         }
         return true
       }
@@ -618,14 +627,14 @@ export class CredentialService {
       case 'never':
         if (pend) await store.addNever(pend.host)
         this.bubble(p.tabId, null)
-        if (pend) this.toast(p.tabId, `Sẽ không hỏi lại cho ${pend.host}. Bỏ ở Cài đặt → Mật khẩu.`)
+        if (pend) this.toast(p.tabId, tr('passwords.page.never', { host: pend.host }))
         this.finish(p.tabId)
         return true
       case '2fa-qr': {
         if (!pend?.savedId) return null
         this.watch = { itemId: pend.savedId, host: pend.host, until: Date.now() + QR_WATCH_MS, tabId: p.tabId }
         this.bubble(p.tabId, null)
-        this.toast(p.tabId, 'Mở trang bảo mật / thiết lập app xác thực của trang này. stag tự nhận mã QR khi nó hiện ra.')
+        this.toast(p.tabId, tr('passwords.page.watchQr'))
         // Agent đang chờ chờ thêm tới khi bạn lưu / bỏ qua mã QR (hoặc hết 10 phút).
         clearTimeout(pend.timer)
         pend.timer = setTimeout(() => this.finish(p.tabId, { id: pend.savedId!, totp: false }), QR_WATCH_MS)
@@ -642,9 +651,9 @@ export class CredentialService {
           return false
         }
         await store.setTotp(pend.savedId, params)
-        await store.log({ itemId: pend.savedId, itemName: store.get(pend.savedId)?.name ?? '', agentName: 'Bạn', host: pend.host, action: 'totp_saved' })
+        await store.log({ itemId: pend.savedId, itemName: store.get(pend.savedId)?.name ?? '', agentName: USER, host: pend.host, action: 'totp_saved' })
         this.bubble(p.tabId, null)
-        this.toast(p.tabId, `Đã lưu khoá 2FA · mã hiện tại ${formatCode(totpCode(params))}`)
+        this.toast(p.tabId, tr('passwords.page.totpSaved', { code: formatCode(totpCode(params)) }))
         this.finish(p.tabId, { id: pend.savedId, totp: true })
         return true
       }
@@ -672,7 +681,7 @@ export class CredentialService {
           q.savedId = id
           t.handled.add(q.raw)
           if (this.watch?.itemId === id) this.watch = null
-          await store.log({ itemId: id, itemName: store.get(id)?.name ?? id, agentName: 'Bạn', host, action: 'totp_saved' })
+          await store.log({ itemId: id, itemName: store.get(id)?.name ?? id, agentName: USER, host, action: 'totp_saved' })
           if (t.ui.bubble?.kind === 'qr') this.bubble(p.tabId, { ...t.ui.bubble, saved: true, isNew: false, target: store.get(id)?.name ?? id, canFill: !!t.seen?.otp })
         } catch (e) {
           if (t.ui.bubble?.kind === 'qr') this.bubble(p.tabId, { ...t.ui.bubble, error: (e as Error).message })
@@ -734,7 +743,7 @@ export class CredentialService {
     ipcMain.handle(IPC.credList, () => store.state())
     ipcMain.handle(IPC.credSave, async (_e, input: CredentialInput) => {
       const v = await store.save(input)
-      await store.log({ itemId: v.id, itemName: v.name, agentName: 'Bạn', host: v.domains[0] ?? '', action: input.id ? 'updated' : 'saved' })
+      await store.log({ itemId: v.id, itemName: v.name, agentName: USER, host: v.domains[0] ?? '', action: input.id ? 'updated' : 'saved' })
       return v
     })
     ipcMain.handle(IPC.credPatch, (_e, id: string, patch: CredentialPatch) => store.patch(String(id), patch ?? {}))
@@ -768,14 +777,17 @@ export class CredentialService {
       if (dataUrl) img = nativeImage.createFromDataURL(String(dataUrl))
       else {
         const win = BrowserWindow.fromWebContents(e.sender) ?? undefined
-        const r = await (win
-          ? dialog.showOpenDialog(win, { title: 'Chọn ảnh mã QR', properties: ['openFile'], filters: [{ name: 'Ảnh', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] }] })
-          : dialog.showOpenDialog({ title: 'Chọn ảnh mã QR', properties: ['openFile'], filters: [{ name: 'Ảnh', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] }] }))
+        const opts: Electron.OpenDialogOptions = {
+          title: tr('passwords.dialog.pickQr'),
+          properties: ['openFile'],
+          filters: [{ name: tr('passwords.dialog.images'), extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] }]
+        }
+        const r = await (win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts))
         if (r.canceled || !r.filePaths[0]) return null
         img = nativeImage.createFromPath(r.filePaths[0])
       }
       const data = decodeQr(img)
-      return data ? previewTotp(data) : { ok: false, error: 'Không thấy mã QR trong ảnh.' }
+      return data ? previewTotp(data) : { ok: false, error: tr('passwords.scan.noQrImage') }
     })
     ipcMain.handle(IPC.credImport, (e, kind: ImportKind) => this.importFile(e, kind))
     ipcMain.handle(IPC.credImportCommit, (_e, token: string, rows: number[]) => this.importCommit(String(token), Array.isArray(rows) ? rows.map(Number) : []))
@@ -792,18 +804,18 @@ export class CredentialService {
       const data = decodeQr(s.thumbnail)
       if (data) return previewTotp(data)
     }
-    return { ok: false, error: 'Không thấy mã QR trên màn hình. Mở trang hiện mã QR cho rõ rồi bấm lại.' }
+    return { ok: false, error: tr('passwords.scan.noQrScreen') }
   }
 
   private async importFile(e: IpcMainInvokeEvent, kind: ImportKind): Promise<ImportPreview | null> {
     const ext = kind === 'bitwarden-json' ? ['json'] : ['csv']
     const win = BrowserWindow.fromWebContents(e.sender) ?? undefined
-    const opts = { title: 'Chọn file export', properties: ['openFile' as const], filters: [{ name: kind === 'bitwarden-json' ? 'JSON' : 'CSV', extensions: ext }] }
+    const opts = { title: tr('passwords.dialog.pickExport'), properties: ['openFile' as const], filters: [{ name: kind === 'bitwarden-json' ? 'JSON' : 'CSV', extensions: ext }] }
     const r = await (win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts))
     if (r.canceled || !r.filePaths[0]) return null
     const file = r.filePaths[0]
     const st = await fs.stat(file)
-    if (st.size > 20 * 1024 * 1024) return { token: '', file, rows: [], errors: ['File lớn quá (trên 20 MB).'] }
+    if (st.size > 20 * 1024 * 1024) return { token: '', file, rows: [], errors: [tr('passwords.import.tooBig')] }
     const { rows, errors } = parseImport(kind, await fs.readFile(file, 'utf8'))
     const token = randomUUID()
     for (const [k, v] of this.imports) if (Date.now() - v.at > 10 * 60_000) this.imports.delete(k)
@@ -818,12 +830,12 @@ export class CredentialService {
 
   private async importCommit(token: string, pick: number[]): Promise<{ added: number; updated: number; errors: string[] }> {
     const imp = this.imports.get(token)
-    if (!imp) throw new Error('Bản xem trước đã hết hạn, chọn lại file.')
+    if (!imp) throw new Error(tr('passwords.import.expired'))
     this.imports.delete(token)
     const rows = pick.filter((i) => Number.isInteger(i) && i >= 0 && i < imp.rows.length).map((i) => imp.rows[i])
     const r = await this.d.store.importRows(rows)
     if (r.added + r.updated)
-      await this.d.store.log({ itemId: '', itemName: `${r.added + r.updated} mục`, agentName: 'Bạn', host: '', action: 'imported', detail: `+${r.added} / ~${r.updated}` })
+      await this.d.store.log({ itemId: '', itemName: `${r.added + r.updated} items`, agentName: USER, host: '', action: 'imported', detail: `+${r.added} / ~${r.updated}` })
     return r
   }
 

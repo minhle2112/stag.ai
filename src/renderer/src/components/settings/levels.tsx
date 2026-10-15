@@ -7,6 +7,7 @@ import { useSettings } from '../../store/settings'
 import { useWorkspaces } from '../../store/workspaces'
 import { Seg } from '../ui/Seg'
 import { OverrideSwitch, Select, Switch, useSaveError } from './controls'
+import { t } from '../../i18n'
 
 /**
  * Cấp áp dụng bật / tắt (Connector, Skill, Plugin…): mặc định cho mọi agent → workspace → agent.
@@ -31,9 +32,9 @@ export function useLevel(level: LevelKey): Level {
   const [kind, wsId, agentId] = level.split(':') as ['app' | 'ws' | 'agent', string?, string?]
   const ws = workspaces.find((w) => w.id === wsId)
   const agent = agentId ? byWs[wsId!]?.agents.find((a) => a.id === agentId) : undefined
-  if (kind === 'agent' && ws && agent) return { lvl: 'agent', wsId: ws.id, agentId: agent.id, name: `agent ${agent.name}` }
-  if (kind === 'ws' && ws) return { lvl: 'ws', wsId: ws.id, name: `workspace ${ws.name}` }
-  return { lvl: 'app', name: 'mọi agent' }
+  if (kind === 'agent' && ws && agent) return { lvl: 'agent', wsId: ws.id, agentId: agent.id, name: t('settings.level.agentName', { name: agent.name }) }
+  if (kind === 'ws' && ws) return { lvl: 'ws', wsId: ws.id, name: t('settings.level.workspaceName', { name: ws.name }) }
+  return { lvl: 'app', name: t('settings.level.allAgents') }
 }
 
 /** Khoá cấp của một agent (mở từ menu ⋯ của agent). */
@@ -50,10 +51,10 @@ export function isOn(field: ToggleField, s: Settings, k: string, workspaceId?: s
   return field === 'connectors' ? connectorOn(s, k, workspaceId, agentId) : field === 'skills' ? skillOn(s, k, workspaceId, agentId) : pluginOn(s, k, workspaceId, agentId)
 }
 
-const LEVEL_OPTIONS = [
-  { value: 'app' as const, label: 'App', tip: 'Mặc định cho mọi workspace và agent' },
-  { value: 'ws' as const, label: 'Workspace', tip: 'Chỉ một workspace (ghi đè cấp App)' },
-  { value: 'agent' as const, label: 'Agent', tip: 'Chỉ một agent (ghi đè cấp Workspace)' }
+const levelOptions = (): Array<{ value: 'app' | 'ws' | 'agent'; label: string; tip: string }> => [
+  { value: 'app', label: 'App', tip: t('settings.level.appTip') },
+  { value: 'ws', label: 'Workspace', tip: t('settings.level.wsTip') },
+  { value: 'agent', label: 'Agent', tip: t('settings.level.agentTip') }
 ]
 
 /**
@@ -86,8 +87,8 @@ export function LevelBar({
 
   if (appOnly || !setLevel) {
     return (
-      <span data-tip="Mục này chỉ đặt ở cấp App · áp dụng mọi workspace" className="inline-flex shrink-0">
-        <Seg className="pointer-events-none opacity-45" value="app" onChange={() => {}} options={LEVEL_OPTIONS.map(({ value, label }) => ({ value, label }))} />
+      <span data-tip={t('settings.level.appOnlyTip')} className="inline-flex shrink-0">
+        <Seg className="pointer-events-none opacity-45" value="app" onChange={() => {}} options={levelOptions().map(({ value, label }) => ({ value, label }))} />
       </span>
     )
   }
@@ -116,24 +117,24 @@ export function LevelBar({
   return (
     <span className="flex shrink-0 items-center gap-2 text-[12px] font-normal">
       <span
-        data-tip="● = đã ghi đè ở cấp này"
+        data-tip={t('settings.level.overriddenTip')}
         className={`inline-flex cursor-help items-center gap-1 text-[11px] text-dim ${cur.lvl === 'app' ? 'invisible' : ''}`}
       >
         <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-        ghi đè
+        {t('settings.level.overridden')}
       </span>
       <span className={cur.lvl === 'app' ? 'invisible' : ''}>
         <Select
           compact
           className="w-36"
-          label={cur.lvl === 'agent' ? 'Chọn agent' : 'Chọn workspace'}
+          label={cur.lvl === 'agent' ? t('settings.level.pickAgent') : t('settings.level.pickWorkspace')}
           value={value}
           onChange={setLevel}
           options={cur.lvl === 'agent' ? agentOptions : wsOptions}
         />
       </span>
-      <span data-tip="Cấp dưới ghi đè cấp trên · ● = đã ghi đè ở cấp này">
-        <Seg value={cur.lvl} onChange={pick} options={LEVEL_OPTIONS} />
+      <span data-tip={t('settings.level.cascadeTip')}>
+        <Seg value={cur.lvl} onChange={pick} options={levelOptions()} />
       </span>
     </span>
   )
@@ -164,7 +165,7 @@ export function LevelToggle({
     const on = isOn(field, settings, k)
     return (
       <span onClick={(e) => e.stopPropagation()}>
-        <Switch label={`${on ? 'Tắt' : 'Bật'} ${label} cho mọi agent`} checked={on} onChange={(v) => run(setApp(v))} />
+        <Switch label={t(on ? 'settings.level.toggleOffAll' : 'settings.level.toggleOnAll', { label })} checked={on} onChange={(v) => run(setApp(v))} />
       </span>
     )
   }

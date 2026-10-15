@@ -8,6 +8,8 @@ import { useSettings } from '../store/settings'
 import { Icon } from './Icon'
 import { Button, Modal } from './Modal'
 import { Seg } from './ui/Seg'
+import { tx, useT } from '../i18n'
+import type { PlainKey } from '@shared/i18n'
 
 const ROLES = ['Lead', 'Dev', 'QA', 'Docs']
 
@@ -20,10 +22,10 @@ interface KindOption {
   hint: string
 }
 
-const KINDS: KindOption[] = [
-  { key: 'claude', kind: 'claude', label: 'Claude Code', hint: 'Agent có vai trò, bộ nhớ riêng, nhận việc.' },
-  { key: 'codex', kind: 'codex', label: 'Codex', hint: 'Agent chạy Codex CLI, cũng có vai trò, bộ nhớ, nhận việc.' },
-  { key: 'terminal', kind: 'terminal', label: 'Terminal', hint: 'Shell trong thư mục dự án, không có bộ nhớ.' }
+const KINDS: Array<Omit<KindOption, 'hint'> & { hint: PlainKey }> = [
+  { key: 'claude', kind: 'claude', label: 'Claude Code', hint: 'agents.create.hintClaude' },
+  { key: 'codex', kind: 'codex', label: 'Codex', hint: 'agents.create.hintCodex' },
+  { key: 'terminal', kind: 'terminal', label: 'Terminal', hint: 'agents.create.hintTerminal' }
 ]
 
 interface Props {
@@ -50,17 +52,27 @@ interface Props {
   }) => Promise<void>
 }
 
-const EFFORT_LABEL: Record<string, string> = { minimal: 'Tối thiểu', low: 'Thấp', medium: 'Vừa', high: 'Cao', xhigh: 'Rất cao', max: 'Tối đa', ultra: 'Ultra' }
+const EFFORT_LABEL: Record<string, PlainKey> = {
+  minimal: 'agents.effort.minimal',
+  low: 'agents.effort.low',
+  medium: 'agents.effort.medium',
+  high: 'agents.effort.high',
+  xhigh: 'agents.effort.xhigh',
+  max: 'agents.effort.max',
+  ultra: 'agents.effort.ultra'
+}
 const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
 const FIELD = 'w-full rounded-md border border-line-2 bg-bg px-2 py-1.5 outline-none focus:border-accent'
 
 export function CreateAgentDialog({ initialKind, suggestName, takenNames, where, onCancel, onSubmit }: Props): React.JSX.Element {
+  const t = useT()
   const adapters = useSettings((s) => s.value.app.adapters)
+  const builtin: KindOption[] = KINDS.map((k) => ({ ...k, hint: t(k.hint) }))
   const external = useExternalAdapters((s) => s.items)
   // Adapter tắt ở Cài đặt → Adapter không hiện ở đây. Tắt hết thì vẫn hiện đủ (không để hộp này cụt).
   const all: KindOption[] = [
-    ...KINDS.filter((k) => adapters[k.kind as 'claude' | 'codex' | 'terminal'].enabled),
+    ...builtin.filter((k) => adapters[k.kind as 'claude' | 'codex' | 'terminal'].enabled),
     ...external
       .filter((a) => a.enabled)
       .map((a) => ({
@@ -68,10 +80,10 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
         kind: 'external' as const,
         adapterId: a.manifest.id,
         label: a.manifest.label,
-        hint: a.manifest.description || 'Adapter ngoài (alpha).'
+        hint: a.manifest.description || t('agents.create.hintExternal')
       }))
   ]
-  const kinds = all.length ? all : KINDS
+  const kinds = all.length ? all : builtin
   const first = (initialKind ? kinds.find((k) => k.kind === initialKind) : undefined) ?? kinds[0]
   const [key, setKey] = useState(first.key)
   const opt = kinds.find((k) => k.key === key) ?? kinds[0]
@@ -108,7 +120,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
   const trimmed = name.trim()
   const problem =
     agentNameProblem(trimmed) ??
-    (takenNames.some((n) => sameAgentName(n, trimmed)) ? `Đã có agent tên "${trimmed}" trong workspace này` : null)
+    (takenNames.some((n) => sameAgentName(n, trimmed)) ? t('agents.name.taken', { name: trimmed }) : null)
   const modelBad = !MODEL_RE.test(model.trim())
   const modelInfo = models.find((m) => m.id === model.trim())
   const efforts = modelInfo?.efforts.length ? modelInfo.efforts : models.length ? [...new Set(models.flatMap((m) => m.efforts))] : FALLBACK_EFFORTS
@@ -138,16 +150,16 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
 
   return (
     <Modal
-      title={`${terminal ? 'Thêm terminal' : 'Thêm agent'}${where ? ` · ${where.name}` : ''}`}
+      title={`${terminal ? t('agents.create.titleTerminal') : t('agents.create.titleAgent')}${where ? ` · ${where.name}` : ''}`}
       width="w-[520px]"
       onClose={busy ? undefined : onCancel}
       footer={
         <>
           <Button onClick={onCancel} disabled={busy}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button primary onClick={submit} disabled={busy || !!problem || modelBad}>
-            {busy ? 'Đang tạo…' : terminal ? 'Tạo và mở terminal' : 'Tạo và mở phiên'}
+            {busy ? t('agents.create.creating') : terminal ? t('agents.create.okTerminal') : t('agents.create.okAgent')}
           </Button>
         </>
       }
@@ -158,7 +170,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
           submit()
         }}
       >
-        <Label text="Loại">
+        <Label text={t('agents.req.kind')}>
           <div className={`grid gap-1.5 ${kinds.length === 1 ? 'grid-cols-1' : kinds.length === 2 || kinds.length === 4 ? 'grid-cols-2' : 'grid-cols-3'}`}>
             {kinds.map((k) => (
               <button
@@ -181,7 +193,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
             ))}
           </div>
         </Label>
-        <Label text={terminal ? 'Tên terminal' : 'Tên agent'}>
+        <Label text={terminal ? t('agents.create.nameTerminal') : t('agents.create.nameAgent')}>
           <input
             autoFocus
             value={name}
@@ -192,11 +204,11 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
         </Label>
         {!terminal && (
           <>
-            <Label text="Vai trò (tuỳ chọn)">
+            <Label text={t('agents.create.role')}>
               <input
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
-                placeholder="vd. Dev frontend"
+                placeholder={t('agents.create.rolePlaceholder')}
                 className="w-full rounded-md border border-line-2 bg-bg px-2 py-1.5 outline-none focus:border-accent"
               />
               <div className="mt-1.5 flex gap-1.5">
@@ -213,7 +225,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
               </div>
             </Label>
             {kind !== 'external' && (
-            <Label text="Quyền">
+            <Label text={t('agents.req.permission')}>
               <div className="space-y-1">
                 {permissionModes(kind).map((m) => (
                   <label key={m.id} className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-panel-2">
@@ -227,7 +239,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
             </Label>
             )}
             {cli && (
-              <Label text="Giao diện ô">
+              <Label text={t('agents.create.cellUi')}>
                 <div className="flex items-center gap-3">
                   <Seg
                     value={cell}
@@ -238,20 +250,20 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
                     ]}
                   />
                   <span className="text-[12px] text-muted">
-                    {cell === 'chat' ? 'Hội thoại có thẻ tool, duyệt quyền bằng nút. Cùng phiên với CLI, đổi qua lại được.' : `${kind === 'codex' ? 'Codex' : 'Claude Code'} chạy nguyên bản trong terminal.`}
+                    {cell === 'chat' ? t('agents.create.cellChatHint') : t('agents.create.cellCliHint', { cli: kind === 'codex' ? 'Codex' : 'Claude Code' })}
                   </span>
                 </div>
               </Label>
             )}
-            <Label text="Việc đầu tiên (tuỳ chọn)">
+            <Label text={t('agents.create.firstTask')}>
               <textarea
                 value={firstTask}
                 onChange={(e) => setFirstTask(e.target.value)}
                 rows={2}
-                placeholder="vd. Thêm phí ship quốc tế theo vùng cho đơn hàng"
+                placeholder={t('agents.create.firstTaskPlaceholder')}
                 className={`${FIELD} resize-none`}
               />
-              <div className="mt-1 text-[12px] text-muted">Để trống = agent chào rồi hỏi bạn muốn làm gì.</div>
+              <div className="mt-1 text-[12px] text-muted">{t('agents.create.firstTaskHint')}</div>
             </Label>
             <button
               type="button"
@@ -262,7 +274,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
               <span className={more ? 'rotate-90' : ''}>
                 <Icon name="cr" size="s" />
               </span>
-              Model, mức suy nghĩ, phạm vi
+              {t('agents.create.more')}
             </button>
             {more && (
               <div className="mb-4 space-y-3 rounded-md border border-line bg-bg p-3">
@@ -273,7 +285,7 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
                         list="create-agent-models"
                         value={model}
                         onChange={(e) => setModel(e.target.value)}
-                        placeholder="theo cấu hình của bạn"
+                        placeholder={t('agents.create.modelPlaceholder')}
                         className={`${FIELD} font-mono text-[12px] ${modelBad ? 'border-danger/60' : ''}`}
                       />
                       <datalist id="create-agent-models">
@@ -283,54 +295,43 @@ export function CreateAgentDialog({ initialKind, suggestName, takenNames, where,
                           </option>
                         ))}
                       </datalist>
-                      {modelBad && <div className="mt-1 text-[12px] text-danger">Chỉ dùng chữ, số và . _ : - / [ ] @</div>}
+                      {modelBad && <div className="mt-1 text-[12px] text-danger">{t('agents.create.modelBad')}</div>}
                     </Label>
-                    <Label text="Mức suy nghĩ" compact>
+                    <Label text={t('agents.req.effort')} compact>
                       <select value={effort} onChange={(e) => setEffort(e.target.value)} className={FIELD}>
-                        <option value="">Mặc định của model</option>
+                        <option value="">{t('agents.create.effortDefault')}</option>
                         {efforts.map((e) => (
                           <option key={e} value={e}>
-                            {EFFORT_LABEL[e] ? `${EFFORT_LABEL[e]} (${e})` : e}
+                            {EFFORT_LABEL[e] ? `${t(EFFORT_LABEL[e])} (${e})` : e}
                           </option>
                         ))}
                       </select>
                     </Label>
                   </>
                 )}
-                <Label text="Phạm vi dự kiến" compact>
+                <Label text={t('agents.create.scope')} compact>
                   <input
                     value={scope}
                     onChange={(e) => setScope(e.target.value)}
-                    placeholder="vd. src/orders/ hoặc src/**/*.ts"
+                    placeholder={t('agents.create.scopePlaceholder')}
                     className={`${FIELD} font-mono text-[12px]`}
                   />
-                  <div className="mt-1 text-[12px] text-muted">Agent dùng làm phạm vi khi nhận việc (khoá phạm vi vẫn kiểm tra như thường).</div>
+                  <div className="mt-1 text-[12px] text-muted">{t('agents.create.scopeHint')}</div>
                 </Label>
               </div>
             )}
           </>
         )}
         {terminal ? (
-          <p className="text-[12px] text-muted">
-            Terminal mở shell chọn ở Cài đặt → Adapter → Terminal, trong thư mục dự án. Đóng ô thì terminal vẫn chạy, mở lại ở thanh bên.
-          </p>
+          <p className="text-[12px] text-muted">{t('agents.create.terminalNote')}</p>
         ) : (
-          <p className="text-[12px] text-muted">
-            Khi mở, agent sẽ đọc vault rồi hỏi bạn muốn nó giúp gì trong workspace này. Bộ nhớ riêng của agent nằm ở{' '}
-            <code>60 Agents/{trimmed || '…'}.md</code> trong vault.
-          </p>
+          <p className="text-[12px] text-muted">{tx('agents.create.agentNote', { path: <code>60 Agents/{trimmed || '…'}.md</code> })}</p>
         )}
         {where && (
           <p className="mt-2 text-[12px] text-muted">
-            {where.folder ? (
-              <>
-                Thuộc project <b className="text-fg">{where.name}</b>: mở phiên trong thư mục <code>{where.folder}</code>, phạm vi tính từ đó.
-              </>
-            ) : (
-              <>
-                Thuộc <b className="text-fg">Chung</b> (thư mục gốc): thấy mọi project, giao việc cho mọi đội.
-              </>
-            )}
+            {where.folder
+              ? tx('agents.create.whereProject', { name: <b className="text-fg">{where.name}</b>, folder: <code>{where.folder}</code> })
+              : tx('agents.create.whereRoot', { root: <b className="text-fg">{t('common.name.rootProject')}</b> })}
           </p>
         )}
         {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InstalledPlugin, PluginSlot } from '@shared/plugins'
+import { useLocale } from '../i18n'
+import { useUi } from '../store/ui'
 import { openPluginUrl, pluginErr, usePluginToast } from '../store/plugins'
 import { useTheme } from '../store/theme'
 
@@ -11,7 +13,8 @@ export interface PluginFrameContext {
   workspace: { id: string; name: string; path: string } | null
   /** Màu app đang dùng; đổi thì trang nhận lại sự kiện `context` và sự kiện `theme`. */
   theme: 'dark' | 'light'
-  locale: 'vi'
+  /** Ngôn ngữ giao diện app; đổi thì trang nhận lại sự kiện `context` và sự kiện `locale`. */
+  locale: 'vi' | 'en'
 }
 
 /**
@@ -36,6 +39,7 @@ export function PluginFrame({
   const ref = useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = useState(240)
   const theme = useTheme((s) => s.theme)
+  const locale = useLocale()
   const id = plugin.manifest.id
   const context = useMemo<PluginFrameContext>(
     () => ({
@@ -44,9 +48,9 @@ export function PluginFrame({
       slotType: slot.type,
       workspace: workspace ? { id: workspace.id, name: workspace.name, path: workspace.path } : null,
       theme,
-      locale: 'vi'
+      locale
     }),
-    [id, slot.id, slot.type, workspace?.id, workspace?.name, workspace?.path, theme] // eslint-disable-line react-hooks/exhaustive-deps
+    [id, slot.id, slot.type, workspace?.id, workspace?.name, workspace?.path, theme, locale] // eslint-disable-line react-hooks/exhaustive-deps
   )
   const ctxRef = useRef(context)
   ctxRef.current = context
@@ -59,6 +63,7 @@ export function PluginFrame({
   useEffect(() => post({ event: 'context', context }), [context])
   // Đổi sáng / tối: sự kiện riêng (host.onTheme trong /__stag/ui.js); trang không nghe thì giữ màu của nó.
   useEffect(() => post({ event: 'theme', theme }), [theme])
+  useEffect(() => post({ event: 'locale', locale }), [locale])
 
   useEffect(() => {
     const onMessage = async (e: MessageEvent): Promise<void> => {
@@ -87,6 +92,23 @@ export function PluginFrame({
             return
           case 'ui.openUrl':
             await openPluginUrl(String(p.url ?? ''), p.target === 'external' ? 'external' : 'browser', ctxRef.current.workspace?.id)
+            reply({ result: null })
+            return
+          case 'ui.pickFile': {
+            const filters = Array.isArray(p.filters) ? (p.filters as Array<{ name: string; extensions: string[] }>) : undefined
+            reply({ result: await window.stag.pickFile(`${name}: ${String(p.title ?? '').slice(0, 120)}`, undefined, filters) })
+            return
+          }
+          case 'ui.reveal': {
+            // Chỉ file trong dự án của workspace đang xem (main kiểm đường dẫn nằm trong dự án).
+            const ws = ctxRef.current.workspace?.id
+            if (!ws) throw new Error('No workspace')
+            await window.stag.artifacts.reveal(ws, String(p.path ?? ''))
+            reply({ result: null })
+            return
+          }
+          case 'ui.openSettings':
+            useUi.getState().openSettings('plugins', { plugin: id })
             reply({ result: null })
             return
           default:
@@ -118,6 +140,8 @@ export function PluginFrame({
       title={`${name} — ${slot.displayName}`}
       src={`stag-plugin://${id}/${slot.path ?? 'index.html'}`}
       sandbox="allow-scripts allow-forms allow-downloads"
+      // Trình phát video trong trang plugin (vd. Stag Clip) được phóng toàn màn hình.
+      allow="fullscreen"
       referrerPolicy="no-referrer"
       className={`block w-full border-0 bg-bg ${fit ? '' : 'h-full'} ${className ?? ''}`}
       style={fit ? { height } : undefined}

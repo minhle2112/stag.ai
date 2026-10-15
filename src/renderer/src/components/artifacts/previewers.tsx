@@ -3,6 +3,7 @@
 // app) hoặc iframe sandbox (HTML), và CSP của app chặn mọi script nội tuyến.
 import { useEffect, useRef, useState } from 'react'
 import type { Workspace } from '@shared/types'
+import { t as tNow, useT } from '../../i18n'
 import { Icon } from '../Icon'
 import { Seg } from '../ui/Seg'
 import { extOf, fileUrl, formatSize } from './stacks'
@@ -36,7 +37,7 @@ function useBytes(ws: Workspace, rel: string, version: string): { data: Uint8Arr
     setState({ data: null, error: null, loading: true })
     window.stag.artifacts
       .bytes(ws.id, rel)
-      .then((data) => alive && setState({ data, error: data ? null : 'Không còn file này trên đĩa.', loading: false }))
+      .then((data) => alive && setState({ data, error: data ? null : tNow('artifacts.pv.missing'), loading: false }))
       .catch((e: Error) => alive && setState({ data: null, error: cleanError(e), loading: false }))
     return () => {
       alive = false
@@ -77,13 +78,15 @@ export function Note({ children }: { children: React.ReactNode }): React.JSX.Ele
 }
 
 function Loading(): React.JSX.Element {
-  return <Note>Đang mở…</Note>
+  const t = useT()
+  return <Note>{t('artifacts.opening')}</Note>
 }
 
 // ---------- ảnh ----------
 
 /** Ảnh trên nền ô vuông tối (thấy rõ phần trong suốt), kèm kích thước thật của ảnh. */
 export function ImageView({ ws, rel, version, onError }: { ws: Workspace; rel: string; version: string; onError: () => void }): React.JSX.Element {
+  const t = useT()
   const [dim, setDim] = useState<string | null>(null)
   return (
     <div className="flex min-h-full flex-col items-center justify-center gap-2.5 bg-[repeating-conic-gradient(#14171a_0%_25%,#101215_0%_50%)] bg-[length:16px_16px] p-6">
@@ -96,7 +99,7 @@ export function ImageView({ ws, rel, version, onError }: { ws: Workspace; rel: s
       />
       {dim && (
         <div className="font-mono text-[11px] text-dim">
-          {dim} · {extOf(rel).toUpperCase() || 'ẢNH'}
+          {dim} · {extOf(rel).toUpperCase() || t('artifacts.pv.image')}
         </div>
       )}
     </div>
@@ -194,6 +197,7 @@ export function PdfView({
   onPick?: (p: { page: number; x: number; y: number }) => void
   onPin?: (id: string) => void
 }): React.JSX.Element {
+  const t = useT()
   const { data, error, loading } = useBytes(ws, rel, version)
   const host = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
@@ -279,7 +283,7 @@ export function PdfView({
   }
 
   if (loading) return <Loading />
-  if (error || failed) return <Note>{error ?? `Không đọc được file PDF: ${failed}`}</Note>
+  if (error || failed) return <Note>{error ?? t('artifacts.pv.pdfFailed', { error: failed ?? '' })}</Note>
   return (
     <div className="flex h-full flex-col bg-stage">
       <div className="flex shrink-0 items-center justify-center gap-1 py-1.5 text-[12px] text-muted">
@@ -294,21 +298,22 @@ export function PdfView({
 }
 
 function ZoomButtons({ zoom, setZoom }: { zoom: number; setZoom: (z: number) => void }): React.JSX.Element {
+  const t = useT()
   const btn = 'inline-grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-fg disabled:opacity-40'
   return (
     <>
-      <button type="button" className={btn} disabled={zoom <= 0.5} data-tip="Thu nhỏ" onClick={() => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}>
+      <button type="button" className={btn} disabled={zoom <= 0.5} data-tip={t('artifacts.pv.zoomOut')} onClick={() => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}>
         <MinusIcon />
       </button>
       <button
         type="button"
         className="h-6 rounded-md px-1.5 font-mono text-[11px] text-muted hover:bg-panel-3 hover:text-fg"
         onClick={() => setZoom(1)}
-        data-tip="Vừa khung"
+        data-tip={t('artifacts.pv.fit')}
       >
         {Math.round(zoom * 100)}%
       </button>
-      <button type="button" className={btn} disabled={zoom >= 3} data-tip="Phóng to" onClick={() => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))}>
+      <button type="button" className={btn} disabled={zoom >= 3} data-tip={t('artifacts.pv.zoomIn')} onClick={() => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))}>
         <Icon name="plus" size="s" />
       </button>
     </>
@@ -358,6 +363,7 @@ export function pdfThumb(ws: Workspace, rel: string, version: string): Promise<s
 // ---------- Word (docx-preview) ----------
 
 export function DocxView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const t = useT()
   const { data, error, loading } = useBytes(ws, rel, version)
   const [ref, shadow] = useShadowHost()
   const [failed, setFailed] = useState<string | null>(null)
@@ -411,7 +417,7 @@ export function DocxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
   }, [data])
 
   if (loading) return <Loading />
-  if (error || failed) return <Note>{error ?? `Không đọc được file Word: ${failed}`}</Note>
+  if (error || failed) return <Note>{error ?? t('artifacts.pv.wordFailed', { error: failed ?? '' })}</Note>
   return <div ref={ref} className="min-h-full bg-stage select-text" />
 }
 
@@ -452,6 +458,7 @@ export function SheetView({
   /** Bấm vào ô (bật chế độ góp ý theo ô). */
   onCell?: (c: { sheet: string; cell: string; value: string }) => void
 }): React.JSX.Element {
+  const t = useT()
   const { data, error, loading } = useBytes(ws, rel, version)
   const [book, setBook] = useState<{ names: string[]; html: (i: number) => { html: string; rows: number; cut: boolean } } | null>(null)
   const [sheet, setSheet] = useState(0)
@@ -546,7 +553,7 @@ export function SheetView({
   }, [!!book])
 
   if (loading) return <Loading />
-  if (error || failed) return <Note>{error ?? `Không đọc được bảng tính: ${failed}`}</Note>
+  if (error || failed) return <Note>{error ?? t('artifacts.pv.sheetFailed', { error: failed ?? '' })}</Note>
   if (!book) return <Loading />
   return (
     <div className="flex h-full flex-col">
@@ -566,8 +573,8 @@ export function SheetView({
       )}
       <div className="min-h-0 flex-1 overflow-auto p-3 select-text">
         <div ref={ref} />
-        {current?.cut && <Note>Chỉ hiện {SHEET_ROWS} dòng đầu. Mở bằng ứng dụng ngoài (nút ở đầu khung) để xem cả file.</Note>}
-        {current && !current.rows && <Note>Sheet trống.</Note>}
+        {current?.cut && <Note>{t('artifacts.pv.sheetCut', { n: String(SHEET_ROWS) })}</Note>}
+        {current && !current.rows && <Note>{t('artifacts.pv.sheetEmpty')}</Note>}
       </div>
     </div>
   )
@@ -576,6 +583,7 @@ export function SheetView({
 // ---------- PowerPoint (bộ vẽ riêng, xem pptx.ts) ----------
 
 export function PptxView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const t = useT()
   const { data, error, loading } = useBytes(ws, rel, version)
   const [ref, shadow] = useShadowHost()
   const [info, setInfo] = useState<{ count: number } | null>(null)
@@ -634,10 +642,10 @@ export function PptxView({ ws, rel, version }: { ws: Workspace; rel: string; ver
   }, [data])
 
   if (loading) return <Loading />
-  if (error || failed) return <Note>{error ?? `Không đọc được file PowerPoint: ${failed}`}</Note>
+  if (error || failed) return <Note>{error ?? t('artifacts.pv.pptxFailed', { error: failed ?? '' })}</Note>
   return (
     <div className="min-h-full bg-stage select-text">
-      {info && <div className="px-4 pt-3 text-center text-[11px] text-dim">{info.count} slide · bản xem trước gần đúng (biểu đồ, SmartArt, hiệu ứng chưa vẽ)</div>}
+      {info && <div className="px-4 pt-3 text-center text-[11px] text-dim">{t('artifacts.pv.slides', { count: info.count })}</div>}
       <div ref={ref} className="px-4 py-3" />
     </div>
   )
@@ -738,6 +746,7 @@ function normalizeRel(p: string): string | null {
 }
 
 export function HtmlView({ ws, rel, version, onRun, baseRel }: { ws: Workspace; rel: string; version: string; onRun: () => void; baseRel?: string }): React.JSX.Element {
+  const t = useT()
   const [srcdoc, setSrcdoc] = useState<string | null>(null)
   const [hasScript, setHasScript] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
@@ -747,10 +756,10 @@ export function HtmlView({ ws, rel, version, onRun, baseRel }: { ws: Workspace; 
     setSrcdoc(null)
     window.stag.artifacts
       .text(ws.id, rel)
-      .then(async (t) => {
-        if (t.status !== 'ok') throw new Error(t.status === 'missing' ? 'Không còn file này trên đĩa.' : 'File không phải văn bản.')
-        setHasScript(/<script[\s>]/i.test(t.text))
-        const html = await staticHtml(ws, rel, t.text, baseRel ?? rel)
+      .then(async (r) => {
+        if (r.status !== 'ok') throw new Error(r.status === 'missing' ? tNow('artifacts.pv.missing') : tNow('artifacts.notText'))
+        setHasScript(/<script[\s>]/i.test(r.text))
+        const html = await staticHtml(ws, rel, r.text, baseRel ?? rel)
         if (alive) setSrcdoc(html)
       })
       .catch((e) => alive && setFailed(cleanError(e)))
@@ -765,10 +774,10 @@ export function HtmlView({ ws, rel, version, onRun, baseRel }: { ws: Workspace; 
       {hasScript && (
         <div className="flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-1.5 text-[12px] text-muted">
           <Icon name="info" size="s" className="text-dim" />
-          Trang có JavaScript — bản xem trước ở đây không chạy script.
+          {t('artifacts.pv.hasScript')}
           <button type="button" onClick={onRun} className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-panel-2 px-2 py-0.5 text-fg hover:bg-panel-3">
             <Icon name="globe" size="s" />
-            Chạy trong Browser
+            {t('artifacts.pv.runInBrowser')}
           </button>
         </div>
       )}
@@ -777,8 +786,8 @@ export function HtmlView({ ws, rel, version, onRun, baseRel }: { ws: Workspace; 
           value={device}
           onChange={setDevice}
           options={[
-            { value: 'desktop', label: 'Máy tính' },
-            { value: 'phone', label: 'Điện thoại' }
+            { value: 'desktop', label: t('artifacts.pv.desktop') },
+            { value: 'phone', label: t('artifacts.pv.phone') }
           ]}
         />
       </div>
@@ -797,6 +806,7 @@ export function HtmlView({ ws, rel, version, onRun, baseRel }: { ws: Workspace; 
 // ---------- zip ----------
 
 export function ZipView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const t = useT()
   const { data, error, loading } = useBytes(ws, rel, version)
   const [entries, setEntries] = useState<Array<{ name: string; dir: boolean; size: number }> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
@@ -816,13 +826,13 @@ export function ZipView({ ws, rel, version }: { ws: Workspace; rel: string; vers
     }
   }, [data])
   if (loading) return <Loading />
-  if (error || failed) return <Note>{error ?? `Không đọc được file nén: ${failed}`}</Note>
+  if (error || failed) return <Note>{error ?? t('artifacts.pv.zipFailed', { error: failed ?? '' })}</Note>
   if (!entries) return <Loading />
   const files = entries.filter((e) => !e.dir)
   return (
     <div className="select-text px-4 py-3 text-[12px]">
       <div className="mb-2 text-muted">
-        {files.length} file · {formatSize(files.reduce((s, e) => s + e.size, 0))} khi giải nén
+        {t('artifacts.pv.zipSummary', { count: files.length, size: formatSize(files.reduce((s, e) => s + e.size, 0)) })}
       </div>
       <ul className="font-mono">
         {entries.slice(0, 3000).map((e) => (
@@ -839,7 +849,10 @@ export function ZipView({ ws, rel, version }: { ws: Workspace; rel: string; vers
 // ---------- font ----------
 
 let fontSeq = 0
+const VI_SAMPLE = 'Ắ Ộ Ữ ỷ đ' // i18n-ignore: mẫu chữ Việt để thử font
+const VI_LOWER = 'ăâêôơưđ' // i18n-ignore: mẫu chữ Việt để thử font
 export function FontView({ ws, rel, version }: { ws: Workspace; rel: string; version: string }): React.JSX.Element {
+  const t = useT()
   const { data, error, loading } = useBytes(ws, rel, version)
   const [family, setFamily] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
@@ -861,16 +874,16 @@ export function FontView({ ws, rel, version }: { ws: Workspace; rel: string; ver
     }
   }, [data])
   if (loading) return <Loading />
-  if (error || failed) return <Note>{error ?? `Không đọc được font: ${failed}`}</Note>
+  if (error || failed) return <Note>{error ?? t('artifacts.pv.fontFailed', { error: failed ?? '' })}</Note>
   if (!family) return <Loading />
   return (
     <div className="space-y-4 px-5 py-4 select-text" style={{ fontFamily: family }}>
       {[48, 32, 22, 16].map((s) => (
         <div key={s} style={{ fontSize: s }} className="leading-tight">
-          Chữ Việt có dấu: Ắ Ộ Ữ ỷ đ — The quick brown fox 0123456789
+          {t('artifacts.pv.fontSample')} {VI_SAMPLE} — The quick brown fox 0123456789
         </div>
       ))}
-      <div className="text-[18px] leading-relaxed">ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz ăâêôơưđ !@#$%&amp;*()</div>
+      <div className="text-[18px] leading-relaxed">ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz {VI_LOWER} !@#$%&amp;*()</div>
     </div>
   )
 }
@@ -878,6 +891,7 @@ export function FontView({ ws, rel, version }: { ws: Workspace; rel: string; ver
 // ---------- còn lại: ảnh thu nhỏ của Windows ----------
 
 export function OtherView({ ws, rel, version, reason }: { ws: Workspace; rel: string; version: string; reason?: string }): React.JSX.Element {
+  const t = useT()
   const [thumb, setThumb] = useState<string | null | undefined>(undefined)
   useEffect(() => {
     let alive = true
@@ -897,7 +911,7 @@ export function OtherView({ ws, rel, version, reason }: { ws: Workspace; rel: st
         <span className="rounded-md border border-line-2 px-4 py-2 font-mono text-[18px] text-muted uppercase">{extOf(rel) || 'file'}</span>
       ) : null}
       <div className="max-w-[420px] text-[12px] text-muted">
-        {reason ?? 'App chưa có cách xem nội dung loại file này.'} Dùng nút mở bằng ứng dụng mặc định ở đầu khung.
+        {reason ?? t('artifacts.pv.noViewer')} {t('artifacts.pv.useOpen')}
       </div>
     </div>
   )

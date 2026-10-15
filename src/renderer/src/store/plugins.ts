@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { t } from '@shared/i18n'
 import type { InstalledPlugin, PluginSlot } from '@shared/plugins'
 import { pluginOn } from '@shared/settings'
 import type { Settings } from '@shared/types'
@@ -43,7 +44,7 @@ export function pluginErr(e: unknown): string {
 
 /** Mở địa chỉ http(s) plugin đưa: trình duyệt trong app (cần workspace) hoặc trình duyệt mặc định. */
 export async function openPluginUrl(url: string, target: 'browser' | 'external' | undefined, workspaceId?: string): Promise<void> {
-  if (!/^https?:\/\/\S+$/i.test(url)) throw new Error(`Địa chỉ không hợp lệ: "${url}"`)
+  if (!/^https?:\/\/\S+$/i.test(url)) throw new Error(t('plugins.err.badUrlShort', { url }))
   if (target !== 'external' && workspaceId) {
     await window.stag.browser.newTab(workspaceId, url)
     useUi.getState().setBrowserOpen(true)

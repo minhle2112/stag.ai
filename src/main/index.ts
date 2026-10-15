@@ -17,6 +17,9 @@ import { Board } from './board'
 import { BrowserService } from './browser'
 import { DevServerService } from './devServer'
 import { StatusHub } from './hub'
+import { ComputerService } from './computer/service'
+import { AlwaysGrants, registerComputerIpc } from './computer/ipc'
+import { computerToolsOn } from '@shared/settings'
 import { registerIpc, registerVoiceIpc, registerVoiceSystemIpc } from './ipc'
 import { VoiceService } from './voice'
 import { Notifier } from './notifier'
@@ -32,6 +35,7 @@ import { independentSessionEnv } from './adapters'
 import { onUserNoteWrite, putNote, readNote } from './vault'
 import { agentKind } from '@shared/types'
 import type { PluginEvent } from '@shared/plugins'
+import { agentFolder, joinRoot } from '@shared/projects'
 import { PAGE_IPC, type InspectAction, type SourceKind } from '@shared/inspect'
 import { SettingsStore } from './settings'
 import { VaultActivityLog } from './vaultActivity'
@@ -51,6 +55,7 @@ import { registerThemeIpc, ThemeService } from './theme'
 import { WINDOW_BG } from '@shared/theme'
 import { homedir } from 'node:os'
 import { AppContents, guardAppSession, guardIpc, guardOtherSession, isAppFrame, type AppPage } from './appSecurity'
+import { getLocale, localeFromSystem, setLocale, t, type Locale, type PlainKey } from '@shared/i18n'
 
 // Chạy bản thử với dữ liệu riêng (không đụng workspace/agent của bản người dùng đang mở).
 // Phải đặt trước khi tạo các service vì chúng đọc đường dẫn userData lúc khởi tạo.
@@ -125,6 +130,7 @@ const browser = new BrowserService(
   join(__dirname, '../preload/inspect.js')
 )
 const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), (s) => {
+  setLocale(s.app.general.language)
   send(IPC.settingsChanged, s)
   applyGeneral(s.app.general)
   theme.apply()
@@ -254,31 +260,34 @@ const plugins = new PluginHost(join(app.getPath('userData'), 'plugins'), {
     sendToAgent: async (agentId, text) => agents.typeInto(agentId, text),
     board: async (workspaceId) => {
       const ws = workspaces.get(workspaceId)
-      if (!ws) throw new Error('Không có workspace này.')
+      if (!ws) throw new Error('No such workspace.')
       return (await board.snapshot(ws)).tasks
     },
     vaultRead: async (workspaceId, rel) => {
       const ws = workspaces.get(workspaceId)
-      if (!ws) throw new Error('Không có workspace này.')
+      if (!ws) throw new Error('No such workspace.')
       return readNote(ws.vaultPath, rel).catch(() => null)
     },
     vaultWrite: async (workspaceId, rel, content) => {
       const ws = workspaces.get(workspaceId)
-      if (!ws) throw new Error('Không có workspace này.')
+      if (!ws) throw new Error('No such workspace.')
       await putNote(ws.vaultPath, rel, content)
     },
     workspacePaths: (workspaceId) => {
       const ws = workspaces.get(workspaceId)
       return ws ? { path: ws.path, vaultPath: ws.vaultPath } : null
     },
-    notify: (title, body) => new Notification({ title, body }).show()
+    notify: (title, body) => new Notification({ title, body }).show(),
+    askAgent: (agentId, text, from) => agents.askFromPlugin(agentId, text, from),
+    publishArtifact: (workspaceId, agentId, input) => agents.publishForPlugin(workspaceId, agentId, input),
+    browserCookies: (workspaceId, domain) => browser.cookieFile(workspaceId, domain)
   }
 })
 const webhooks = new PluginWebhookServer(plugins)
 /** Gõ bằng giọng nói: model ở userData/voice, nhận dạng trong utilityProcess riêng (chỉ chạy khi đang dùng). */
 const voice = new VoiceService({
   dir: join(app.getPath('userData'), 'voice'),
-  spawn: (script, o) => spawnUtility(script, { ...o, name: 'stag.ai giọng nói' }),
+  spawn: (script, o) => spawnUtility(script, { ...o, name: t('app.process.voice') }),
   workerScript: join(__dirname, 'voiceWorker.js'),
   env: process.env,
   settings: () => settings.get().app.voice,
@@ -356,9 +365,48 @@ const credentials = new CredentialService({
 })
 browser.attachCredentials(credentials)
 agents.attachCredentials(credentials)
+/** Computer use (giống Claude Desktop): agent Claude điều khiển chuột / bàn phím qua máy chủ MCP `computer`. */
+const computerGrants = new AlwaysGrants(join(app.getPath('userData'), 'computer-grants.json'))
+const computer = new ComputerService({
+  settings: () => settings.get().app.computer,
+  enabledFor: (wsId, agentId) => computerToolsOn(settings.get(), wsId, agentId),
+  // Cửa sổ app thường (bỏ viền / thanh nổi / ô giọng nói: luôn trên cùng, không thu nhỏ được).
+  mainWindows: () => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isMinimizable() && !w.isAlwaysOnTop()),
+  alwaysApps: (agentId) => computerGrants.get(agentId),
+  saveAlwaysApps: (agentId, keys) => computerGrants.set(agentId, keys),
+  onDriving: (who) => showDriving(who)
+})
+
+/** Agent đang điều khiển máy: chấm màu trên nút stag.ai ở thanh tác vụ (thấy được cả khi app bị thu nhỏ) + tooltip khay. */
+function showDriving(who: { agentName: string; paused: boolean } | null): void {
+  const dot = who ? drivingDot(who.paused ? [245, 165, 36] : [45, 226, 192]) : null
+  const text = who ? t(who.paused ? 'computer.pill.paused' : 'computer.title.driving', { name: who.agentName }) : ''
+  for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.isMinimizable() && !w.isAlwaysOnTop()) w.setOverlayIcon(dot, text)
+  tray?.setToolTip(who ? `stag.ai — ${text}` : 'stag.ai')
+}
+
+/** Chấm tròn 16×16 cho setOverlayIcon. */
+function drivingDot([r, g, b]: [number, number, number]): Electron.NativeImage {
+  const size = 16
+  const buf = Buffer.alloc(size * size * 4)
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot(x - 7.5, y - 7.5)
+      if (d > 7.5) continue
+      const o = (y * size + x) * 4
+      const edge = d > 6
+      buf[o] = edge ? 20 : b
+      buf[o + 1] = edge ? 20 : g
+      buf[o + 2] = edge ? 20 : r
+      buf[o + 3] = 255
+    }
+  return nativeImage.createFromBitmap(buf, { width: size, height: size })
+}
+agents.attachComputer(computer)
 const hub = new StatusHub({
   hook: (agentId, payload) => agents.onHook(agentId, payload),
   mcp: (agentId) => agents.mcpFor(agentId),
+  computerMcp: (agentId) => agents.computerMcpFor(agentId),
   status: (agentId, body) => agents.onStatusLine(agentId, body)
 })
 
@@ -367,6 +415,8 @@ let quitting = false
 let tray: Tray | null = null
 /** Đã báo "app vẫn chạy dưới khay" một lần trong lần chạy này. */
 let toldTray = false
+/** Ngôn ngữ của menu khay đang hiện: đổi ngôn ngữ thì dựng lại menu. */
+let trayLocale: Locale | null = null
 
 function trayIconPath(): string {
   return app.isPackaged ? join(process.resourcesPath, 'icons', 'tray.png') : join(app.getAppPath(), 'resources', 'icons', 'tray.png')
@@ -400,20 +450,24 @@ function applyGeneral(g: GeneralSettings): void {
   if (g.closeAction === 'tray' && !tray) {
     tray = new Tray(nativeImage.createFromPath(trayIconPath()))
     tray.setToolTip('stag.ai')
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: 'Mở stag.ai', click: showWindow },
-        { type: 'separator' },
-        { label: 'Thoát', click: () => void requestQuit() }
-      ])
-    )
     tray.on('click', showWindow)
   } else if (g.closeAction === 'quit' && tray) {
     tray.destroy()
     tray = null
+    trayLocale = null
     // Cửa sổ đang ẩn dưới khay mà bỏ khay thì phải hiện lại, không thì không còn đường mở.
     const win = mainWindow()
     if (win && !win.isVisible()) showWindow()
+  }
+  if (tray && trayLocale !== getLocale()) {
+    trayLocale = getLocale()
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: t('app.tray.open'), click: showWindow },
+        { type: 'separator' },
+        { label: t('app.tray.quit'), click: () => void requestQuit() }
+      ])
+    )
   }
 }
 
@@ -422,14 +476,14 @@ let initDone = false
 // Promise bị từ chối mà không ai bắt (lưu file lỗi vì ổ đầy / trình diệt virus giữ file…): ghi log, không làm sập main.
 process.on('unhandledRejection', (e) => console.error('[main] unhandledRejection', e))
 /** Bước khởi động bị lỗi: app vẫn mở cửa sổ (không thì tiến trình chạy ngầm giữ khoá một-phiên-bản), báo người dùng. */
-const startupErrors: string[] = []
+const startupErrors: { step: PlainKey; message: string }[] = []
 
-async function step(name: string, fn: () => Promise<unknown>): Promise<void> {
+async function step(name: PlainKey, fn: () => Promise<unknown>): Promise<void> {
   try {
     await fn()
   } catch (e) {
     console.error(`[startup] ${name}`, e)
-    startupErrors.push(`• ${name}: ${(e as Error).message}`)
+    startupErrors.push({ step: name, message: (e as Error).message })
   }
 }
 
@@ -438,8 +492,8 @@ function warnStartupErrors(): void {
   const opts = {
     type: 'error' as const,
     title: 'stag.ai',
-    message: 'Một số phần của app không khởi động được',
-    detail: [...startupErrors, '', 'App vẫn mở, nhưng các phần này có thể không chạy. Thử đóng hẳn app rồi mở lại.'].join('\n')
+    message: t('app.startup.title'),
+    detail: [...startupErrors.map((e) => `• ${t(e.step)}: ${e.message}`), '', t('app.startup.detail')].join('\n')
   }
   const win = mainWindow()
   void (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))
@@ -448,12 +502,12 @@ function warnStartupErrors(): void {
 /** File dữ liệu của app hỏng lúc mở (mất điện giữa lúc ghi, BOM…): báo một lần, không để người dùng tưởng cài đặt tự mất. */
 function warnRecoveredFiles(): void {
   if (!jsonRecoveries.length) return
-  const lines = jsonRecoveries.map((r) => `• ${r.file}: ${r.fromBackup ? 'đã đọc lại bản sao lưu (.bak) gần nhất' : 'không có bản sao lưu, dùng mặc định'}`)
+  const lines = jsonRecoveries.map((r) => `• ${r.file}: ${r.fromBackup ? t('app.recovered.fromBackup') : t('app.recovered.defaults')}`)
   const opts = {
     type: 'warning' as const,
     title: 'stag.ai',
-    message: 'Một số file dữ liệu của app bị hỏng',
-    detail: [...lines, '', 'Bản hỏng được cất cạnh file gốc với đuôi .broken-<thời điểm> để bạn cứu tay nếu cần.'].join('\n')
+    message: t('app.recovered.title'),
+    detail: [...lines, '', t('app.recovered.detail')].join('\n')
   }
   const win = mainWindow()
   void (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))
@@ -467,13 +521,13 @@ async function requestQuit(): Promise<void> {
     if (win && !win.isVisible()) showWindow()
     const opts = {
       type: 'question' as const,
-      buttons: ['Thoát', 'Huỷ'],
+      buttons: [t('app.tray.quit'), t('common.cancel')],
       defaultId: 1,
       cancelId: 1,
       title: 'stag.ai',
-      message: `Còn ${n} agent / terminal đang chạy`,
-      detail: 'Thoát app sẽ dừng tất cả các phiên này. Việc đang mở và bộ nhớ vault vẫn giữ nguyên.',
-      checkboxLabel: 'Không hỏi lại'
+      message: t('app.quit.title', { count: n }),
+      detail: t('app.quit.detail'),
+      checkboxLabel: t('app.quit.dontAsk')
     }
     const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
     if (r.response !== 0) return
@@ -531,7 +585,7 @@ function createWindow(): void {
       win.hide()
       if (!toldTray) {
         toldTray = true
-        notifier.info('stag.ai vẫn đang chạy', 'Agent tiếp tục làm việc. Bấm icon stag.ai ở khay hệ thống để mở lại.')
+        notifier.info(t('app.notify.trayTitle'), t('app.notify.trayBody'))
       }
       return
     }
@@ -580,21 +634,28 @@ app.whenReady().then(async () => {
     onSessionEnd()
     app.quit()
   })
-  await step('Danh sách workspace', () => workspaces.load())
-  await step('Cài đặt', () => settings.load())
+  await step('app.startup.step.workspaces', () => workspaces.load())
+  await step('app.startup.step.settings', () => settings.load())
+  // Bản cài mới (chưa có cài đặt lẫn workspace): ngôn ngữ theo Windows. Bản đã cài không có mục này → giữ tiếng Việt.
+  if (settings.fresh && workspaces.list().length === 0)
+    await step('app.startup.step.language', () => settings.setApp({ general: { language: localeFromSystem(app.getPreferredSystemLanguages()) } }))
+  setLocale(settings.general().language)
+  ipcMain.on(IPC.localeGetSync, (e) => {
+    e.returnValue = settings.general().language
+  })
   browser.setSettings(settings.get().app.browser)
   // Trước khi tạo cửa sổ: nền cửa sổ và trang đầu tiên lấy đúng màu đã lưu (không chớp sai màu).
   theme.start()
   registerThemeIpc(theme)
   browser.themeToggle = () => void theme.toggle()
-  await step('Adapter ngoài', () => external.load())
-  await step('Bí mật (connector)', () => secrets.load())
-  await step('Kho mật khẩu', () => credentialStore.load())
-  await step('Dọn skill của phiên cũ', () => skills.cleanAllSessions())
-  await step('Giọng nói', () => voice.load())
-  await step('Chi phí giọng nói', () => cloudUsage.load())
-  await step('Danh sách agent', () => agents.load())
-  await step('Máy chủ trạng thái cho agent (hub)', () => hub.start())
+  await step('app.startup.step.adapters', () => external.load())
+  await step('app.startup.step.secrets', () => secrets.load())
+  await step('app.startup.step.passwords', () => credentialStore.load())
+  await step('app.startup.step.skills', () => skills.cleanAllSessions())
+  await step('app.startup.step.voice', () => voice.load())
+  await step('app.startup.step.voiceUsage', () => cloudUsage.load())
+  await step('app.startup.step.agents', () => agents.load())
+  await step('app.startup.step.hub', () => hub.start())
   protocol.handle('stag-file', (req) => {
     const url = new URL(req.url)
     const ws = workspaces.get(url.hostname)
@@ -608,6 +669,13 @@ app.whenReady().then(async () => {
     const headers = plugins.uiHeaders(id)
     if (rel === '__stag/ui.js') return new Response(pluginUiJs, { headers: { ...headers, 'Content-Type': 'text/javascript; charset=utf-8' } })
     if (rel === '__stag/ui.css') return new Response(pluginUiCss, { headers: { ...headers, 'Content-Type': 'text/css; charset=utf-8' } })
+    // Ảnh / video trong dự án cho trang của plugin (quyền files.read), có Range để tua video.
+    const media = /^__stag\/file\/([^/]+)\/(.+)$/.exec(rel)
+    if (media) {
+      const ws = workspaces.get(media[1])
+      if (!ws || !plugins.canServeFiles(id, ws.id)) return new Response('Not found', { status: 404, headers })
+      return serveArtifact(ws, media[2], req.headers.get('range'))
+    }
     const file = await plugins.uiFile(id, rel)
     if (!file) return new Response('Not found', { status: 404, headers })
     return new Response(await readFile(file.path), { headers: { ...headers, 'Content-Type': file.type } })
@@ -617,8 +685,8 @@ app.whenReady().then(async () => {
   // (chỉ cửa sổ app dùng; trình duyệt trong app có phiên riêng).
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (d, cb) => cb({ cancel: d.resourceType === 'subFrame' }))
   agents.attachHub(hub)
-  await step('Plugin', () => plugins.load())
-  await step('Cài đặt plugin', () => plugins.applySettings(settings.get()))
+  await step('app.startup.step.plugins', () => plugins.load())
+  await step('app.startup.step.pluginSettings', () => plugins.applySettings(settings.get()))
   plugins.startScheduler()
   await webhooks.start().catch((e) => console.error('[plugins] webhook server', e))
   agents.attachPlugins({
@@ -644,7 +712,14 @@ app.whenReady().then(async () => {
         description: t.tool.description,
         inputSchema: t.tool.parametersSchema,
         call: (params) =>
-          plugins.callTool(t.pluginId, t.tool.name, params, { workspaceId: ws.id, workspaceName: ws.name, workspacePath: ws.path, agentId: a.id, agentName: a.name })
+          plugins.callTool(t.pluginId, t.tool.name, params, {
+            workspaceId: ws.id,
+            workspaceName: ws.name,
+            workspacePath: ws.path,
+            agentId: a.id,
+            agentName: a.name,
+            projectPath: joinRoot(ws.path, agentFolder(ws, a))
+          })
       }))
   })
   registerIpc(ptys, workspaces, agents, board, browser, settings, activity, artifacts, notifier, adapters, external, secrets, oauth, approvals, skills, plugins, vaultIndexer, devServers, products)
@@ -659,23 +734,24 @@ app.whenReady().then(async () => {
   const inspectRes = app.isPackaged ? join(process.resourcesPath, 'inspect') : join(app.getAppPath(), 'resources', 'inspect')
   const wsOf = (id: unknown): Workspace => {
     const w = workspaces.get(String(id))
-    if (!w) throw new Error('Workspace không còn')
+    if (!w) throw new Error(t('app.error.workspaceGone'))
     return w
   }
   ipcMain.handle(IPC.inspectSetup, (_e, workspaceId: string) => detectSetup(wsOf(workspaceId)))
   ipcMain.handle(IPC.inspectInstall, (_e, workspaceId: string, kind: SourceKind) => {
-    if (kind !== 'vite' && kind !== 'next' && kind !== 'wordpress') throw new Error('Không rõ loại')
+    if (kind !== 'vite' && kind !== 'next' && kind !== 'wordpress') throw new Error(t('app.error.unknownKind'))
     return installSetup(wsOf(workspaceId), kind, inspectRes)
   })
   ipcMain.handle(IPC.inspectUninstall, (_e, workspaceId: string) => removeWordpress(wsOf(workspaceId)))
   ipcMain.handle(IPC.inspectSetupMessage, async (_e, workspaceId: string, kind: 'vite' | 'next') => {
     const setup = await detectSetup(wsOf(workspaceId))
     const cfg = kind === 'vite' ? setup.vite?.config : setup.next?.config
-    if (!cfg || (kind !== 'vite' && kind !== 'next')) throw new Error('Không thấy file cấu hình')
+    if (!cfg || (kind !== 'vite' && kind !== 'next')) throw new Error(t('app.error.noConfigFile'))
     return setupMessage(kind, cfg)
   })
   registerVoiceIpc(voice, new VocabCache(), workspaces, voiceCloud, cloudUsage)
   registerClaudeUsageIpc(claudeUsage)
+  registerComputerIpc(computer, agents)
   claudeUsage.sync()
   registerVoiceSystemIpc({
     secrets,
@@ -736,6 +812,7 @@ function stopEverything(): void {
   globalVoice.dispose()
   keySender.dispose()
   overlay.dispose()
+  computer.dispose()
   // Ô terminal của dev server (preview_*) là phiên agent: dừng ở đây để không giữ cổng sau khi thoát.
   agents.shutdown()
   ptys.killAll()

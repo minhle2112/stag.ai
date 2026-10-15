@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { isHotkeyDown, isHotkeyUp, VOICE_HOTKEYS } from '@shared/voice'
+import { t as tr, useT } from '../i18n'
 import { useSettings } from '../store/settings'
 import { useUi } from '../store/ui'
 import { beginVoice, cancelVoice, endVoice, insertVoice, undoAiFix, useVoice, useVoiceFor, voiceTargetFor } from '../store/voice'
@@ -36,7 +37,7 @@ export function VoiceHotkeys(): React.JSX.Element | null {
       if (ui.settings || ui.modals > 0) return
       const t = ui.tab === 'agents' ? voiceTargetFor(useWorkspaces.getState().activeId ?? undefined) : null
       if (!t) {
-        useVoice.setState({ phase: 'error', target: null, error: 'Chọn một ô agent trong tab Agents rồi giữ phím tắt để nói.', needsModel: false })
+        useVoice.setState({ phase: 'error', target: null, error: tr('voice.run.noTarget'), needsModel: false })
         return
       }
       holding = true
@@ -84,14 +85,15 @@ export function MicButton({ wsId, agentId }: { wsId: string; agentId: string }):
   const hotkey = useSettings((s) => s.value.app.voice.hotkey)
   const mine = useVoiceFor(agentId)
   const phase = useVoice((s) => s.phase)
+  const t = useT()
   if (!enabled) return null
   const live = mine && (phase === 'opening' || phase === 'listening')
-  const tip = live ? 'Dừng nói' : `Nói để gõ (hoặc giữ ${VOICE_HOTKEYS[hotkey]})`
+  const tip = live ? t('voice.panel.stop') : t('voice.panel.speakHold', { key: VOICE_HOTKEYS[hotkey] })
   return (
     <button
       type="button"
       data-tip={tip}
-      aria-label={live ? 'Dừng nói' : 'Nói để gõ'}
+      aria-label={live ? t('voice.panel.stop') : t('voice.panel.speak')}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation()
@@ -113,6 +115,7 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
   const { phase, level, text, error, needsModel, status, setText, live, livePartial, notice, aiBusy, aiBefore } = useVoice()
   const hotkey = useSettings((s) => s.value.app.voice.hotkey)
   const box = useRef<HTMLTextAreaElement>(null)
+  const t = useT()
 
   useEffect(() => {
     if (mine && phase === 'preview' && box.current) {
@@ -134,19 +137,19 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
       {(phase === 'opening' || phase === 'listening') && (
         <div className="flex items-center gap-3">
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${phase === 'listening' ? 'animate-pulse bg-danger' : 'bg-muted'}`} />
-          <span className="shrink-0 text-[13px]">{phase === 'opening' ? 'Đang mở micro…' : 'Đang nghe…'}</span>
+          <span className="shrink-0 text-[13px]">{phase === 'opening' ? t('voice.status.opening') : t('voice.status.listening')}</span>
           <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded bg-line">
             <div className="h-full bg-work transition-[width] duration-75" style={{ width: `${Math.round(level * 100)}%` }} />
           </div>
           <span className="shrink-0 text-[12px] text-muted">
-            {status.engine === 'loading' ? 'đang nạp model · ' : ''}thả {key} (hoặc bấm nút micro) để dừng · Esc huỷ
+            {status.engine === 'loading' ? t('voice.panel.hintLoading', { key }) : t('voice.panel.hint', { key })}
           </span>
         </div>
       )}
       {phase === 'processing' && (
         <div className="flex items-center gap-3 text-[13px]">
           <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-          {status.engine === 'loading' ? 'Đang nạp model (lần đầu sau một lúc không dùng)…' : 'Đang nhận dạng…'}
+          {status.engine === 'loading' ? t('voice.panel.loadingModel') : t('voice.status.processing')}
         </div>
       )}
       {(phase === 'listening' || phase === 'processing') && (live || livePartial) && (
@@ -173,29 +176,29 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
             }}
             rows={Math.min(6, Math.max(2, Math.ceil(text.length / 80)))}
             spellCheck={false}
-            aria-label="Chữ nhận được từ giọng nói"
+            aria-label={t('voice.panel.textLabel')}
             className="w-full resize-none rounded-md border border-line bg-bg px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:border-accent"
           />
           <div className="flex items-center gap-2 text-[12px] text-muted">
             {aiBusy ? (
               <span className="flex items-center gap-1.5 text-accent">
                 <span className="h-2 w-2 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                Đang sửa bằng AI…
+                {t('voice.status.fixing')}
               </span>
             ) : aiBefore ? (
               <span className="flex items-center gap-1.5 text-work">
-                Đã sửa bằng AI
+                {t('voice.panel.fixed')}
                 <button onClick={undoAiFix} className="rounded px-1.5 py-0.5 text-muted underline hover:text-fg">
-                  Hoàn tác
+                  {t('voice.panel.undo')}
                 </button>
               </span>
             ) : null}
-            <span className="flex-1">Sửa nếu cần · giữ {key} để nói thêm · Shift+Enter xuống dòng · chèn xong vẫn chưa gửi</span>
+            <span className="flex-1">{t('voice.panel.previewHint', { key })}</span>
             <button onClick={cancelVoice} className="rounded-md bg-panel-2 px-2.5 py-1 text-fg hover:bg-line">
-              Bỏ (Esc)
+              {t('voice.panel.discard')}
             </button>
             <button onClick={() => insertVoice()} className="rounded-md bg-accent px-2.5 py-1 font-medium text-accent-on hover:brightness-110">
-              Chèn (Enter)
+              {t('voice.panel.insert')}
             </button>
           </div>
         </div>
@@ -211,16 +214,16 @@ export function VoicePanel({ agentId }: { agentId: string }): React.JSX.Element 
               }}
               className="rounded-md bg-accent px-2.5 py-1 font-medium text-accent-on hover:brightness-110"
             >
-              Mở Cài đặt → Giọng nói
+              {t('voice.panel.openSettings')}
             </button>
           )}
           {text && (
             <button onClick={() => insertVoice()} className="rounded-md bg-panel-2 px-2.5 py-1 text-fg hover:bg-line">
-              Thử chèn lại
+              {t('voice.panel.retryInsert')}
             </button>
           )}
           <button onClick={cancelVoice} className="rounded-md bg-panel-2 px-2.5 py-1 text-fg hover:bg-line">
-            Đóng
+            {t('common.close')}
           </button>
         </div>
       )}

@@ -6,6 +6,7 @@
 //   bản đọc trang của agent (browser_snapshot) không bao giờ đọc vào đó.
 import { ipcRenderer } from 'electron'
 import { CRED_IPC, type CapturedLogin, type CredAct, type CredBubble, type CredCmd, type CredPageUi, type DetectResult, type FillResult, type PageRect, type PageSeen } from '@shared/credentials'
+import { setLocale, t } from '@shared/i18n'
 import { ICONS, type IconName } from '../renderer/src/components/icons'
 
 let host: HTMLElement | null = null
@@ -73,8 +74,8 @@ function usable(el: HTMLInputElement): boolean {
 }
 
 const TEXTY = new Set(['text', 'email', 'tel', 'number', ''])
-const USER_HINT = /user|e-?mail|login|account|identifier|phone|tên đăng nhập|tài khoản|số điện thoại/i
-const OTP_HINT = /otp|totp|mfa|2fa|two.?factor|one.?time|verif|security.?code|auth.?code|pin.?code|\bcode\b|\btoken\b|mã/i
+const USER_HINT = /user|e-?mail|login|account|identifier|phone|tên đăng nhập|tài khoản|số điện thoại/i // i18n-ignore: matches Vietnamese text on web pages
+const OTP_HINT = /otp|totp|mfa|2fa|two.?factor|one.?time|verif|security.?code|auth.?code|pin.?code|\bcode\b|\btoken\b|mã/i // i18n-ignore: matches Vietnamese text on web pages
 
 function attrs(el: HTMLInputElement): string {
   return [el.name, el.id, el.getAttribute('placeholder'), el.getAttribute('aria-label'), el.labels?.[0]?.innerText].filter(Boolean).join(' ')
@@ -112,7 +113,7 @@ function userField(pass: HTMLInputElement | null): HTMLInputElement | null {
   // Ô chữ đứng ngay trước ô mật khẩu.
   const before = all.filter((x) => x.compareDocumentPosition(pass) & Node.DOCUMENT_POSITION_FOLLOWING)
   const cand = before.at(-1)
-  return cand && !/search|tìm/i.test(attrs(cand)) && cand.type !== 'search' ? cand : null
+  return cand && !/search|tìm/i.test(attrs(cand)) && cand.type !== 'search' ? cand : null // i18n-ignore: matches Vietnamese text on web pages
 }
 
 function crossFrames(): boolean {
@@ -170,7 +171,7 @@ function markSecret(el: HTMLInputElement): void {
   }).observe(el, { attributes: true, attributeFilter: ['type'] })
 }
 
-const REMEMBER = /remember|keep me|stay signed|trust (?:this )?(?:device|browser|computer)|don'?t ask (?:again|on this)|ghi nhớ|nhớ (?:tôi|thiết bị|đăng nhập|mật khẩu)|tin cậy thiết bị|không hỏi lại/i
+const REMEMBER = /remember|keep me|stay signed|trust (?:this )?(?:device|browser|computer)|don'?t ask (?:again|on this)|ghi nhớ|nhớ (?:tôi|thiết bị|đăng nhập|mật khẩu)|tin cậy thiết bị|không hỏi lại/i // i18n-ignore: matches Vietnamese text on web pages
 
 function tickRemember(scope: ParentNode): boolean {
   let ticked = false
@@ -190,7 +191,7 @@ function tickRemember(scope: ParentNode): boolean {
   return ticked
 }
 
-const SUBMIT_TEXT = /^\s*(?:log ?in|sign ?in|đăng nhập|continue|next|tiếp tục|tiếp theo|tiếp|submit|verify|xác nhận|xác minh|confirm|gửi)\b/i
+const SUBMIT_TEXT = /^\s*(?:log ?in|sign ?in|đăng nhập|continue|next|tiếp tục|tiếp theo|tiếp|submit|verify|xác nhận|xác minh|confirm|gửi)\b/i // i18n-ignore: matches Vietnamese text on web pages
 
 function submitLike(el: Element): boolean {
   if (el instanceof HTMLInputElement) return el.type === 'submit' || el.type === 'image' || ((el.type === 'button') && SUBMIT_TEXT.test(el.value))
@@ -298,7 +299,7 @@ function onSubmitLike(e: Event, t: EventTarget | null): void {
 
 // ---------- mã QR / khoá 2FA trên trang ----------
 
-const KW = /authenticator|two-factor|2fa|2-step|two-step|mfa|totp|qr code|qr-code|scan (?:this|the) (?:qr|code)|mã qr|quét mã|xác thực hai|xác minh 2 bước|xác thực 2 bước|app xác thực|ứng dụng xác thực|otpauth/i
+const KW = /authenticator|two-factor|2fa|2-step|two-step|mfa|totp|qr code|qr-code|scan (?:this|the) (?:qr|code)|mã qr|quét mã|xác thực hai|xác minh 2 bước|xác thực 2 bước|app xác thực|ứng dụng xác thực|otpauth/i // i18n-ignore: matches Vietnamese text on web pages
 const B32 = /(?<![A-Za-z0-9])(?:[A-Z2-7]{2,8}[ -]){1,15}[A-Z2-7]{2,8}(?![A-Za-z0-9])|(?<![A-Za-z0-9])[A-Z2-7]{16,}(?![A-Za-z0-9])/g
 let seenTimer = 0
 
@@ -371,6 +372,8 @@ function act(a: CredAct): Promise<unknown> {
 
 function render(u: CredPageUi): void {
   if (!u) return
+  // Ngôn ngữ giao diện của app (main gắn vào mỗi lần gửi): đổi trước khi vẽ chữ.
+  if (u.locale) setLocale(u.locale)
   const toastChanged = !!u.toast && u.toastId !== lastToast
   ui = u
   if (!u.bubble && !toastChanged && !host) return
@@ -390,45 +393,51 @@ function render(u: CredPageUi): void {
 }
 
 function bubbleHtml(b: CredBubble): string {
-  const x = `<button class="x" data-x title="Đóng">${icon('x')}</button>`
+  // Chuỗi từ điển là của app (tin được); giá trị từ trang / người dùng thì esc() trước khi đưa vào tham số.
+  const x = `<button class="x" data-x title="${esc(t('common.close'))}">${icon('x')}</button>`
   if (b.kind === 'save') {
     const agents = b.update
       ? ''
-      : `<div class="who">Agent được dùng</div><div class="ags">${b.agents
+      : `<div class="who">${t('passwords.bubble.agents')}</div><div class="ags">${b.agents
           .map((a) => `<button class="ag${a.on ? '' : ' off'}" data-ag="${esc(a.id)}"><span class="av" style="background:${a.color}">${esc(a.name.slice(0, 1).toUpperCase())}</span>${esc(a.name)}${icon('check', 'chk')}</button>`)
-          .join('')}</div>${b.waiting.length ? `<div class="sub">${esc(b.waiting.join(', '))} được chọn sẵn vì đang chờ trang này.</div>` : ''}`
-    return `${x}<h4>${icon('key')}${b.update ? 'Cập nhật mật khẩu?' : 'Lưu mật khẩu cho trang này?'}</h4>
-      <div class="sub">${b.update ? `Mật khẩu bạn vừa dùng khác bản đã lưu trong “${esc(b.itemName ?? '')}”.` : `Bạn vừa đăng nhập ${esc(b.host)} trong ô Browser.`}</div>
-      <div class="fr"><span class="k">Tên đăng nhập</span><span class="v">${esc(b.username) || '<i>(không thấy)</i>'}</span></div>
-      <div class="fr"><span class="k">Mật khẩu</span><span class="v mono" data-pw>••••••••••••</span><button class="ib" data-eye title="Hiện 20 giây">${icon('eye')}</button></div>
+          .join('')}</div>${b.waiting.length ? `<div class="sub">${t('passwords.bubble.waiting', { names: esc(b.waiting.join(', ')) })}</div>` : ''}`
+    return `${x}<h4>${icon('key')}${b.update ? t('passwords.bubble.updateTitle') : t('passwords.bubble.saveTitle')}</h4>
+      <div class="sub">${b.update ? t('passwords.bubble.updateSub', { name: esc(b.itemName ?? '') }) : t('passwords.bubble.saveSub', { host: esc(b.host) })}</div>
+      <div class="fr"><span class="k">${t('passwords.bubble.username')}</span><span class="v">${esc(b.username) || `<i>${t('passwords.bubble.notSeen')}</i>`}</span></div>
+      <div class="fr"><span class="k">${t('passwords.bubble.password')}</span><span class="v mono" data-pw>••••••••••••</span><button class="ib" data-eye title="${esc(t('passwords.bubble.show20'))}">${icon('eye')}</button></div>
       ${agents}
-      <div class="acts"><button class="btn pri" data-save>${b.update ? 'Cập nhật' : 'Lưu'}</button><button class="btn" data-later>Để sau</button><span class="sp"></span><button class="btn ghost" data-never>Không bao giờ cho trang này</button></div>`
+      <div class="acts"><button class="btn pri" data-save>${b.update ? t('passwords.bubble.update') : t('common.save')}</button><button class="btn" data-later>${t('passwords.bubble.later')}</button><span class="sp"></span><button class="btn ghost" data-never>${t('passwords.bubble.never')}</button></div>`
   }
   if (b.kind === '2fa') {
-    return `${x}<h4>${icon('qr')}Trang này có 2FA. Lưu cả khoá 2FA?</h4>
-      <div class="why">Mã 6 số bạn vừa gõ chỉ dùng được một lần. Để agent tự đăng nhập lần sau, stag cần <b>khoá bí mật</b>: thứ trang chỉ hiện lúc bật hoặc thiết lập lại 2FA.</div>
-      <button class="opt" data-qr>${icon('monitor')}<div><b>Mở trang bảo mật để lấy mã QR</b><span>Thiết lập lại app xác thực trong ô Browser. stag tự nhận mã QR trên trang.</span></div></button>
+    return `${x}<h4>${icon('qr')}${t('passwords.bubble.2faTitle')}</h4>
+      <div class="why">${t('passwords.bubble.2faWhy', { key: `<b>${t('passwords.bubble.2faSecretKey')}</b>` })}</div>
+      <button class="opt" data-qr>${icon('monitor')}<div><b>${t('passwords.bubble.2faQrTitle')}</b><span>${t('passwords.bubble.2faQrDesc')}</span></div></button>
       ${
         b.paste
-          ? `<div class="paste"><input class="mono" data-key placeholder="Khoá bí mật hoặc otpauth://…" spellcheck="false" autocomplete="off"><button class="btn pri" data-keysave>Lưu</button></div>${b.error ? `<div class="err">${esc(b.error)}</div>` : ''}`
-          : `<button class="opt" data-paste>${icon('key')}<div><b>Dán khoá bí mật</b><span>Nếu bạn còn giữ khoá lúc bật 2FA (hoặc có trong Bitwarden / Authy export).</span></div></button>`
+          ? `<div class="paste"><input class="mono" data-key placeholder="${esc(t('passwords.bubble.2faKeyPlaceholder'))}" spellcheck="false" autocomplete="off"><button class="btn pri" data-keysave>${t('common.save')}</button></div>${b.error ? `<div class="err">${esc(b.error)}</div>` : ''}`
+          : `<button class="opt" data-paste>${icon('key')}<div><b>${t('passwords.bubble.2faPasteTitle')}</b><span>${t('passwords.bubble.2faPasteDesc')}</span></div></button>`
       }
-      <div class="acts"><span class="sp"></span><button class="btn ghost" data-skip>Để sau, agent nhờ tôi gõ mã</button></div>`
+      <div class="acts"><span class="sp"></span><button class="btn ghost" data-skip>${t('passwords.bubble.2faSkip')}</button></div>`
   }
   if (b.saved)
-    return `${x}<h4>${icon('check', 'ok')}Đã lưu khoá 2FA vào “${esc(b.target)}”</h4>
+    return `${x}<h4>${icon('check', 'ok')}${t('passwords.bubble.qrSavedTitle', { name: esc(b.target) })}</h4>
       <div class="code"><span data-code>…</span><span class="left" data-left></span></div>
-      <div class="sub">Trang hỏi mã xác nhận thì bạn gõ, hoặc để stag điền giúp.</div>
-      <div class="acts">${b.canFill ? '<button class="btn pri" data-fill>stag điền mã xác nhận</button>' : ''}<span class="sp"></span><button class="btn" data-qrdone>Xong</button></div>`
+      <div class="sub">${t('passwords.bubble.qrSavedSub')}</div>
+      <div class="acts">${b.canFill ? `<button class="btn pri" data-fill>${t('passwords.bubble.qrFill')}</button>` : ''}<span class="sp"></span><button class="btn" data-qrdone>${t('common.done')}</button></div>`
   if (b.replace)
-    return `${x}<h4>${icon('qr')}stag thấy mã QR 2FA trên trang</h4>
-    <div class="sub">Mã QR${b.account ? ` của <b>${esc(b.account)}</b>` : ''}. “${esc(b.target)}”${b.targetUser ? ` (${esc(b.targetUser)})` : ''} <b>đã có khoá 2FA</b>: thay thì khoá cũ mất hẳn, không lấy lại được. Chỉ thay khi bạn vừa thiết lập lại 2FA cho đúng tài khoản này.</div>
+    return `${x}<h4>${icon('qr')}${t('passwords.bubble.qrTitle')}</h4>
+    <div class="sub">${t('passwords.bubble.qrReplaceSub', {
+      qr: b.account ? t('passwords.bubble.qrCodeOf', { account: `<b>${esc(b.account)}</b>` }) : t('passwords.bubble.qrCode'),
+      target: esc(b.target),
+      user: b.targetUser ? ` (${esc(b.targetUser)})` : '',
+      hasKey: `<b>${t('passwords.bubble.qrHasKey')}</b>`
+    })}</div>
     ${b.error ? `<div class="err">${esc(b.error)}</div>` : ''}
-    <div class="acts"><button class="btn" data-qrsave>Thay khoá 2FA</button><button class="btn" data-qrnew>Lưu thành mục mới</button><span class="sp"></span><button class="btn ghost" data-qrskip>Bỏ qua</button></div>`
-  return `${x}<h4>${icon('qr')}stag thấy mã QR 2FA trên trang</h4>
-    <div class="sub">${b.isNew ? `Lưu thành mục mới “${esc(b.target)}”${b.account ? ` (${esc(b.account)})` : ''}?` : `Lưu vào “${esc(b.target)}”?`} Nhớ quét cùng mã này bằng điện thoại: thiết lập lại làm mã cũ trên điện thoại hết hiệu lực.</div>
+    <div class="acts"><button class="btn" data-qrsave>${t('passwords.bubble.qrReplace')}</button><button class="btn" data-qrnew>${t('passwords.bubble.qrSaveNew')}</button><span class="sp"></span><button class="btn ghost" data-qrskip>${t('passwords.bubble.qrSkip')}</button></div>`
+  return `${x}<h4>${icon('qr')}${t('passwords.bubble.qrTitle')}</h4>
+    <div class="sub">${b.isNew ? t('passwords.bubble.qrNewSub', { target: esc(b.target), account: b.account ? ` (${esc(b.account)})` : '' }) : t('passwords.bubble.qrIntoSub', { target: esc(b.target) })} ${t('passwords.bubble.qrRescan')}</div>
     ${b.error ? `<div class="err">${esc(b.error)}</div>` : ''}
-    <div class="acts"><button class="btn pri" data-qrsave>Lưu khoá 2FA</button><button class="btn ghost" data-qrskip>Bỏ qua</button></div>`
+    <div class="acts"><button class="btn pri" data-qrsave>${t('passwords.bubble.qrSave')}</button><button class="btn ghost" data-qrskip>${t('passwords.bubble.qrSkip')}</button></div>`
 }
 
 function wire(b: CredBubble): void {

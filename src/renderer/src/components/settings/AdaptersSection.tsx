@@ -8,6 +8,7 @@ import { Icon } from '../Icon'
 import { Button, Modal } from '../Modal'
 import { Seg } from '../ui/Seg'
 import { AdvancedFields, CliDetail, LABEL, ModelInput, shortVersion, TerminalDetail, type StatusMap } from './AdapterDetails'
+import { fmtDateTime, tx, useT } from '../../i18n'
 import {
   Badge,
   Callout,
@@ -61,6 +62,7 @@ export function AdaptersSection(): React.JSX.Element {
   const [view, setView] = useState<View>(initial)
   const [status, setStatus] = useState<StatusMap>({})
   const [installing, setInstalling] = useState(false)
+  const t = useT()
 
   const check = (id: CliAdapterId): void => {
     setStatus((s) => ({ ...s, [id]: 'loading' }))
@@ -109,7 +111,7 @@ export function AdaptersSection(): React.JSX.Element {
           <>
             {view.type === 'list' && (
               <SmallButton variant="primary" icon="plus" onClick={() => setInstalling(true)}>
-                Cài adapter
+                {t('adapters.install')}
               </SmallButton>
             )}
             <LevelBar appOnly />
@@ -122,7 +124,7 @@ export function AdaptersSection(): React.JSX.Element {
           onBack={back}
           kind={view.id}
           title={LABEL[view.id]}
-          badge={<Badge>Có sẵn</Badge>}
+          badge={<Badge>{t('adapters.builtinBadge')}</Badge>}
           power={<BuiltinPower id={view.id} />}
         >
           {view.id === 'terminal' ? (
@@ -151,15 +153,16 @@ function AdapterList({ status, open }: { status: StatusMap; open: (v: View) => v
   const loaded = useExternalAdapters((s) => s.loaded)
   const adapters = useSettings((s) => s.value.app.adapters)
   const shell = adapters.terminal.shell
+  const t = useT()
 
   const cliLine = (id: CliAdapterId): string => {
     const st = status[id]
     const parts: string[] = []
-    if (!st || st === 'loading') parts.push('đang kiểm tra…')
-    else if (st.error) parts.push(st.path ? 'lỗi khi chạy' : 'không tìm thấy')
+    if (!st || st === 'loading') parts.push(t('adapters.list.checking'))
+    else if (st.error) parts.push(st.path ? t('adapters.list.runError') : t('adapters.list.notFound'))
     else {
-      parts.push(shortVersion(st.version), `${st.models.length} model`)
-      parts.push(st.login.state === 'in' ? 'đã đăng nhập' : st.login.state === 'out' ? 'chưa đăng nhập' : 'không rõ đăng nhập')
+      parts.push(shortVersion(st.version), t('adapters.modelCount', { count: st.models.length }))
+      parts.push(st.login.state === 'in' ? t('adapters.list.signedIn') : st.login.state === 'out' ? t('adapters.list.signedOut') : t('adapters.list.signInUnknown'))
     }
     return parts.join(' · ')
   }
@@ -173,15 +176,12 @@ function AdapterList({ status, open }: { status: StatusMap; open: (v: View) => v
   return (
     <>
       <Callout icon="shield" className="mt-2">
-        <span className="font-medium text-fg">Adapter ngoài đang ở bản thử (alpha).</span> Cách đóng gói adapter còn có thể đổi. Adapter chạy chương trình trên máy
-        bạn, nên chỉ cài từ nguồn bạn tin. Công tắc ẩn một adapter khỏi hộp Thêm agent mà không gỡ nó.
+        <span className="font-medium text-fg">{t('adapters.list.alphaTitle')}</span> {t('adapters.list.alphaDesc')}
       </Callout>
 
-      <Group title="Adapter ngoài">
+      <Group title={t('adapters.list.external')}>
         {external.length === 0 ? (
-          <Empty title={loaded ? 'Chưa cài adapter ngoài nào' : 'Đang tải…'}>
-            Cài một gói adapter để chạy thêm CLI AI khác (vd. Aider) như một agent trong lưới.
-          </Empty>
+          <Empty title={loaded ? t('adapters.list.externalEmpty') : t('common.loading')}>{t('adapters.list.externalEmptyDesc')}</Empty>
         ) : (
           <Tiles>
             {external.map((a) => (
@@ -189,8 +189,8 @@ function AdapterList({ status, open }: { status: StatusMap; open: (v: View) => v
                 key={a.manifest.id}
                 logo={<AdapterLogo kind="external" label={a.manifest.label} />}
                 title={a.manifest.label}
-                badge={<Badge>{a.source.type === 'npm' ? 'npm' : 'Thư mục'}</Badge>}
-                line={[a.manifest.id, `v${a.version}`, `${a.manifest.models.length} model`].join(' · ')}
+                badge={<Badge>{a.source.type === 'npm' ? 'npm' : t('adapters.folderBadge')}</Badge>}
+                line={[a.manifest.id, `v${a.version}`, t('adapters.modelCount', { count: a.manifest.models.length })].join(' · ')}
                 tone="muted"
                 enabled={a.enabled}
                 onToggle={(enabled) => void window.stag.externalAdapters.update(a.manifest.id, { enabled })}
@@ -201,14 +201,14 @@ function AdapterList({ status, open }: { status: StatusMap; open: (v: View) => v
         )}
       </Group>
 
-      <Group title="Adapter có sẵn">
+      <Group title={t('adapters.list.builtin')}>
         <Tiles>
           {(['claude', 'codex'] as const).map((id) => (
             <AdapterTileCard
               key={id}
               logo={<AdapterLogo kind={id} />}
               title={LABEL[id]}
-              badge={<Badge>Có sẵn</Badge>}
+              badge={<Badge>{t('adapters.builtinBadge')}</Badge>}
               line={cliLine(id)}
               tone={cliTone(id)}
               enabled={adapters[id].enabled}
@@ -219,7 +219,7 @@ function AdapterList({ status, open }: { status: StatusMap; open: (v: View) => v
           <AdapterTileCard
             logo={<AdapterLogo kind="terminal" />}
             title="Terminal"
-            badge={<Badge>Có sẵn</Badge>}
+            badge={<Badge>{t('adapters.builtinBadge')}</Badge>}
             line={{ powershell: 'Windows PowerShell', pwsh: 'PowerShell 7', gitbash: 'Git Bash', cmd: 'cmd' }[shell]}
             tone="ok"
             enabled={adapters.terminal.enabled}
@@ -252,6 +252,7 @@ function AdapterTileCard({
   onToggle: (enabled: boolean) => void
   onOpen: () => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <Tile
       logo={logo}
@@ -259,7 +260,7 @@ function AdapterTileCard({
       badge={badge}
       dot={tone}
       sub={line}
-      tip={enabled ? line : `${line} · đang ẩn khỏi hộp Thêm agent`}
+      tip={enabled ? line : `${line} · ${t('adapters.power.hiddenSuffix')}`}
       dim={!enabled}
       onOpen={onOpen}
       control={<PowerButton label={title} enabled={enabled} onToggle={onToggle} />}
@@ -269,9 +270,10 @@ function AdapterTileCard({
 
 /** Công tắc hiện / ẩn một adapter trong hộp Thêm agent. */
 export function PowerButton({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: (v: boolean) => void }): React.JSX.Element {
+  const t = useT()
   return (
-    <span data-tip={enabled ? 'Đang hiện trong hộp Thêm agent — bấm để ẩn' : 'Đang ẩn — bấm để hiện trong hộp Thêm agent'} className="inline-flex">
-      <Switch label={enabled ? `Ẩn ${label} khỏi hộp Thêm agent` : `Hiện ${label} trong hộp Thêm agent`} checked={enabled} onChange={onToggle} />
+    <span data-tip={enabled ? t('adapters.power.shownTip') : t('adapters.power.hiddenTip')} className="inline-flex">
+      <Switch label={enabled ? t('adapters.power.hide', { name: label }) : t('adapters.power.show', { name: label })} checked={enabled} onChange={onToggle} />
     </span>
   )
 }
@@ -298,16 +300,17 @@ function DetailFrame({
   onBack: () => void
   children: ReactNode
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="mt-2">
       <DetailHead
         onBack={onBack}
-        backLabel="Tất cả adapter"
+        backLabel={t('adapters.detail.back')}
         logo={<AdapterLogo kind={kind} label={title} />}
         title={title}
         badge={badge}
         control={power}
-        sub={sub ?? 'Thay đổi áp dụng cho phiên mở sau; phiên đang chạy giữ nguyên. Kiểm tra CLI không gọi model, không tốn quota.'}
+        sub={sub ?? t('adapters.detail.sub')}
       />
       {children}
     </div>
@@ -323,6 +326,7 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
   const [status, setStatus] = useState<ExternalAdapterStatus | 'loading' | null>(null)
   const [error, run] = useSaveError()
   const [busy, setBusy] = useState<'reinstall' | 'remove' | null>(null)
+  const t = useT()
 
   // Mở trang: chỉ tìm file chạy. Bấm "Kiểm tra lại": chạy cả lệnh lấy phiên bản (mã của gói).
   const check = (runVersion = false): void => {
@@ -336,7 +340,7 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
 
   if (!a) {
     return (
-      <DetailFrame onBack={onBack} kind="external" title={id} badge={<Badge>Adapter ngoài</Badge>} sub={loaded ? 'Adapter này đã bị gỡ.' : 'Đang tải…'}>
+      <DetailFrame onBack={onBack} kind="external" title={id} badge={<Badge>{t('adapters.list.external')}</Badge>} sub={loaded ? t('adapters.ext.removed') : t('common.loading')}>
         {null}
       </DetailFrame>
     )
@@ -355,9 +359,9 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
   }
 
   async function remove(): Promise<void> {
-    const extra = users.length ? `\n\n${users.length} agent đang dùng adapter này (${users.map((u) => u.name).join(', ')}) sẽ không mở phiên được nữa cho tới khi bạn cài lại.` : ''
-    const what = a!.source.type === 'npm' ? 'Gói npm sẽ bị gỡ khỏi thư mục adapter của app.' : 'Thư mục của bạn được giữ nguyên, chỉ bỏ khỏi danh sách.'
-    if (!window.confirm(`Gỡ adapter "${m.label}"?\n\n${what}${extra}`)) return
+    const extra = users.length ? `\n\n${t('adapters.ext.removeUsers', { count: users.length, names: users.map((u) => u.name).join(', ') })}` : ''
+    const what = a!.source.type === 'npm' ? t('adapters.ext.removeNpm') : t('adapters.ext.removeLocal')
+    if (!window.confirm(`${t('adapters.ext.removeAsk', { name: m.label })}\n\n${what}${extra}`)) return
     setBusy('remove')
     try {
       await window.stag.externalAdapters.remove(id)
@@ -369,14 +373,14 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
   }
 
   const caps: Array<[string, string]> = [
-    ['Luật phiên + bộ nhớ vault', m.rules ? ('flag' in m.rules ? `✓ ${m.rules.flag} <file>` : `✓ biến ${m.rules.env}`) : '—'],
-    ['MCP stag (việc, trình duyệt, bàn giao)', m.mcpConfigFlag ? `✓ ${m.mcpConfigFlag}` : '—'],
-    ['Lời mở phiên', m.prompt ? ('flag' in m.prompt ? `✓ ${m.prompt.flag}` : '✓ tham số cuối') : '—'],
-    ['Chọn model', m.modelFlag ? `✓ ${m.modelFlag}` : '—'],
-    ['Trạng thái qua hook (đang làm / chờ bạn)', '—'],
-    ['Tiếp tục phiên trước', '—'],
-    ['% context + tự bàn giao', '—'],
-    ['Khoá phạm vi', '—']
+    [t('adapters.feature.rules'), m.rules ? ('flag' in m.rules ? `✓ ${m.rules.flag} <file>` : `✓ ${t('adapters.ext.envVar', { name: m.rules.env })}`) : '—'],
+    [t('adapters.feature.mcp'), m.mcpConfigFlag ? `✓ ${m.mcpConfigFlag}` : '—'],
+    [t('adapters.feature.prompt'), m.prompt ? ('flag' in m.prompt ? `✓ ${m.prompt.flag}` : `✓ ${t('adapters.ext.lastArg')}`) : '—'],
+    [t('adapters.feature.model'), m.modelFlag ? `✓ ${m.modelFlag}` : '—'],
+    [t('adapters.feature.hooks'), '—'],
+    [t('adapters.feature.resume'), '—'],
+    [t('adapters.feature.context'), '—'],
+    [t('adapters.feature.scope'), '—']
   ]
   const mono = 'break-all font-mono text-[11px]'
 
@@ -385,43 +389,43 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
       onBack={onBack}
       kind="external"
       title={m.label}
-      badge={<Badge>{a.source.type === 'npm' ? 'npm' : 'Thư mục'}</Badge>}
+      badge={<Badge>{a.source.type === 'npm' ? 'npm' : t('adapters.folderBadge')}</Badge>}
       power={<PowerButton label={m.label} enabled={a.enabled} onToggle={(enabled) => run(update({ enabled }))} />}
       sub={m.description || undefined}
     >
       <ErrorBar error={error} />
-      <Group title="Gói">
+      <Group title={t('adapters.ext.package')}>
         <Row
-          label="Nguồn"
+          label={t('adapters.ext.source')}
           sub={<span className={mono}>{a.source.type === 'npm' ? `${a.source.name}@${a.source.version}` : a.source.path}</span>}
         >
           <SmallButton icon="folder" onClick={() => void window.stag.openFolder(a.dir)}>
-            Mở thư mục
+            {t('adapters.ext.openFolder')}
           </SmallButton>
         </Row>
-        <Row label="Phiên bản gói" sub={`${a.version} · id ${m.id} · cài lúc ${new Date(a.installedAt).toLocaleString('vi-VN')}`}>
+        <Row label={t('adapters.ext.version')} sub={t('adapters.ext.versionSub', { version: a.version, id: m.id, time: fmtDateTime(a.installedAt) })}>
           <SmallButton onClick={reinstall} disabled={!!busy}>
-            {busy === 'reinstall' ? 'Đang cài…' : a.source.type === 'npm' ? 'Cài lại / cập nhật' : 'Đọc lại gói'}
+            {busy === 'reinstall' ? t('adapters.ext.installing') : a.source.type === 'npm' ? t('adapters.ext.reinstall') : t('adapters.ext.reload')}
           </SmallButton>
         </Row>
-        {m.homepage && <Row label="Trang chủ" sub={<span className={mono}>{m.homepage}</span>} />}
+        {m.homepage && <Row label={t('adapters.ext.homepage')} sub={<span className={mono}>{m.homepage}</span>} />}
       </Group>
 
-      <Group title="Trên máy này">
+      <Group title={t('adapters.detail.thisComputer')}>
         <Row
-          label="Chương trình"
-          sub={st?.error ? <span className="text-danger">{st.error}</span> : st?.path ? <span className={mono}>{st.path}</span> : 'Đang tìm…'}
+          label={t('adapters.ext.program')}
+          sub={st?.error ? <span className="text-danger">{st.error}</span> : st?.path ? <span className={mono}>{st.path}</span> : t('adapters.detail.searching')}
         />
-        <Row label="Phiên bản" sub={st?.version ?? (status === 'loading' ? 'Đang kiểm tra…' : '—')}>
+        <Row label={t('adapters.detail.version')} sub={st?.version ?? (status === 'loading' ? t('adapters.detail.checking') : '—')}>
           <SmallButton onClick={() => check(true)} disabled={status === 'loading'}>
-            {status === 'loading' ? 'Đang kiểm tra…' : 'Kiểm tra lại'}
+            {status === 'loading' ? t('adapters.detail.checking') : t('adapters.detail.recheck')}
           </SmallButton>
         </Row>
         <Row
-          label="Lệnh mỗi phiên"
+          label={t('adapters.ext.command')}
           sub={
             <span className={mono}>
-              {[m.command, ...m.args, m.modelFlag && a.model ? `${m.modelFlag} ${a.model}` : '', m.rules && 'flag' in m.rules ? `${m.rules.flag} <luật phiên>` : '', m.mcpConfigFlag ? `${m.mcpConfigFlag} <mcp stag>` : '', a.extraArgs, m.prompt ? ('flag' in m.prompt ? `${m.prompt.flag} "<lời mở>"` : '"<lời mở>"') : '']
+              {[m.command, ...m.args, m.modelFlag && a.model ? `${m.modelFlag} ${a.model}` : '', m.rules && 'flag' in m.rules ? `${m.rules.flag} ${t('adapters.ext.cmdRules')}` : '', m.mcpConfigFlag ? `${m.mcpConfigFlag} <mcp stag>` : '', a.extraArgs, m.prompt ? ('flag' in m.prompt ? `${m.prompt.flag} "${t('adapters.ext.cmdPrompt')}"` : `"${t('adapters.ext.cmdPrompt')}"`) : '']
                 .filter(Boolean)
                 .join(' ')}
             </span>
@@ -429,12 +433,12 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
         />
       </Group>
 
-      <Group title="Agent mới">
-        <Row label='Hiện trong hộp "Thêm agent"' desc="Tắt thì không tạo mới được." sub={`${users.length} agent đang dùng adapter này.`}>
-          <Switch label={`Hiện ${m.label} khi thêm agent`} checked={a.enabled} onChange={(enabled) => run(update({ enabled }))} />
+      <Group title={t('adapters.detail.newAgents')}>
+        <Row label={t('adapters.detail.showInAdd')} desc={t('adapters.ext.showInAddDesc')} sub={t('adapters.ext.usersCount', { count: users.length })}>
+          <Switch label={t('adapters.detail.showLabel', { name: m.label })} checked={a.enabled} onChange={(enabled) => run(update({ enabled }))} />
         </Row>
         {m.modelFlag && (
-          <Row label="Model" desc={`Trống = mặc định của ${m.label}. Áp dụng cho mọi agent dùng adapter này.`}>
+          <Row label="Model" desc={t('adapters.ext.modelDesc', { name: m.label })}>
             <ModelInput
               key={a.model}
               name={m.label}
@@ -453,12 +457,12 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
         extraArgs={a.extraArgs}
         env={a.env}
         argsExample=""
-        envExample="TEN_BIEN=giá trị"
+        envExample={t('adapters.adv.envExample')}
         storedIn="adapters/registry.json"
         onSave={(patch) => update(patch)}
       />
 
-      <Group title="Khả năng trong stag.ai">
+      <Group title={t('adapters.detail.features')}>
         {caps.map(([label, v]) => (
           <Row key={label} label={<span className="font-normal">{label}</span>}>
             <span className={`font-mono text-[12px] ${v.startsWith('✓') ? 'text-work' : 'text-dim'}`}>{v}</span>
@@ -466,13 +470,13 @@ function ExternalDetail({ id, onBack }: { id: string; onBack: () => void }): Rea
         ))}
       </Group>
 
-      <Group title="Gỡ">
+      <Group title={t('adapters.ext.removeGroup')}>
         <Row
-          label="Gỡ adapter"
-          desc={a.source.type === 'npm' ? 'Gỡ gói khỏi thư mục adapter của app. Agent đã tạo vẫn còn, mở phiên sẽ báo cần cài lại.' : 'Bỏ khỏi danh sách; thư mục của bạn không bị xoá.'}
+          label={t('adapters.ext.remove')}
+          desc={a.source.type === 'npm' ? t('adapters.ext.removeNpmDesc') : t('adapters.ext.removeLocalDesc')}
         >
           <SmallButton variant="danger" onClick={remove} disabled={!!busy}>
-            {busy === 'remove' ? 'Đang gỡ…' : 'Gỡ adapter'}
+            {busy === 'remove' ? t('adapters.ext.removing') : t('adapters.ext.remove')}
           </SmallButton>
         </Row>
       </Group>
@@ -488,6 +492,7 @@ function InstallAdapterDialog({ onClose, onInstalled }: { onClose: () => void; o
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const t = useT()
   const ready = tab === 'npm' ? name.trim() !== '' : path.trim() !== ''
 
   useEffect(() => {
@@ -517,7 +522,7 @@ function InstallAdapterDialog({ onClose, onInstalled }: { onClose: () => void; o
   }
 
   async function choose(): Promise<void> {
-    const dir = await window.stag.pickFolder('Chọn thư mục gói adapter (có package.json)', path || undefined)
+    const dir = await window.stag.pickFolder(t('adapters.installDialog.pick'), path || undefined)
     if (dir) setPath(dir)
   }
 
@@ -527,16 +532,16 @@ function InstallAdapterDialog({ onClose, onInstalled }: { onClose: () => void; o
 
   return (
     <Modal
-      title="Cài adapter ngoài"
+      title={t('adapters.installDialog.title')}
       width="w-[480px]"
       onClose={busy ? undefined : onClose}
       footer={
         <>
           <Button onClick={onClose} disabled={busy}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button primary onClick={install} disabled={busy || !ready}>
-            {busy ? (tab === 'npm' ? 'Đang chạy npm install…' : 'Đang đọc gói…') : 'Cài'}
+            {busy ? (tab === 'npm' ? t('adapters.installDialog.runningNpm') : t('adapters.installDialog.reading')) : t('common.install')}
           </Button>
         </>
       }
@@ -548,7 +553,7 @@ function InstallAdapterDialog({ onClose, onInstalled }: { onClose: () => void; o
         }}
       >
         <p className="mb-3 text-[12px] leading-relaxed text-dim">
-          Thêm một adapter từ npm hoặc từ một thư mục trên máy. Gói cần có mục <code>stagAdapter</code> trong package.json (xem <code>docs/adapters.md</code>).
+          {tx('adapters.installDialog.intro', { field: <code>stagAdapter</code>, docs: <code>docs/adapters.md</code> })}
         </p>
         <Seg
           className="mb-4 self-start"
@@ -560,7 +565,7 @@ function InstallAdapterDialog({ onClose, onInstalled }: { onClose: () => void; o
               label: (
                 <>
                   <Icon name="hex" size="s" />
-                  Gói npm
+                  {t('adapters.installDialog.npm')}
                 </>
               )
             },
@@ -569,7 +574,7 @@ function InstallAdapterDialog({ onClose, onInstalled }: { onClose: () => void; o
               label: (
                 <>
                   <Icon name="folder" size="s" />
-                  Thư mục
+                  {t('adapters.folderBadge')}
                 </>
               )
             }
@@ -578,33 +583,31 @@ function InstallAdapterDialog({ onClose, onInstalled }: { onClose: () => void; o
         {tab === 'npm' ? (
           <>
             <label className={label} htmlFor="adapter-npm-name">
-              Tên gói
+              {t('adapters.installDialog.name')}
             </label>
             <input id="adapter-npm-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="stag-adapter-aider" spellCheck={false} className={field} />
             <label className={`${label} mt-3`} htmlFor="adapter-npm-version">
-              Phiên bản (tuỳ chọn)
+              {t('adapters.installDialog.version')}
             </label>
             <input id="adapter-npm-version" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="latest" spellCheck={false} className={field} />
-            <p className={hint}>
-              Cài bằng <code>npm install --ignore-scripts</code> vào thư mục riêng của app (script cài đặt của gói không được chạy).
-            </p>
+            <p className={hint}>{tx('adapters.installDialog.npmHint', { command: <code>npm install --ignore-scripts</code> })}</p>
           </>
         ) : (
           <>
             <label className={label} htmlFor="adapter-local-path">
-              Đường dẫn tới thư mục gói
+              {t('adapters.installDialog.path')}
             </label>
             <div className="flex gap-2">
               <input id="adapter-local-path" autoFocus value={path} onChange={(e) => setPath(e.target.value)} placeholder="D:\code\stag-adapter-aider" spellCheck={false} className={field} />
               <SmallButton icon="folder" size="md" onClick={choose}>
-                Chọn
+                {t('adapters.installDialog.choose')}
               </SmallButton>
             </div>
-            <p className={hint}>Dùng tại chỗ, không chép: sửa gói rồi bấm "Đọc lại gói" ở trang adapter là có tác dụng.</p>
+            <p className={hint}>{t('adapters.installDialog.localHint')}</p>
           </>
         )}
         <Callout icon="shield" className="mt-4">
-          Adapter chạy chương trình trên máy bạn với quyền của bạn. Chỉ cài từ nguồn bạn tin.
+          {t('adapters.installDialog.warning')}
         </Callout>
         {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-[12px] whitespace-pre-wrap text-danger">{error}</div>}
       </form>

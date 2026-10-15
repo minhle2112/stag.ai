@@ -12,6 +12,7 @@ import type {
 import { independentSessionEnv } from './adapters'
 import { exists, readText } from './fsutil'
 import { isObject, JsonFile } from './jsonFile'
+import { t } from '@shared/i18n'
 
 /**
  * Adapter ngoài (alpha, theo kiểu "Install Adapter" của Paperclip): một gói npm hoặc một thư mục có
@@ -38,30 +39,30 @@ const strList = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x
 export function parseManifest(pkg: unknown): { manifest: ExternalAdapterManifest; name: string; version: string } {
   const p = obj(pkg)
   const raw = p.stagAdapter
-  if (!raw || typeof raw !== 'object') throw new Error('Gói này không phải adapter của stag.ai: package.json thiếu mục "stagAdapter".')
+  if (!raw || typeof raw !== 'object') throw new Error(t('adapters.manifest.missing'))
   const m = obj(raw)
   const bad = (field: string, why: string): never => {
     throw new Error(`stagAdapter.${field} ${why}`)
   }
-  const id = typeof m.id === 'string' ? m.id : bad('id', 'là bắt buộc')
-  if (!ID_RE.test(id)) bad('id', 'chỉ gồm a-z, 0-9, "-", bắt đầu bằng chữ, 2–32 ký tự')
-  if (RESERVED_IDS.has(id)) bad('id', `"${id}" trùng adapter có sẵn`)
-  const label = typeof m.label === 'string' && m.label.trim() ? m.label.trim().slice(0, 60) : bad('label', 'là bắt buộc')
-  const command = typeof m.command === 'string' && m.command.trim() ? m.command.trim() : bad('command', 'là bắt buộc')
-  const args = m.args === undefined ? [] : (strList(m.args) ?? bad('args', 'phải là mảng chuỗi'))
-  const versionArgs = m.versionArgs === undefined ? ['--version'] : (strList(m.versionArgs) ?? bad('versionArgs', 'phải là mảng chuỗi'))
+  const id = typeof m.id === 'string' ? m.id : bad('id', t('adapters.manifest.required'))
+  if (!ID_RE.test(id)) bad('id', t('adapters.manifest.idFormat'))
+  if (RESERVED_IDS.has(id)) bad('id', t('adapters.manifest.idReserved', { id }))
+  const label = typeof m.label === 'string' && m.label.trim() ? m.label.trim().slice(0, 60) : bad('label', t('adapters.manifest.required'))
+  const command = typeof m.command === 'string' && m.command.trim() ? m.command.trim() : bad('command', t('adapters.manifest.required'))
+  const args = m.args === undefined ? [] : (strList(m.args) ?? bad('args', t('adapters.manifest.stringArray')))
+  const versionArgs = m.versionArgs === undefined ? ['--version'] : (strList(m.versionArgs) ?? bad('versionArgs', t('adapters.manifest.stringArray')))
   const models: ExternalAdapterManifest['models'] = []
   if (m.models !== undefined) {
-    if (!Array.isArray(m.models)) bad('models', 'phải là mảng')
+    if (!Array.isArray(m.models)) bad('models', t('adapters.manifest.array'))
     for (const x of m.models as unknown[]) {
       const one = typeof x === 'string' ? { id: x, label: x } : { id: obj(x).id, label: obj(x).label ?? obj(x).id }
-      if (typeof one.id !== 'string' || !one.id || !MODEL_RE.test(one.id)) bad('models', 'có model id không hợp lệ')
+      if (typeof one.id !== 'string' || !one.id || !MODEL_RE.test(one.id)) bad('models', t('adapters.manifest.badModel'))
       models.push({ id: one.id as string, label: typeof one.label === 'string' ? one.label : (one.id as string) })
     }
   }
   const flag = (field: string, v: unknown): string => {
     if (v === undefined || v === '') return ''
-    if (typeof v !== 'string' || !FLAG_RE.test(v)) bad(field, 'phải là một cờ dạng --ten')
+    if (typeof v !== 'string' || !FLAG_RE.test(v)) bad(field, t('adapters.manifest.flag'))
     return v as string
   }
   const modelFlag = flag('modelFlag', m.modelFlag)
@@ -71,14 +72,14 @@ export function parseManifest(pkg: unknown): { manifest: ExternalAdapterManifest
     const r = obj(m.rules)
     if (typeof r.flag === 'string') rules = { flag: flag('rules.flag', r.flag) }
     else if (typeof r.env === 'string' && ENV_RE.test(r.env) && !/^STAG_/i.test(r.env)) rules = { env: r.env }
-    else bad('rules', 'phải là { "flag": "--cờ" } hoặc { "env": "TEN_BIEN" }')
+    else bad('rules', t('adapters.manifest.oneOf', { a: '{ "flag": "--flag" }', b: '{ "env": "VAR_NAME" }' }))
   }
   let prompt: ExternalAdapterManifest['prompt'] = null
   if (m.prompt !== undefined && m.prompt !== null) {
     const r = obj(m.prompt)
     if (typeof r.flag === 'string') prompt = { flag: flag('prompt.flag', r.flag) }
     else if (r.positional === true) prompt = { positional: true }
-    else bad('prompt', 'phải là { "flag": "--cờ" } hoặc { "positional": true }')
+    else bad('prompt', t('adapters.manifest.oneOf', { a: '{ "flag": "--flag" }', b: '{ "positional": true }' }))
   }
   const name = typeof p.name === 'string' ? p.name : id
   const version = typeof p.version === 'string' ? p.version : '0.0.0'
@@ -230,8 +231,8 @@ function run(command: string, args: string[] | string, opts: { env: NodeJS.Proce
  * Dùng chung cho adapter ngoài và plugin. Tên / phiên bản kiểm bằng NPM_NAME_RE / NPM_VERSION_RE (chạy qua cmd.exe).
  */
 export async function npmInstall(prefix: string, label: string, name: string, version: string): Promise<string> {
-  if (!NPM_NAME_RE.test(name)) throw new Error(`"${name}" không phải tên gói npm hợp lệ.`)
-  if (!NPM_VERSION_RE.test(version)) throw new Error(`Phiên bản "${version}" không hợp lệ.`)
+  if (!NPM_NAME_RE.test(name)) throw new Error(t('adapters.npm.badName', { name }))
+  if (!NPM_VERSION_RE.test(version)) throw new Error(t('adapters.npm.badVersion', { version }))
   await fs.mkdir(prefix, { recursive: true })
   if (!(await exists(join(prefix, 'package.json')))) await fs.writeFile(join(prefix, 'package.json'), JSON.stringify({ name: label, private: true }, null, 2), 'utf8')
   // npm trên Windows là npm.cmd → chạy qua cmd.exe; tên / phiên bản đã kiểm bằng regex (không có ký tự đặc biệt của cmd).
@@ -242,7 +243,7 @@ export async function npmInstall(prefix: string, label: string, name: string, ve
   })
   if (!r.ok) {
     const msg = (r.err || r.out).split(/\r?\n/).filter((l) => /ERR!|error/i.test(l)).slice(0, 4).join('\n') || (r.err || r.out).trim().slice(-400)
-    throw new Error(`npm install ${name}@${version} lỗi:\n${msg || 'không rõ (npm có trong PATH không?)'}`)
+    throw new Error(t('adapters.npm.failed', { spec: `${name}@${version}`, error: msg || t('adapters.npm.unknown') }))
   }
   return join(prefix, 'node_modules', ...name.split('/'))
 }
@@ -314,21 +315,21 @@ export class ExternalAdapterStore {
     } else {
       dir = resolve(req.path.trim())
       const st = await fs.stat(dir).catch(() => null)
-      if (!st?.isDirectory()) throw new Error(`Không thấy thư mục "${req.path}".`)
+      if (!st?.isDirectory()) throw new Error(t('adapters.install.noFolder', { path: req.path }))
       source = { type: 'local', path: dir }
     }
     const pkgText = await readText(join(dir, 'package.json'))
-    if (!pkgText) throw new Error(`Không thấy package.json trong "${dir}".`)
+    if (!pkgText) throw new Error(t('adapters.install.noPackage', { path: dir }))
     let pkg: unknown
     try {
       pkg = JSON.parse(pkgText)
     } catch {
-      throw new Error('package.json của gói không phải JSON hợp lệ.')
+      throw new Error(t('adapters.install.badPackage'))
     }
     const { manifest, version } = parseManifest(pkg)
     const old = this.get(manifest.id)
     if (old && !sameSource(old.source, source))
-      throw new Error(`Đã có adapter "${manifest.id}" (${old.manifest.label}) cài từ nguồn khác. Gỡ nó trước rồi cài lại.`)
+      throw new Error(t('adapters.install.otherSource', { id: manifest.id, label: old.manifest.label }))
     const entry: InstalledAdapter = {
       manifest,
       source,
@@ -359,7 +360,7 @@ export class ExternalAdapterStore {
 
   async update(id: string, patch: InstalledAdapterPatch): Promise<InstalledAdapter> {
     const a = this.get(id)
-    if (!a) throw new Error('Adapter không còn')
+    if (!a) throw new Error(t('adapters.error.gone'))
     const next: InstalledAdapter = { ...a }
     if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled
     if (typeof patch.model === 'string' && MODEL_RE.test(patch.model.trim())) next.model = patch.model.trim()
@@ -375,7 +376,9 @@ export class ExternalAdapterStore {
     const p = await resolveCommand(a.manifest.command, a.dir)
     if (p) return p
     throw new Error(
-      `Không tìm thấy chương trình "${a.manifest.command}" của adapter ${a.manifest.label}.` + (a.manifest.install ? ` Cài bằng: ${a.manifest.install}` : '')
+      a.manifest.install
+        ? t('adapters.error.programMissingInstall', { command: a.manifest.command, label: a.manifest.label, install: a.manifest.install })
+        : t('adapters.error.programMissing', { command: a.manifest.command, label: a.manifest.label })
     )
   }
 
@@ -386,7 +389,7 @@ export class ExternalAdapterStore {
   async check(id: string, runVersion = false): Promise<ExternalAdapterStatus> {
     const status: ExternalAdapterStatus = { id, path: null, version: null, error: null, checkedAt: new Date().toISOString() }
     const a = this.get(id)
-    if (!a) return { ...status, error: 'Adapter không còn' }
+    if (!a) return { ...status, error: t('adapters.error.gone') }
     try {
       status.path = await this.exe(a)
     } catch (e) {
@@ -396,7 +399,7 @@ export class ExternalAdapterStore {
     const spec = spawnSpec(status.path, a.manifest.versionArgs.map((x) => fillPkg(x, a.dir)))
     const r = await run(spec.command, spec.args, { env: { ...independentSessionEnv(process.env), ...parseEnv(a.env).vars }, cwd: a.dir })
     if (r.ok) status.version = (r.out || r.err).trim().split(/\r?\n/)[0] || null
-    else status.error = `Chạy ${a.manifest.command} ${a.manifest.versionArgs.join(' ')} lỗi: ${(r.err || r.out).trim().split(/\r?\n/)[0] || 'không rõ'}`
+    else status.error = t('adapters.error.runFailed', { command: `${a.manifest.command} ${a.manifest.versionArgs.join(' ')}`, error: (r.err || r.out).trim().split(/\r?\n/)[0] || t('common.unknown') })
     return status
   }
 

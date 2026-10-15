@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react'
-import { ago } from '../../status'
+import { fmtRelative, t } from '../../i18n'
 import { agentInitial, avatarColor, LIVE_MS, type NoteTouch } from './activity'
 
-export const kindLabel = (k: 'read' | 'write'): string => (k === 'write' ? 'ghi' : 'đọc')
+export const kindLabel = (k: 'read' | 'write'): string => (k === 'write' ? t('vault.kind.write') : t('vault.kind.read'))
 
 /** "Kiên đang ghi note này" (vừa làm) hoặc "Kiên ghi note này · 5 phút trước". */
-export function touchTip(t: NoteTouch, now: number): string {
-  if (now - Date.parse(t.at) < LIVE_MS) return `${t.agentName} đang ${kindLabel(t.kind)} note này`
-  const when = ago(t.at, now)
-  return `${t.agentName} ${kindLabel(t.kind)} note này · ${when === 'vừa xong' ? when : `${when} trước`}`
+export function touchTip(x: NoteTouch, now: number): string {
+  const agent = x.agentName
+  if (now - Date.parse(x.at) < LIVE_MS) return x.kind === 'write' ? t('vault.live.writing', { agent }) : t('vault.live.reading', { agent })
+  const when = fmtRelative(x.at, now)
+  return x.kind === 'write' ? t('vault.live.wrote', { agent, when }) : t('vault.live.read', { agent, when })
 }
 
 /**

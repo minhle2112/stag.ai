@@ -1,5 +1,6 @@
 // Gõ bằng giọng nói (V1): model, trạng thái, phím tắt, cắt đoạn âm thanh, chống lặp danh sách gợi ý.
 // Dùng chung cho main (tải model, worker nhận dạng) và renderer (thu âm, phím tắt). Xem vault: Vietnamese voice input.
+import { fmtNumber } from './i18n'
 import type { VoiceGlobalHotkey, VoiceHotkey } from './types'
 
 export type { VoiceHotkey }
@@ -59,7 +60,7 @@ export const VOICE_GLOBAL_HOTKEYS: Record<VoiceGlobalHotkey, { label: string; ac
  * Chỉ nói "gửi" → text rỗng, chỉ nhấn Enter (gửi phần đã gõ sẵn).
  */
 export function splitSendCommand(text: string): { text: string; send: boolean } {
-  const m = /(^|[\s,.;:!?…]+)(?<![\p{L}\p{N}_])gửi(\s+đi)?[\s.!?…]*$/iu.exec(text.normalize('NFC'))
+  const m = /(^|[\s,.;:!?…]+)(?<![\p{L}\p{N}_])gửi(\s+đi)?[\s.!?…]*$/iu.exec(text.normalize('NFC')) // i18n-ignore: Vietnamese voice command "gửi"
   if (!m) return { text, send: false }
   return { text: text.normalize('NFC').slice(0, m.index).trimEnd(), send: true }
 }
@@ -244,5 +245,5 @@ export function appendText(prev: string, next: string): string {
 
 /** Tốc độ tải để hiện "x MB / y MB". */
 export function formatMb(bytes: number): string {
-  return `${Math.round(bytes / 1e6).toLocaleString('vi-VN')} MB`
+  return `${fmtNumber(Math.round(bytes / 1e6))} MB`
 }

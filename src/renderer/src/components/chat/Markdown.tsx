@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react'
 import { CHAT_PROSE, renderChatMarkdown } from './chatMarkdown'
+import { t, useLocale } from '../../i18n'
 
 const OPENABLE = /^(https?|mailto):/i
 
@@ -12,9 +13,9 @@ function onClick(e: React.MouseEvent<HTMLDivElement>): void {
     void navigator.clipboard.writeText(code)
     const label = copy.querySelector<HTMLElement>('[data-copy-label]')
     if (label) {
-      label.textContent = 'Đã chép'
+      label.textContent = t('common.copied')
       setTimeout(() => {
-        label.textContent = 'Sao chép'
+        label.textContent = t('chat.copy')
       }, 1200)
     }
     return
@@ -30,7 +31,10 @@ function onClick(e: React.MouseEvent<HTMLDivElement>): void {
 
 /** Chữ markdown của assistant. `caret` = đang stream (con trỏ nhấp nháy cuối chữ). */
 export const Markdown = memo(function Markdown({ text, caret }: { text: string; caret?: boolean }): React.JSX.Element {
-  const html = useMemo(() => renderChatMarkdown(text, { caret }), [text, caret])
+  // Nút Sao chép trong HTML theo ngôn ngữ giao diện: đổi ngôn ngữ thì dựng lại.
+  const locale = useLocale()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const html = useMemo(() => renderChatMarkdown(text, { caret }), [text, caret, locale])
   // `html` do chatMarkdown.ts sinh: html:false nên chữ thô trong tin đã bị escape, chỉ có thẻ do ta thêm.
   return <div className={CHAT_PROSE} onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
 })

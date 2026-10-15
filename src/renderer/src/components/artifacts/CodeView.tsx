@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import { highlightLines, splitLines, symbolsOf } from './code'
 
 /** Chiều cao một dòng (px). Cố định để cuộn tới một dòng chỉ cần phép nhân, không cần một phần tử cho mỗi dòng. */
@@ -11,6 +12,7 @@ const PAD_Y = 8
  * Cột phải tự ẩn khi khung xem hẹp (container query của khung `@container` chứa nó).
  */
 export function CodeView({ text, rel }: { text: string; rel: string }): React.JSX.Element {
+  const t = useT()
   const lines = useMemo(() => splitLines(text), [text])
   const html = useMemo(() => highlightLines(lines, rel).join('\n'), [lines, rel])
   const gutter = useMemo(() => lines.map((_, i) => i + 1).join('\n'), [lines])
@@ -48,9 +50,9 @@ export function CodeView({ text, rel }: { text: string; rel: string }): React.JS
       {symbols.length > 0 && (
         <aside className="hidden w-[232px] shrink-0 overflow-y-auto border-l border-line bg-bg py-1 @[640px]:block">
           <h4 className="flex min-h-[30px] items-center gap-1.5 px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-dim">
-            CẤU TRÚC · {symbols.length}
+            {t('artifacts.code.outline', { count: symbols.length })}
             <span className="flex-1" />
-            <span className="font-mono font-normal tracking-normal">{lines.length} dòng</span>
+            <span className="font-mono font-normal tracking-normal">{t('artifacts.code.lines', { count: lines.length })}</span>
           </h4>
           {symbols.map((s) => (
             <button

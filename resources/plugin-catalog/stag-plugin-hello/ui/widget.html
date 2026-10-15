@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>Hello — widget</title>
@@ -16,7 +16,7 @@
   </head>
   <body>
     <main>
-      <p class="muted" style="margin: 0 0 6px">Widget của Hello (slot dashboardWidget): việc xong của agent trong workspace này.</p>
+      <p class="muted" style="margin: 0 0 6px">Hello widget (dashboardWidget slot): tasks finished by agents in this workspace.</p>
       <table>
         <tbody id="rows"></tbody>
       </table>
@@ -29,11 +29,11 @@
         rows.replaceChildren(
           ...stats.agents.map((a) => {
             const tr = document.createElement('tr')
-            for (const v of [a.name, a.running ? 'đang chạy' : '', String(a.done)]) tr.append(Object.assign(document.createElement('td'), { textContent: v }))
+            for (const v of [a.name, a.running ? 'running' : '', String(a.done)]) tr.append(Object.assign(document.createElement('td'), { textContent: v }))
             return tr
           })
         )
-        if (!stats.agents.length) rows.innerHTML = '<tr><td class="muted">Chưa có agent.</td></tr>'
+        if (!stats.agents.length) rows.innerHTML = '<tr><td class="muted">No agents yet.</td></tr>'
       }
       await host.ready
       host.on('stats', load)

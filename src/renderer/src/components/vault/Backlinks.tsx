@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { VaultIndex } from '@shared/types'
+import { useT } from '../../i18n'
 import { snippetAt } from './snippet'
 
 function split(rel: string): { name: string; dir: string } {
@@ -38,6 +39,7 @@ export function Backlinks({
   changed: number
   onOpen: (rel: string, line?: number) => void
 }): React.JSX.Element {
+  const t = useT()
   const { incoming, outgoing } = useMemo(() => {
     const byFrom = new Map<string, number[]>()
     const out = new Map<string, { rel: string | null; name: string; line: number }>()
@@ -83,8 +85,8 @@ export function Backlinks({
 
   return (
     <>
-      <Heading count={incoming.length}>LIÊN KẾT NGƯỢC</Heading>
-      {incoming.length === 0 && <div className="px-3 py-1 text-[12px] text-dim">Chưa có</div>}
+      <Heading count={incoming.length}>{t('vault.backlinks')}</Heading>
+      {incoming.length === 0 && <div className="px-3 py-1 text-[12px] text-dim">{t('vault.none')}</div>}
       {incoming.map(({ from, lines }) => {
         const { name, dir } = split(from)
         const snippet = snippets[snippetKey(from, lines[0])]
@@ -93,20 +95,20 @@ export function Backlinks({
             key={from}
             type="button"
             onClick={() => onOpen(from, lines[0])}
-            data-tip={`${from} · dòng ${lines.join(', ')}`}
+            data-tip={t('vault.lineTip', { from, lines: lines.join(', ') })}
             className="block w-full px-3 py-[5px] text-left text-[12px] hover:bg-panel-2"
           >
             <span className="flex items-baseline gap-1.5">
               <span className="min-w-0 truncate text-fg">{name}</span>
               {lines.length > 1 && <span className="shrink-0 font-mono text-[11px] text-dim">({lines.length})</span>}
             </span>
-            <small className="block truncate text-[11px] text-dim">{snippet || (dir ? `${dir} · dòng ${lines[0]}` : `dòng ${lines[0]}`)}</small>
+            <small className="block truncate text-[11px] text-dim">{snippet || (dir ? t('vault.dirLine', { dir, line: String(lines[0]) }) : t('vault.line', { line: String(lines[0]) }))}</small>
           </button>
         )
       })}
 
-      <Heading count={outgoing.length}>LIÊN KẾT RA</Heading>
-      {outgoing.length === 0 && <div className="px-3 py-1 text-[12px] text-dim">Chưa có</div>}
+      <Heading count={outgoing.length}>{t('vault.outgoing')}</Heading>
+      {outgoing.length === 0 && <div className="px-3 py-1 text-[12px] text-dim">{t('vault.none')}</div>}
       {outgoing.map((o) =>
         o.rel ? (
           <button
@@ -119,9 +121,9 @@ export function Backlinks({
             {o.name}
           </button>
         ) : (
-          <div key={`ghost:${o.name.toLowerCase()}`} className="px-3 py-[5px] text-[12px] text-dim" data-tip="Chưa có note này">
+          <div key={`ghost:${o.name.toLowerCase()}`} className="px-3 py-[5px] text-[12px] text-dim" data-tip={t('vault.ghostTip')}>
             <div className="truncate">{o.name}</div>
-            <small className="block text-[11px]">chưa có note</small>
+            <small className="block text-[11px]">{t('vault.ghost')}</small>
           </div>
         )
       )}

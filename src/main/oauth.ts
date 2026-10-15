@@ -10,6 +10,7 @@ import {
 import type { OAuthClientInformationFull, OAuthMetadata } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { OAUTH_SECRET_PREFIX } from '@shared/connectors'
 import type { SecretStore } from './secrets'
+import { getLocale, t } from '@shared/i18n'
 
 /**
  * Đăng nhập OAuth cho connector HTTP (máy chủ MCP của nhà cung cấp: Notion, Linear, Sentry…), làm ngay trong app
@@ -57,7 +58,7 @@ export class OAuthService {
 
   /** Đăng nhập rồi cất token vào bí mật `name`. Ném lỗi tiếng Việt. */
   async login(name: string, opts: OAuthLogin): Promise<void> {
-    if (this.pending) throw new Error('Đang chờ một lần đăng nhập khác trong trình duyệt. Huỷ lần đó trước.')
+    if (this.pending) throw new Error(t('connectors.oauth.busy'))
     const serverUrl = new URL(opts.serverUrl)
     // 1. Máy chủ xác thực.
     let authServerUrl = new URL('/', serverUrl).href
@@ -85,7 +86,7 @@ export class OAuthService {
         code_challenge_methods_supported: ['S256']
       } as OAuthMetadata
     }
-    if (!metadata) throw new Error('Máy chủ này không công bố cách đăng nhập OAuth (không tìm thấy máy chủ xác thực). Dùng API key nếu dịch vụ có.')
+    if (!metadata) throw new Error(t('connectors.oauth.noMetadata'))
 
     const scope = (opts.scopes?.length ? opts.scopes : scopesSupported)?.join(' ') || undefined
     // 2. Client.
@@ -97,7 +98,7 @@ export class OAuthService {
         redirect_uris: [OAUTH_REDIRECT]
       } as OAuthClientInformationFull
     } else {
-      if (!metadata.registration_endpoint) throw new Error('Dịch vụ không cho tự đăng ký ứng dụng: cần Client ID của OAuth app bạn tạo ở trang quản trị của dịch vụ (hoặc dùng API key nếu có).')
+      if (!metadata.registration_endpoint) throw new Error(t('connectors.oauth.noRegistration'))
       try {
         client = await registerClient(authServerUrl, {
           metadata,
@@ -111,7 +112,7 @@ export class OAuthService {
           scope
         })
       } catch (e) {
-        throw new Error(`Đăng ký ứng dụng với dịch vụ thất bại: ${(e as Error).message}`)
+        throw new Error(t('connectors.oauth.registerFailed', { message: (e as Error).message }))
       }
     }
 
@@ -128,7 +129,7 @@ export class OAuthService {
     for (const [k, v] of Object.entries(opts.params ?? {})) authorizationUrl.searchParams.set(k, v)
     // Địa chỉ trang đăng nhập do máy chủ MCP (bên ngoài) khai báo: chỉ mở trang web. `file:`, `search-ms:`, `ms-…:` qua
     // shell.openExternal sẽ chạy chương trình / file trên máy người dùng.
-    if (!isWebUrl(authorizationUrl)) throw new Error(`Máy chủ trả về địa chỉ đăng nhập không phải trang web (${authorizationUrl.protocol}), app không mở.`)
+    if (!isWebUrl(authorizationUrl)) throw new Error(t('connectors.oauth.badAuthUrl', { protocol: authorizationUrl.protocol }))
     const code = await this.waitForCode(authorizationUrl.href, state)
 
     // 4. Đổi mã lấy token.
@@ -143,7 +144,7 @@ export class OAuthService {
         resource: resource ? new URL(resource) : undefined
       })
     } catch (e) {
-      throw new Error(`Đổi mã đăng nhập lấy token thất bại: ${(e as Error).message}`)
+      throw new Error(t('connectors.oauth.exchangeFailed', { message: (e as Error).message }))
     }
     const saved: OAuthState = {
       version: 1,
@@ -166,7 +167,7 @@ export class OAuthService {
   /** Đăng nhập lại với cấu hình đã lưu (token hết hạn / bị thu hồi). */
   async relogin(name: string): Promise<void> {
     const st = this.read(name)
-    if (!st) throw new Error(`Không đọc được thông tin đăng nhập ${name}.`)
+    if (!st) throw new Error(t('connectors.oauth.unreadable', { name }))
     await this.login(name, st.login)
   }
 
@@ -191,27 +192,27 @@ export class OAuthService {
 
   private async doAccessToken(name: string, label: string): Promise<string> {
     const st = this.read(name)
-    if (!st) throw new Error(`Connector "${label}" chưa đăng nhập (hoặc thông tin đăng nhập hỏng). Bấm "Đăng nhập lại" ở trang của nó.`)
+    if (!st) throw new Error(t('connectors.oauth.notSignedIn', { label }))
     const exp = st.tokens.expires_at
     if (!exp || exp - Date.now() > REFRESH_MARGIN) return st.tokens.access_token
-    if (!st.tokens.refresh_token) throw new Error(`Phiên đăng nhập của connector "${label}" đã hết hạn. Bấm "Đăng nhập lại" ở trang của nó.`)
+    if (!st.tokens.refresh_token) throw new Error(t('connectors.oauth.expired', { label }))
     try {
-      const t = await refreshAuthorization(st.authServerUrl, {
+      const tok = await refreshAuthorization(st.authServerUrl, {
         metadata: st.metadata,
         clientInformation: st.client,
         refreshToken: st.tokens.refresh_token,
         resource: st.resource ? new URL(st.resource) : undefined
       })
       st.tokens = {
-        access_token: t.access_token,
-        refresh_token: t.refresh_token ?? st.tokens.refresh_token,
-        token_type: t.token_type,
-        expires_at: t.expires_in ? Date.now() + t.expires_in * 1000 : undefined
+        access_token: tok.access_token,
+        refresh_token: tok.refresh_token ?? st.tokens.refresh_token,
+        token_type: tok.token_type,
+        expires_at: tok.expires_in ? Date.now() + tok.expires_in * 1000 : undefined
       }
       await this.secrets.setMany([{ name, value: JSON.stringify(st) }])
       return st.tokens.access_token
     } catch (e) {
-      throw new Error(`Không làm mới được đăng nhập của connector "${label}" (${(e as Error).message}). Bấm "Đăng nhập lại" ở trang của nó.`)
+      throw new Error(t('connectors.oauth.refreshFailed', { label, message: (e as Error).message }))
     }
   }
 
@@ -246,7 +247,7 @@ export class OAuthService {
         if (err) reject(err)
         else resolve(code!)
       }
-      this.pending = { cancel: () => finish(new Error('Đã huỷ đăng nhập.')) }
+      this.pending = { cancel: () => finish(new Error(t('connectors.oauth.cancelled'))) }
       server = createServer((req, res) => {
         const u = new URL(req.url ?? '/', OAUTH_REDIRECT)
         if (u.pathname !== '/oauth/callback') {
@@ -255,21 +256,21 @@ export class OAuthService {
         }
         // Sai state: không phải lượt đăng nhập này (trang / chương trình khác gọi vào cổng) → bỏ qua, chờ tiếp.
         if (u.searchParams.get('state') !== state) {
-          res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end(page('Yêu cầu không khớp lượt đăng nhập đang chờ.'))
+          res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end(page(t('connectors.oauth.page.stateMismatch')))
           return
         }
         const err = u.searchParams.get('error')
         const ok = !err && !!u.searchParams.get('code')
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-        res.end(page(ok ? 'Đã đăng nhập. Quay lại stag.ai — bạn có thể đóng tab này.' : `Đăng nhập không thành công${err ? `: ${err}` : ''}. Quay lại stag.ai để thử lại.`))
+        res.end(page(ok ? t('connectors.oauth.page.ok') : err ? t('connectors.oauth.page.failedWith', { error: err }) : t('connectors.oauth.page.failed')))
         if (ok) finish(null, u.searchParams.get('code')!)
-        else finish(new Error(err ? `Dịch vụ từ chối đăng nhập: ${u.searchParams.get('error_description') ?? err}` : 'Trang đăng nhập không trả về mã xác nhận.'))
+        else finish(new Error(err ? t('connectors.oauth.denied', { error: u.searchParams.get('error_description') ?? err }) : t('connectors.oauth.noCode')))
       })
       server.once('error', (e: NodeJS.ErrnoException) =>
-        finish(new Error(e.code === 'EADDRINUSE' ? `Cổng ${OAUTH_PORT} đang bị chương trình khác dùng, không nhận được kết quả đăng nhập.` : e.message))
+        finish(new Error(e.code === 'EADDRINUSE' ? t('connectors.oauth.portBusy', { port: String(OAUTH_PORT) }) : e.message))
       )
       server.listen(OAUTH_PORT, '127.0.0.1', () => {
-        timer = setTimeout(() => finish(new Error('Quá 5 phút chưa đăng nhập xong. Thử lại.')), LOGIN_TIMEOUT)
+        timer = setTimeout(() => finish(new Error(t('connectors.oauth.timeout'))), LOGIN_TIMEOUT)
         this.openBrowser(url).catch((e) => finish(e as Error))
       })
     })
@@ -283,4 +284,4 @@ export function isWebUrl(u: URL): boolean {
 }
 
 const page = (msg: string): string =>
-  `<!doctype html><meta charset="utf-8"><title>stag.ai</title><body style="font:15px system-ui;background:#111;color:#eee;display:grid;place-items:center;height:100vh;margin:0"><p>${msg.replace(/</g, '&lt;')}</p>`
+  `<!doctype html><html lang="${getLocale()}"><meta charset="utf-8"><title>stag.ai</title><body style="font:15px system-ui;background:#111;color:#eee;display:grid;place-items:center;height:100vh;margin:0"><p>${msg.replace(/</g, '&lt;')}</p>`

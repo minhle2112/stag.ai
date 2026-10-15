@@ -65,7 +65,7 @@ export function guardIpc(ipc: IpcMain, trusted: (e: AnyEvent) => boolean, exempt
     } catch {
       /* khung đã đóng */
     }
-    log(`[ipc] từ chối "${channel}" từ ${from}`)
+    log(`[ipc] rejected "${channel}" from ${from}`)
   }
   const wrapHandle = (channel: string, fn: Listener): Listener =>
     ((e: IpcMainInvokeEvent, ...args: unknown[]) => {

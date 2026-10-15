@@ -3,6 +3,7 @@ import { resolveHandoff } from '@shared/settings'
 import { DEFAULT_SETTINGS, type AppSettingsPatch, type HandoffSettings, type OverrideLevel, type Settings, type SettingsOverridesPatch } from '@shared/types'
 import { useAgents } from './agents'
 import { fetchThenListen } from './sync'
+import { getLocale, onLocaleChange, setLocale } from '@shared/i18n'
 
 interface SettingsState {
   value: Settings
@@ -27,6 +28,15 @@ export const useSettings = create<SettingsState>((set) => {
       set({ value: await window.stag.settings.setOverrides(level, id, patch) })
     }
   }
+})
+
+// Đổi ngôn ngữ trong Cài đặt → áp dụng ngay (component dùng useT() vẽ lại). Trước khi nhận cài đặt thật thì giữ
+// ngôn ngữ main.tsx đã đặt lúc mở trang.
+useSettings.subscribe((s) => {
+  if (s.loaded) setLocale(s.value.app.general.language)
+})
+onLocaleChange(() => {
+  document.documentElement.lang = getLocale()
 })
 
 /** Cài đặt bàn giao thực tế của một agent (app → workspace → agent). */

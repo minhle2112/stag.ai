@@ -1,4 +1,5 @@
 import { DEFAULT_SCOPE, type Agent, type AgentKind, type ScopeLockSettings, type Task, type Workspace } from '@shared/types'
+import { t } from '@shared/i18n'
 import { covers, entryHas, isUnlocked, lockHolder, parseScope, projectRel, scopeLocks, taskBase, unlocked, type ScopeEntry, type ScopeLock } from '@shared/scope'
 import type { Board, HookPayload } from './board'
 
@@ -223,13 +224,13 @@ export class ScopeGuard {
           `stag.ai scope lock: could not read the task board to check the scope lock (${(e as Error).message}), and stag.ai is set to block edits in another agent's scope, so this ${cmd ? 'command' : 'edit'} is refused for now. Do not change it in any other way and do not ask the user: retry in a moment, and meanwhile work on another part of your task. If it keeps failing, mention it in your final reply.`
         )
       if (kind === 'codex') return undefined
-      return reply('ask', `stag.ai: không đọc được bảng việc để kiểm khoá phạm vi (${(e as Error).message}). Cho ${agent.name} ${cmd ? 'chạy lệnh này' : 'sửa file này'}?`)
+      return reply('ask', `stag.ai: could not read the task board to check the scope lock (${(e as Error).message}). Let ${agent.name} ${cmd ? 'run this command' : 'edit this file'}?`)
     }
     if (cfg.mode !== 'block') hits = hits.filter((h) => !this.grants.get(agent.id)?.has(h.grant))
     if (cfg.mode === 'warn') hits = hits.filter((h) => !this.warned.get(agent.id)?.has(h.grant))
     if (!hits.length) return undefined
     const [first] = hits
-    const what = hits.length > 1 ? `${first.label} (+${hits.length - 1} chỗ khác)` : first.label
+    const what = hits.length > 1 ? `${first.label} (+${hits.length - 1} more)` : first.label
     const shortCmd = cmd && (cmd.length > 160 ? `${cmd.slice(0, 157)}…` : cmd)
     const conflict = (decision: ScopeConflict['decision']): void => {
       try {
@@ -262,16 +263,16 @@ export class ScopeGuard {
       // Người dùng từ chối thì không có PostToolUse: giữ có hạn để không phình mãi.
       while (pend.size > MAX_PENDING_ASKS) pend.delete(pend.keys().next().value as string)
       this.asked.set(agent.id, pend)
-      const action = cmd ? `Lệnh này có thể sửa ${what}` : `${what}`
+      const action = cmd ? `This command may modify ${what}` : `${what}`
       return reply(
         'ask',
-        `stag.ai: ${action} — thuộc phạm vi việc "${first.task.title}" của agent ${first.task.agentName} (đang mở, mục "${first.entry}"). Cho ${agent.name} ${cmd ? 'chạy' : 'sửa'}?`
+        `stag.ai: ${action} — it is in the scope of agent ${first.task.agentName}'s open task "${first.task.title}" (entry "${first.entry}"). Let ${agent.name} ${cmd ? 'run it' : 'edit it'}?`
       )
     }
     const allow = await this.board.askScope(
       ws,
       agent,
-      { file: what, command: shortCmd ?? undefined, holder: { agentName: first.task.agentName, title: first.task.title, entry: first.entry } },
+      { file: hits.length > 1 ? t('scope.ask.more', { label: first.label, count: hits.length - 1 }) : first.label, command: shortCmd ?? undefined, holder: { agentName: first.task.agentName, title: first.task.title, entry: first.entry } },
       SCOPE_ASK_MS
     )
     conflict(allow ? 'allowed' : 'denied')

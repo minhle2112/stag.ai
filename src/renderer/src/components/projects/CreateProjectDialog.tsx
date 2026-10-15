@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { PlainKey } from '@shared/i18n'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { autoFolder, copyTeam, folderClash, normFolder, projectNameProblem, projectNoteRel, projectOf, teamPreset, type TeamPreset } from '@shared/projects'
 import type { Agent, ProjectTeamMember, WorkspaceFolder } from '@shared/types'
@@ -7,17 +8,19 @@ import { useUi } from '../../store/ui'
 import { useWorkspaces } from '../../store/workspaces'
 import { Icon } from '../Icon'
 import { Button, Modal } from '../Modal'
+import { tx, useT } from '../../i18n'
 
 const NO_AGENTS: Agent[] = []
 
 const FIELD = 'w-full rounded-md border border-line-2 bg-bg px-2 py-1.5 outline-none focus:border-accent'
 
-const PRESETS: Array<{ id: TeamPreset; title: string; sub: string }> = [
-  { id: 'none', title: 'Để trống', sub: 'Tạo agent sau' },
-  { id: 'solo', title: 'Solo', sub: 'Dev' },
-  { id: 'duo', title: 'Đôi', sub: 'Dev + Tester' },
-  { id: 'team', title: 'Đội', sub: 'Lead + Dev + Tester' },
-  { id: 'copy', title: 'Chép đội', sub: 'từ project khác' }
+/** `sub`: khoá từ điển, hoặc tên vai trò (giữ nguyên ở mọi ngôn ngữ). */
+const PRESETS: Array<{ id: TeamPreset; title: PlainKey; sub: PlainKey | { roles: string } }> = [
+  { id: 'none', title: 'projects.preset.none', sub: 'projects.preset.noneSub' },
+  { id: 'solo', title: 'projects.preset.solo', sub: { roles: 'Dev' } },
+  { id: 'duo', title: 'projects.preset.duo', sub: { roles: 'Dev + Tester' } },
+  { id: 'team', title: 'projects.preset.team', sub: { roles: 'Lead + Dev + Tester' } },
+  { id: 'copy', title: 'projects.preset.copy', sub: 'projects.preset.copySub' }
 ]
 
 function errMsg(e: unknown): string {
@@ -32,6 +35,7 @@ export function CreateProjectDialog(): React.JSX.Element | null {
 }
 
 function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string }): React.JSX.Element | null {
+  const t = useT()
   const ws = useWorkspaces((s) => s.items.find((w) => w.id === wsId))
   const agents = useAgents((s) => s.byWs[wsId]?.agents) ?? NO_AGENTS
   const setNewProject = useUi((s) => s.setNewProject)
@@ -70,7 +74,7 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
 
   function changeName(v: string): void {
     setName(v)
-    setTeam((cur) => teamFor(preset, v).map((t, i) => (edited[i] && cur[i] ? { ...t, name: cur[i].name } : t)))
+    setTeam((cur) => teamFor(preset, v).map((m, i) => (edited[i] && cur[i] ? { ...m, name: cur[i].name } : m)))
   }
 
   function choosePreset(p: TeamPreset, from = copyFrom): void {
@@ -85,16 +89,18 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
 
   const nameError = name.trim() ? projectNameProblem(name, projects) : ''
   let folderError: string | null = null
-  if (!folder) folderError = mode === 'new' ? 'Tên thư mục không hợp lệ.' : picked === '__other' && other.trim() ? 'Đường dẫn không hợp lệ (tương đối trong workspace).' : 'Chọn một thư mục.'
+  if (!folder)
+    folderError =
+      mode === 'new' ? t('projects.folder.invalidName') : picked === '__other' && other.trim() ? t('projects.folder.invalidPath') : t('projects.folder.pick')
   else if (mode === 'new' && newFolder.trim() && (folders ?? []).some((f) => f.path.toLowerCase() === folder.toLowerCase()))
-    folderError = `Đã có thư mục ${folder}. Đặt tên khác, hoặc chọn "Dùng thư mục có sẵn".`
+    folderError = t('projects.folder.exists', { folder })
   else folderError = folderClash(projects, folder)
-  const teamErrors = team.map((t, i) => {
-    const n = t.name.trim()
-    if (!n) return 'Cần tên'
+  const teamErrors = team.map((m, i) => {
+    const n = m.name.trim()
+    if (!n) return t('projects.team.nameRequired')
     const p = agentNameProblem(n)
     if (p) return p
-    if (agents.some((a) => sameAgentName(a.name, n)) || team.some((o, j) => j < i && sameAgentName(o.name, n))) return 'Trùng tên agent khác trong workspace'
+    if (agents.some((a) => sameAgentName(a.name, n)) || team.some((o, j) => j < i && sameAgentName(o.name, n))) return t('projects.team.dup')
     return null
   })
   const ok = !nameError && name.trim() && !folderError && teamErrors.every((e) => !e) && !(preset === 'copy' && !projects.length)
@@ -126,25 +132,25 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
   }
 
   if (!ws) return null
-  const note = projectNoteRel(name.trim() || '<tên>')
+  const note = projectNoteRel(name.trim() || t('projects.create.notePlaceholder'))
 
   return (
     <Modal
       title={
         <span className="flex items-baseline gap-2">
-          Project mới <span className="text-[12px] font-normal text-dim">trong {ws.name}</span>
+          {t('projects.create.title')} <span className="text-[12px] font-normal text-dim">{t('projects.create.in', { name: ws.name })}</span>
         </span>
       }
       width="w-[600px]"
       onClose={busy ? undefined : () => setNewProject(null)}
       footer={
         <>
-          <span className="mr-auto text-[12px] text-dim">Agent đang có giữ nguyên ở chỗ cũ.</span>
+          <span className="mr-auto text-[12px] text-dim">{t('projects.create.keepAgents')}</span>
           <Button onClick={() => setNewProject(null)} disabled={busy}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button primary onClick={() => void submit()} disabled={busy || !ok}>
-            {busy ? 'Đang tạo…' : 'Tạo project'}
+            {busy ? t('projects.create.creating') : t('projects.create.submit')}
           </Button>
         </>
       }
@@ -155,17 +161,17 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
           void submit()
         }}
       >
-        <Label text="Tên">
-          <input autoFocus={!hintFolder} value={name} onChange={(e) => changeName(e.target.value)} placeholder="vd. web-shop" className={FIELD} />
+        <Label text={t('projects.create.name')}>
+          <input autoFocus={!hintFolder} value={name} onChange={(e) => changeName(e.target.value)} placeholder={t('projects.create.namePlaceholder')} className={FIELD} />
           {nameError && <div className="mt-1 text-[12px] text-danger">{nameError}</div>}
         </Label>
 
-        <Label text="Thư mục code">
+        <Label text={t('projects.create.folder')}>
           <div className="mb-2 inline-flex overflow-hidden rounded-md border border-line-2">
             {(
               [
-                ['new', 'plus', 'Tạo thư mục mới'],
-                ['existing', 'folder', 'Dùng thư mục có sẵn']
+                ['new', 'plus', t('projects.create.modeNew')],
+                ['existing', 'folder', t('projects.create.modeExisting')]
               ] as const
             ).map(([m, icon, label], i) => (
               <button
@@ -195,19 +201,19 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
               <div className="mt-1 text-[12px] text-muted">
                 {newFolder.trim() ? (
                   <>
-                    App tạo thư mục <code>{folder ?? newFolder.trim()}\</code> khi bấm "Tạo project".
+                    {tx('projects.create.willCreate', { folder: <code>{folder ?? newFolder.trim()}\</code> })}
                   </>
                 ) : (
                   <>
-                    Bỏ trống thì app tự tạo <code>{auto}\</code> theo tên project.
+                    {tx('projects.create.autoFolder', { folder: <code>{auto}\</code> })}
                   </>
                 )}
               </div>
             </>
           ) : (
             <div className="grid max-h-48 grid-cols-2 gap-1 overflow-y-auto">
-              {folders === null && <div className="text-[12px] text-dim">Đang đọc thư mục…</div>}
-              {folders?.length === 0 && <div className="col-span-2 text-[12px] text-dim">Workspace chưa có thư mục con nào. Chọn "Tạo thư mục mới".</div>}
+              {folders === null && <div className="text-[12px] text-dim">{t('projects.create.readingFolders')}</div>}
+              {folders?.length === 0 && <div className="col-span-2 text-[12px] text-dim">{t('projects.create.noSubfolders')}</div>}
               {folders?.map((f) => {
                 const clash = folderClash(projects, f.path)
                 const owner = projects.find((p) => p.folder.toLowerCase() === f.path.toLowerCase())
@@ -227,7 +233,7 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
                     <Icon name="folder" size="s" />
                     <span className="min-w-0 flex-1 truncate">{f.path}</span>
                     <span className={`shrink-0 font-sans text-[11px] ${!clash && f.pkg ? 'text-accent-text' : 'text-dim'}`}>
-                      {owner ? `thuộc ${owner.name}` : clash ? 'lồng với project khác' : f.pkg ? 'có package.json' : ''}
+                      {owner ? t('projects.create.ownedBy', { name: owner.name }) : clash ? t('projects.create.nested') : f.pkg ? t('projects.create.hasPkg') : ''}
                     </span>
                   </button>
                 )
@@ -239,28 +245,28 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
                   picked === '__other' ? 'border-accent text-fg' : 'border-line-2 text-muted hover:text-fg'
                 }`}
               >
-                <Icon name="folder" size="s" /> Thư mục khác trong workspace…
+                <Icon name="folder" size="s" /> {t('projects.create.otherFolder')}
               </button>
               {picked === '__other' && (
                 <input
                   autoFocus
                   value={other}
                   onChange={(e) => setOther(e.target.value)}
-                  placeholder="vd. services/api"
+                  placeholder={t('projects.create.otherPlaceholder')}
                   className={`${FIELD} col-span-2 font-mono text-[12px]`}
                 />
               )}
             </div>
           )}
           {folderError && (folder || (mode === 'new' && newFolder.trim()) || (picked === '__other' && other.trim())) && <div className="mt-1 text-[12px] text-danger">{folderError}</div>}
-          <div className="mt-1 text-[12px] text-muted">Agent của project mở phiên trong thư mục này; khoá phạm vi tính đường dẫn từ đây.</div>
+          <div className="mt-1 text-[12px] text-muted">{t('projects.create.folderNote')}</div>
         </Label>
 
-        <Label text="Mục tiêu (không bắt buộc)">
-          <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={2} placeholder="vd. Website bán hàng: giỏ hàng, thanh toán, trang sản phẩm" className={`${FIELD} resize-none`} />
+        <Label text={t('projects.create.goal')}>
+          <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={2} placeholder={t('projects.create.goalPlaceholder')} className={`${FIELD} resize-none`} />
         </Label>
 
-        <Label text="Đội agent">
+        <Label text={t('projects.create.team')}>
           <div className="grid grid-cols-5 gap-1.5">
             {PRESETS.map((p) => {
               const disabled = p.id === 'copy' && !projects.length
@@ -274,15 +280,15 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
                     disabled ? 'cursor-not-allowed opacity-50' : ''
                   }`}
                 >
-                  <div className="text-[12.5px] font-semibold">{p.title}</div>
-                  <div className="text-[11px] text-muted">{disabled ? 'chưa có project nào' : p.sub}</div>
+                  <div className="text-[12.5px] font-semibold">{t(p.title)}</div>
+                  <div className="text-[11px] text-muted">{disabled ? t('projects.create.noProjects') : typeof p.sub === 'string' ? t(p.sub) : p.sub.roles}</div>
                 </button>
               )
             })}
           </div>
           {preset === 'copy' && projects.length > 0 && (
             <div className="mt-2 flex items-center gap-2 text-[12px] text-muted">
-              Chép từ
+              {t('projects.create.copyFrom')}
               <select
                 value={copyFrom}
                 onChange={(e) => {
@@ -297,21 +303,21 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
                   </option>
                 ))}
               </select>
-              <span className="text-dim">(cùng vai trò, model, skill, connector)</span>
+              <span className="text-dim">{t('projects.create.copyNote')}</span>
             </div>
           )}
           <div className="mt-2 space-y-1.5">
             {!team.length && (
               <div className="rounded-md border border-dashed border-line-2 px-3 py-2 text-[12px] text-dim">
-                {preset === 'copy' ? 'Project nguồn chưa có agent nào để chép.' : 'Không tạo agent. Thêm sau bằng nút "+ Agent" trên thanh project.'}
+                {preset === 'copy' ? t('projects.create.sourceEmpty') : t('projects.create.noAgents')}
               </div>
             )}
-            {team.map((t, i) => (
+            {team.map((m, i) => (
               <div key={i} className="grid grid-cols-[72px_1fr_140px] items-start gap-2">
-                <span className="truncate pt-1.5 text-[12px] text-muted">{t.role || '—'}</span>
+                <span className="truncate pt-1.5 text-[12px] text-muted">{m.role || '—'}</span>
                 <div>
                   <input
-                    value={t.name}
+                    value={m.name}
                     onChange={(e) => {
                       const v = e.target.value
                       setEdited((x) => ({ ...x, [i]: true }))
@@ -321,11 +327,11 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
                   />
                   {teamErrors[i] && <div className="mt-0.5 text-[12px] text-danger">{teamErrors[i]}</div>}
                 </div>
-                {t.cloneOf ? (
-                  <span className="pt-1.5 text-[12px] text-dim">{t.kind === 'codex' ? 'Codex' : 'Claude Code'} · như bản gốc</span>
+                {m.cloneOf ? (
+                  <span className="pt-1.5 text-[12px] text-dim">{t('projects.create.asOriginal', { kind: m.kind === 'codex' ? 'Codex' : 'Claude Code' })}</span>
                 ) : (
                   <select
-                    value={t.kind}
+                    value={m.kind}
                     onChange={(e) => {
                       const kind = e.target.value as 'claude' | 'codex'
                       setTeam((cur) => cur.map((m, j) => (j === i ? { ...m, kind } : m)))
@@ -339,13 +345,13 @@ function Dialog({ wsId, folder: hintFolder }: { wsId: string; folder?: string })
               </div>
             ))}
           </div>
-          {team.length > 0 && <div className="mt-1.5 text-[12px] text-dim">Model theo cài đặt mặc định (đổi sau ở menu ⋯ của agent → Model & effort). Agent chưa mở phiên cho tới khi bạn bấm.</div>}
+          {team.length > 0 && <div className="mt-1.5 text-[12px] text-dim">{t('projects.create.modelNote')}</div>}
         </Label>
 
         <div className="flex gap-2 rounded-md border border-line bg-panel-2 px-3 py-2 text-[12px] text-muted">
           <Icon name="file" size="s" />
           <div>
-            Tạo note <code>{note}</code> trong vault (mục tiêu, thư mục, đội). Agent của project được báo tên project, thư mục và note này khi mở phiên.
+            {tx('projects.create.noteInfo', { note: <code>{note}</code> })}
           </div>
         </div>
         {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}

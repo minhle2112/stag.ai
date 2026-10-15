@@ -6,6 +6,7 @@ import { useAgents } from '../../store/agents'
 import { useInspect } from '../../store/inspect'
 import { Icon } from '../Icon'
 import { IconButton } from '../shell/IconButton'
+import { useT } from '../../i18n'
 
 /** Bình luận (kể cả chờ gửi) đang ở trang của tab này. */
 export function pagePins(pins: InspectPin[], tab: BrowserTab | undefined): InspectPin[] {
@@ -40,6 +41,7 @@ export function draftGroups(pins: InspectPin[]): Array<{ agentId: string; agentN
  * (trang thật là view gốc của main, nằm trên HTML, nên pane ẩn view đi khi ngăn phủ).
  */
 export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; tab: BrowserTab | undefined; overlay: boolean; onClose: () => void }): React.JSX.Element {
+  const t = useT()
   const snap = useInspect((s) => s.byWs[wsId])
   const act = useInspect((s) => s.act)
   const highlight = useInspect((s) => s.highlight)
@@ -59,13 +61,13 @@ export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; ta
     if (!highlight || highlight.wsId !== wsId) return
     if (closed.some((p) => p.id === highlight.id)) setShowClosed(true)
     setHl(highlight.id)
-    const t = setTimeout(() => setHl(null), 1000)
+    const timer = setTimeout(() => setHl(null), 1000)
     requestAnimationFrame(() => {
       const card = list.current?.querySelector<HTMLElement>(`[data-pin="${highlight.id}"]`)
       card?.scrollIntoView({ block: 'nearest' })
       card?.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true })
     })
-    return () => clearTimeout(t)
+    return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlight?.at])
 
@@ -90,14 +92,14 @@ export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; ta
       }}
     >
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line pr-2 pl-3.5 text-[13px] font-semibold">
-        Bình luận
+        {t('common.name.comments')}
         {open.length > 0 && <span className="font-medium text-dim">{open.length}</span>}
         <span className="flex-1" />
-        <IconButton icon="x" tip="Ẩn bình luận" size="s" onClick={onClose} />
+        <IconButton icon="x" tip={t('inspect.panel.hide')} size="s" onClick={onClose} />
       </div>
       <div ref={list} className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-2.5" onMouseLeave={() => peek(null)}>
-        {!groups.length && !open.length && !(showClosed && closed.length) && <div className="px-4 py-10 text-center text-[12.5px] text-dim">Chưa có bình luận.</div>}
-        {groups.length > 0 && <Section>Chờ gửi</Section>}
+        {!groups.length && !open.length && !(showClosed && closed.length) && <div className="px-4 py-10 text-center text-[12.5px] text-dim">{t('inspect.panel.empty')}</div>}
+        {groups.length > 0 && <Section>{t('inspect.panel.pending')}</Section>}
         {groups.map((g) => (
           <DraftGroup
             key={g.agentId}
@@ -115,7 +117,7 @@ export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; ta
             }}
           />
         ))}
-        {(open.length > 0 || (showClosed && closed.length > 0)) && <Section>Đã gửi</Section>}
+        {(open.length > 0 || (showClosed && closed.length > 0)) && <Section>{t('inspect.panel.sent')}</Section>}
         {[...open, ...(showClosed ? closed : [])].map((p) => (
           <Thread
             key={p.id}
@@ -138,7 +140,7 @@ export function InspectPanel({ wsId, tab, overlay, onClose }: { wsId: string; ta
       {closed.length > 0 && (
         <div className="shrink-0 border-t border-line px-3.5 py-2.5">
           <button type="button" className="text-[12px] text-muted hover:text-fg" onClick={() => setShowClosed((v) => !v)}>
-            {showClosed ? 'Ẩn' : 'Hiện'} {closed.length} bình luận đã đóng
+            {t(showClosed ? 'inspect.panel.hideClosed' : 'inspect.panel.showClosed', { count: closed.length })}
           </button>
         </div>
       )}
@@ -168,6 +170,7 @@ function DraftGroup({
   onPeek: (id: number | null) => void
   onShow: (id: number) => void
 }): React.JSX.Element {
+  const t = useT()
   const act = useInspect((s) => s.act)
   const exists = useAgents((s) => !!s.byWs[wsId]?.agents.some((a) => a.id === agentId))
   const [busy, setBusy] = useState(false)
@@ -188,16 +191,16 @@ function DraftGroup({
       <div className="flex items-center gap-[7px]">
         <Avatar name={agentName} />
         <b className="min-w-0 truncate text-[12.5px] font-semibold">{agentName}</b>
-        <span className="shrink-0 text-[12px] text-dim">{pins.length} bình luận</span>
+        <span className="shrink-0 text-[12px] text-dim">{t('inspect.panel.count', { count: pins.length })}</span>
         <span className="flex-1" />
         <button
           type="button"
           disabled={busy || !exists}
-          data-tip={exists ? `Gửi ${pins.length} bình luận cho ${agentName} trong một tin` : `${agentName} không còn trong workspace`}
+          data-tip={exists ? t('inspect.draft.sendTip', { count: pins.length, name: agentName }) : t('inspect.draft.gone', { name: agentName })}
           onClick={() => void send()}
           className="h-[26px] shrink-0 rounded-md bg-accent px-3 text-[12px] font-semibold text-accent-on hover:brightness-110 disabled:opacity-40"
         >
-          Gửi
+          {t('common.send')}
         </button>
       </div>
       {pins.map((p) => {
@@ -215,7 +218,7 @@ function DraftGroup({
           >
             <span className="mt-px grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border-[1.5px] border-dashed border-muted text-[10px] font-bold text-muted">{p.id}</span>
             <div className="min-w-0 flex-1">
-              <div className={`truncate text-[12px] ${gone ? 'text-dim line-through' : 'text-muted'}`} data-tip={gone ? 'Phần tử này không còn trên trang' : undefined}>
+              <div className={`truncate text-[12px] ${gone ? 'text-dim line-through' : 'text-muted'}`} data-tip={gone ? t('inspect.panel.elementGone') : undefined}>
                 <b className="mr-[5px] font-mono text-[11.5px] font-medium text-dim">{l.t}</b>
                 {l.txt}
               </div>
@@ -223,8 +226,8 @@ function DraftGroup({
             </div>
             <button
               type="button"
-              data-tip="Xoá bình luận này"
-              aria-label={`Xoá bình luận #${p.id}`}
+              data-tip={t('inspect.draft.removeTip')}
+              aria-label={t('inspect.draft.removeAria', { id: String(p.id) })}
               onClick={() => void act(wsId, { type: 'remove', id: p.id })}
               className="grid h-6 w-6 shrink-0 place-items-center rounded-[5px] text-muted hover:bg-panel-3 hover:text-fg"
             >
@@ -239,13 +242,14 @@ function DraftGroup({
 }
 
 function Avatar({ name, me }: { name: string; me?: boolean }): React.JSX.Element {
+  const t = useT()
   return (
     <span
       aria-hidden
       className="mt-px grid h-4 w-4 shrink-0 place-items-center rounded-full text-[8px] font-bold"
       style={me ? { background: '#5d646d', color: '#fff' } : { background: agentColor(name), color: '#0b0d10' }}
     >
-      {me ? 'B' : initials(name)}
+      {me ? t('inspect.thread.youInitial') : initials(name)}
     </span>
   )
 }
@@ -265,6 +269,7 @@ function Thread({
   onPeek: (id: number | null) => void
   onShow: () => void
 }): React.JSX.Element {
+  const t = useT()
   const act = useInspect((s) => s.act)
   const key = `${wsId}:${p.id}`
   const reply = useInspect((s) => s.replies[key] ?? '')
@@ -275,9 +280,9 @@ function Thread({
   const closed = p.state === 'closed'
 
   const send = (): void => {
-    const t = reply.trim()
-    if (!t) return
-    void act(wsId, { type: 'reply', id: p.id, text: t })
+    const text = reply.trim()
+    if (!text) return
+    void act(wsId, { type: 'reply', id: p.id, text })
     setReply(key, '')
   }
 
@@ -294,14 +299,14 @@ function Thread({
     >
       <div className="flex items-center gap-[7px]">
         <span className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[10px] font-bold ${dotClass(p)}`}>{p.id}</span>
-        <span className={`min-w-0 flex-1 truncate text-[12px] ${gone ? 'text-dim line-through' : 'text-muted'}`} data-tip={gone ? 'Phần tử này không còn trên trang' : undefined}>
+        <span className={`min-w-0 flex-1 truncate text-[12px] ${gone ? 'text-dim line-through' : 'text-muted'}`} data-tip={gone ? t('inspect.panel.elementGone') : undefined}>
           <b className="mr-[5px] font-mono text-[11.5px] font-medium text-dim">{l.t}</b>
           {l.txt}
         </span>
         <button
           type="button"
-          data-tip={closed ? 'Mở lại' : 'Xong, đóng bình luận'}
-          aria-label={closed ? 'Mở lại' : 'Đóng bình luận'}
+          data-tip={closed ? t('inspect.thread.reopen') : t('inspect.thread.closeTip')}
+          aria-label={closed ? t('inspect.thread.reopen') : t('inspect.thread.closeAria')}
           onClick={() => void act(wsId, { type: closed ? 'reopen' : 'close', id: p.id })}
           className="grid h-6 w-6 shrink-0 place-items-center rounded-[5px] text-muted hover:bg-panel-3 hover:text-fg"
         >
@@ -313,13 +318,13 @@ function Thread({
           <Avatar name={p.agentName} me={m.by === 'user'} />
           <div className="min-w-0 flex-1 text-[13px] leading-[1.45]">
             <b className="text-[12px] font-semibold" style={m.by === 'agent' ? { color: agentColor(p.agentName) } : undefined}>
-              {m.by === 'user' ? 'Bạn' : p.agentName}
+              {m.by === 'user' ? t('inspect.thread.you') : p.agentName}
             </b>
             <div className="whitespace-pre-wrap text-fg [overflow-wrap:anywhere]">{m.text}</div>
           </div>
         </div>
       ))}
-      {p.state === 'queued' && <div className="mt-2 text-[12px] text-muted">{running ? `Chờ ${p.agentName} xong việc đang làm` : `Chờ phiên của ${p.agentName} mở`}</div>}
+      {p.state === 'queued' && <div className="mt-2 text-[12px] text-muted">{running ? t('inspect.thread.waitBusy', { name: p.agentName }) : t('inspect.thread.waitSession', { name: p.agentName })}</div>}
       {p.state === 'working' && (
         <div className="mt-2 flex items-center gap-1.5 text-[12px] text-muted">
           <span className="flex gap-[3px]">
@@ -327,7 +332,7 @@ function Thread({
               <i key={d} className="h-1 w-1 animate-pulse rounded-full bg-muted" style={{ animationDelay: `${d}ms` }} />
             ))}
           </span>
-          {p.agentName} đang trả lời
+          {t('inspect.thread.replying', { name: p.agentName })}
         </div>
       )}
       {(p.state === 'new' || p.state === 'read') && (
@@ -342,7 +347,7 @@ function Thread({
               ;(e.target as HTMLInputElement).blur()
             }
           }}
-          placeholder="Trả lời…"
+          placeholder={t('inspect.thread.replyPlaceholder')}
           className="mt-[9px] h-7 w-full rounded-md border border-line-2 bg-bg px-[9px] text-[12.5px] text-fg outline-none placeholder:text-dim focus:border-line-3"
         />
       )}

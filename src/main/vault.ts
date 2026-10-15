@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { NoteWriteResult, VaultCandidate, VaultNode } from '@shared/types'
+import { t } from '@shared/i18n'
 import { exists, isDir, readText } from './fsutil'
 import { noteWriter } from './workLog'
 
@@ -54,7 +55,7 @@ export async function detectVaults(projectDir: string): Promise<VaultCandidate[]
  */
 export async function inspectVaultDir(dir: string, projectDir: string): Promise<VaultCandidate> {
   const path = resolve(dir)
-  if (!(await isDir(path))) throw new Error(`Không tìm thấy thư mục: ${path}`)
+  if (!(await isDir(path))) throw new Error(t('vault.err.noDir', { path }))
   const rel = relative(resolve(projectDir), path)
   const outside = rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)
   const entries = await fs.readdir(path)
@@ -91,7 +92,7 @@ export async function vaultTree(vaultPath: string): Promise<VaultNode[]> {
 function notePath(vaultPath: string, rel: string): string {
   const root = resolve(vaultPath)
   const full = resolve(root, rel)
-  if (!full.startsWith(root + sep)) throw new Error('Đường dẫn nằm ngoài vault')
+  if (!full.startsWith(root + sep)) throw new Error(t('vault.err.outside'))
   return full
 }
 
@@ -120,7 +121,7 @@ export async function readNote(vaultPath: string, rel: string): Promise<string> 
  */
 export async function writeNote(vaultPath: string, rel: string, text: string, base: string | null): Promise<NoteWriteResult> {
   const full = notePath(vaultPath, rel)
-  if (!rel.toLowerCase().endsWith('.md')) throw new Error('Chỉ sửa được note .md')
+  if (!rel.toLowerCase().endsWith('.md')) throw new Error(t('vault.err.onlyMd'))
   // Qua chuỗi ghi chung: không chen giữa một lần đọc-sửa-ghi của agent / nhật ký việc.
   let conflict: { disk: string | null } | null = null
   await noteWriter.update(full, (disk) => {
@@ -138,7 +139,7 @@ export async function writeNote(vaultPath: string, rel: string, text: string, ba
 /** Ghi đè / tạo note, tạo luôn thư mục cha (plugin ghi vault qua ctx.vault.write). Chặn đường dẫn ra ngoài vault. */
 export async function putNote(vaultPath: string, rel: string, text: string): Promise<void> {
   const full = notePath(vaultPath, rel)
-  if (!rel.toLowerCase().endsWith('.md')) throw new Error('Chỉ ghi được note .md')
+  if (!rel.toLowerCase().endsWith('.md')) throw new Error('Only .md notes can be written')
   await noteWriter.update(full, () => text)
 }
 
@@ -148,15 +149,15 @@ export async function putNote(vaultPath: string, rel: string, text: string): Pro
  */
 export async function createNote(vaultPath: string, folder: string, name: string): Promise<string> {
   const clean = name.trim().replace(/\.md$/i, '').trim()
-  if (!clean) throw new Error('Chưa nhập tên note')
-  if (/[\\/:*?"<>|[\]#^]/.test(clean) || /^\.|\.$/.test(clean)) throw new Error('Tên note không được có \\ / : * ? " < > | [ ] # ^ và không bắt đầu / kết thúc bằng dấu chấm')
+  if (!clean) throw new Error(t('vault.err.noName'))
+  if (/[\\/:*?"<>|[\]#^]/.test(clean) || /^\.|\.$/.test(clean)) throw new Error(t('vault.err.badName'))
   const rel = folder ? `${folder.replace(/\/+$/, '')}/${clean}.md` : `${clean}.md`
   const full = notePath(vaultPath, rel)
   await fs.mkdir(resolve(full, '..'), { recursive: true })
   try {
     await fs.writeFile(full, `# ${clean}\n\n`, { encoding: 'utf8', flag: 'wx' })
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`Đã có note "${rel}"`)
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(t('vault.err.exists', { rel }))
     throw e
   }
   userWrote(vaultPath, rel)

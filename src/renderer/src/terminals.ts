@@ -1,8 +1,10 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { composerFor } from './store/chat'
+import { useWindowPicker } from './store/computer'
 import { TERMINAL_PALETTES, type Theme } from '@shared/theme'
 import type { AgentKind } from '@shared/types'
+import { t } from '@shared/i18n'
 import { isSoftNewlineKey, SOFT_NEWLINE, wantsSoftNewline } from './terminalKeys'
 
 /**
@@ -74,7 +76,7 @@ export function startTerminalBus(): void {
       e.ptyId = null
       e.input?.dispose()
       e.input = null
-      e.term.write(`\r\n\x1b[90m[phiên đã đóng, mã ${exitCode}]\x1b[0m\r\n`)
+      e.term.write(`\r\n\x1b[90m[${t('agents.term.closed', { code: String(exitCode) })}]\x1b[0m\r\n`)
     }
     exitListeners.forEach((fn) => fn(agentId, ptyId))
   })
@@ -162,7 +164,7 @@ function entry(agentId: string): Entry {
     const fit = new FitAddon()
     term.loadAddon(fit)
     const created: Entry = { term, fit, el, opened: false, ptyId: null, input: null, sent: null, resizeTimer: null, softNewline: false }
-    term.attachCustomKeyEventHandler((ev) => clipboardKey(term, ev) && newlineKey(created, ev))
+    term.attachCustomKeyEventHandler((ev) => clipboardKey(term, ev) && newlineKey(created, ev) && windowKey(created, agentId, ev))
     entries.set(agentId, created)
     e = created
   }
@@ -205,6 +207,17 @@ function newlineKey(e: Entry, ev: KeyboardEvent): boolean {
   // Như clipboardKey: chặn cả keypress / keyup, chỉ gửi ở keydown.
   ev.preventDefault()
   if (ev.type === 'keydown' && e.ptyId) window.stag.pty.write(e.ptyId, SOFT_NEWLINE)
+  return false
+}
+
+/**
+ * Ctrl+Shift+2 trong ô Claude / Codex: mở bảng chọn cửa sổ Windows (computer use). `@` trong CLI là gợi ý file của
+ * chính CLI, nên stag.ai dùng phím riêng. Ô Terminal thường giữ nguyên. Trả false = xterm bỏ qua phím này.
+ */
+function windowKey(e: Entry, agentId: string, ev: KeyboardEvent): boolean {
+  if (!e.softNewline || !ev.ctrlKey || !ev.shiftKey || ev.altKey || ev.metaKey || ev.code !== 'Digit2') return true
+  ev.preventDefault()
+  if (ev.type === 'keydown') useWindowPicker.getState().open(agentId)
   return false
 }
 
@@ -277,7 +290,7 @@ export function bindPty(agentId: string, ptyId: string, kind: AgentKind): boolea
   if (code !== undefined) {
     exitedEarly.delete(ptyId)
     e.ptyId = null
-    e.term.write(`\r\n\x1b[90m[phiên đã đóng, mã ${code}]\x1b[0m\r\n`)
+    e.term.write(`\r\n\x1b[90m[${t('agents.term.closed', { code: String(code) })}]\x1b[0m\r\n`)
     exitListeners.forEach((fn) => fn(agentId, ptyId))
     return false
   }

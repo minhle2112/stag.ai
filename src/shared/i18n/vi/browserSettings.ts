@@ -1,0 +1,50 @@
+// Chuỗi giao diện tiếng Việt (nguồn), namespace `browserSettings` (Cài đặt → Trình duyệt). Tham số dạng {tên}.
+export default {
+  title: 'Trình duyệt',
+  desc: 'Trình duyệt trong app (nút Browser trên thanh trên) và việc agent dùng nó. Thay đổi được lưu ngay. Cấp workspace / agent chỉ đổi việc bật / tắt tool trình duyệt của agent.',
+  on: 'bật',
+  off: 'tắt',
+  remove: 'Bỏ',
+
+  browsing: 'Duyệt web',
+  home: 'Trang tab mới',
+  homeDesc: 'Trang mở khi bấm "+" trong trình duyệt. Bỏ trống = trang trống.',
+  homeBad: 'Cần một địa chỉ web, vd. localhost:5173 hoặc github.com.',
+  homePlaceholder: '(trang trống)',
+  search: 'Máy tìm kiếm',
+  searchDesc: 'Chữ gõ vào thanh địa chỉ không phải địa chỉ web thì tìm bằng máy này.',
+
+  agentGroup: 'Agent dùng trình duyệt',
+  agentTools: 'Cho agent dùng trình duyệt',
+  agentToolsDesc:
+    'Tool browser_* (mở trang, đọc trang, bấm, gõ, chụp màn hình, console). Tắt thì phiên mở sau không thấy các tool này; phiên đang chạy gọi tool sẽ bị từ chối ngay.',
+  agentToolsAll: 'Cho mọi agent dùng trình duyệt',
+  agentToolsFor: 'Trình duyệt cho {name}',
+
+  externalGroup: 'Agent mở trang ngoài localhost',
+  externalLabel: 'Khi agent mở trang ngoài',
+  'external.ask': 'Hỏi bạn',
+  'external.askDesc': 'Hiện hộp thoại khi agent mở một trang ngoài localhost lần đầu; cho phép thì dùng được tới khi tắt app.',
+  'external.allow': 'Luôn cho',
+  'external.allowDesc': 'Agent mở mọi trang http(s) mà không hỏi.',
+  'external.deny': 'Luôn chặn',
+  'external.denyDesc': 'Agent chỉ mở được localhost và các trang luôn cho phép bên dưới, không hỏi bạn.',
+  allowed: 'Trang luôn cho phép',
+  allowedDesc: 'Agent mở các origin này mà không hỏi, kể cả sau khi mở lại app. Hộp thoại "Agent muốn mở trang ngoài" có nút "Luôn cho trang này".',
+  allowedMoot: 'Đang "Luôn cho" nên danh sách này chưa cần; nó có tác dụng khi bạn chuyển về "Hỏi bạn" hoặc "Luôn chặn".',
+  allowedAria: 'Origin luôn cho phép',
+  originBad: 'Không phải địa chỉ web http(s).',
+  originDup: '{origin} đã có trong danh sách.',
+
+  cookies: 'Cookie & dữ liệu trang',
+  keepCookies: 'Giữ cookie sau khi tắt app',
+  keepCookiesDesc: 'Giữ đăng nhập của các trang (mỗi workspace riêng). Áp dụng cho tab mở sau khi đổi; tab đang mở giữ như cũ.',
+  clear: 'Xoá cookie và dữ liệu trang',
+  clearDesc: 'Đăng xuất khỏi mọi trang và xoá dữ liệu trang lưu (localStorage, cache…) của trình duyệt trong app.',
+  cleared: 'Đã xoá. Trang đang mở có thể cần tải lại.',
+  clearFor: 'Xoá dữ liệu của',
+  allWorkspaces: 'Mọi workspace',
+  workspaceOption: 'Workspace: {name}',
+  clearing: 'Đang xoá…',
+  clickAgain: 'Bấm lần nữa để xoá'
+} as const

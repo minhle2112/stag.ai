@@ -1,6 +1,7 @@
 // Project trong workspace (mỗi project một đội agent). Dùng chung main (quyết định cuối) và renderer (báo lỗi khi gõ).
 // "Chung" = thư mục gốc của workspace, chỗ của agent không thuộc project nào (Agent.projectId vắng).
 
+import { LOCALES, t, translate } from './i18n'
 import type { Agent, Project, ProjectTeamMember, Workspace } from './types'
 
 /** Số màu nhận diện project (CSS `--p1` … `--p4` trong styles.css), xoay vòng. */
@@ -20,21 +21,27 @@ export function projectSlug(name: string): string {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/g, 'd')
+    .replace(/đ/g, 'd') // i18n-ignore: bỏ dấu chữ đ khi đặt tên thư mục
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
 }
 
-/** Lý do tên project không dùng được (tên cũng là tên thư mục note trong vault), null = được. */
-export function projectNameProblem(name: string, projects: readonly Project[], exceptId?: string): string | null {
+/**
+ * Lý do tên project không dùng được (tên cũng là tên thư mục note trong vault), null = được. Giao diện: theo ngôn ngữ
+ * đang chọn; `forAgent` (main: tool project_create / project_update của agent) → tiếng Anh.
+ */
+export function projectNameProblem(name: string, projects: readonly Project[], exceptId?: string, forAgent = false): string | null {
   const n = name.trim()
-  if (!n) return 'Project cần có tên'
-  if (INVALID_CHARS.test(n)) return 'Tên không được chứa các ký tự < > : " / \\ | ? *'
-  if (n.endsWith('.')) return 'Tên không được kết thúc bằng dấu chấm'
-  if (RESERVED.test(n)) return `"${n}" là tên dành riêng của Windows`
-  if (n.length > NAME_MAX) return `Tên dài quá ${NAME_MAX} ký tự`
-  if (n.toLowerCase() === 'chung') return '"Chung" là tên của thư mục gốc, chọn tên khác'
-  if (projects.some((p) => p.id !== exceptId && p.name.toLowerCase() === n.toLowerCase())) return 'Đã có project tên này'
+  if (!n) return forAgent ? 'The project needs a name' : t('projects.name.required')
+  if (INVALID_CHARS.test(n)) return forAgent ? 'The name cannot contain < > : " / \\ | ? *' : t('projects.name.invalidChars')
+  if (n.endsWith('.')) return forAgent ? 'The name cannot end with a dot' : t('projects.name.trailingDot')
+  if (RESERVED.test(n)) return forAgent ? `"${n}" is a reserved Windows name` : t('projects.name.reserved', { name: n })
+  if (n.length > NAME_MAX) return forAgent ? `The name is longer than ${NAME_MAX} characters` : t('projects.name.tooLong', { max: NAME_MAX })
+  // Tên thư mục gốc ở mọi ngôn ngữ giao diện ("Chung" / "Shared"): project trùng tên sẽ trông như tab gốc.
+  if (LOCALES.some((l) => translate(l, 'common.name.rootProject').toLowerCase() === n.toLowerCase()))
+    return forAgent ? `"${n}" is the name of the workspace root; pick another name` : t('projects.name.chung', { name: n })
+  if (projects.some((p) => p.id !== exceptId && p.name.toLowerCase() === n.toLowerCase()))
+    return forAgent ? 'A project with this name already exists' : t('projects.name.taken')
   return null
 }
 
@@ -55,22 +62,26 @@ export function normFolder(input: string): string | null {
 
 const lower = (s: string): string => s.toLowerCase()
 
-/** Hai project không được trùng hay lồng thư mục. Trả lời lỗi (tiếng Việt) hoặc null. `folder` đã chuẩn hoá. */
-export function folderClash(projects: readonly Project[], folder: string, exceptId?: string): string | null {
+/**
+ * Hai project không được trùng hay lồng thư mục. Trả lời lỗi hoặc null. `folder` đã chuẩn hoá. Giao diện: theo ngôn ngữ
+ * đang chọn; `forAgent` → tiếng Anh.
+ */
+export function folderClash(projects: readonly Project[], folder: string, exceptId?: string, forAgent = false): string | null {
   const f = lower(folder)
   for (const p of projects) {
     if (p.id === exceptId) continue
     const o = lower(p.folder)
-    if (o === f) return `Đã là thư mục của project "${p.name}".`
-    if (f.startsWith(`${o}/`)) return `Nằm bên trong thư mục của "${p.name}" (${p.folder}). Hai project không được lồng nhau.`
-    if (o.startsWith(`${f}/`)) return `Chứa thư mục của "${p.name}" (${p.folder}). Hai project không được lồng nhau.`
+    const x = { name: p.name, folder: p.folder }
+    if (o === f) return forAgent ? `It is already the folder of project "${p.name}".` : t('projects.folder.same', x)
+    if (f.startsWith(`${o}/`)) return forAgent ? `It is inside the folder of "${p.name}" (${p.folder}). Projects cannot be nested.` : t('projects.folder.inside', x)
+    if (o.startsWith(`${f}/`)) return forAgent ? `It contains the folder of "${p.name}" (${p.folder}). Projects cannot be nested.` : t('projects.folder.contains', x)
   }
   return null
 }
 
 /** Tên thư mục tự đặt theo tên project: slug, trùng thư mục có sẵn / của project khác thì thêm -2, -3… */
 export function autoFolder(name: string, taken: (folder: string) => boolean): string {
-  const base = projectSlug(name) || 'project-moi'
+  const base = projectSlug(name) || 'new-project'
   let x = base
   for (let i = 2; taken(x); i++) x = `${base}-${i}`
   return x

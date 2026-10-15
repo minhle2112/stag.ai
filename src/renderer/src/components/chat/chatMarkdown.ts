@@ -8,6 +8,7 @@ import MarkdownIt from 'markdown-it'
 import type { StateCore } from 'markdown-it'
 import { ICONS } from '../icons'
 import { escapeHtml, highlightLines, splitLines } from '../artifacts/code'
+import { t as tr } from '@shared/i18n'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: false })
 // Không tự biến "stag.ai" / "index.ts" thành link: chỉ link có http(s):// hoặc email.
@@ -50,7 +51,7 @@ export function codeBlockHtml(code: string, info: string): string {
     `<div class="cc-code my-2 overflow-hidden rounded-md border border-line bg-bg0">` +
     `<div class="flex h-6 items-center gap-2 border-b border-line pr-1 pl-2.5 text-[11px] text-dim">` +
     `<span class="min-w-0 flex-1 truncate font-mono">${escapeHtml(lang)}</span>` +
-    `<button type="button" data-copy class="inline-flex h-[18px] items-center gap-1 rounded px-1.5 text-[11px] text-muted hover:bg-panel-3 hover:text-fg">${COPY_SVG}<span data-copy-label>Sao chép</span></button>` +
+    `<button type="button" data-copy class="inline-flex h-[18px] items-center gap-1 rounded px-1.5 text-[11px] text-muted hover:bg-panel-3 hover:text-fg">${COPY_SVG}<span data-copy-label>${escapeHtml(tr('chat.copy'))}</span></button>` +
     `</div>` +
     `<pre class="m-0! overflow-x-auto rounded-none! border-0! bg-transparent! px-2.5! py-2! font-mono text-[12px] leading-[1.5]"><code class="text-[12px]!">${rows.join('\n')}</code></pre>` +
     `</div>`
@@ -76,7 +77,7 @@ md.renderer.rules.link_open = (tokens, idx, opts, _env, self) => {
 }
 
 // Ảnh markdown: không tải gì, chỉ hiện chữ thay thế.
-md.renderer.rules.image = (tokens, idx) => `<span class="md-embed md-file">${escapeHtml(tokens[idx].content || 'ảnh')}</span>`
+md.renderer.rules.image = (tokens, idx) => `<span class="md-embed md-file">${escapeHtml(tokens[idx].content || tr('chat.image.alt'))}</span>`
 
 // Bảng rộng cuộn ngang trong khung riêng (ô chat có thể chỉ ~300px).
 md.renderer.rules.table_open = () => '<div class="my-2 overflow-x-auto"><table>\n'

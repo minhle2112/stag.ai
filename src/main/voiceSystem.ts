@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { BrowserWindow, clipboard, ClipboardItem, globalShortcut, screen } from 'electron'
+import { t as tr } from '@shared/i18n'
 import { VOICE_GLOBAL_HOTKEYS } from '@shared/voice'
 import type { VoiceSettings } from '@shared/types'
 
@@ -55,7 +56,7 @@ export class KeySender {
     this.proc = p
     let buf = ''
     this.ready = new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('Không khởi động được bộ nhấn phím (PowerShell).')), 15_000)
+      const t = setTimeout(() => reject(new Error(tr('voice.keys.startFailed'))), 15_000)
       p.stdout.on('data', (d: Buffer) => {
         buf += d.toString()
         let i: number
@@ -74,7 +75,7 @@ export class KeySender {
           this.proc = null
           this.ready = null
         }
-        reject(new Error('Bộ nhấn phím đã thoát.'))
+        reject(new Error(tr('voice.keys.exited')))
         for (const w of this.waiters.splice(0)) w()
       })
       p.on('error', (e) => reject(e))
@@ -88,9 +89,9 @@ export class KeySender {
     const run = async (): Promise<void> => {
       await this.warm()
       const p = this.proc
-      if (!p) throw new Error('Bộ nhấn phím không chạy.')
+      if (!p) throw new Error(tr('voice.keys.notRunning'))
       await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('Bộ nhấn phím không trả lời.')), 5000)
+        const t = setTimeout(() => reject(new Error(tr('voice.keys.noReply'))), 5000)
         this.waiters.push(() => {
           clearTimeout(t)
           resolve()
@@ -188,9 +189,10 @@ function set(s){
   var dot=document.getElementById('dot'),msg=document.getElementById('msg'),lv=document.getElementById('lv'),t=document.getElementById('t'),hint=document.getElementById('hint');
   var listening=s.phase==='listening'||s.phase==='opening';
   dot.className=s.phase==='error'?'err':listening?'':'busy';
-  msg.textContent=s.phase==='error'?(s.error||'Lỗi'):s.phase==='opening'?'Đang mở micro…':listening?'Đang nghe…':s.phase==='fixing'?'Đang sửa bằng AI…':'Đang nhận dạng…';
+  var l=s.l||{};
+  msg.textContent=s.phase==='error'?(s.error||l.error):s.phase==='opening'?l.opening:listening?l.listening:s.phase==='fixing'?l.fixing:l.processing;
   lv.style.display=listening?'block':'none';lv.firstChild.style.width=Math.round((s.level||0)*100)+'%';
-  hint.textContent=listening?('bấm '+(s.hotkey||'phím tắt')+' để dừng · Esc huỷ'):'';
+  hint.textContent=listening?l.hint:'';
   var has=(s.text||s.partial)&&s.phase!=='error';t.style.display=has?'block':'none';
   t.textContent=s.text||'';if(s.partial){var sp=document.createElement('span');sp.textContent=(s.text?' ':'')+s.partial;t.appendChild(sp)}
 }
@@ -235,7 +237,16 @@ export class VoiceOverlay {
     await this.ensure()
     const win = this.win
     if (!win || win.isDestroyed()) return
-    await win.webContents.executeJavaScript(`set(${JSON.stringify(s)})`).catch(() => {})
+    // Chữ của ô nổi theo ngôn ngữ giao diện, tính lúc gửi.
+    const l = {
+      error: tr('common.error'),
+      opening: tr('voice.status.opening'),
+      listening: tr('voice.status.listening'),
+      fixing: tr('voice.status.fixing'),
+      processing: tr('voice.status.processing'),
+      hint: tr('voice.overlay.hint', { key: s.hotkey || tr('voice.overlay.hotkey') })
+    }
+    await win.webContents.executeJavaScript(`set(${JSON.stringify({ ...s, l })})`).catch(() => {})
     if (!win.isVisible()) {
       const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
       win.setBounds({ x: Math.round(area.x + (area.width - 520) / 2), y: area.y + area.height - 130, width: 520, height: 120 })
@@ -282,14 +293,14 @@ export class GlobalVoice {
     if (this.registered) this.sc.unregister(this.registered)
     this.registered = null
     this.error = ''
-    if (process.env.STAG_VOICE_DEBUG) console.log('[voice] phím toàn hệ thống:', want ?? 'không đăng ký')
+    if (process.env.STAG_VOICE_DEBUG) console.log('[voice] global hotkey:', want ?? 'not registered')
     if (!want) return
     const ok = this.sc.register(want, () => {
-      if (process.env.STAG_VOICE_DEBUG) console.log('[voice] phím toàn hệ thống được bấm')
+      if (process.env.STAG_VOICE_DEBUG) console.log('[voice] global hotkey pressed')
       this.d.onToggle()
     })
     if (ok) this.registered = want
-    else this.error = `Phím ${VOICE_GLOBAL_HOTKEYS[v.globalHotkey].label} đang bị ứng dụng khác dùng, chọn phím khác.`
+    else this.error = tr('voice.global.taken', { key: VOICE_GLOBAL_HOTKEYS[v.globalHotkey].label })
   }
 
   /** Đang nói ngoài app: Esc toàn hệ thống để huỷ. */

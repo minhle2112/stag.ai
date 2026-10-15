@@ -3,6 +3,7 @@
 import MarkdownIt from 'markdown-it'
 import type { StateCore, StateInline, Token } from 'markdown-it'
 import { isAttachment, resolveNote, splitFrontmatter, splitWikilink, type NoteRef } from '@shared/wikilink'
+import { t as tr } from '@shared/i18n'
 import { ICONS } from '../icons'
 
 export interface NoteRenderCtx {
@@ -92,7 +93,7 @@ function renderWiki(m: WikiMeta, env: Env): string {
   const name = m.target ? (m.embed ? noteName(m.target) : m.target) : ''
   let label = m.alias ?? (name && m.heading ? `${name} > ${m.heading}` : name || m.heading || '')
   if (m.embed) label = `↪ ${label}`
-  const title = ghost ? 'Chưa có note' : (rel ?? m.target)
+  const title = ghost ? tr('vault.ghostTitle') : (rel ?? m.target)
   return `<a${attrs([['class', cls], ['data-target', m.target], ['data-heading', m.heading], ['title', title]])}>${esc(label)}</a>`
 }
 
@@ -227,7 +228,7 @@ md.renderer.rules.link_open = (tokens, idx, opts, envAny, self) => {
       t.attrSet('class', rel === null ? 'wikilink ghost' : 'wikilink')
       t.attrSet('data-target', target)
       if (heading) t.attrSet('data-heading', heading)
-      t.attrSet('title', rel === null ? 'Chưa có note' : (rel ?? target))
+      t.attrSet('title', rel === null ? tr('vault.ghostTitle') : (rel ?? target))
     } else t.attrSet('class', 'md-link-other')
   } else t.attrSet('class', 'md-link-other')
   return self.renderToken(tokens, idx, opts)
@@ -292,7 +293,7 @@ function propsBox(props: NoteProp[], rows: string, open: boolean): string {
   return (
     `<details class="md-propsbox group mb-4 rounded-md border border-line font-mono text-[12px] text-muted" data-line="1"${open ? ' open' : ''}>` +
     `<summary class="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-dim select-none hover:text-muted [&::-webkit-details-marker]:hidden">` +
-    `${chevron}<span class="shrink-0 font-sans">Thuộc tính</span>` +
+    `${chevron}<span class="shrink-0 font-sans">${esc(tr('vault.properties'))}</span>` +
     `<span class="min-w-0 flex-1 truncate group-open:invisible">${esc(peek)}</span></summary>` +
     `<div class="px-2.5"><table class="md-props"><tbody>${rows}</tbody></table></div></details>\n`
   )

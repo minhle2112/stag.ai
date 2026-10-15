@@ -27,6 +27,7 @@ import {
   type PluginTool,
   type PluginWebhookDelivery
 } from '@shared/plugins'
+import { t } from '@shared/i18n'
 import { pluginOn } from '@shared/settings'
 import type { Settings } from '@shared/types'
 import { npmInstall, npmUninstall } from './externalAdapters'
@@ -93,6 +94,12 @@ export interface PluginHostApi {
   /** Thư mục dự án + vault của workspace (files.list / files.read), null = không có workspace này. */
   workspacePaths(workspaceId: string): { path: string; vaultPath: string } | null
   notify(title: string, body: string): void
+  /** Nhờ agent làm một việc (quyền agent.sessions.send): gõ + gửi khi agent rảnh, chưa chạy thì mở phiên mới bắt đầu bằng việc này. */
+  askAgent?(agentId: string, text: string, from: string): Promise<'sent' | 'queued' | 'opened'>
+  /** Đăng một file trong dự án lên Sản phẩm thay cho agent (quyền artifacts.publish). Trả về id sản phẩm. */
+  publishArtifact?(workspaceId: string, agentId: string, input: { file: string; title: string; description: string }): Promise<string>
+  /** Cookie của ô Browser trong workspace cho một tên miền, dạng cookies.txt (quyền browser.cookies). */
+  browserCookies?(workspaceId: string, domain: string): Promise<{ text: string; count: number }>
 }
 
 /** Ngữ cảnh một lần gọi (workspace / agent đang xem hoặc đang gọi tool). */
@@ -102,6 +109,8 @@ export interface PluginCallContext {
   workspacePath?: string
   agentId?: string
   agentName?: string
+  /** Thư mục agent làm việc (thư mục project của nó, hoặc gốc workspace). Chỉ có ở lời gọi tool. */
+  projectPath?: string
 }
 
 interface Entry {
@@ -163,7 +172,7 @@ const TIMEOUT = { initialize: 15_000, health: 5_000, tool: 120_000, action: 30_0
 const MAX_RUNS = 30
 const JOB_TICK_MS = 15_000
 /** Lời gọi từ trang của plugin (iframe) được chuyển cho host như lời gọi của worker. */
-const BRIDGE_HOST_METHODS = ['config.get', 'state.get', 'state.set', 'state.delete', 'agents.list', 'agent.sessions.send', 'board.list', 'vault.read', 'vault.write', 'files.list', 'files.read', 'notify']
+const BRIDGE_HOST_METHODS = ['config.get', 'state.get', 'state.set', 'state.delete', 'agents.list', 'agent.sessions.send', 'agent.ask', 'board.list', 'vault.read', 'vault.write', 'files.list', 'files.read', 'notify']
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.htm': 'text/html; charset=utf-8',
@@ -193,6 +202,9 @@ const NEEDS: Record<string, PluginCapability> = {
   'state.delete': 'plugin.state.write',
   'agents.list': 'agents.read',
   'agent.sessions.send': 'agent.sessions.send',
+  'agent.ask': 'agent.sessions.send',
+  'artifacts.publish': 'artifacts.publish',
+  'browser.cookies': 'browser.cookies',
   'board.list': 'board.read',
   'vault.read': 'vault.read',
   'vault.write': 'vault.write',
@@ -284,14 +296,14 @@ export class PluginHost {
   async scaffold(req: PluginScaffoldRequest): Promise<InstalledPlugin> {
     const name = req.name.trim()
     const id = req.id.trim()
-    if (!name || name.length > 60 || /[\r\n]/.test(name)) throw new Error('Tên plugin: 1–60 ký tự, một dòng.')
-    if (!PLUGIN_ID_RE.test(id) || RESERVED_PLUGIN_IDS.includes(id)) throw new Error('Mã plugin chỉ gồm a-z, 0-9, ".", "_", "-" (2–64 ký tự), vd. "my.bao-cao".')
-    if (this.entries.some((e) => e.manifest.id === id)) throw new Error(`Đã có plugin mã "${id}".`)
-    if (!this.deps.sdkFile) throw new Error('Không thấy SDK plugin kèm app.')
+    if (!name || name.length > 60 || /[\r\n]/.test(name)) throw new Error(t('plugins.err.scaffoldName'))
+    if (!PLUGIN_ID_RE.test(id) || RESERVED_PLUGIN_IDS.includes(id)) throw new Error(t('plugins.err.scaffoldId'))
+    if (this.entries.some((e) => e.manifest.id === id)) throw new Error(t('plugins.err.idTaken', { id }))
+    if (!this.deps.sdkFile) throw new Error(t('plugins.err.noSdk'))
     const parent = resolve(req.parentDir.trim())
-    if (!(await fs.stat(parent).catch(() => null))?.isDirectory()) throw new Error(`Không thấy thư mục "${req.parentDir}".`)
+    if (!(await fs.stat(parent).catch(() => null))?.isDirectory()) throw new Error(t('plugins.err.noFolder', { path: req.parentDir }))
     const dir = join(parent, pluginFolderFor(id))
-    if ((await fs.readdir(dir).catch(() => [])).length) throw new Error(`Thư mục "${dir}" đã có file. Chọn chỗ khác hoặc đổi mã.`)
+    if ((await fs.readdir(dir).catch(() => [])).length) throw new Error(t('plugins.err.folderNotEmpty', { path: dir }))
     for (const [rel, text] of Object.entries(scaffoldFiles({ ...req, name, id }))) {
       await fs.mkdir(join(dir, rel, '..'), { recursive: true })
       await fs.writeFile(join(dir, rel), text, 'utf8')
@@ -331,7 +343,7 @@ export class PluginHost {
 
   private get(id: string): Entry {
     const e = this.entries.find((x) => x.manifest.id === id)
-    if (!e) throw new Error(`Không có plugin "${id}".`)
+    if (!e) throw new Error(t('plugins.err.notFound', { id }))
     return e
   }
 
@@ -408,31 +420,31 @@ export class PluginHost {
       source = { type: 'npm', name, version }
     } else if (req.type === 'catalog') {
       if (!this.deps.catalogDir || !/^[a-z0-9-]+$/.test(req.slug) || !(await this.catalog()).some((c) => c.slug === req.slug))
-        throw new Error(`Không có plugin "${req.slug}" trong danh mục kèm app.`)
+        throw new Error(t('plugins.err.notInCatalog', { id: req.slug }))
       dir = join(this.deps.catalogDir, req.slug)
       source = { type: 'catalog', slug: req.slug }
     } else {
       dir = resolve(req.path.trim())
       const st = await fs.stat(dir).catch(() => null)
-      if (!st?.isDirectory()) throw new Error(`Không thấy thư mục "${req.path}".`)
+      if (!st?.isDirectory()) throw new Error(t('plugins.err.noFolder', { path: req.path }))
       source = { type: 'local', path: dir }
     }
     const text = await readText(join(dir, 'package.json'))
-    if (!text) throw new Error(`Không thấy package.json trong "${dir}".`)
+    if (!text) throw new Error(t('plugins.err.noPackageJson', { path: dir }))
     let pkg: unknown
     try {
       pkg = JSON.parse(text)
     } catch {
-      throw new Error('package.json của gói không phải JSON hợp lệ.')
+      throw new Error(t('plugins.err.badPackageJson'))
     }
     const { manifest, name, version } = parsePluginManifest(pkg)
     if (manifest.entrypoints.worker) {
       const script = resolve(dir, manifest.entrypoints.worker)
       if (!script.startsWith(dir + sep) || !(await fs.stat(script).catch(() => null))?.isFile())
-        throw new Error(`Không thấy file worker "${manifest.entrypoints.worker}" trong gói.`)
+        throw new Error(t('plugins.err.noWorkerFile', { path: manifest.entrypoints.worker }))
     }
     const old = this.entries.find((e) => e.manifest.id === manifest.id)
-    if (old && !sameSource(old.source, source)) throw new Error(`Đã có plugin "${manifest.id}" (${old.manifest.displayName}) cài từ nguồn khác. Gỡ nó trước rồi cài lại.`)
+    if (old && !sameSource(old.source, source)) throw new Error(t('plugins.err.otherSource', { id: manifest.id, name: old.manifest.displayName }))
     const entry: Entry = {
       manifest,
       name,
@@ -449,12 +461,13 @@ export class PluginHost {
     if (manifest.entrypoints.ui) {
       const ui = resolve(dir, manifest.entrypoints.ui)
       if (!ui.startsWith(dir + sep) || !(await fs.stat(ui).catch(() => null))?.isDirectory())
-        throw new Error(`Không thấy thư mục giao diện "${manifest.entrypoints.ui}" trong gói.`)
+        throw new Error(t('plugins.err.noUiFolder', { path: manifest.entrypoints.ui }))
     }
     if (old) await this.stop(old.manifest.id)
     this.entries = old ? this.entries.map((e) => (e === old ? entry : e)) : [...this.entries, entry]
     await this.save()
-    this.log(manifest.id, 'info', `${old ? 'Cài lại' : 'Cài'} ${name}@${version} từ ${source.type === 'npm' ? 'npm' : source.type === 'catalog' ? 'danh mục kèm app' : source.path}`)
+    const from = source.type === 'npm' ? 'npm' : source.type === 'catalog' ? t('plugins.log.fromCatalog') : source.path
+    this.log(manifest.id, 'info', old ? t('plugins.log.reinstalled', { pkg: `${name}@${version}`, from }) : t('plugins.log.installed', { pkg: `${name}@${version}`, from }))
     if (this.runnable(entry)) await this.start(manifest.id)
     this.changed()
     return this.info(entry)
@@ -466,7 +479,7 @@ export class PluginHost {
     e.approved = [...e.manifest.capabilities]
     e.approvedAt = now()
     await this.save()
-    this.log(id, 'info', `Đã duyệt quyền: ${e.approved.join(', ') || '(không có)'}`)
+    this.log(id, 'info', t('plugins.log.approved', { caps: e.approved.join(', ') || t('plugins.log.noCaps') }))
     if (this.runnable(e)) await this.start(id)
     this.changed()
     return this.info(e)
@@ -502,7 +515,7 @@ export class PluginHost {
     const r = this.runtime(id)
     if (r.proc && r.status.state === 'ready') {
       const v = (await this.call(id, 'validateConfig', { config }, TIMEOUT.config)) as { ok?: boolean; errors?: string[] } | null
-      if (v && v.ok === false) throw new Error((v.errors ?? ['Plugin không nhận cấu hình này.']).join(' '))
+      if (v && v.ok === false) throw new Error((v.errors ?? [t('plugins.err.configRejected')]).join(' '))
     }
     e.config = config
     await this.save()
@@ -555,7 +568,7 @@ export class PluginHost {
         env: { ...(this.deps.env ?? process.env), STAG_PLUGIN_ID: id, STAG_PLUGIN_DIR: e.dir, STAG_PLUGIN_DATA: join(this.root, 'state') }
       })
     } catch (err) {
-      this.fail(id, `Không chạy được worker: ${(err as Error).message}`)
+      this.fail(id, t('plugins.err.spawn', { message: (err as Error).message }))
       return
     }
     r.proc = proc
@@ -569,16 +582,16 @@ export class PluginHost {
     try {
       await this.call(id, 'initialize', { manifest: e.manifest, config: e.config, host: { name: 'stag.ai', apiVersion: e.manifest.apiVersion } }, TIMEOUT.initialize)
     } catch (err) {
-      this.log(id, 'error', `initialize lỗi: ${(err as Error).message}`)
+      this.log(id, 'error', t('plugins.log.initFailed', { message: (err as Error).message }))
       r.stopping = true
       proc.kill()
       r.proc = null
-      this.fail(id, `Worker khởi động lỗi: ${(err as Error).message}`)
+      this.fail(id, t('plugins.err.startFailed', { message: (err as Error).message }))
       return
     }
     if (r.proc !== proc) return
     r.status.state = 'ready'
-    this.log(id, 'info', `Worker chạy (pid ${proc.pid ?? '?'})`)
+    this.log(id, 'info', t('plugins.log.running', { pid: String(proc.pid ?? '?') }))
     r.healthTimer = setInterval(() => void this.checkHealth(id), HEALTH_MS)
     this.planJobs(e, r, new Date())
     this.changed()
@@ -608,7 +621,7 @@ export class PluginHost {
     r.proc = null
     for (const p of r.pending.values()) {
       clearTimeout(p.timer)
-      p.reject(new Error('Plugin đã dừng'))
+      p.reject(callError('Plugin stopped', t('plugins.err.stopped')))
     }
     r.pending.clear()
     r.status.state = 'stopped'
@@ -627,17 +640,17 @@ export class PluginHost {
     r.healthTimer = null
     for (const p of r.pending.values()) {
       clearTimeout(p.timer)
-      p.reject(new Error(`Worker thoát (mã ${code})`))
+      p.reject(callError(`Worker exited (code ${code})`, t('plugins.err.workerExited', { code: String(code) })))
     }
     r.pending.clear()
     if (r.stopping) return
-    const t = Date.now()
-    r.crashes = r.crashes.filter((x) => t - x < RESTART_WINDOW_MS)
-    r.crashes.push(t)
+    const nowMs = Date.now()
+    r.crashes = r.crashes.filter((x) => nowMs - x < RESTART_WINDOW_MS)
+    r.crashes.push(nowMs)
     r.status.restarts++
-    this.log(id, 'error', `Worker thoát bất ngờ (mã ${code})`)
+    this.log(id, 'error', t('plugins.log.crashed', { code: String(code) }))
     if (r.crashes.length > MAX_RESTARTS) {
-      this.fail(id, `Worker lỗi ${MAX_RESTARTS} lần trong 10 phút, đã dừng. Bấm "Khởi động lại" sau khi sửa.`)
+      this.fail(id, t('plugins.err.tooManyCrashes', { count: MAX_RESTARTS }))
       return
     }
     r.status.state = 'starting'
@@ -672,12 +685,12 @@ export class PluginHost {
   private call(id: string, method: string, params: unknown, timeoutMs: number): Promise<unknown> {
     const r = this.runtime(id)
     const proc = r.proc
-    if (!proc) return Promise.reject(new Error('Worker của plugin không chạy.'))
+    if (!proc) return Promise.reject(callError("The plugin's worker is not running.", t('plugins.err.notRunning')))
     const rid = `h${r.nextId++}`
     return new Promise((res, rej) => {
       const timer = setTimeout(() => {
         r.pending.delete(rid)
-        rej(new Error(`Plugin không trả lời ${method} sau ${Math.round(timeoutMs / 1000)} giây.`))
+        rej(callError(`The plugin did not answer ${method} within ${Math.round(timeoutMs / 1000)} s.`, t('plugins.err.timeout', { method, seconds: Math.round(timeoutMs / 1000) })))
       }, timeoutMs)
       r.pending.set(rid, { resolve: res, reject: rej, timer })
       proc.send({ jsonrpc: '2.0', id: rid, method, params })
@@ -697,7 +710,7 @@ export class PluginHost {
       if (!p) return
       r.pending.delete(String(m.id))
       clearTimeout(p.timer)
-      if (m.error) p.reject(new Error(m.error.message ?? 'Lỗi từ plugin'))
+      if (m.error) p.reject(new Error(m.error.message ?? 'Plugin error'))
       else p.resolve(m.result)
       return
     }
@@ -726,10 +739,10 @@ export class PluginHost {
   private async hostCall(id: string, method: string, p: Record<string, unknown>): Promise<unknown> {
     const e = this.get(id)
     const need = NEEDS[method]
-    if (need && !e.approved.includes(need)) throw Object.assign(new Error(`Plugin chưa được cấp quyền "${need}".`), { code: -32001 })
+    if (need && !e.approved.includes(need)) throw Object.assign(new Error(`The plugin has not been granted the "${need}" capability.`), { code: -32001 })
     const api = this.deps.api
     const s = (v: unknown, max = 100_000): string => {
-      if (typeof v !== 'string' || !v || v.length > max) throw Object.assign(new Error('Tham số không hợp lệ'), { code: -32602 })
+      if (typeof v !== 'string' || !v || v.length > max) throw Object.assign(new Error('Invalid params'), { code: -32602 })
       return v
     }
     switch (method) {
@@ -759,9 +772,42 @@ export class PluginHost {
       case 'agent.sessions.send': {
         const agentId = s(p.agentId)
         const a = api.agents().agents.find((x) => x.id === agentId)
-        if (a && !this.onIn(id, a.workspaceId, a.id)) throw Object.assign(new Error('Plugin đang tắt ở agent / workspace này.'), { code: -32001 })
+        if (a && !this.onIn(id, a.workspaceId, a.id)) throw Object.assign(new Error('The plugin is turned off for this agent / workspace.'), { code: -32001 })
         await api.sendToAgent(agentId, s(p.text, 20_000))
         return null
+      }
+      case 'agent.ask': {
+        const agentId = s(p.agentId)
+        const a = api.agents().agents.find((x) => x.id === agentId)
+        if (!a) throw Object.assign(new Error('No such agent.'), { code: -32602 })
+        if (!this.onIn(id, a.workspaceId, a.id)) throw Object.assign(new Error('The plugin is turned off for this agent / workspace.'), { code: -32001 })
+        if (!api.askAgent) throw Object.assign(new Error(`stag.ai has no method "${method}"`), { code: -32601 })
+        return { status: await api.askAgent(agentId, s(p.text, 20_000), e.manifest.displayName) }
+      }
+      case 'artifacts.publish': {
+        const workspaceId = this.wsOn(id, s(p.workspaceId))
+        const agentId = s(p.agentId)
+        const a = api.agents().agents.find((x) => x.id === agentId && x.workspaceId === workspaceId)
+        if (!a) throw Object.assign(new Error('No such agent in this workspace.'), { code: -32602 })
+        if (!this.onIn(id, workspaceId, agentId)) throw Object.assign(new Error('The plugin is turned off for this agent.'), { code: -32001 })
+        if (!api.publishArtifact) throw Object.assign(new Error(`stag.ai has no method "${method}"`), { code: -32601 })
+        const artifactId = await api.publishArtifact(workspaceId, agentId, {
+          file: s(p.file, 1000),
+          title: s(p.title, 200),
+          description: typeof p.description === 'string' ? p.description.slice(0, 2000) : ''
+        })
+        return { id: artifactId }
+      }
+      case 'browser.cookies': {
+        const workspaceId = this.wsOn(id, s(p.workspaceId))
+        const domain = s(p.domain, 253).toLowerCase().replace(/^\./, '')
+        // Một tên miền thật (ít nhất hai nhãn), không phải "*" hay một đuôi trần như "com".
+        // Đuôi công cộng hai nhãn (co.uk, com.vn…) cũng không nhận (cùng ước lượng với kho mật khẩu).
+        const bare = /^(co|com|net|org|gov|edu|ac|or|ne|go|biz|info|gob|nic|mil|ltd|plc)\.[a-z]{2}$/.test(domain)
+        if (bare || !/^(?!-)[a-z0-9-]{1,63}(\.(?!-)[a-z0-9-]{1,63})+$/.test(domain)) throw Object.assign(new Error('Invalid domain.'), { code: -32602 })
+        if (!api.browserCookies) throw Object.assign(new Error(`stag.ai has no method "${method}"`), { code: -32601 })
+        this.log(id, 'info', `browser.cookies: ${domain}`)
+        return api.browserCookies(workspaceId, domain)
       }
       case 'board.list':
         return api.board(this.wsOn(id, s(p.workspaceId)))
@@ -782,7 +828,7 @@ export class PluginHost {
         api.notify(s(p.title, 200), typeof p.body === 'string' ? p.body.slice(0, 500) : '')
         return null
       default:
-        throw Object.assign(new Error(`stag.ai không có method "${method}"`), { code: -32601 })
+        throw Object.assign(new Error(`stag.ai has no method "${method}"`), { code: -32601 })
     }
   }
 
@@ -793,15 +839,15 @@ export class PluginHost {
 
   /** `workspaceId` nếu plugin bật ở đó, không thì lỗi (board / vault của workspace đã tắt plugin). */
   private wsOn(id: string, workspaceId: string): string {
-    if (!this.onIn(id, workspaceId)) throw Object.assign(new Error('Plugin đang tắt ở workspace này.'), { code: -32001 })
+    if (!this.onIn(id, workspaceId)) throw Object.assign(new Error('The plugin is turned off for this workspace.'), { code: -32001 })
     return workspaceId
   }
 
   /** Workspace cho files.*: phải có, và plugin không bị tắt ở workspace đó. */
   private filesWorkspace(id: string, workspaceId: string): { path: string; vaultPath: string } {
     const ws = this.deps.api.workspacePaths(workspaceId)
-    if (!ws) throw Object.assign(new Error('Không có workspace này.'), { code: -32602 })
-    if (this.settings && !pluginOn(this.settings, id, workspaceId)) throw Object.assign(new Error('Plugin đang tắt ở workspace này.'), { code: -32001 })
+    if (!ws) throw Object.assign(new Error('No such workspace.'), { code: -32602 })
+    if (this.settings && !pluginOn(this.settings, id, workspaceId)) throw Object.assign(new Error('The plugin is turned off for this workspace.'), { code: -32001 })
     return ws
   }
 
@@ -820,7 +866,7 @@ export class PluginHost {
       const { result, changed } = fn(st)
       if (!changed) return result
       const text = JSON.stringify(st)
-      if (text.length > 5_000_000) throw new Error('Dữ liệu của plugin vượt 5 MB.')
+      if (text.length > 5_000_000) throw new Error('Plugin data exceeds 5 MB.')
       await fs.mkdir(dirname(file), { recursive: true })
       // Ghi file tạm rồi đổi tên: tắt máy giữa chừng không để lại JSON hỏng (mất hết dữ liệu của plugin).
       await fs.writeFile(`${file}.tmp`, text, 'utf8')
@@ -866,13 +912,15 @@ export class PluginHost {
     const r = this.runtime(id)
     r.status.toolCalls++
     this.changed()
+    const tool = this.entries.find((e) => e.manifest.id === id)?.manifest.tools.find((x) => x.name === name)
     try {
-      const res = (await this.call(id, 'executeTool', { name, params, context: ctx }, TIMEOUT.tool)) as { content?: unknown; isError?: boolean } | null
+      const res = (await this.call(id, 'executeTool', { name, params, context: ctx }, tool?.timeoutSec ? tool.timeoutSec * 1000 : TIMEOUT.tool)) as { content?: unknown; isError?: boolean } | null
       const c = res?.content
       return { text: typeof c === 'string' ? c : JSON.stringify(c ?? null), isError: !!res?.isError }
     } catch (err) {
       this.log(id, 'error', `Tool ${name}: ${(err as Error).message}`)
-      return { text: `Plugin ${id}: ${(err as Error).message}`, isError: true }
+      // Agent đọc kết quả tool: lỗi của chính app thì lấy bản tiếng Anh (callError), lỗi worker trả về giữ nguyên.
+      return { text: `Plugin ${id}: ${(err as { en?: string }).en ?? (err as Error).message}`, isError: true }
     }
   }
 
@@ -882,16 +930,16 @@ export class PluginHost {
    */
   async runSlot(id: string, slotId: string, ctx: PluginCallContext): Promise<{ openUrl?: string; target?: 'browser' | 'external'; message?: string }> {
     const e = this.get(id)
-    if (!this.runnable(e)) throw new Error(`Plugin ${e.manifest.displayName} chưa được duyệt quyền hoặc đang tắt.`)
+    if (!this.runnable(e)) throw new Error(t('plugins.err.notRunnable', { name: e.manifest.displayName }))
     const slot = e.manifest.ui.slots.find((x) => x.id === slotId)
-    if (!slot) throw new Error(`Plugin không có slot "${slotId}".`)
+    if (!slot) throw new Error(t('plugins.err.noSlot', { id: slotId }))
     if (slot.open) {
       const url = fillSlotUrl(slot.open.url, {
         config: e.config,
         workspace: ctx.workspaceId ? { id: ctx.workspaceId, name: ctx.workspaceName ?? '', path: ctx.workspacePath ?? '' } : undefined,
         agent: ctx.agentId ? { id: ctx.agentId, name: ctx.agentName ?? '' } : undefined
       })
-      if (!/^https?:\/\/[^\s]+$/i.test(url)) throw new Error(`Địa chỉ không hợp lệ: "${url}". Kiểm tra cấu hình của plugin.`)
+      if (!/^https?:\/\/[^\s]+$/i.test(url)) throw new Error(t('plugins.err.badUrl', { url }))
       return { openUrl: url, target: slot.open.target }
     }
     const res = (await this.call(id, 'performAction', { key: slot.action, params: {}, context: ctx }, TIMEOUT.action)) as Record<string, unknown> | null
@@ -945,11 +993,11 @@ export class PluginHost {
   async runJob(id: string, key: string, trigger: PluginJobRun['trigger'] = 'manual'): Promise<PluginJobRun> {
     const e = this.get(id)
     const job = e.manifest.jobs.find((j) => j.key === key)
-    if (!job) throw new Error(`Plugin không có việc "${key}".`)
-    if (!e.approved.includes('jobs.schedule') || !this.runnable(e)) throw new Error(`Plugin ${e.manifest.displayName} chưa được duyệt quyền hoặc đang tắt.`)
+    if (!job) throw new Error(t('plugins.err.noJob', { key }))
+    if (!e.approved.includes('jobs.schedule') || !this.runnable(e)) throw new Error(t('plugins.err.notRunnable', { name: e.manifest.displayName }))
     const r = this.runtime(id)
-    if (!r.proc || r.status.state !== 'ready') throw new Error('Worker của plugin không chạy.')
-    if (r.jobRunning.has(key)) throw new Error(`Việc "${job.displayName}" đang chạy.`)
+    if (!r.proc || r.status.state !== 'ready') throw new Error(t('plugins.err.notRunning'))
+    if (r.jobRunning.has(key)) throw new Error(t('plugins.err.jobRunning', { name: job.displayName }))
     const run: PluginJobRun = { runId: newToken(8), key, trigger, startedAt: now(), finishedAt: null, ok: null }
     r.jobRunning.add(key)
     r.jobRuns.unshift(run)
@@ -961,7 +1009,7 @@ export class PluginHost {
     } catch (err) {
       run.ok = false
       run.error = (err as Error).message.slice(0, 500)
-      this.log(id, 'error', `Việc ${key}: ${run.error}`)
+      this.log(id, 'error', t('plugins.log.jobFailed', { key, message: run.error }))
     } finally {
       run.finishedAt = now()
       r.jobRunning.delete(key)
@@ -982,7 +1030,7 @@ export class PluginHost {
     const e = this.get(id)
     e.webhookToken = newToken()
     await this.save()
-    this.log(id, 'info', 'Đã đổi mã địa chỉ webhook')
+    this.log(id, 'info', t('plugins.log.webhookRotated'))
     this.changed()
     return this.info(e)
   }
@@ -1007,13 +1055,13 @@ export class PluginHost {
       return { status, body }
     }
     if (!e.approved.includes('webhooks.receive') || !this.runnable(e) || !r.proc || r.status.state !== 'ready')
-      return done(503, { error: 'plugin not running' }, 'Plugin không chạy (chưa duyệt, đang tắt hoặc lỗi)')
+      return done(503, { error: 'plugin not running' }, t('plugins.err.webhookNotRunning'))
     let parsedBody: unknown
     if (/json/i.test(req.headers['content-type'] ?? '') && req.rawBody) {
       try {
         parsedBody = JSON.parse(req.rawBody)
       } catch {
-        return done(400, { error: 'invalid JSON' }, 'Thân yêu cầu không phải JSON hợp lệ')
+        return done(400, { error: 'invalid JSON' }, t('plugins.err.webhookBadJson'))
       }
     }
     const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => !['authorization', 'cookie'].includes(k)))
@@ -1031,6 +1079,15 @@ export class PluginHost {
   }
 
   // ---- trang của plugin (iframe cách ly) ----
+
+  /**
+   * Trang của plugin xem được file trong thư mục dự án của workspace (ảnh / video, vd. clip vừa cắt) qua
+   * stag-plugin://<id>/__stag/file/<workspaceId>/<rel>: plugin đang được chạy, có quyền files.read, bật ở workspace đó.
+   */
+  canServeFiles(id: string, workspaceId: string): boolean {
+    const e = this.entries.find((x) => x.manifest.id === id)
+    return !!e && this.runnable(e) && e.approved.includes('files.read') && this.onIn(id, workspaceId)
+  }
 
   /** File giao diện của plugin cho giao thức stag-plugin://<id>/<rel>. null = không có / chưa được chạy. */
   async uiFile(id: string, rel: string): Promise<{ path: string; type: string } | null> {
@@ -1078,19 +1135,19 @@ export class PluginHost {
    */
   async bridge(id: string, method: string, params: Record<string, unknown>, ctx: PluginCallContext): Promise<unknown> {
     const e = this.get(id)
-    if (!this.runnable(e)) throw new Error(`Plugin ${e.manifest.displayName} chưa được duyệt quyền hoặc đang tắt.`)
-    if (ctx.workspaceId && !this.onIn(id, ctx.workspaceId, ctx.agentId)) throw new Error(`Plugin ${e.manifest.displayName} đang tắt ở workspace / agent này.`)
+    if (!this.runnable(e)) throw new Error(`Plugin ${e.manifest.displayName} is not approved or is turned off.`)
+    if (ctx.workspaceId && !this.onIn(id, ctx.workspaceId, ctx.agentId)) throw new Error(`Plugin ${e.manifest.displayName} is turned off for this workspace / agent.`)
     if (method === 'data.get' || method === 'action.perform') {
       const key = typeof params.key === 'string' ? params.key.slice(0, 100) : ''
-      if (!key) throw new Error('Thiếu "key".')
+      if (!key) throw new Error('Missing "key".')
       const r = this.runtime(id)
-      if (!r.proc || r.status.state !== 'ready') throw new Error('Worker của plugin không chạy.')
+      if (!r.proc || r.status.state !== 'ready') throw new Error("The plugin's worker is not running.")
       const p = params.params && typeof params.params === 'object' ? params.params : {}
       return method === 'data.get'
         ? this.call(id, 'getData', { key, params: p, context: ctx }, TIMEOUT.data)
         : this.call(id, 'performAction', { key, params: p, context: ctx }, TIMEOUT.action)
     }
-    if (!BRIDGE_HOST_METHODS.includes(method)) throw new Error(`Trang plugin không gọi được "${method}".`)
+    if (!BRIDGE_HOST_METHODS.includes(method)) throw new Error(`Plugin pages cannot call "${method}".`)
     return this.hostCall(id, method, params)
   }
 
@@ -1205,6 +1262,14 @@ export interface ProjectFileEntry {
 
 const rpcError = (message: string, code = -32602): Error => Object.assign(new Error(message), { code })
 
+/**
+ * Lỗi của lời gọi app → worker: `message` theo ngôn ngữ giao diện (hiện ở Cài đặt / nút của plugin), `en` là bản
+ * tiếng Anh cho agent khi lỗi rơi vào kết quả tool (callTool).
+ */
+function callError(en: string, message: string): Error {
+  return Object.assign(new Error(message), { en })
+}
+
 /** Đường dẫn thật của `rel` trong dự án (chặn thoát ra ngoài, symlink trỏ ra ngoài, .git / .stag / .sessions, vault). */
 async function projectTarget(project: string, vault: string, rel: string): Promise<{ root: string; real: string; vault: string | null }> {
   let real: string
@@ -1213,20 +1278,20 @@ async function projectTarget(project: string, vault: string, rel: string): Promi
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code
     if (code === 'OUTSIDE') throw rpcError((e as Error).message)
-    if (code === 'ENOENT' || code === 'ENOTDIR') throw rpcError(`Không thấy "${rel}" trong dự án.`)
-    throw rpcError(`Không mở được "${rel}": ${(e as Error).message}`, -32099)
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw rpcError(`"${rel}" not found in the project.`)
+    throw rpcError(`Cannot open "${rel}": ${(e as Error).message}`, -32099)
   }
   const root = await fs.realpath(resolve(project))
-  if (relSlash(root, real).split('/').some((s) => FILES_DENY.has(s.toLowerCase()))) throw rpcError(`"${rel}" là dữ liệu của git / stag.ai, plugin không đọc được.`)
+  if (relSlash(root, real).split('/').some((s) => FILES_DENY.has(s.toLowerCase()))) throw rpcError(`"${rel}" is git / stag.ai data; plugins cannot read it.`)
   const v = await fs.realpath(resolve(vault)).catch(() => null)
-  if (v && isInside(v, real)) throw rpcError(`"${rel}" nằm trong vault: dùng ctx.vault.read (quyền vault.read).`)
+  if (v && isInside(v, real)) throw rpcError(`"${rel}" is inside the vault: use ctx.vault.read (vault.read capability).`)
   return { root, real, vault: v }
 }
 
 /** Một thư mục trong dự án (không đệ quy), thư mục trước, tối đa 2000 mục. Bỏ .git, node_modules, .sessions, .stag, vault. */
 export async function listProjectDir(project: string, vault: string, rel: string): Promise<ProjectFileEntry[]> {
   const { root, real, vault: v } = await projectTarget(project, vault, rel)
-  if (!(await fs.stat(real)).isDirectory()) throw rpcError(`"${rel}" không phải thư mục.`)
+  if (!(await fs.stat(real)).isDirectory()) throw rpcError(`"${rel}" is not a folder.`)
   const out: ProjectFileEntry[] = []
   for (const d of await fs.readdir(real, { withFileTypes: true })) {
     if (out.length >= FILES_MAX_ENTRIES) break
@@ -1250,16 +1315,16 @@ export async function listProjectDir(project: string, vault: string, rel: string
 /** Nội dung chữ (UTF-8) của một file trong dự án, tối đa 1 MB; file nhị phân / quá lớn → lỗi. */
 export async function readProjectText(project: string, vault: string, rel: string): Promise<{ text: string }> {
   const { real } = await projectTarget(project, vault, rel)
-  if (FILES_SECRET.test(basename(real))) throw rpcError(`"${rel}" thường chứa mã bí mật (API key, mật khẩu), plugin không đọc được.`)
+  if (FILES_SECRET.test(basename(real))) throw rpcError(`"${rel}" usually holds secrets (API keys, passwords); plugins cannot read it.`)
   const st = await fs.stat(real)
-  if (!st.isFile()) throw rpcError(`"${rel}" không phải file.`)
-  if (st.size > FILES_MAX_BYTES) throw rpcError(`"${rel}" quá lớn (${Math.ceil(st.size / 1024)} KB, tối đa 1 MB).`)
+  if (!st.isFile()) throw rpcError(`"${rel}" is not a file.`)
+  if (st.size > FILES_MAX_BYTES) throw rpcError(`"${rel}" is too large (${Math.ceil(st.size / 1024)} KB, max 1 MB).`)
   const buf = await fs.readFile(real)
-  if (buf.includes(0)) throw rpcError(`"${rel}" là file nhị phân, files.read chỉ đọc file chữ.`)
+  if (buf.includes(0)) throw rpcError(`"${rel}" is a binary file; files.read only reads text files.`)
   try {
     return { text: new TextDecoder('utf-8', { fatal: true }).decode(buf) }
   } catch {
-    throw rpcError(`"${rel}" không phải chữ UTF-8.`)
+    throw rpcError(`"${rel}" is not UTF-8 text.`)
   }
 }
 
@@ -1302,7 +1367,7 @@ function omit(o: Record<string, string>, key: string): Record<string, string> {
 
 function stateKey(p: Record<string, unknown>): string {
   const key = typeof p.key === 'string' ? p.key : ''
-  if (!key || key.length > 200) throw Object.assign(new Error('Khoá dữ liệu không hợp lệ'), { code: -32602 })
+  if (!key || key.length > 200) throw Object.assign(new Error('Invalid state key'), { code: -32602 })
   return typeof p.scope === 'string' && p.scope ? `${p.scope.slice(0, 100)}:${key}` : key
 }
 

@@ -4,6 +4,8 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, shell, type WebContents } from 'electron'
 import { IPC } from '@shared/ipc'
+import { getLocale, t } from '@shared/i18n'
+import { uiName } from '@shared/i18n/uiNames'
 import {
   agentApiRules,
   agentMessage,
@@ -76,10 +78,13 @@ import { createStagMcp, describeAgent, type AdapterInfo, type AgentInfo, type Ag
 import type { ProjectService } from './projects'
 import { formatEntries, parseClaudeLog, parseCodexLog, readTailLines, redact, secretParts } from './sessionLog'
 import { archiveName, memoryRules, oneLine, sizeKb, type MemoryKeeper } from './workLog'
-import { browserToolsOn } from '@shared/settings'
+import { browserToolsOn, computerToolsOn } from '@shared/settings'
+import { COMPUTER_SERVER, createComputerMcp } from './computer/mcp'
+import type { ComputerService } from './computer/service'
+import type { ComputerAsk } from '@shared/computer'
 import { ScopeGuard } from './scopeGuard'
 import type { ArtifactLog } from './artifacts'
-import { commentMessage, type ArtifactStore } from './artifactStore'
+import { commentMessage, type ArtifactStore, type PublishInput } from './artifactStore'
 import type { InspectService, InspectTeamMember } from './inspect'
 import type { VaultActivityLog } from './vaultActivity'
 import type { VaultIndexer } from './vaultIndex'
@@ -242,12 +247,42 @@ export class AgentService {
   /** Gõ chữ vào terminal của agent đang chạy (plugin có quyền agent.sessions.send). */
   typeInto(agentId: string, text: string): void {
     const run = this.running.get(agentId)
-    if (!run) throw new Error('Agent này không có phiên đang chạy.')
+    if (!run) throw new Error('This agent has no running session.')
     if (run.chat) {
       run.chat.send(text, { origin: 'app' })
       return
     }
     this.ptys.write(run.ptyId, text, false)
+  }
+
+  /**
+   * Plugin (quyền agent.sessions.send, vd. thanh hỏi của Stag Clip) nhờ agent làm một việc: phiên đang chạy → vào hàng
+   * chờ tin như tin người dùng (gõ nguyên văn + gửi khi agent rảnh); chưa chạy → mở phiên mới bắt đầu bằng việc này.
+   */
+  async askFromPlugin(agentId: string, text: string, from: string): Promise<'sent' | 'queued' | 'opened'> {
+    const agent = this.data.agents.find((a) => a.id === agentId)
+    if (!agent || agentKind(agent) === 'terminal') throw new Error('No such AI agent.')
+    const body = text.trim()
+    if (!body) throw new Error('text is empty.')
+    if (body.length > TASK_MAX) throw new Error(`text is too long (max ${TASK_MAX} characters).`)
+    if (this.running.has(agentId)) {
+      this.mail.enqueue(agentId, { fromId: USER_SENDER, fromName: '', text: body, at: Date.now(), user: true })
+      this.deliverMail()
+      return this.mail.pending(agentId) ? 'queued' : 'sent'
+    }
+    await this.setFirstTask(agentId, { from, task: body, created: false })
+    this.apiEvent({ type: 'open', workspaceId: agent.workspaceId, agentId, nearAgentId: null })
+    return 'opened'
+  }
+
+  /** Plugin (quyền artifacts.publish) đăng một file lên Sản phẩm thay agent, dưới việc đang mở → việc của phiên → việc gần nhất của agent. */
+  async publishForPlugin(workspaceId: string, agentId: string, input: PublishInput): Promise<string> {
+    const ws = this.workspaces.get(workspaceId)
+    const agent = this.data.agents.find((a) => a.id === agentId && a.workspaceId === workspaceId)
+    if (!ws || !agent) throw new Error('No such agent in this workspace.')
+    if (!this.products) throw new Error('Artifacts are not available.')
+    const task = (await this.publishTask(ws, agentId)) ?? (await this.board.snapshot(ws)).tasks.filter((x) => x.agentId === agentId).at(-1) ?? null
+    return this.products.publish(ws, agent, task, input, ws.path)
   }
 
   /**
@@ -303,6 +338,41 @@ export class AgentService {
 
   attachCredentials(svc: CredentialService): void {
     this.credentials = svc
+  }
+
+  /** Computer use (máy chủ MCP `computer`, src/main/computer/). */
+  private computer: ComputerService | null = null
+
+  attachComputer(svc: ComputerService): void {
+    this.computer = svc
+  }
+
+  /** Phiên đang chạy của agent cho computer use (bảng @ trong ô soạn tin); null = phiên không chạy. */
+  computerSession(agentId: string): { ref: Parameters<ComputerService['run']>[0]; enabled: boolean } | null {
+    const ctx = this.context(agentId)
+    if (!ctx?.run) return null
+    const { agent, ws, run } = ctx
+    return {
+      ref: { agentId: agent.id, agentName: agent.name, workspaceId: ws.id, workspacePath: ws.path, sessionId: run.sessionId },
+      enabled: agentKind(agent) === 'claude' && computerToolsOn(this.settings.get(), ws.id, agent.id)
+    }
+  }
+
+  /** Máy chủ MCP `computer` (computer use) cho agent đang gọi. */
+  computerMcpFor(agentId: string): ReturnType<typeof createComputerMcp> | null {
+    const ctx = this.context(agentId)
+    if (!ctx || !this.computer) return null
+    const { agent, ws, run } = ctx
+    const computer = this.computer
+    return createComputerMcp({
+      session: run ? { agentId: agent.id, agentName: agent.name, workspaceId: ws.id, workspacePath: ws.path, sessionId: run.sessionId } : null,
+      // Đọc mỗi yêu cầu MCP: tắt giữa phiên thì lần gọi sau báo lỗi.
+      enabled: computerToolsOn(this.settings.get(), ws.id, agent.id),
+      service: computer,
+      // Luôn hỏi (kể cả khi tắt "Hỏi bạn trước…" của Agent API); cửa sổ stag.ai hiện lên để bạn thấy thẻ.
+      ask: (ask: ComputerAsk) =>
+        computer.withAttention(() => this.confirm(agent, 'request_access', { workspaceId: ws.id, fromAgentId: agent.id, fromName: agent.name, action: 'computer', computer: ask }, true))
+    })
   }
 
   /** Thẻ hỏi credential_fill: luôn hỏi theo cài đặt của mục (không theo công tắc "Hỏi bạn trước…" của Agent API). */
@@ -447,19 +517,19 @@ export class AgentService {
   }
 
   async create(req: CreateAgentRequest): Promise<Agent> {
-    if (!this.workspaces.get(req.workspaceId)) throw new Error('Workspace không tồn tại')
+    if (!this.workspaces.get(req.workspaceId)) throw new Error(t('app.error.noSuchWorkspace'))
     const name = req.name.trim()
     const problem = agentNameProblem(name)
     if (problem) throw new Error(problem)
     const taken = this.data.agents.some((a) => a.workspaceId === req.workspaceId && sameAgentName(a.name, name))
-    if (taken) throw new Error(`Đã có agent tên "${name}" trong workspace này`)
-    if (req.projectId && !this.workspaces.get(req.workspaceId)?.projects?.some((p) => p.id === req.projectId)) throw new Error('Project này không còn trong workspace')
+    if (taken) throw new Error(t('app.agent.nameTaken', { name }))
+    if (req.projectId && !this.workspaces.get(req.workspaceId)?.projects?.some((p) => p.id === req.projectId)) throw new Error(t('app.agent.projectGone'))
     const terminal = req.kind === 'terminal'
-    if (req.kind === 'external' && !this.external.get(req.adapterId ?? '')) throw new Error('Adapter ngoài này không còn, cài lại ở Cài đặt → Adapter')
+    if (req.kind === 'external' && !this.external.get(req.adapterId ?? '')) throw new Error(t('app.agent.adapterGone'))
     const cli = req.kind === 'claude' || req.kind === 'codex'
     const model = (req.model ?? '').trim()
     const effort = (req.effort ?? '').trim()
-    if (model && !MODEL_RE.test(model)) throw new Error('Tên model không hợp lệ (chỉ dùng chữ, số và . _ : - / [ ] @)')
+    if (model && !MODEL_RE.test(model)) throw new Error(t('app.agent.badModel'))
     const agent: Agent = {
       id: randomUUID(),
       workspaceId: req.workspaceId,
@@ -510,27 +580,25 @@ export class AgentService {
 
   private async doStart(owner: WebContents, req: StartAgentRequest): Promise<AgentRun> {
     const agent = this.data.agents.find((a) => a.id === req.agentId)
-    if (!agent) throw new Error('Agent không tồn tại')
+    if (!agent) throw new Error(t('app.agent.notFound'))
     const existing = this.running.get(agent.id)
     if (existing) return publicRun(existing)
     const ws = this.workspaces.get(agent.workspaceId)
-    if (!ws) throw new Error('Workspace của agent không còn trong app')
+    if (!ws) throw new Error(t('app.agent.workspaceGone'))
     if (agentKind(agent) === 'terminal') return this.startTerminal(owner, agent, ws, req)
 
-    if (!this.hub) throw new Error('Máy chủ trạng thái của app chưa sẵn sàng')
+    if (!this.hub) throw new Error(t('app.agent.hubNotReady'))
     // Agent của project mở phiên trong thư mục project (cố định cả phiên); file phiên, .stag, vault vẫn ở gốc workspace.
     const cwd = this.cwdOf(agent, ws)
-    if (cwd !== ws.path && !(await isDir(cwd))) throw new Error(`Không thấy thư mục project ${cwd}. Tạo lại thư mục, hoặc xoá project này.`)
+    if (cwd !== ws.path && !(await isDir(cwd))) throw new Error(t('app.agent.noProjectDir', { path: cwd }))
     const kind = agentKind(agent)
     const chatMode = (kind === 'claude' || kind === 'codex') && agent.cell === 'chat'
     const ext = kind === 'external' ? this.external.get(agent.adapterId ?? '') : undefined
-    if (kind === 'external' && !ext) throw new Error(`Adapter "${agent.adapterId}" của agent này đã bị gỡ. Cài lại ở Cài đặt → Adapter.`)
-    if (kind !== 'claude' && kind !== 'codex' && !ext) throw new Error('Loại agent này chưa được hỗ trợ')
+    if (kind === 'external' && !ext) throw new Error(t('app.agent.adapterRemoved', { id: agent.adapterId ?? '' }))
+    if (kind !== 'claude' && kind !== 'codex' && !ext) throw new Error(t('app.agent.unsupported'))
     // `claude -p` bỏ qua hộp thoại "tin cậy thư mục": ô chat chỉ chạy ở thư mục người dùng đã tin ở ô CLI.
     if (chatMode && kind === 'claude' && !(await isClaudeFolderTrusted(cwd, homedir(), this.claudeEnv())))
-      throw new Error(
-        'Claude Code chưa được xác nhận tin cậy thư mục dự án này. Đổi agent sang ô CLI, mở phiên một lần và chọn "Yes, I trust this folder", rồi quay lại ô chat.'
-      )
+      throw new Error(t('app.agent.untrusted'))
     const exe = ext ? await this.external.exe(ext) : (await this.adapters.exe(kind as 'claude' | 'codex')).path
     // Connector (MCP) bật cho agent này; thiếu bí mật → báo lỗi ngay, trước khi ghi gì.
     const all = effectiveConnectors(this.settings.get(), agent.workspaceId, agent.id)
@@ -606,6 +674,14 @@ export class AgentService {
       MEMORY_RULES: memoryRules(memCfg, noteSize ?? { kb: 0, archive: archiveName(agent.name) }),
       MEMORY_TOOLS: memoryToolRules(memCfg.agentTools),
       USER_LANGUAGE: userLanguage(),
+      // Tên trong giao diện theo ngôn ngữ app đang chọn: agent gọi đúng tên người dùng đang thấy.
+      UI_ARTIFACTS: t('common.name.artifacts'),
+      UI_WORKING: t('common.name.working'),
+      UI_BROWSER: t('common.name.browser'),
+      UI_INSPECT: t('common.name.inspect'),
+      UI_COMMENTS: t('common.name.comments'),
+      UI_ROOT_PROJECT: t('common.name.rootProject'),
+      UI_SETTINGS: t('common.name.settings'),
       DATE: today(),
       NOW: new Date().toISOString()
     }
@@ -613,7 +689,7 @@ export class AgentService {
     // Agent bị xoá trong lúc đang mở phiên (các await ở trên): không tạo lại note / file phiên cho nó.
     if (this.deleted(agent)) {
       void this.skills.cleanSession(sessionId)
-      throw new Error('Agent đã bị xoá')
+      throw new Error(t('app.agent.deleted'))
     }
     // Ghi danh sách phiên đang mở trước khi tạo file trong .sessions/: app tắt đột ngột thì lần mở sau còn biết mà dọn.
     if (!this.data.openSessions?.some((s) => s.sessionId === sessionId)) (this.data.openSessions ??= []).push({ workspaceId: ws.id, sessionId })
@@ -651,7 +727,7 @@ export class AgentService {
       if (chatMode) {
         // Ô chat: `codex [-c …] app-server`; luật phiên + mức quyền đi qua thread/start (xem chat/codexSession.ts).
         const user = codexAppServerUserArgs(this.adapters.launchArgs('codex', agent))
-        if (user.dropped.length) console.warn('[codex-chat] bỏ tham số không dùng được với app-server:', user.dropped.join(' '))
+        if (user.dropped.length) console.warn('[codex-chat] dropped arguments that app-server does not accept:', user.dropped.join(' '))
         args = [...codexConfigArgs(this.hub.endpoints()), ...codexUser, ...user.args]
         // Context lấy thẳng từ thread/tokenUsage/updated, không cần theo rollout.
         transcriptFile = null
@@ -673,10 +749,16 @@ export class AgentService {
         args.unshift('-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio')
       args.push('--name', agent.name, '--append-system-prompt', rules)
       // Có connector / tắt máy chủ, skill có sẵn → file --settings / --mcp-config riêng của phiên.
-      const own = await this.hub.writeSessionConfigs(sessionFile.replace(/\.md$/, ''), claudeServers(conn.servers, connCmds), {
-        ...claudeSettingsExtra(conn),
-        ...claudeSkillSettings(sk)
-      })
+      // Computer use bật cho agent: thêm máy chủ `computer` (tool tự cho phép; app hỏi bạn ở request_access).
+      // Không đặt tên `computer-use`: Claude Code giữ tên đó (và workspace, claude-in-chrome…) và bỏ qua máy chủ.
+      const cuOn = !!this.computer && computerToolsOn(this.settings.get(), ws.id, agent.id)
+      const extra = { ...claudeSettingsExtra(conn), ...claudeSkillSettings(sk) }
+      if (cuOn) extra.allow = [...extra.allow, 'mcp__computer']
+      const own = await this.hub.writeSessionConfigs(
+        sessionFile.replace(/\.md$/, ''),
+        { ...claudeServers(conn.servers, connCmds), ...(cuOn ? { [COMPUTER_SERVER]: this.hub.computerServer() } : {}) },
+        extra
+      )
       args.push(...this.hub.claudeArgs(own))
       if (sessionSkills.dir) args.push('--add-dir', sessionSkills.dir)
       if (agent.permissionMode !== 'default') args.push('--permission-mode', agent.permissionMode)
@@ -693,7 +775,7 @@ export class AgentService {
     if (this.deleted(agent)) {
       removeSessionFiles(sessionFile)
       void this.skills.cleanSession(sessionId)
-      throw new Error('Agent đã bị xoá')
+      throw new Error(t('app.agent.deleted'))
     }
     const hubToken = this.hub.issueToken(agent.id, sessionId)
     const sessionEnv: Record<string, string> = {
@@ -839,11 +921,11 @@ export class AgentService {
 
   chatSend(req: ChatSendRequest): void {
     const run = this.running.get(req.agentId)
-    if (!run?.chat) throw new Error('Ô chat chưa có phiên đang chạy')
+    if (!run?.chat) throw new Error(t('app.agent.chatNotRunning'))
     const text = req.text.trim()
     if (!text && !req.images?.length) return
     // Đang bàn giao / chờ: vẫn gửi được (Claude xếp hàng lượt).
-    run.chat.send(text || '(ảnh)', { origin: 'user', images: req.images })
+    run.chat.send(text || '(image)', { origin: 'user', images: req.images })
   }
 
   chatInterrupt(agentId: string): void {
@@ -899,10 +981,10 @@ export class AgentService {
   /** Đổi giao diện ô (CLI ↔ chat): chỉ khi agent không có phiên chạy. */
   async setCell(agentId: string, cell: 'cli' | 'chat'): Promise<Agent> {
     const agent = this.data.agents.find((a) => a.id === agentId)
-    if (!agent) throw new Error('Agent không tồn tại')
+    if (!agent) throw new Error(t('app.agent.notFound'))
     const kind = agentKind(agent)
-    if (kind !== 'claude' && kind !== 'codex') throw new Error('Ô chat chỉ có cho Claude Code và Codex')
-    if (this.running.has(agentId)) throw new Error('Dừng phiên đang chạy trước khi đổi giao diện ô')
+    if (kind !== 'claude' && kind !== 'codex') throw new Error(t('app.agent.chatOnly'))
+    if (this.running.has(agentId)) throw new Error(t('app.agent.stopFirst'))
     if (cell === 'chat') agent.cell = 'chat'
     else delete agent.cell
     this.chats.delete(agentId)
@@ -949,6 +1031,7 @@ export class AgentService {
     this.running.delete(agentId)
     this.hub?.revokeToken(run.token)
     this.requests.cancelAgent(agentId)
+    this.computer?.sessionEnded(run.sessionId)
     this.guard.endSession(agentId)
     this.approvals.cancelAgent(agentId)
     run.transcript?.stop()
@@ -1019,14 +1102,14 @@ export class AgentService {
       input: p.tool_input
     })
     if (this.running.has(agent.id)) this.board.setActivity(agent, 'working', { tool: p.tool_name })
-    if (d === 'timeout') return hookReply('ask', 'stag.ai: chưa ai duyệt trong app (Cài đặt → Connector → Duyệt) — hỏi ở đây.')
+    if (d === 'timeout') return hookReply('ask', t('app.agent.hookTimeout'))
     if (d === 'deny')
       return hookReply('deny', 'The user declined this tool call in stag.ai (Connectors → Review). Do not retry it or work around it; tell the user and ask what to do instead.')
     if (d === 'always') {
       const cur = this.settings.get().app.connectors.items.find((x) => x.id === c.id)
       if (cur) await this.settings.saveConnector({ ...cur, toolPolicy: { ...cur.toolPolicy, [m[2]]: 'allow' } }).catch(() => {})
     }
-    return hookReply('allow', 'stag.ai: người dùng đã cho phép trong app.')
+    return hookReply('allow', t('app.agent.hookAllowed'))
   }
 
   /**
@@ -1049,6 +1132,8 @@ export class AgentService {
       this.apiEvent({ type: 'updated', agent: { ...ctx.agent } })
     }
     this.board.hook(ctx.agent, payload)
+    // Hết lượt: nhả máy cho người dùng / agent khác, mở lại cửa sổ stag.ai (computer use).
+    if (payload.hook_event_name === 'Stop') this.computer?.turnEnded(agentId)
     const ask = ctx.run.handoffAsk
     if (ask && this.board.statusOf(agentId)?.handoff === 'asking') {
       if (payload.hook_event_name === 'UserPromptSubmit') ask.submitted = true
@@ -1149,11 +1234,11 @@ export class AgentService {
    */
   handoffNow(agentId: string): void {
     const ctx = this.context(agentId)
-    if (!ctx?.run) throw new Error('Agent không có phiên đang chạy')
+    if (!ctx?.run) throw new Error(t('app.agent.noSession'))
     const status = this.board.statusOf(agentId)
     if (status?.handoff === 'asking' || status?.handoff === 'restarting') return
     if (status?.activity !== 'waiting' || status.reason === 'permission' || status.reason === 'question')
-      throw new Error('Chờ agent hết lượt (đang chờ bạn trả lời) rồi hãy bàn giao')
+      throw new Error(t('app.agent.handoffWait'))
     this.askHandoff(ctx.agent, ctx.run, true)
   }
 
@@ -1314,7 +1399,7 @@ export class AgentService {
     }
     const ext = await Promise.all(
       this.external.list().map(async (a): Promise<AdapterInfo> => {
-        const problem = !a.enabled ? 'turned off in Settings → Adapter' : await this.external.exe(a).then(() => '', (e: Error) => e.message)
+        const problem = !a.enabled ? `turned off in ${uiName.settings('adapters')}` : await this.external.exe(a).then(() => '', (e: Error) => e.message)
         return {
           kind: `external:${a.manifest.id}`,
           label: a.manifest.label,
@@ -1341,7 +1426,7 @@ export class AgentService {
     const checked = checkCreateInput(input, (k) => s.app.adapters[k].defaultPermission)
     if ('error' in checked) throw new Error(checked.error)
     const d = checked.draft
-    const nameProblem = agentNameProblem(d.name)
+    const nameProblem = agentNameProblem(d.name, 'en')
     if (nameProblem) throw new Error(`Invalid name: ${nameProblem}`)
     if (this.data.agents.some((a) => a.workspaceId === ws.id && sameAgentName(a.name, d.name)))
       throw new Error(`An agent named "${d.name}" already exists in this workspace (see agent_list). Pick another name.`)
@@ -1600,7 +1685,7 @@ export class AgentService {
       if (p !== target.permissionMode) perm = p
     }
     if (newName !== undefined) {
-      const problem = agentNameProblem(newName)
+      const problem = agentNameProblem(newName, 'en')
       if (problem) throw new Error(`Invalid name: ${problem}`)
       if (this.data.agents.some((a) => a.id !== target.id && a.workspaceId === ws.id && sameAgentName(a.name, newName)))
         throw new Error(`An agent named "${newName}" already exists in this workspace.`)
@@ -1718,8 +1803,8 @@ export class AgentService {
    */
   broadcast(req: BroadcastRequest): BroadcastResult {
     const text = req.text.trim()
-    if (!text) throw new Error('Tin nhắn trống')
-    if (text.length > MESSAGE_MAX) throw new Error(`Tin quá dài (tối đa ${MESSAGE_MAX} ký tự)`)
+    if (!text) throw new Error(t('app.agent.emptyMessage'))
+    if (text.length > MESSAGE_MAX) throw new Error(t('app.agent.messageTooLong', { max: MESSAGE_MAX }))
     const results: BroadcastResult['results'] = []
     const seen = new Set<string>()
     for (const id of req.agentIds) {
@@ -1774,7 +1859,7 @@ export class AgentService {
       const problem = this.mail.check(target.id, caller.id, now)
       if (problem) throw new Error(problem)
     } else if (!resolveAgentApi(this.settings.get(), ws.id, caller.id).manage) {
-      throw new Error(`"${target.name}" is not running, and opening agents is turned off for you (Settings → Agent API). Tell the user to open it, then try again.`)
+      throw new Error(`"${target.name}" is not running, and opening agents is turned off for you (${uiName.settings('agentApi')}). Tell the user to open it, then try again.`)
     }
     const busy = await this.board.openTask(ws, target.id)
     if (busy)
@@ -1791,7 +1876,7 @@ export class AgentService {
       const problem = this.mail.check(target.id, caller.id, now)
       if (problem) throw new Error(`${problem} Nothing was handed off.`)
     } else if (!resolveAgentApi(this.settings.get(), ws.id, caller.id).manage) {
-      throw new Error(`"${target.name}" stopped while waiting, and opening agents is turned off for you (Settings → Agent API). Nothing was handed off. Tell the user to open it, then try again.`)
+      throw new Error(`"${target.name}" stopped while waiting, and opening agents is turned off for you (${uiName.settings('agentApi')}). Nothing was handed off. Tell the user to open it, then try again.`)
     }
 
     const card = await this.board.transferTask(ws, caller.id, target, run?.sessionId ?? '', summary, input.title)
@@ -1944,7 +2029,7 @@ export class AgentService {
         this.submit(run, commentMessage(items), {
           cli: isCliKind(agentKind(agent)),
           origin: 'app',
-          display: n === 1 ? 'Góp ý từ tab Sản phẩm' : `${n} góp ý từ tab Sản phẩm`
+          display: n === 1 ? t('app.agent.commentOne', { tab: t('common.name.artifacts') }) : t('app.agent.comments', { count: n, tab: t('common.name.artifacts') })
         })
         this.commentQuiet.set(agentId, Date.now() + MAIL_GAP_MS)
         for (const { ws, comments } of items) await store!.delivered(ws, comments.map((c) => c.id))
@@ -2050,11 +2135,11 @@ export class AgentService {
       const cfg = resolveMemory(this.settings.get(), ws.id, null)
       const file = join(ws.vaultPath, '_INDEX.md')
       if (!cfg.indexArchive) {
-        out.push({ ...base, moved: 0, kb: null, skipped: 'đang tắt ở workspace này' })
+        out.push({ ...base, moved: 0, kb: null, skipped: t('app.memory.skipOff') })
         continue
       }
       if (!(await exists(file))) {
-        out.push({ ...base, moved: 0, kb: null, skipped: 'vault không có _INDEX.md' })
+        out.push({ ...base, moved: 0, kb: null, skipped: t('app.memory.skipNoIndex') })
         continue
       }
       try {
@@ -2062,7 +2147,7 @@ export class AgentService {
         const text = await fs.readFile(file, 'utf8')
         out.push({ ...base, moved, kb: sizeKb(text) })
       } catch (e) {
-        out.push({ ...base, moved: 0, kb: null, skipped: `lỗi: ${(e as Error).message}` })
+        out.push({ ...base, moved: 0, kb: null, skipped: t('app.memory.skipError', { message: (e as Error).message }) })
       }
     }
     return out
@@ -2091,7 +2176,7 @@ export class AgentService {
         try {
           await shell.trashItem(note)
         } catch (e) {
-          throw new Error(`Không chuyển được note ${note} vào Thùng rác: ${(e as Error).message}`)
+          throw new Error(t('app.agent.trashFailed', { note, message: (e as Error).message }))
         }
       }
       // Note cất "Work done" cũ (workLog.ts) đi theo note chính; không chuyển được thì để lại, không chặn việc xoá.
@@ -2159,12 +2244,12 @@ export class AgentService {
    */
   async clone(agentId: string, toProjectId: string | null, name?: string): Promise<Agent> {
     const src = this.data.agents.find((a) => a.id === agentId)
-    if (!src) throw new Error('Agent không tồn tại')
-    if (agentKind(src) === 'terminal') throw new Error('Ô terminal không nhân bản được')
+    if (!src) throw new Error(t('app.agent.notFound'))
+    if (agentKind(src) === 'terminal') throw new Error(t('app.agent.cloneTerminal'))
     const ws = this.workspaces.get(src.workspaceId)
     const to = toProjectId ? ws?.projects?.find((p) => p.id === toProjectId) : undefined
-    if (toProjectId && !to) throw new Error('Project này không còn trong workspace')
-    const place = to ? to.name : 'Chung'
+    if (toProjectId && !to) throw new Error(t('app.agent.projectGone'))
+    const place = to ? to.name : t('common.name.rootProject')
     const base = `${src.role.trim() || src.name.split(' · ')[0]} · ${place}`
     const taken = (n: string): boolean => this.data.agents.some((a) => a.workspaceId === src.workspaceId && sameAgentName(a.name, n))
     const agent = await this.create({
@@ -2200,13 +2285,13 @@ export class AgentService {
    */
   async rename(agentId: string, rawName: string): Promise<Agent> {
     const agent = this.data.agents.find((a) => a.id === agentId)
-    if (!agent) throw new Error('Agent không tồn tại')
+    if (!agent) throw new Error(t('app.agent.notFound'))
     const name = rawName.trim()
     const problem = agentNameProblem(name)
     if (problem) throw new Error(problem)
     if (name === agent.name) return agent
     const taken = this.data.agents.some((a) => a.id !== agent.id && a.workspaceId === agent.workspaceId && sameAgentName(a.name, name))
-    if (taken) throw new Error(`Đã có agent tên "${name}" trong workspace này`)
+    if (taken) throw new Error(t('app.agent.nameTaken', { name }))
 
     const ws = this.workspaces.get(agent.workspaceId)
     // Terminal không có note bộ nhớ trong vault.
@@ -2216,12 +2301,12 @@ export class AgentService {
       const to = join(dir, `${name}.md`)
       // Chỉ đổi hoa/thường: trên Windows hai đường dẫn là một file, không coi là "đã tồn tại".
       if (!sameAgentName(agent.name, name) && (await exists(to)))
-        throw new Error(`Trong vault đã có note ${to}. Đổi tên note đó trước, hoặc chọn tên khác. Chưa đổi gì cả.`)
+        throw new Error(t('app.agent.noteExists', { note: to }))
       if (await exists(from)) {
         try {
           await fs.rename(from, to)
         } catch (e) {
-          throw new Error(`Không đổi tên được note ${from}: ${(e as Error).message}. Chưa đổi gì cả.`)
+          throw new Error(t('app.agent.renameFailed', { note: from, message: (e as Error).message }))
         }
         // Tiêu đề note theo template là "# <tên agent>": đổi theo nếu còn đúng như cũ.
         const text = await readText(to)
@@ -2267,11 +2352,13 @@ export class AgentService {
 }
 
 /**
- * Ngôn ngữ hệ thống của người dùng, vd. "English (en-US)" — agent dùng cho câu hỏi mở phiên
- * (lúc người dùng chưa viết gì); sau đó agent theo ngôn ngữ người dùng viết hoặc CLAUDE.md của dự án.
+ * Ngôn ngữ giao diện stag.ai người dùng đang chọn, vd. "Vietnamese (vi-VN)" — agent dùng cho câu hỏi mở phiên
+ * (lúc người dùng chưa viết gì); sau đó agent theo ngôn ngữ người dùng viết hoặc CLAUDE.md của dự án. Giao diện tiếng
+ * Anh thì giữ vùng của Windows nếu Windows cũng tiếng Anh ("English (Germany) (en-DE)").
  */
 function userLanguage(): string {
-  const tag = app.getPreferredSystemLanguages()[0] || app.getLocale() || 'en'
+  const system = app.getPreferredSystemLanguages()[0] || app.getLocale() || 'en'
+  const tag = getLocale() === 'vi' ? 'vi-VN' : /^en\b/i.test(system) ? system : 'en'
   try {
     const name = new Intl.DisplayNames(['en'], { type: 'language' }).of(tag)
     return name && name !== tag ? `${name} (${tag})` : tag
@@ -2340,6 +2427,6 @@ function removeQuietly(file: string): void {
   try {
     rmSync(file, { force: true, maxRetries: 2, retryDelay: 50 })
   } catch (e) {
-    console.error('[agents] không xoá được', file, (e as Error).message)
+    console.error('[agents] could not delete', file, (e as Error).message)
   }
 }

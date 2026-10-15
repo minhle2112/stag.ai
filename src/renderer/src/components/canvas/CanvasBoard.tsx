@@ -25,6 +25,7 @@ import { suspendFit } from '../../terminals'
 import { Icon, type IconName } from '../Icon'
 import { SkillAvatar } from '../settings/SkillsSection'
 import { FLY_EASE, FLY_MS, FrameCtx, Popover, dragWith, emitter, useEmitter, type Emitter, type FrameApi } from './frame'
+import { useT } from '../../i18n'
 
 /** Camera khi chưa có gì để vừa khung. */
 const HOME: CanvasView = { x: 40, y: 40, zoom: 1 }
@@ -75,6 +76,7 @@ interface Props {
  * lưu vào bố cục khi đã đứng yên.
  */
 export function CanvasBoard({ ws, layout, hasAgents, renderCell, emptyTitle, emptyHint }: Props): React.JSX.Element {
+  const t = useT()
   const wsId = ws.id
   // Mỗi tab (Chung / project) một canvas riêng (AgentGrid gắn lại CanvasBoard khi đổi tab): hoàn tác cũng riêng từng tab.
   const [undoKey] = useState(() => `${wsId}:${useAgents.getState().byWs[wsId]?.place ?? ''}`)
@@ -343,7 +345,7 @@ export function CanvasBoard({ ws, layout, hasAgents, renderCell, emptyTitle, emp
     )
     applyRects(rects, true)
     flyTo(fitAllView(Object.values(rects), sizeRef.current))
-    setToast({ text: `Đã xếp gọn ${l.cells.length} ô`, undo: true })
+    setToast({ text: t('canvas.tidied', { count: l.cells.length }), undo: true })
   }
 
   /** Kéo nền (chuột trái) hoặc giữ chuột giữa ở bất kỳ đâu: di chuyển bản đồ. */
@@ -481,10 +483,8 @@ export function CanvasBoard({ ws, layout, hasAgents, renderCell, emptyTitle, emp
       {!layout.cells.length && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-dim">
           <Icon name="grid" size={28} />
-          <div>{hasAgents ? 'Không có ô nào đang mở.' : (emptyTitle ?? 'Workspace này chưa có agent.')}</div>
-          <div className="text-[12px]">
-            {hasAgents ? 'Bấm agent ở thanh bên để mở lại ô của nó, hoặc chuột phải vào đây để tạo agent mới.' : (emptyHint ?? 'Chuột phải vào đây → Agent mới (hoặc Ctrl+K).')}
-          </div>
+          <div>{hasAgents ? t('canvas.empty.noCells') : (emptyTitle ?? t('canvas.empty.noAgents'))}</div>
+          <div className="text-[12px]">{hasAgents ? t('canvas.empty.noCellsHint') : (emptyHint ?? t('canvas.empty.noAgentsHint'))}</div>
         </div>
       )}
 
@@ -510,7 +510,7 @@ export function CanvasBoard({ ws, layout, hasAgents, renderCell, emptyTitle, emp
           {toast.text}
           {toast.undo && (
             <button type="button" onClick={undo} className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-panel-3" data-tip="Ctrl+Z">
-              Hoàn tác
+              {t('canvas.undo')}
             </button>
           )}
         </div>
@@ -668,6 +668,7 @@ function Toolbar({
   onTidy: () => void
   canTidy: boolean
 }): React.JSX.Element {
+  const t = useT()
   const z = useEmitter(zoom)
   return (
     <div
@@ -675,21 +676,21 @@ function Toolbar({
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.stopPropagation()}
     >
-      <ToolBtn icon="send" tip="Phát lệnh cho nhiều agent" onClick={onBroadcast} />
+      <ToolBtn icon="send" tip={t('canvas.broadcastTip')} onClick={onBroadcast} />
       <span className="mx-1 h-4 w-px bg-line-2" />
-      <ToolBtn icon="minus" tip="Thu nhỏ · Ctrl+lăn chuột" onClick={onZoomOut} />
+      <ToolBtn icon="minus" tip={t('canvas.zoomOutTip')} onClick={onZoomOut} />
       <button
         type="button"
         onClick={onReset}
-        data-tip="Về 100%"
+        data-tip={t('canvas.resetZoomTip')}
         className="h-[26px] w-[46px] rounded-md text-center font-mono text-[11.5px] text-muted hover:bg-panel-3 hover:text-fg"
       >
         {Math.round(z * 100)}%
       </button>
-      <ToolBtn icon="plus" tip="Phóng to · Ctrl+lăn chuột" onClick={onZoomIn} />
+      <ToolBtn icon="plus" tip={t('canvas.zoomInTip')} onClick={onZoomIn} />
       <span className="mx-1 h-4 w-px bg-line-2" />
-      <ToolBtn icon="fit" label="Vừa khung" tip="Thu vừa mọi ô vào màn hình" onClick={onFit} />
-      <ToolBtn icon="tidy" label="Xếp gọn" tip="Xếp mọi ô thành lưới ngăn nắp (hoàn tác: Ctrl+Z)" onClick={onTidy} disabled={!canTidy} />
+      <ToolBtn icon="fit" label={t('canvas.fit')} tip={t('canvas.fitTip')} onClick={onFit} />
+      <ToolBtn icon="tidy" label={t('canvas.tidy')} tip={t('canvas.tidyTip')} onClick={onTidy} disabled={!canTidy} />
     </div>
   )
 }
@@ -731,6 +732,7 @@ function CanvasMenu({
   onTidy: () => void
   onFit: () => void
 }): React.JSX.Element {
+  const t = useT()
   const items = usePlugins((s) => s.items)
   const settings = useSettings((s) => s.value)
   const openWidget = useAgents((s) => s.openWidget)
@@ -745,14 +747,14 @@ function CanvasMenu({
   return (
     <Popover at={screen} bounds={bounds} onClose={onClose}>
       <div className={PANEL} role="menu" onMouseOver={(e) => sub && !sub.contains(e.target as Node) && setSub(null)}>
-        <MenuRow icon="plus" label="Agent mới" hint="Ctrl+Shift+N" onClick={run(() => setNewAgent({ wsId: ws.id, at }))} />
-        <MenuRow icon="term" label="Terminal mới" onClick={run(() => setNewAgent({ wsId: ws.id, at, kind: 'terminal' }))} />
+        <MenuRow icon="plus" label={t('canvas.newAgent')} hint="Ctrl+Shift+N" onClick={run(() => setNewAgent({ wsId: ws.id, at }))} />
+        <MenuRow icon="term" label={t('canvas.newTerminal')} onClick={run(() => setNewAgent({ wsId: ws.id, at, kind: 'terminal' }))} />
         <div onMouseEnter={(e) => setSub(e.currentTarget)} onClick={(e) => setSub(e.currentTarget)}>
           <MenuRow icon="widget" label="Widget" sub />
         </div>
         <div className="my-1 border-t border-line-2" />
-        <MenuRow icon="tidy" label="Xếp gọn" onClick={run(onTidy)} />
-        <MenuRow icon="fit" label="Vừa khung" onClick={run(onFit)} />
+        <MenuRow icon="tidy" label={t('canvas.tidy')} onClick={run(onTidy)} />
+        <MenuRow icon="fit" label={t('canvas.fit')} onClick={run(onFit)} />
       </div>
       {sub && (
         <WidgetSubmenu
@@ -787,6 +789,7 @@ function WidgetSubmenu({
   onPick: (id: string) => void
   onLeave: () => void
 }): React.JSX.Element {
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   useLayoutEffect(() => {
@@ -809,18 +812,18 @@ function WidgetSubmenu({
             role="menuitem"
             data-widget={id}
             onClick={() => onPick(id)}
-            data-tip={shown.includes(id) ? 'Đã mở — bấm để tới ô đó' : 'Mở tại chỗ vừa bấm chuột phải'}
+            data-tip={shown.includes(id) ? t('canvas.widgetOpenTip') : t('canvas.widgetPlaceTip')}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-panel-3"
           >
             <SkillAvatar name={plugin.manifest.displayName} size={16} />
             <span className="min-w-0 flex-1 truncate">
               {plugin.manifest.displayName} · {slot.displayName}
             </span>
-            {shown.includes(id) && <span className="shrink-0 text-[11px] text-dim">đang mở</span>}
+            {shown.includes(id) && <span className="shrink-0 text-[11px] text-dim">{t('canvas.widgetOpen')}</span>}
           </button>
         ))
       ) : (
-        <div className="px-2.5 py-1.5 text-[12px] text-dim">Chưa có widget nào — cài plugin ở Cài đặt → Plugin.</div>
+        <div className="px-2.5 py-1.5 text-[12px] text-dim">{t('canvas.noWidgets')}</div>
       )}
     </div>
   )

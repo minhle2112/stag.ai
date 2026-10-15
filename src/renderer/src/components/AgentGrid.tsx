@@ -22,11 +22,13 @@ import { AdapterTile } from './ui/AdapterTile'
 import { CanvasBoard } from './canvas/CanvasBoard'
 import { Popover, useFrame } from './canvas/frame'
 import { ProjectTabs } from './projects/ProjectTabs'
+import { useT } from '../i18n'
 
 /** Màu chữ trạng thái ở tiêu đề ô theo dấu trạng thái. */
 const MARK_TEXT: Record<StatusMark, string> = { ok: 'text-work', in: 'text-info', wa: 'text-wait', off: 'text-dim', tm: 'text-muted' }
 
 export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.Element {
+  const t = useT()
   const wsId = workspace.id
   const state = useAgents((s) => s.byWs[wsId])
   // Selector hẹp: useAgents() không selector làm component render lại mỗi khi bất kỳ workspace nào đổi.
@@ -64,13 +66,15 @@ export function AgentGrid({ workspace }: { workspace: Workspace }): React.JSX.El
             layout={state.layout}
             hasAgents={here > 0}
             renderCell={renderCell}
-            emptyTitle={project ? `${project.name} chưa có agent.` : projects.length ? 'Chung chưa có agent.' : undefined}
-            emptyHint={
+            emptyTitle={
               project
-                ? `Agent tạo ở đây mở phiên trong ${project.folder}. Chuột phải vào đây → Agent mới, hoặc bấm "+ Agent" ở thanh trên.`
+                ? t('agents.grid.emptyTitle', { name: project.name })
                 : projects.length
-                  ? 'Agent ở Chung làm ở thư mục gốc, thấy mọi project. Chuột phải vào đây → Agent mới.'
+                  ? t('agents.grid.emptyTitle', { name: t('common.name.rootProject') })
                   : undefined
+            }
+            emptyHint={
+              project ? t('agents.grid.emptyHintProject', { folder: project.folder }) : projects.length ? t('agents.grid.emptyHintRoot') : undefined
             }
           />
         )}
@@ -141,11 +145,12 @@ function HeadBtn({
 
 /** Nút phóng to ô ra toàn khung canvas / thu về bản đồ (luôn hiện trên tiêu đề ô). */
 function MaxBtn(): React.JSX.Element {
+  const t = useT()
   const frame = useFrame()
   return (
     <HeadBtn
       icon={frame.maximized ? 'unfocus' : 'focus'}
-      tip={frame.maximized ? 'Thu về bản đồ · Esc / Ctrl+Shift+F' : 'Phóng to toàn khung · Ctrl+Shift+F'}
+      tip={frame.maximized ? t('agents.grid.restoreTip') : t('agents.grid.maximizeTip')}
       keep
       className={frame.maximized ? '!opacity-100 text-fg' : ''}
       onClick={frame.toggleMax}
@@ -155,6 +160,7 @@ function MaxBtn(): React.JSX.Element {
 
 /** Thanh tiêu đề ô: kéo để di chuyển ô trên canvas (trừ khi ô đang phóng to). */
 function CellHeader({ className, tip, children }: { className: string; tip?: string; children: React.ReactNode }): React.JSX.Element {
+  const t = useT()
   const frame = useFrame()
   return (
     <div
@@ -163,7 +169,7 @@ function CellHeader({ className, tip, children }: { className: string; tip?: str
       className={`flex h-[30px] shrink-0 items-center gap-2 border-b border-line pr-1 pl-1.5 text-[12px] ${frame.maximized ? '' : 'cursor-grab active:cursor-grabbing'} ${className}`}
     >
       {!frame.maximized && (
-        <span className="-mr-1 flex text-dim opacity-0 group-hover/cell:opacity-100" data-tip="Kéo để di chuyển ô">
+        <span className="-mr-1 flex text-dim opacity-0 group-hover/cell:opacity-100" data-tip={t('agents.grid.dragTip')}>
           <Icon name="grip" size="s" />
         </span>
       )}
@@ -207,6 +213,7 @@ function CtxMeter({ agentId, status }: { agentId: string; status: AgentStatus | 
 
 /** memo + selector theo agent: ô chỉ render lại khi phần của chính agent đó đổi, không theo cả workspace. */
 const AgentCell = memo(function AgentCell({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Element {
+  const t = useT()
   const hostRef = useRef<HTMLDivElement>(null)
   const menuBtn = useRef<HTMLButtonElement>(null)
   const start = useAgents((s) => s.start)
@@ -222,7 +229,7 @@ const AgentCell = memo(function AgentCell({ ws, agent }: { ws: Workspace; agent:
   const kind = agentKind(agent)
   const terminal = kind === 'terminal'
   // Agent của adapter ngoài: hiện tên adapter (vd. Aider) trên ô nhận diện.
-  const extLabel = useExternalAdapters((s) => (kind === 'external' ? (s.items.find((x) => x.manifest.id === agent.adapterId)?.manifest.label ?? `${agent.adapterId} (đã gỡ)`) : null))
+  const extLabel = useExternalAdapters((s) => (kind === 'external' ? (s.items.find((x) => x.manifest.id === agent.adapterId)?.manifest.label ?? t('agents.grid.adapterRemoved', { id: agent.adapterId ?? '' })) : null))
   const view = statusView(running, starting, status, kind)
   // Ô chat (Claude Code stream-json / Codex app-server, xem shared/chat.ts): hội thoại thay cho terminal.
   const chat = (kind === 'claude' || kind === 'codex') && agent.cell === 'chat'
@@ -245,7 +252,7 @@ const AgentCell = memo(function AgentCell({ ws, agent }: { ws: Workspace; agent:
         <span className={`sdot ${view.mark}`} data-tip={view.label} />
         <b
           className="min-w-0 truncate text-[13px] font-semibold whitespace-nowrap"
-          data-tip={`${agent.name}${agent.role ? ` · ${agent.role}` : ''}\nBấm đúp để đổi tên`}
+          data-tip={`${agent.name}${agent.role ? ` · ${agent.role}` : ''}\n${t('agents.grid.renameTip')}`}
           onDoubleClick={() => setRenaming(true)}
         >
           {agent.name}
@@ -254,7 +261,7 @@ const AgentCell = memo(function AgentCell({ ws, agent }: { ws: Workspace; agent:
           <AdapterTile
             kind={kind}
             label={extLabel ?? undefined}
-            tip={kind === 'claude' ? 'Claude Code' : kind === 'codex' ? 'Codex' : kind === 'terminal' ? 'Terminal' : (extLabel ?? 'Adapter ngoài')}
+            tip={kind === 'claude' ? 'Claude Code' : kind === 'codex' ? 'Codex' : kind === 'terminal' ? 'Terminal' : (extLabel ?? t('agents.grid.externalAdapter'))}
           />
         </span>
         {!terminal && <span className={`min-w-0 truncate ${MARK_TEXT[view.mark]} @max-[300px]/cell:hidden`}>{view.label}</span>}
@@ -264,7 +271,7 @@ const AgentCell = memo(function AgentCell({ ws, agent }: { ws: Workspace; agent:
           {running && !terminal && <MicButton wsId={ws.id} agentId={agent.id} />}
           <CloseBtn wsId={ws.id} agentId={agent.id} running={running} />
           <MaxBtn />
-          <HeadBtn icon="more" tip="Menu ô" keep btnRef={menuBtn} onClick={() => setMenu(!menu)} />
+          <HeadBtn icon="more" tip={t('agents.grid.menuTip')} keep btnRef={menuBtn} onClick={() => setMenu(!menu)} />
         </span>
       </CellHeader>
       {menu && (
@@ -288,13 +295,13 @@ const AgentCell = memo(function AgentCell({ ws, agent }: { ws: Workspace; agent:
               {error ? (
                 <div className="max-w-md rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-center text-danger">{error}</div>
               ) : (
-                <div className="text-dim">{terminal ? 'Terminal chưa mở.' : 'Phiên đã dừng.'}</div>
+                <div className="text-dim">{terminal ? t('agents.grid.terminalClosed') : t('agents.grid.sessionStopped')}</div>
               )}
               <div className="flex gap-2">
                 <Button primary onClick={() => start(ws.id, agent.id, false)}>
-                  {terminal ? 'Mở terminal' : 'Phiên mới'}
+                  {terminal ? t('agents.menu.openTerminal') : t('agents.menu.newSession')}
                 </Button>
-                {agent.lastSessionId && <Button onClick={() => start(ws.id, agent.id, true)}>Tiếp tục phiên trước</Button>}
+                {agent.lastSessionId && <Button onClick={() => start(ws.id, agent.id, true)}>{t('agents.menu.resume')}</Button>}
               </div>
             </div>
           )}
@@ -310,20 +317,24 @@ const AgentCell = memo(function AgentCell({ ws, agent }: { ws: Workspace; agent:
 
 /** Dòng "Đang làm" dưới tiêu đề ô: việc đang mở của agent (task_start) + phạm vi đang khoá (thay cho thẻ Kanban cũ). */
 function DoingLine({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.Element {
-  const task = useBoard((s) => s.byWs[ws.id]?.tasks.find((t) => t.agentId === agent.id && t.status === 'open'))
+  const t = useT()
+  const task = useBoard((s) => s.byWs[ws.id]?.tasks.find((x) => x.agentId === agent.id && x.status === 'open'))
   if (!task)
-    return <div className="flex h-6 shrink-0 items-center border-b border-line px-2.5 text-[12px] text-dim @max-[220px]/cell:hidden">Chưa có việc</div>
+    return (
+      <div className="flex h-6 shrink-0 items-center border-b border-line px-2.5 text-[12px] text-dim @max-[220px]/cell:hidden">{t('agents.grid.noTask')}</div>
+    )
   const base = task.base ?? agentFolder(ws, agent)
-  const files = task.files?.length ? `\n+ ${task.files.length} file đã sửa ngoài phạm vi: ${task.files.slice(-8).join(', ')}` : ''
+  const files = task.files?.length ? `\n${t('agents.grid.doingFilesTip', { count: task.files.length, files: task.files.slice(-8).join(', ') })}` : ''
+  const scope = task.scope ? `\n${t('agents.grid.doingScopeTip', { scope: task.scope, base: base || t('agents.grid.rootFolder') })}` : ''
   return (
     <div
       className="flex h-6 shrink-0 items-center gap-1.5 overflow-hidden border-b border-line bg-panel-2 px-2.5 text-[12px] whitespace-nowrap text-muted"
-      data-tip={`Đang làm: ${task.title}${task.scope ? `\nPhạm vi đang khoá: ${task.scope} (tính từ ${base || 'thư mục gốc'})` : ''}${files}`}
+      data-tip={`${t('agents.grid.doingTip', { title: task.title })}${scope}${files}`}
     >
       <span className="flex shrink-0 text-work">
         <Icon name="check" size="s" />
       </span>
-      <span className="shrink-0 @max-[260px]/cell:hidden">Đang làm:</span>
+      <span className="shrink-0 @max-[260px]/cell:hidden">{t('agents.grid.doing')}</span>
       <b className="min-w-0 truncate font-medium text-fg">{task.title}</b>
       {task.scope && (
         <span className="ml-auto flex min-w-0 shrink items-center gap-1 font-mono text-[11px] text-dim @max-[340px]/cell:hidden">
@@ -336,8 +347,9 @@ function DoingLine({ ws, agent }: { ws: Workspace; agent: Agent }): React.JSX.El
 }
 
 function CloseBtn({ wsId, agentId, running }: { wsId: string; agentId: string; running: boolean }): React.JSX.Element {
+  const t = useT()
   const hide = useAgents((s) => s.hide)
-  return <HeadBtn icon="x" tip={running ? 'Đóng ô · phiên vẫn chạy, mở lại ở thanh bên' : 'Đóng ô · mở lại ở thanh bên'} onClick={() => hide(wsId, agentId)} />
+  return <HeadBtn icon="x" tip={running ? t('agents.grid.closeTipRunning') : t('agents.grid.closeTip')} onClick={() => hide(wsId, agentId)} />
 }
 
 /**
@@ -346,6 +358,7 @@ function CloseBtn({ wsId, agentId, running }: { wsId: string; agentId: string; r
  * lời nhắc.
  */
 const WidgetCell = memo(function WidgetCell({ ws, widget }: { ws: Workspace; widget: string }): React.JSX.Element {
+  const t = useT()
   const boxRef = useRef<HTMLDivElement>(null)
   const focus = useAgents((s) => s.focus)
   const closeWidget = useAgents((s) => s.closeWidget)
@@ -376,13 +389,13 @@ const WidgetCell = memo(function WidgetCell({ ws, widget }: { ws: Workspace; wid
 
   return (
     <div ref={boxRef} data-widget-cell={widget} className="group/cell @container/cell absolute inset-0 flex flex-col bg-panel" onMouseDown={() => focus(ws.id, key)}>
-      <CellHeader className={focused ? 'bg-panel-3' : 'bg-panel'} tip={`Widget của plugin ${pluginName}: ${slotName}\nKéo thanh này để di chuyển ô`}>
+      <CellHeader className={focused ? 'bg-panel-3' : 'bg-panel'} tip={`${t('agents.grid.widgetTip', { plugin: pluginName, slot: slotName })}\n${t('agents.grid.widgetDragTip')}`}>
         <SkillAvatar name={pluginName} size={16} />
         <b className="min-w-0 truncate text-[13px] font-semibold">{pluginName}</b>
         <span className="min-w-0 truncate text-muted @max-[300px]/cell:hidden">{slotName}</span>
         <div className="flex-1" />
         <span className="flex shrink-0 items-center gap-px">
-          <HeadBtn icon="x" tip="Đóng widget · mở lại bằng chuột phải lên canvas → Widget" onClick={() => closeWidget(ws.id, widget)} />
+          <HeadBtn icon="x" tip={t('agents.grid.widgetCloseTip')} onClick={() => closeWidget(ws.id, widget)} />
           <MaxBtn />
         </span>
       </CellHeader>
@@ -394,10 +407,12 @@ const WidgetCell = memo(function WidgetCell({ ws, widget }: { ws: Workspace; wid
           pluginsLoaded &&
           settingsLoaded && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-dim">
-              <div>Widget này không còn chạy — xem Cài đặt → Plugin.</div>
+              <div>{t('agents.grid.widgetDead')}</div>
               <div className="flex gap-2">
-                <Button onClick={() => useUi.getState().openSettings('plugins', installed ? { plugin: pluginId } : undefined)}>Mở Cài đặt → Plugin</Button>
-                <Button onClick={() => closeWidget(ws.id, widget)}>Đóng ô</Button>
+                <Button onClick={() => useUi.getState().openSettings('plugins', installed ? { plugin: pluginId } : undefined)}>
+                  {t('agents.grid.widgetOpenSettings')}
+                </Button>
+                <Button onClick={() => closeWidget(ws.id, widget)}>{t('agents.menu.closeCell')}</Button>
               </div>
             </div>
           )

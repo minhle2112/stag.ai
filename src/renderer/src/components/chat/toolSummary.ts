@@ -1,6 +1,7 @@
 // Tóm tắt tool của Claude Code cho thẻ tool và thẻ xin quyền: tên thân thiện, một dòng tóm tắt tham số, và dữ liệu
 // có cấu trúc để vẽ phần mở rộng (lệnh, diff, checklist…). Thuần logic → test được trong Node.
 import type { IconName } from '../icons'
+import { t as tr, type PlainKey } from '@shared/i18n'
 
 // ---------- tiện ích ----------
 
@@ -262,34 +263,37 @@ export function toolDisplayName(name: string): string {
   return m ? `${m.server} · ${m.tool}` : name
 }
 
-const LABEL: Record<string, { icon: IconName; label: string }> = {
-  Bash: { icon: 'term', label: 'Chạy lệnh' },
-  BashOutput: { icon: 'term', label: 'Đọc output lệnh' },
-  KillShell: { icon: 'term', label: 'Dừng lệnh' },
-  Read: { icon: 'file', label: 'Đọc file' },
-  Edit: { icon: 'fdiff', label: 'Sửa file' },
-  MultiEdit: { icon: 'fdiff', label: 'Sửa file' },
-  ApplyPatch: { icon: 'fdiff', label: 'Sửa file' },
-  Permissions: { icon: 'shield', label: 'Thêm quyền' },
-  MCP: { icon: 'conn', label: 'Mở trang của máy chủ MCP' },
-  Write: { icon: 'pen', label: 'Ghi file' },
-  NotebookEdit: { icon: 'fdiff', label: 'Sửa notebook' },
-  Glob: { icon: 'search', label: 'Tìm file' },
-  Grep: { icon: 'search', label: 'Tìm trong code' },
-  WebFetch: { icon: 'globe', label: 'Tải trang web' },
-  WebSearch: { icon: 'globe', label: 'Tìm trên web' },
-  Task: { icon: 'bot', label: 'Agent con' },
-  Agent: { icon: 'bot', label: 'Agent con' },
-  TodoWrite: { icon: 'kanban', label: 'Việc cần làm' },
-  ExitPlanMode: { icon: 'kanban', label: 'Kế hoạch' }
+const LABEL: Record<string, { icon: IconName; label: PlainKey }> = {
+  Bash: { icon: 'term', label: 'chat.tool.label.bash' },
+  BashOutput: { icon: 'term', label: 'chat.tool.label.bashOutput' },
+  KillShell: { icon: 'term', label: 'chat.tool.label.killShell' },
+  Read: { icon: 'file', label: 'chat.tool.label.read' },
+  Edit: { icon: 'fdiff', label: 'chat.tool.label.edit' },
+  MultiEdit: { icon: 'fdiff', label: 'chat.tool.label.edit' },
+  ApplyPatch: { icon: 'fdiff', label: 'chat.tool.label.edit' },
+  Permissions: { icon: 'shield', label: 'chat.tool.label.permissions' },
+  MCP: { icon: 'conn', label: 'chat.tool.label.mcp' },
+  Write: { icon: 'pen', label: 'chat.tool.label.write' },
+  NotebookEdit: { icon: 'fdiff', label: 'chat.tool.label.notebook' },
+  Glob: { icon: 'search', label: 'chat.tool.label.glob' },
+  Grep: { icon: 'search', label: 'chat.tool.label.grep' },
+  WebFetch: { icon: 'globe', label: 'chat.tool.label.webFetch' },
+  WebSearch: { icon: 'globe', label: 'chat.tool.label.webSearch' },
+  Task: { icon: 'bot', label: 'chat.tool.label.subagent' },
+  Agent: { icon: 'bot', label: 'chat.tool.label.subagent' },
+  TodoWrite: { icon: 'kanban', label: 'chat.tool.label.todo' },
+  ExitPlanMode: { icon: 'kanban', label: 'chat.tool.label.plan' }
 }
 
-const STAG_LABEL: Record<string, { icon: IconName; label: string; verb: string }> = {
-  task_start: { icon: 'kanban', label: 'Bắt đầu việc', verb: 'Bắt đầu việc' },
-  task_update: { icon: 'kanban', label: 'Đổi việc', verb: 'Đổi việc' },
-  task_done: { icon: 'kanban', label: 'Xong việc', verb: 'Xong việc' },
-  task_list: { icon: 'kanban', label: 'Việc của đội', verb: 'Xem việc của cả đội' },
-  session_handoff: { icon: 'handoff', label: 'Bàn giao', verb: 'Bàn giao sang phiên mới' }
+/** Nhãn tool theo ngôn ngữ giao diện (gọi lúc dùng, không lúc nạp module). */
+const lbl = (name: string): string => tr(LABEL[name].label)
+
+const STAG_LABEL: Record<string, { icon: IconName; label: PlainKey; verb: PlainKey }> = {
+  task_start: { icon: 'kanban', label: 'chat.tool.stag.taskStart', verb: 'chat.tool.stag.taskStart' },
+  task_update: { icon: 'kanban', label: 'chat.tool.stag.taskUpdate', verb: 'chat.tool.stag.taskUpdate' },
+  task_done: { icon: 'kanban', label: 'chat.tool.stag.taskDone', verb: 'chat.tool.stag.taskDone' },
+  task_list: { icon: 'kanban', label: 'chat.tool.stag.taskList', verb: 'chat.tool.stag.taskListVerb' },
+  session_handoff: { icon: 'handoff', label: 'chat.tool.stag.handoff', verb: 'chat.tool.stag.handoffVerb' }
 }
 
 function todoItems(v: unknown): TodoItem[] {
@@ -298,7 +302,7 @@ function todoItems(v: unknown): TodoItem[] {
     const r = rec(x)
     const status = str(r.status)
     return {
-      text: str(r.content) || str(r.activeForm) || str(r.text) || '(trống)',
+      text: str(r.content) || str(r.activeForm) || str(r.text) || tr('chat.tool.empty'),
       status: status === 'completed' || status === 'in_progress' ? status : 'pending'
     }
   })
@@ -327,8 +331,8 @@ function compactJson(v: unknown, max: number): string {
 /** Số dòng đầu đoạn [offset, offset+limit) của tool Read: "L12–61", "từ L12", "200 dòng đầu". */
 export function readRange(offset: number | null, limit: number | null): string {
   if (offset !== null && limit !== null) return `L${offset}–${offset + limit - 1}`
-  if (offset !== null) return `từ L${offset}`
-  if (limit !== null) return `${limit} dòng đầu`
+  if (offset !== null) return tr('chat.tool.fromLine', { line: `L${offset}` })
+  if (limit !== null) return tr('chat.tool.firstLines', { count: limit })
   return ''
 }
 
@@ -350,7 +354,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const description = str(i.description)
       return {
         icon: 'term',
-        label: LABEL.Bash.label,
+        label: lbl('Bash'),
         summary: clip(firstLine(command) || description, SUMMARY_MAX),
         stats: null,
         detail: { kind: 'bash', command, description }
@@ -361,7 +365,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const range = readRange(num(i.offset), num(i.limit))
       return {
         icon: 'file',
-        label: LABEL.Read.label,
+        label: lbl('Read'),
         summary: [shortenPath(path, opts.root), range].filter(Boolean).join(' · '),
         stats: null,
         detail: { kind: 'read', path, range }
@@ -381,7 +385,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const summary = paths.length > 1 ? `${paths.length} file: ${paths.map((x) => shortenPath(x, opts.root, 40)).join(', ')}` : shortenPath(paths[0] ?? '', opts.root)
       return {
         icon: added ? 'pen' : 'fdiff',
-        label: added ? 'Tạo file' : removed ? 'Xoá file' : LABEL.ApplyPatch.label,
+        label: added ? tr('chat.tool.label.create') : removed ? tr('chat.tool.label.delete') : lbl('ApplyPatch'),
         summary: clip(summary, SUMMARY_MAX),
         stats: rows.length ? diffStats(rows) : null,
         detail: { kind: 'edit', path: paths.join(', '), rows, replaceAll: false, edits: changes.length > 1 ? changes.length : 1 }
@@ -392,12 +396,12 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const fsPerm = rec(perms.fileSystem)
       const net = rec(perms.network)
       const lines = [
-        ...['read', 'write'].flatMap((k) => (Array.isArray(fsPerm[k]) ? (fsPerm[k] as unknown[]).map((p) => `${k === 'read' ? 'Đọc' : 'Ghi'}: ${String(p)}`) : [])),
-        net.enabled === true ? 'Mạng: bật' : ''
+        ...['read', 'write'].flatMap((k) => (Array.isArray(fsPerm[k]) ? (fsPerm[k] as unknown[]).map((p) => tr(k === 'read' ? 'chat.tool.perm.read' : 'chat.tool.perm.write', { path: String(p) })) : [])),
+        net.enabled === true ? tr('chat.tool.perm.network') : ''
       ].filter(Boolean)
       return {
         icon: 'shield',
-        label: 'Thêm quyền',
+        label: lbl('Permissions'),
         summary: clip(lines[0] ?? compactJson(perms, SUMMARY_MAX), SUMMARY_MAX),
         stats: null,
         detail: lines.length ? { kind: 'text', text: lines.join('\n') } : { kind: 'json', json: jsonOf(perms) }
@@ -407,10 +411,10 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const url = str(i.url)
       return {
         icon: 'conn',
-        label: `Máy chủ MCP ${str(i.server)}`.trim(),
+        label: tr('chat.tool.mcpServer', { name: str(i.server) }).trim(),
         summary: clip(firstLine(str(i.message)) || url, SUMMARY_MAX),
         stats: null,
-        detail: { kind: 'text', text: [str(i.message), url ? `Mở: ${url}` : ''].filter(Boolean).join('\n\n') }
+        detail: { kind: 'text', text: [str(i.message), url ? tr('chat.tool.openUrl', { url }) : ''].filter(Boolean).join('\n\n') }
       }
     }
     case 'Edit':
@@ -425,7 +429,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const stats = diffStats(rows)
       return {
         icon: 'fdiff',
-        label: LABEL[name].label,
+        label: lbl(name),
         summary: shortenPath(path, opts.root),
         stats,
         detail: { kind: 'edit', path, rows, replaceAll: list.some((e) => e.replace_all === true), edits: list.length }
@@ -437,8 +441,8 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const lines = countLines(content)
       return {
         icon: 'pen',
-        label: LABEL.Write.label,
-        summary: [shortenPath(path, opts.root), content ? `${lines} dòng` : ''].filter(Boolean).join(' · '),
+        label: lbl('Write'),
+        summary: [shortenPath(path, opts.root), content ? tr('chat.tool.lines', { count: lines }) : ''].filter(Boolean).join(' · '),
         stats: lines ? { add: lines, del: 0 } : null,
         detail: { kind: 'write', path, content, lines }
       }
@@ -447,7 +451,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const path = str(i.notebook_path)
       return {
         icon: 'fdiff',
-        label: LABEL.NotebookEdit.label,
+        label: lbl('NotebookEdit'),
         summary: shortenPath(path, opts.root),
         stats: null,
         detail: { kind: 'write', path, content: str(i.new_source), lines: countLines(str(i.new_source)) }
@@ -460,7 +464,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const extra = [str(i.glob), str(i.type), str(i.output_mode)].filter(Boolean).join(' · ')
       return {
         icon: 'search',
-        label: LABEL[name].label,
+        label: lbl(name),
         summary: clip([pattern, path ? `trong ${shortenPath(path, opts.root)}` : ''].filter(Boolean).join(' '), SUMMARY_MAX),
         stats: null,
         detail: { kind: 'search', pattern, path, extra }
@@ -470,7 +474,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const url = str(i.url)
       return {
         icon: 'globe',
-        label: LABEL.WebFetch.label,
+        label: lbl('WebFetch'),
         summary: clip(url.replace(/^https?:\/\//i, ''), SUMMARY_MAX),
         stats: null,
         detail: { kind: 'web', target: url, prompt: str(i.prompt), isQuery: false }
@@ -478,7 +482,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
     }
     case 'WebSearch': {
       const q = str(i.query)
-      return { icon: 'globe', label: LABEL.WebSearch.label, summary: clip(q, SUMMARY_MAX), stats: null, detail: { kind: 'web', target: q, prompt: '', isQuery: true } }
+      return { icon: 'globe', label: lbl('WebSearch'), summary: clip(q, SUMMARY_MAX), stats: null, detail: { kind: 'web', target: q, prompt: '', isQuery: true } }
     }
     case 'Task':
     case 'Agent': {
@@ -486,7 +490,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const prompt = str(i.prompt)
       return {
         icon: 'bot',
-        label: LABEL[name].label,
+        label: lbl(name),
         summary: clip(description || firstLine(prompt), SUMMARY_MAX),
         stats: null,
         detail: { kind: 'agent', description, prompt, subagent: str(i.subagent_type) }
@@ -496,7 +500,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const questions = parseQuestions(i)
       return {
         icon: 'ask',
-        label: 'Câu hỏi',
+        label: tr('chat.tool.label.question'),
         summary: clip(questions[0]?.question ?? '', SUMMARY_MAX),
         stats: null,
         detail: { kind: 'questions', questions, answers: answersOf(i) }
@@ -506,7 +510,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const plan = str(i.plan)
       return {
         icon: 'kanban',
-        label: LABEL.ExitPlanMode.label,
+        label: lbl('ExitPlanMode'),
         summary: clip(firstLine(plan).replace(/^#+\s*/, ''), SUMMARY_MAX),
         stats: null,
         detail: { kind: 'plan', plan }
@@ -518,7 +522,7 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
       const active = items.find((t) => t.status === 'in_progress')
       return {
         icon: 'kanban',
-        label: LABEL.TodoWrite.label,
+        label: lbl('TodoWrite'),
         summary: items.length ? `${done}/${items.length}${active ? ` · ${clip(active.text, 80)}` : ''}` : '',
         stats: null,
         detail: { kind: 'todo', items }
@@ -532,13 +536,13 @@ export function describeTool(name: string, input: unknown, opts: DescribeOpts = 
     const title = str(i.title)
     const summaryText = firstLine(str(i.summary))
     const body = mcp.tool === 'task_done' ? summaryText : title
-    const text = body ? `${meta.verb}: ${clip(body, 110)}` : meta.verb
+    const text = body ? `${tr(meta.verb)}: ${clip(body, 110)}` : tr(meta.verb)
     return {
       icon: meta.icon,
-      label: meta.label,
+      label: tr(meta.label),
       summary: body ? clip(body, SUMMARY_MAX) : '',
       stats: null,
-      detail: { kind: 'text', text: [text, str(i.scope) ? `Phạm vi: ${str(i.scope)}` : '', str(i.log) ? `Nhật ký: ${str(i.log)}` : ''].filter(Boolean).join('\n') }
+      detail: { kind: 'text', text: [text, str(i.scope) ? tr('chat.tool.scope', { scope: str(i.scope) }) : '', str(i.log) ? tr('chat.tool.log', { log: str(i.log) }) : ''].filter(Boolean).join('\n') }
     }
   }
   if (mcp) {
@@ -570,13 +574,13 @@ export function stepName(name: string): string {
 /** Kết quả ngắn bên phải một dòng bước: "214 dòng", "4 kết quả", "✓" / "✗"; null = để biểu tượng trạng thái lo. */
 export function stepResult(name: string, state: string, output?: string): { text: string; tone: 'ok' | 'err' | 'dim' } | null {
   if (state === 'running') return null
-  if (state === 'error' || state === 'denied') return { text: state === 'denied' ? '✗ bị từ chối' : '✗', tone: 'err' }
+  if (state === 'error' || state === 'denied') return { text: state === 'denied' ? tr('chat.tool.denied') : '✗', tone: 'err' }
   const out = (output ?? '').trim()
-  if (name === 'Read' && out) return { text: `${countLines(out)} dòng`, tone: 'dim' }
+  if (name === 'Read' && out) return { text: tr('chat.tool.lines', { count: countLines(out) }), tone: 'dim' }
   if (name === 'Grep' || name === 'Glob') {
-    if (!out || /^no (matches|files) found/i.test(out)) return { text: '0 kết quả', tone: 'dim' }
+    if (!out || /^no (matches|files) found/i.test(out)) return { text: tr('chat.tool.results', { count: 0 }), tone: 'dim' }
     const head = /^Found (\d+) (files?|matches?|lines?)/i.exec(out)
-    return { text: `${head ? head[1] : countLines(out)} kết quả`, tone: 'dim' }
+    return { text: tr('chat.tool.results', { count: head ? Number(head[1]) : countLines(out) }), tone: 'dim' }
   }
   return { text: '✓', tone: 'ok' }
 }
@@ -629,18 +633,20 @@ export function mergeFileChanges(changes: Array<{ path: string; rows: DiffRow[] 
 
 /** Tiêu đề thẻ xin quyền: "Tester muốn chạy lệnh", "Tester muốn dùng stag · task_done". */
 export function askHeadline(agent: string, name: string): string {
-  if (name === 'AskUserQuestion') return `${agent} hỏi bạn`
-  if (name === 'ExitPlanMode') return `${agent} muốn bạn duyệt kế hoạch`
-  const meta = LABEL[name]
-  if (meta) return `${agent} muốn ${meta.label.charAt(0).toLowerCase()}${meta.label.slice(1)}`
-  return `${agent} muốn dùng ${toolDisplayName(name)}`
+  if (name === 'AskUserQuestion') return tr('chat.ask.headQuestion', { agent })
+  if (name === 'ExitPlanMode') return tr('chat.ask.headPlan', { agent })
+  if (LABEL[name]) {
+    const label = lbl(name)
+    return tr('chat.ask.headTool', { agent, action: `${label.charAt(0).toLowerCase()}${label.slice(1)}` })
+  }
+  return tr('chat.ask.headUse', { agent, tool: toolDisplayName(name) })
 }
 
 /** Nhãn nút "Luôn cho phép": Bash kèm lệnh (rút gọn), còn lại theo tên tool. */
 export function rememberLabel(name: string, input: unknown): string {
   if (name === 'Bash') {
     const cmd = firstLine(str(rec(input).command))
-    if (cmd) return `Luôn cho phép “${clip(cmd, 32)}”`
+    if (cmd) return tr('chat.ask.alwaysCmd', { cmd: clip(cmd, 32) })
   }
-  return 'Luôn cho phép trong phiên'
+  return tr('chat.ask.alwaysSession')
 }

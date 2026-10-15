@@ -10,6 +10,7 @@ import { codexHome, tomlString } from './codex'
 import { resolveCommand } from './externalAdapters'
 import { claudeJsonPath } from './context'
 import { readText } from './fsutil'
+import { t } from '@shared/i18n'
 
 /**
  * Connector (máy chủ MCP) cho phiên agent: dịch sang cấu hình từng CLI, đưa bí mật qua biến môi trường,
@@ -49,12 +50,12 @@ export function connectorEnv(servers: Connector[], getSecret: (name: string) => 
   const owner: Record<string, string> = {}
   const need = (c: Connector, name: string): string => {
     const v = getSecret(name)
-    if (v === undefined) throw new Error(`Connector "${c.id}" cần bí mật ${name} nhưng chưa lưu (hoặc không giải mã được). Thêm ở Cài đặt → Secrets, hoặc tắt connector này.`)
+    if (v === undefined) throw new Error(t('connectors.env.missingSecret', { id: c.id, name }))
     return v
   }
   const put = (c: Connector, key: string, value: string): void => {
     if (key in env && env[key] !== value)
-      throw new Error(`Connector "${owner[key]}" và "${c.id}" cùng đặt biến ${key} với giá trị khác nhau. Đổi tên biến hoặc tắt một trong hai.`)
+      throw new Error(t('connectors.env.conflict', { a: owner[key], b: c.id, key }))
     env[key] = value
     owner[key] = c.id
   }
@@ -273,15 +274,15 @@ export function parseCodexMcpList(out: string): InheritedServer[] {
   return list
     .filter((s) => typeof s?.name === 'string')
     .map((s) => {
-      const t = obj(s.transport)
-      const target = typeof t.url === 'string' ? t.url : [t.command, ...(Array.isArray(t.args) ? t.args : [])].filter((x) => typeof x === 'string').join(' ')
+      const tr = obj(s.transport)
+      const target = typeof tr.url === 'string' ? tr.url : [tr.command, ...(Array.isArray(tr.args) ? tr.args : [])].filter((x) => typeof x === 'string').join(' ')
       return {
         key: `codex:${s.name}`,
         runtime: 'codex' as const,
         name: s.name,
         source: 'codex' as const,
         target,
-        status: s.enabled === false ? 'Đã tắt trong config.toml' : 'Bật trong config.toml',
+        status: s.enabled === false ? t('connectors.inherited.codexOff') : t('connectors.inherited.codexOn'),
         copyable: true
       }
     })
@@ -292,7 +293,7 @@ export async function scanInherited(runtime: CliAdapterId, exe: string, cwd: str
   const scan: InheritedScan = { runtime, cwd, servers: [], error: null, scannedAt: new Date().toISOString() }
   const r = await run(exe, runtime === 'claude' ? ['mcp', 'list'] : ['mcp', 'list', '--json'], cwd, env, runtime === 'claude' ? 120_000 : 30_000)
   if (!r.ok && !r.out.trim()) {
-    scan.error = `Chạy "${runtime} mcp list" lỗi: ${r.err.trim().split(/\r?\n/)[0] || 'không rõ'}`
+    scan.error = t('connectors.inherited.scanFailed', { command: `${runtime} mcp list`, error: r.err.trim().split(/\r?\n/)[0] || t('common.unknown') })
     return scan
   }
   scan.servers = runtime === 'claude' ? parseClaudeMcpList(r.out, await claudeConfigs(cwd, homedir(), env)) : parseCodexMcpList(r.out)
@@ -392,7 +393,7 @@ export async function testConnector(
       return result({ ok: true, server: v ? `${v.name} ${v.version}` : '', tools })
     })()
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`Quá ${TEST_TIMEOUT / 1000} giây không xong (lần đầu chạy npx có thể phải tải gói — thử lại)`)), TEST_TIMEOUT)
+      timer = setTimeout(() => reject(new Error(t('connectors.test.timeout', { seconds: TEST_TIMEOUT / 1000 }))), TEST_TIMEOUT)
     })
     return await Promise.race([work, timeout])
   } catch (e) {
@@ -406,8 +407,8 @@ export async function testConnector(
 function explain(e: Error, stderr: string): string {
   const msg = e.message || String(e)
   const tail = stderr.trim().split(/\r?\n/).slice(-3).join(' · ')
-  if (/\b401\b|unauthorized/i.test(msg)) return `Máy chủ từ chối (401): token sai, hoặc máy chủ cần đăng nhập OAuth (app chưa hỗ trợ). ${msg}`
-  if (/ENOENT/.test(msg)) return `Không tìm thấy chương trình: ${msg}`
-  if (/Connection closed/i.test(msg) && tail) return `Máy chủ thoát ngay: ${tail}`
+  if (/\b401\b|unauthorized/i.test(msg)) return t('connectors.test.unauthorized', { message: msg })
+  if (/ENOENT/.test(msg)) return t('connectors.test.notFound', { message: msg })
+  if (/Connection closed/i.test(msg) && tail) return t('connectors.test.exited', { output: tail })
   return tail ? `${msg} — ${tail}` : msg
 }

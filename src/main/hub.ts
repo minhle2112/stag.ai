@@ -13,6 +13,8 @@ export interface HubHandlers {
   hook(agentId: string, payload: HookPayload): unknown
   /** Máy chủ MCP gắn với một agent (tool task_* biết ai đang gọi). null = agent không tồn tại. */
   mcp(agentId: string): McpServer | null
+  /** Máy chủ MCP `computer` của agent (computer use giống Claude Desktop). null = agent không tồn tại. */
+  computerMcp?(agentId: string): McpServer | null
   /** JSON statusLine của phiên agent (độ dài context, xem context.ts). */
   status(agentId: string, body: unknown): void
 }
@@ -60,13 +62,13 @@ export class StatusHub {
 
   /** Tham số thêm cho `claude`: hook + máy chủ MCP của app (hoặc file riêng của phiên, xem writeSessionConfigs). */
   claudeArgs(own: { settingsFile?: string; mcpFile?: string } = {}): string[] {
-    if (!this.server) throw new Error('StatusHub chưa chạy')
+    if (!this.server) throw new Error('StatusHub is not running')
     return ['--settings', own.settingsFile ?? this.settingsFile, '--mcp-config', own.mcpFile ?? this.mcpFile]
   }
 
   /** Mục `stag` trong `mcpServers` kiểu Claude (token / id agent lấy từ biến môi trường). */
   stagServer(): Record<string, unknown> {
-    if (!this.server) throw new Error('StatusHub chưa chạy')
+    if (!this.server) throw new Error('StatusHub is not running')
     return {
       type: 'http',
       url: `http://127.0.0.1:${this.port}/mcp`,
@@ -120,15 +122,23 @@ export class StatusHub {
     return out
   }
 
+  /**
+   * Mục `computer` trong `mcpServers` (máy chủ riêng, cùng token phiên): agent thấy tool `mcp__computer__screenshot`,
+   * `left_click`… cùng tên / tham số như Claude Desktop (tên `computer-use` bị Claude Code giữ riêng).
+   */
+  computerServer(): Record<string, unknown> {
+    return { ...this.stagServer(), url: `http://127.0.0.1:${this.port}/mcp/computer-use` }
+  }
+
   /** File cấu hình MCP kiểu Claude (`{ mcpServers: { stag } }`, token qua biến môi trường) cho adapter ngoài. */
   mcpConfigFile(): string {
-    if (!this.server) throw new Error('StatusHub chưa chạy')
+    if (!this.server) throw new Error('StatusHub is not running')
     return this.mcpFile
   }
 
   /** Địa chỉ hook / MCP cho CLI không dùng file cấu hình của app (Codex nhận qua `-c`). */
   endpoints(): { hookUrl: string; mcpUrl: string } {
-    if (!this.server) throw new Error('StatusHub chưa chạy')
+    if (!this.server) throw new Error('StatusHub is not running')
     const base = `http://127.0.0.1:${this.port}`
     return { hookUrl: `${base}/hook`, mcpUrl: `${base}/mcp` }
   }
@@ -220,15 +230,15 @@ export class StatusHub {
       return send(res, 200, {})
     }
 
-    if (path === '/mcp') {
+    if (path === '/mcp' || path === '/mcp/computer-use') {
       // Không giữ phiên: không có luồng GET/SSE riêng, không có DELETE phiên.
       if (req.method !== 'POST') {
         res.setHeader('Allow', 'POST')
         return send(res, 405, { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed' }, id: null })
       }
       const body = await readJson(req)
-      const server = agentId ? this.handlers.mcp(agentId) : null
-      if (!server) return send(res, 404, { jsonrpc: '2.0', error: { code: -32001, message: 'Agent không tồn tại' }, id: null })
+      const server = !agentId ? null : path === '/mcp' ? this.handlers.mcp(agentId) : (this.handlers.computerMcp?.(agentId) ?? null)
+      if (!server) return send(res, 404, { jsonrpc: '2.0', error: { code: -32001, message: 'Unknown agent' }, id: null })
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
       res.on('close', () => {
         transport.close()

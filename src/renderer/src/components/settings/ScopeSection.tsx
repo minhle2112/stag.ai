@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { PlainKey } from '@shared/i18n'
 import { ALWAYS_SHARED, parseScope, projectRel } from '@shared/scope'
 import { resolveScope } from '@shared/settings'
 import { type ScopeLockSettings, type ScopeMode } from '@shared/types'
@@ -8,25 +9,19 @@ import { Icon } from '../Icon'
 import { Seg } from '../ui/Seg'
 import { LevelBar, useLevel, type LevelKey } from './levels'
 import { ErrorBar, Group, INPUT_MONO, InfoTip, Row, SectionTitle, SmallButton, Switch, useSaveError } from './controls'
+import { t as tt, useT } from '../../i18n'
 
-const MODES: Array<{ value: ScopeMode; label: string; desc: string }> = [
-  {
-    value: 'ask',
-    label: 'Hỏi bạn',
-    desc: 'Claude hỏi ngay trong terminal của nó (hộp xin quyền, kèm lý do); Codex: app hiện hộp thoại, chờ bạn cho sửa hay từ chối.'
-  },
-  {
-    value: 'block',
-    label: 'Chặn luôn',
-    desc: 'Không bao giờ hỏi bạn: agent bị từ chối và tự bàn với agent kia (xem việc của nó, nhắn nhờ thu hẹp phạm vi hay báo khi xong), trong lúc chờ thì làm phần khác của việc mình.'
-  },
-  { value: 'warn', label: 'Chỉ cảnh báo', desc: 'Cho sửa. Vẫn cảnh báo agent khi nhận việc trùng phạm vi.' },
-  { value: 'off', label: 'Tắt', desc: 'Không khoá, không cảnh báo.' }
+const MODES: Array<{ value: ScopeMode; label: PlainKey; desc: PlainKey }> = [
+  { value: 'ask', label: 'scope.mode.ask', desc: 'scope.mode.askDesc' },
+  { value: 'block', label: 'scope.mode.block', desc: 'scope.mode.blockDesc' },
+  { value: 'warn', label: 'scope.mode.warn', desc: 'scope.mode.warnDesc' },
+  { value: 'off', label: 'scope.mode.off', desc: 'scope.mode.offDesc' }
 ]
-const modeLabel = (m: ScopeMode): string => MODES.find((x) => x.value === m)!.label
+const modeLabel = (m: ScopeMode): string => tt(MODES.find((x) => x.value === m)!.label)
 
 /** Cài đặt → Khoá phạm vi (Settings S5): app.scope + ghi đè workspace / agent (SettingsOverrides.scope). */
 export function ScopeSection(): React.JSX.Element {
+  const t = useT()
   const settings = useSettings((s) => s.value)
   const save = useSettings((s) => s.save)
   const saveOverrides = useSettings((s) => s.saveOverrides)
@@ -39,7 +34,7 @@ export function ScopeSection(): React.JSX.Element {
   const own: Partial<ScopeLockSettings> =
     cur.lvl === 'ws' ? (settings.workspaces[cur.wsId!]?.scope ?? {}) : cur.lvl === 'agent' ? (settings.agents[cur.agentId!]?.scope ?? {}) : settings.app.scope
   const parent: ScopeLockSettings = cur.lvl === 'agent' ? resolveScope(settings, cur.wsId, null) : settings.app.scope
-  const parentName = cur.lvl === 'agent' ? `workspace ${ws?.name ?? ''}` : 'mặc định của app'
+  const parentName = cur.lvl === 'agent' ? t('scope.parentWs', { name: ws?.name ?? '' }) : t('scope.parentApp')
   const effective = resolveScope(settings, cur.wsId, cur.agentId)
 
   function setField<K extends keyof ScopeLockSettings>(key: K, value: ScopeLockSettings[K] | undefined): void {
@@ -59,16 +54,16 @@ export function ScopeSection(): React.JSX.Element {
   return (
     <>
       <SectionTitle
-        title="Khoá phạm vi"
-        desc="Mỗi việc đang mở của agent giữ một vùng code: phạm vi agent khai khi nhận việc (task_start) cộng các file agent đó đã sửa. Agent khác định sửa vào vùng đó thì app làm theo chế độ dưới đây; việc xong hoặc bị bỏ thì nhả khoá. Thay đổi có tác dụng ngay, cả với phiên đang chạy."
+        title={t('scope.title')}
+        desc={t('scope.desc')}
         right={<LevelBar level={level} setLevel={setLevel} has={(o) => !!o?.scope} />}
       />
       <ErrorBar error={error} />
 
       <Group>
         <Row
-          label="Khi agent định sửa vào phạm vi của agent khác"
-          desc="Chế độ tính theo agent đang định sửa. Rê chuột vào từng chế độ để xem nghĩa."
+          label={t('scope.mode.label')}
+          desc={t('scope.mode.desc')}
           override={
             cur.lvl === 'app' ? undefined : { on: !!own.mode, onReset: () => setField('mode', undefined), parent: modeLabel(parent.mode) }
           }
@@ -76,21 +71,21 @@ export function ScopeSection(): React.JSX.Element {
           <Seg
             value={effective.mode}
             onChange={(mode) => setField('mode', mode)}
-            options={MODES.map((m) => ({ value: m.value, label: m.label, tip: m.desc }))}
+            options={MODES.map((m) => ({ value: m.value, label: t(m.label), tip: t(m.desc) }))}
           />
         </Row>
         <Row
-          label="Đoán lệnh shell"
-          desc={`Lệnh Bash / PowerShell (Codex: exec_command) có dấu hiệu ghi (>, rm, mv, cp, Set-Content, sed -i, git checkout…) và nhắc tới đường dẫn đang bị khoá thì coi như sửa chỗ đó. Chỉ là đoán: bỏ sót script hoặc lệnh không ghi rõ đường dẫn, đôi khi hỏi thừa lệnh chỉ đọc file bị khoá. Tắt thì chỉ xét tool sửa file (Edit / Write, apply_patch).${cur.lvl === 'agent' ? ` Cấp agent theo ${parentName}.` : ''}`}
+          label={t('scope.shell.label')}
+          desc={`${t('scope.shell.desc')}${cur.lvl === 'agent' ? ` ${t('scope.shell.descAgent', { parent: parentName })}` : ''}`}
           disabled={off}
           override={
             cur.lvl === 'ws'
-              ? { on: 'guessShell' in own, onReset: () => setField('guessShell', undefined), parent: parent.guessShell ? 'bật' : 'tắt' }
+              ? { on: 'guessShell' in own, onReset: () => setField('guessShell', undefined), parent: parent.guessShell ? t('scope.on') : t('scope.off') }
               : undefined
           }
         >
           <Switch
-            label={cur.lvl === 'app' ? 'Đoán lệnh shell' : `Đoán lệnh shell cho ${cur.name}`}
+            label={cur.lvl === 'app' ? t('scope.shell.label') : t('scope.shell.labelFor', { name: cur.name })}
             checked={shellOn}
             disabled={off || cur.lvl === 'agent'}
             onChange={(v) => setField('guessShell', v)}
@@ -101,36 +96,36 @@ export function ScopeSection(): React.JSX.Element {
       <Group
         title={
           <span className="inline-flex items-center gap-1.5">
-            Không bao giờ khoá
+            {t('scope.exempt.title')}
             <InfoTip
-              text={`Agent luôn sửa được các chỗ này, phạm vi trùng ở đây cũng không bị cảnh báo. Mẫu viết như phạm vi việc, tương đối so với thư mục dự án, không phân biệt hoa thường: docs/, package-lock.json, **/*.snap (mọi thư mục), *.md (chỉ ở gốc dự án).${cur.lvl === 'ws' ? ' Cộng thêm với danh sách của app.' : ''}`}
+              text={`${t('scope.exempt.tip')}${cur.lvl === 'ws' ? ` ${t('scope.exempt.tipWs')}` : ''}`}
             />
           </span>
         }
       >
         <div className={`border-b border-line py-2.5 ${off ? 'opacity-50' : ''}`}>
           <div className="flex flex-wrap gap-1">
-            <Chip title="Bộ nhớ chung: agent nào cũng ghi log / index">{ws ? vaultLabel(ws.path, ws.vaultPath) : 'vault của workspace'}</Chip>
+            <Chip title={t('scope.exempt.vaultTip')}>{ws ? vaultLabel(ws.path, ws.vaultPath) : t('scope.exempt.vaultFallback')}</Chip>
             {ALWAYS_SHARED.map((p) => (
-              <Chip key={p} title="Dữ liệu của app / git">
+              <Chip key={p} title={t('scope.exempt.appData')}>
                 {p}/
               </Chip>
             ))}
             {cur.lvl !== 'app' &&
               settings.app.scope.exempt.map((p) => (
-                <Chip key={`app:${p}`} title="Từ mặc định của app">
+                <Chip key={`app:${p}`} title={t('scope.exempt.fromApp')}>
                   {p}
                 </Chip>
               ))}
             {cur.lvl === 'agent' &&
               (settings.workspaces[cur.wsId!]?.scope?.exempt ?? []).map((p) => (
-                <Chip key={`ws:${p}`} title={`Từ ${parentName}`}>
+                <Chip key={`ws:${p}`} title={t('scope.exempt.from', { parent: parentName })}>
                   {p}
                 </Chip>
               ))}
           </div>
           {cur.lvl === 'agent' ? (
-            <div className="mt-2 text-[12px] text-dim">Danh sách miễn khoá đặt ở cấp app và workspace.</div>
+            <div className="mt-2 text-[12px] text-dim">{t('scope.exempt.agentNote')}</div>
           ) : (
             <ExemptEditor
               items={(cur.lvl === 'app' ? settings.app.scope.exempt : own.exempt) ?? []}
@@ -158,7 +153,7 @@ function Chip({ children, title }: { children: React.ReactNode; title?: string }
 function vaultLabel(root: string, vaultPath: string): string {
   const rel = projectRel(vaultPath, root)
   const name = vaultPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'vault'
-  return rel === null ? `${name} (ngoài dự án)` : `${name}/`
+  return rel === null ? tt('scope.exempt.outside', { name }) : `${name}/`
 }
 
 /** Thêm / bỏ mẫu miễn khoá của cấp đang sửa. */
@@ -173,17 +168,18 @@ function ExemptEditor({
   root?: string
   onChange: (next: string[]) => void
 }): React.JSX.Element {
+  const t = useT()
   const [text, setText] = useState('')
   const [problem, setProblem] = useState('')
   const add = (): void => {
-    const t = text.trim()
-    if (!t) return
+    const pat = text.trim()
+    if (!pat) return
     // Kiểm theo một thư mục giả khi ở cấp app (chưa biết dự án nào).
-    const entries = parseScope(t, root ?? 'C:/project')
-    if (!entries.length) return setProblem('Không đọc được mẫu này (đường dẫn ngoài dự án?).')
-    if (entries.some((e) => e.key === '' && !e.glob)) return setProblem('Mẫu này là cả dự án. Muốn bỏ khoá hẳn thì chọn chế độ "Tắt".')
-    if (items.includes(t) || inherited.includes(t)) return setProblem('Đã có trong danh sách.')
-    onChange([...items, t])
+    const entries = parseScope(pat, root ?? 'C:/project')
+    if (!entries.length) return setProblem(t('scope.exempt.badPattern'))
+    if (entries.some((e) => e.key === '' && !e.glob)) return setProblem(t('scope.exempt.wholeProject'))
+    if (items.includes(pat) || inherited.includes(pat)) return setProblem(t('scope.exempt.dup'))
+    onChange([...items, pat])
     setText('')
     setProblem('')
   }
@@ -194,8 +190,8 @@ function ExemptEditor({
           <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{p}</span>
           <button
             type="button"
-            aria-label={`Bỏ ${p}`}
-            data-tip="Bỏ mẫu này"
+            aria-label={t('scope.exempt.removeAria', { pattern: p })}
+            data-tip={t('scope.exempt.removeTip')}
             onClick={() => onChange(items.filter((x) => x !== p))}
             className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-fg"
           >
@@ -205,9 +201,9 @@ function ExemptEditor({
       ))}
       <div className="mt-2 flex gap-1.5">
         <input
-          aria-label="Mẫu miễn khoá mới"
+          aria-label={t('scope.exempt.newAria')}
           value={text}
-          placeholder="vd. docs/ hoặc **/*.snap"
+          placeholder={t('scope.exempt.placeholder')}
           spellCheck={false}
           onChange={(e) => {
             setText(e.target.value)
@@ -217,7 +213,7 @@ function ExemptEditor({
           className={`${INPUT_MONO} min-w-0 flex-1`}
         />
         <SmallButton icon="plus" onClick={add} disabled={!text.trim()}>
-          Thêm
+          {t('common.add')}
         </SmallButton>
       </div>
       {problem && <div className="mt-1 text-[12px] text-danger">{problem}</div>}

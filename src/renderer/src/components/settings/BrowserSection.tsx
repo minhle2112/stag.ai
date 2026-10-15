@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { PlainKey } from '@shared/i18n'
 import { homePageInput, originInput, SEARCH_ENGINE_LABELS } from '@shared/browser'
 import { browserToolsOn } from '@shared/settings'
 import { type BrowserSettings, type ExternalPagePolicy, type SearchEngine } from '@shared/types'
@@ -6,15 +7,17 @@ import { useSettings } from '../../store/settings'
 import { useWorkspaces } from '../../store/workspaces'
 import { ErrorBar, Group, INPUT_MONO, Row, SectionTitle, Select, SmallButton, Switch, useSaveError } from './controls'
 import { LevelBar, useLevel, type LevelKey } from './levels'
+import { useT } from '../../i18n'
 
-const EXTERNAL: Record<ExternalPagePolicy, { label: string; desc: string }> = {
-  ask: { label: 'Hỏi bạn', desc: 'Hiện hộp thoại khi agent mở một trang ngoài localhost lần đầu; cho phép thì dùng được tới khi tắt app.' },
-  allow: { label: 'Luôn cho', desc: 'Agent mở mọi trang http(s) mà không hỏi.' },
-  deny: { label: 'Luôn chặn', desc: 'Agent chỉ mở được localhost và các trang luôn cho phép bên dưới, không hỏi bạn.' }
+const EXTERNAL: Record<ExternalPagePolicy, { label: PlainKey; desc: PlainKey }> = {
+  ask: { label: 'browserSettings.external.ask', desc: 'browserSettings.external.askDesc' },
+  allow: { label: 'browserSettings.external.allow', desc: 'browserSettings.external.allowDesc' },
+  deny: { label: 'browserSettings.external.deny', desc: 'browserSettings.external.denyDesc' }
 }
 
 /** Cài đặt → Trình duyệt (Settings S5): app.browser + bật / tắt tool trình duyệt theo workspace / agent (SettingsOverrides.browser). */
 export function BrowserSection(): React.JSX.Element {
+  const t = useT()
   const br = useSettings((s) => s.value.app.browser)
   const save = useSettings((s) => s.save)
   const [error, run] = useSaveError()
@@ -24,17 +27,17 @@ export function BrowserSection(): React.JSX.Element {
   return (
     <>
       <SectionTitle
-        title="Trình duyệt"
-        desc="Trình duyệt trong app (nút Browser trên thanh trên) và việc agent dùng nó. Thay đổi được lưu ngay. Cấp workspace / agent chỉ đổi việc bật / tắt tool trình duyệt của agent."
+        title={t('browserSettings.title')}
+        desc={t('browserSettings.desc')}
         right={<LevelBar level={level} setLevel={setLevel} has={(o) => o?.browser?.agentTools !== undefined} />}
       />
       <ErrorBar error={error} />
 
-      <Group title="Duyệt web">
+      <Group title={t('browserSettings.browsing')}>
         <HomePageRow value={br.homePage} onSave={(homePage) => set({ homePage })} />
-        <Row label="Máy tìm kiếm" desc="Chữ gõ vào thanh địa chỉ không phải địa chỉ web thì tìm bằng máy này.">
+        <Row label={t('browserSettings.search')} desc={t('browserSettings.searchDesc')}>
           <Select
-            label="Máy tìm kiếm"
+            label={t('browserSettings.search')}
             value={br.searchEngine}
             onChange={(searchEngine: SearchEngine) => set({ searchEngine })}
             options={(Object.keys(SEARCH_ENGINE_LABELS) as SearchEngine[]).map((v) => ({ value: v, label: SEARCH_ENGINE_LABELS[v] }))}
@@ -44,24 +47,24 @@ export function BrowserSection(): React.JSX.Element {
 
       <AgentToolsGroup run={run} level={level} />
 
-      <Group title="Agent mở trang ngoài localhost">
-        <Row label="Khi agent mở trang ngoài" desc={EXTERNAL[br.externalPages].desc}>
+      <Group title={t('browserSettings.externalGroup')}>
+        <Row label={t('browserSettings.externalLabel')} desc={t(EXTERNAL[br.externalPages].desc)}>
           <Select
-            label="Khi agent mở trang ngoài"
+            label={t('browserSettings.externalLabel')}
             value={br.externalPages}
             onChange={(externalPages: ExternalPagePolicy) => set({ externalPages })}
-            options={(Object.keys(EXTERNAL) as ExternalPagePolicy[]).map((v) => ({ value: v, label: EXTERNAL[v].label }))}
+            options={(Object.keys(EXTERNAL) as ExternalPagePolicy[]).map((v) => ({ value: v, label: t(EXTERNAL[v].label) }))}
           />
         </Row>
         <AllowedOrigins list={br.allowedOrigins} moot={br.externalPages === 'allow'} onSave={(allowedOrigins) => set({ allowedOrigins })} />
       </Group>
 
-      <Group title="Cookie & dữ liệu trang">
+      <Group title={t('browserSettings.cookies')}>
         <Row
-          label="Giữ cookie sau khi tắt app"
-          desc="Giữ đăng nhập của các trang (mỗi workspace riêng). Áp dụng cho tab mở sau khi đổi; tab đang mở giữ như cũ."
+          label={t('browserSettings.keepCookies')}
+          desc={t('browserSettings.keepCookiesDesc')}
         >
-          <Switch label="Giữ cookie sau khi tắt app" checked={br.keepCookies} onChange={(keepCookies) => set({ keepCookies })} />
+          <Switch label={t('browserSettings.keepCookies')} checked={br.keepCookies} onChange={(keepCookies) => set({ keepCookies })} />
         </Row>
         <ClearDataRow />
       </Group>
@@ -71,6 +74,7 @@ export function BrowserSection(): React.JSX.Element {
 
 /** Trang tab mới: lưu khi rời ô / Enter; gõ sai thì báo, không lưu. */
 function HomePageRow({ value, onSave }: { value: string; onSave: (v: string) => void }): React.JSX.Element {
+  const t = useT()
   const [text, setText] = useState(value)
   const [bad, setBad] = useState(false)
   useEffect(() => {
@@ -85,15 +89,15 @@ function HomePageRow({ value, onSave }: { value: string; onSave: (v: string) => 
   }
   return (
     <Row
-      label="Trang tab mới"
+      label={t('browserSettings.home')}
       htmlFor="browser-home"
-      desc={'Trang mở khi bấm "+" trong trình duyệt. Bỏ trống = trang trống.'}
-      sub={bad ? <span className="text-danger">Cần một địa chỉ web, vd. localhost:5173 hoặc github.com.</span> : undefined}
+      desc={t('browserSettings.homeDesc')}
+      sub={bad ? <span className="text-danger">{t('browserSettings.homeBad')}</span> : undefined}
     >
       <input
         id="browser-home"
         value={text}
-        placeholder="(trang trống)"
+        placeholder={t('browserSettings.homePlaceholder')}
         spellCheck={false}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
@@ -106,14 +110,15 @@ function HomePageRow({ value, onSave }: { value: string; onSave: (v: string) => 
 
 /** Danh sách origin luôn cho agent mở: thêm (chuẩn hoá, báo lỗi nếu sai) / bỏ. */
 function AllowedOrigins({ list, moot, onSave }: { list: string[]; moot: boolean; onSave: (v: string[]) => void }): React.JSX.Element {
+  const t = useT()
   const [text, setText] = useState('')
   const [bad, setBad] = useState('')
   const add = (): void => {
-    const t = text.trim()
-    if (!t) return
-    const o = originInput(t)
-    if (!o) return setBad('Không phải địa chỉ web http(s).')
-    if (list.includes(o)) return setBad(`${o} đã có trong danh sách.`)
+    const typed = text.trim()
+    if (!typed) return
+    const o = originInput(typed)
+    if (!o) return setBad(t('browserSettings.originBad'))
+    if (list.includes(o)) return setBad(t('browserSettings.originDup', { origin: o }))
     setBad('')
     setText('')
     onSave([...list, o])
@@ -121,18 +126,18 @@ function AllowedOrigins({ list, moot, onSave }: { list: string[]; moot: boolean;
   return (
     <>
       <Row
-        label="Trang luôn cho phép"
-        desc='Agent mở các origin này mà không hỏi, kể cả sau khi mở lại app. Hộp thoại "Agent muốn mở trang ngoài" có nút "Luôn cho trang này".'
+        label={t('browserSettings.allowed')}
+        desc={t('browserSettings.allowedDesc')}
         sub={
           bad ? (
             <span className="text-danger">{bad}</span>
           ) : moot ? (
-            'Đang "Luôn cho" nên danh sách này chưa cần; nó có tác dụng khi bạn chuyển về "Hỏi bạn" hoặc "Luôn chặn".'
+            t('browserSettings.allowedMoot')
           ) : undefined
         }
       >
         <input
-          aria-label="Origin luôn cho phép"
+          aria-label={t('browserSettings.allowedAria')}
           value={text}
           placeholder="github.com"
           spellCheck={false}
@@ -144,12 +149,12 @@ function AllowedOrigins({ list, moot, onSave }: { list: string[]; moot: boolean;
           className={`w-56 ${INPUT_MONO} ${bad ? 'border-danger/60!' : ''}`}
         />
         <SmallButton icon="plus" onClick={add} disabled={!text.trim()}>
-          Thêm
+          {t('common.add')}
         </SmallButton>
       </Row>
       {list.map((o) => (
         <Row key={o} label={<span className="font-mono text-[12px]">{o}</span>}>
-          <SmallButton onClick={() => onSave(list.filter((x) => x !== o))}>Bỏ</SmallButton>
+          <SmallButton onClick={() => onSave(list.filter((x) => x !== o))}>{t('browserSettings.remove')}</SmallButton>
         </Row>
       ))}
     </>
@@ -158,6 +163,7 @@ function AllowedOrigins({ list, moot, onSave }: { list: string[]; moot: boolean;
 
 /** "Cho agent dùng trình duyệt" theo cấp: mặc định cho mọi agent → workspace → agent (cấp chọn ở tiêu đề trang). */
 function AgentToolsGroup({ run, level: key }: { run: (p: Promise<unknown>) => void; level: LevelKey }): React.JSX.Element {
+  const t = useT()
   const settings = useSettings((s) => s.value)
   const save = useSettings((s) => s.save)
   const saveOverrides = useSettings((s) => s.saveOverrides)
@@ -173,16 +179,16 @@ function AgentToolsGroup({ run, level: key }: { run: (p: Promise<unknown>) => vo
     )
 
   return (
-    <Group title="Agent dùng trình duyệt">
+    <Group title={t('browserSettings.agentGroup')}>
       <Row
-        label="Cho agent dùng trình duyệt"
-        desc="Tool browser_* (mở trang, đọc trang, bấm, gõ, chụp màn hình, console). Tắt thì phiên mở sau không thấy các tool này; phiên đang chạy gọi tool sẽ bị từ chối ngay."
-        override={level.lvl === 'app' ? undefined : { on: own !== undefined, onReset: () => setOwn(undefined), parent: parent ? 'bật' : 'tắt' }}
+        label={t('browserSettings.agentTools')}
+        desc={t('browserSettings.agentToolsDesc')}
+        override={level.lvl === 'app' ? undefined : { on: own !== undefined, onReset: () => setOwn(undefined), parent: parent ? t('browserSettings.on') : t('browserSettings.off') }}
       >
         {level.lvl === 'app' ? (
-          <Switch label="Cho mọi agent dùng trình duyệt" checked={settings.app.browser.agentTools} onChange={(agentTools) => run(save({ browser: { agentTools } }))} />
+          <Switch label={t('browserSettings.agentToolsAll')} checked={settings.app.browser.agentTools} onChange={(agentTools) => run(save({ browser: { agentTools } }))} />
         ) : (
-          <Switch label={`Trình duyệt cho ${level.name}`} checked={own ?? parent} onChange={(v) => setOwn(v)} />
+          <Switch label={t('browserSettings.agentToolsFor', { name: level.name })} checked={own ?? parent} onChange={(v) => setOwn(v)} />
         )}
       </Row>
     </Group>
@@ -191,6 +197,7 @@ function AgentToolsGroup({ run, level: key }: { run: (p: Promise<unknown>) => vo
 
 /** Xoá cookie và dữ liệu trang (một workspace hoặc tất cả); bấm hai lần để chắc chắn. */
 function ClearDataRow(): React.JSX.Element {
+  const t = useT()
   const workspaces = useWorkspaces((s) => s.items)
   const [target, setTarget] = useState('')
   const [confirm, setConfirm] = useState(false)
@@ -214,26 +221,26 @@ function ClearDataRow(): React.JSX.Element {
 
   return (
     <Row
-      label="Xoá cookie và dữ liệu trang"
-      desc="Đăng xuất khỏi mọi trang và xoá dữ liệu trang lưu (localStorage, cache…) của trình duyệt trong app."
-      sub={error ? <span className="text-danger">{error}</span> : state === 'done' ? 'Đã xoá. Trang đang mở có thể cần tải lại.' : undefined}
+      label={t('browserSettings.clear')}
+      desc={t('browserSettings.clearDesc')}
+      sub={error ? <span className="text-danger">{error}</span> : state === 'done' ? t('browserSettings.cleared') : undefined}
     >
       <Select
-        label="Xoá dữ liệu của"
+        label={t('browserSettings.clearFor')}
         value={scope}
         onChange={(v) => {
           setTarget(v)
           setConfirm(false)
           setState('')
         }}
-        options={[{ value: '', label: 'Mọi workspace' }, ...workspaces.map((w) => ({ value: w.id, label: `Workspace: ${w.name}` }))]}
+        options={[{ value: '', label: t('browserSettings.allWorkspaces') }, ...workspaces.map((w) => ({ value: w.id, label: t('browserSettings.workspaceOption', { name: w.name }) }))]}
       />
       <SmallButton
         variant={confirm ? 'dangerSolid' : 'danger'}
         disabled={state === 'busy'}
         onClick={() => (confirm ? void clear() : (setConfirm(true), setState('')))}
       >
-        {state === 'busy' ? 'Đang xoá…' : confirm ? 'Bấm lần nữa để xoá' : 'Xoá'}
+        {state === 'busy' ? t('browserSettings.clearing') : confirm ? t('browserSettings.clickAgain') : t('common.delete')}
       </SmallButton>
     </Row>
   )

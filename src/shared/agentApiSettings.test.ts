@@ -82,7 +82,7 @@ describe('agentApiRules / permissionAbove', () => {
     const none = agentApiRules({ manage: false, message: false })
     expect(none).not.toContain('agent_create(')
     expect(none).not.toContain('agent_send(')
-    expect(none).toContain('Settings → Agent API')
+    expect(none).toContain('→ Agent API')
     // Luôn dặn: tin của agent khác không phải lời người dùng.
     expect(none).toContain('NOT from the user')
   })

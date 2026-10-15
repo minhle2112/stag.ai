@@ -6,6 +6,7 @@ import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { cleanHotwords, VOICE_MODEL, type VoiceModel, type VoiceResult, type VoiceStatus } from '@shared/voice'
 import { HOTWORD_MAX } from '@shared/voiceVocab'
+import { t } from '@shared/i18n'
 import type { VoiceSettings } from '@shared/types'
 import type { SpawnWorker, WorkerProc } from './plugins'
 
@@ -51,7 +52,7 @@ function windowsExtract(archive: string, into: string): Promise<void> {
   const tar = process.platform === 'win32' ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
   return new Promise((resolve, reject) =>
     execFile(tar, ['-xjf', relative(into, archive)], { cwd: into, windowsHide: true, maxBuffer: 1 << 20 }, (err, _out, stderr) =>
-      err ? reject(new Error(`Giải nén không được: ${String(stderr || err.message).trim().slice(0, 300)}`)) : resolve()
+      err ? reject(new Error(t('voice.model.extractFailed', { message: String(stderr || err.message).trim().slice(0, 300) }))) : resolve()
     )
   )
 }
@@ -109,7 +110,7 @@ export class VoiceService {
       this.set({ model: 'downloading', received: 0, total: this.model.bytes }, true)
 
       const res = await (this.d.fetch ?? fetch)(this.model.url, { signal: abort.signal })
-      if (!res.ok || !res.body) throw new Error(`Máy chủ trả về lỗi ${res.status}.`)
+      if (!res.ok || !res.body) throw new Error(t('voice.model.serverError', { status: String(res.status) }))
       const hash = createHash('sha256')
       let received = 0
       let last = 0
@@ -128,13 +129,13 @@ export class VoiceService {
       await pipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), meter, createWriteStream(file), { signal: abort.signal })
       this.set({ model: 'verifying', received })
       if (received !== this.model.bytes || hash.digest('hex') !== this.model.sha256)
-        throw new Error('File tải về không khớp mã kiểm tra (có thể bị hỏng giữa đường). Thử tải lại.')
+        throw new Error(t('voice.model.badChecksum'))
 
       this.set({ model: 'extracting' })
       await (this.d.extract ?? windowsExtract)(file, out)
       if (abort.signal.aborted) throw new Error('aborted')
       const unpacked = join(out, this.model.archive)
-      if (!this.model.files.every((f) => existsSync(join(unpacked, f)))) throw new Error('Gói model thiếu file, không dùng được.')
+      if (!this.model.files.every((f) => existsSync(join(unpacked, f)))) throw new Error(t('voice.model.missingFiles'))
       await fs.mkdir(join(this.d.dir, 'models'), { recursive: true })
       await fs.rm(this.modelDir, { recursive: true, force: true })
       await fs.rename(unpacked, this.modelDir)
@@ -170,7 +171,7 @@ export class VoiceService {
 
   private ensureWorker(): Promise<void> {
     if (this.ready) return this.ready
-    if (this.status.model !== 'ready') return Promise.reject(new Error('Chưa tải model nhận dạng giọng nói (Cài đặt → Giọng nói).'))
+    if (this.status.model !== 'ready') return Promise.reject(new Error(t('voice.engine.noModel')))
     const proc = this.d.spawn(this.d.workerScript, { cwd: this.d.dir, env: this.d.env, name: 'voice' })
     this.proc = proc
     proc.onMessage((raw) => {
@@ -180,7 +181,7 @@ export class VoiceService {
       this.pending.delete(m.id)
       clearTimeout(p.timer)
       if (m.ok) p.resolve(m.result)
-      else p.reject(new Error(m.error || 'Lỗi nhận dạng.'))
+      else p.reject(new Error(m.error === 'model_not_loaded' ? t('voice.engine.notLoaded') : m.error || t('voice.engine.failed')))
     })
     proc.onOutput((text, err) => {
       // sherpa in log C++ ra stderr (gợi ý max_total_len…): chỉ ghi khi chạy dev.
@@ -189,8 +190,8 @@ export class VoiceService {
     // Thoát bất ngờ (unload() đã gỡ proc trước khi kill nên không vào đây).
     proc.onExit((code) => {
       if (this.proc !== proc) return
-      this.drop(`Tiến trình nhận dạng thoát bất ngờ (mã ${code}).`)
-      this.set({ engine: 'off', error: `Tiến trình nhận dạng thoát bất ngờ (mã ${code}).` })
+      this.drop(t('voice.engine.crashed', { code: String(code) }))
+      this.set({ engine: 'off', error: t('voice.engine.crashed', { code: String(code) }) })
     })
     this.set({ engine: 'loading', error: undefined })
     const ready = this.call('load', { modelDir: this.modelDir, threads: this.d.threads ?? 4 }).then(
@@ -201,7 +202,7 @@ export class VoiceService {
       (e: Error) => {
         if (this.proc === proc) {
           this.unload()
-          this.set({ error: `Không nạp được model: ${e.message}` })
+          this.set({ error: t('voice.engine.loadFailed', { message: e.message }) })
         }
         throw e
       }
@@ -212,12 +213,12 @@ export class VoiceService {
 
   private call(type: string, payload: Record<string, unknown>): Promise<unknown> {
     const proc = this.proc
-    if (!proc) return Promise.reject(new Error('Tiến trình nhận dạng chưa chạy.'))
+    if (!proc) return Promise.reject(new Error(t('voice.engine.notRunning')))
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error('Nhận dạng quá lâu, đã huỷ.'))
+        reject(new Error(t('voice.engine.timeout')))
       }, this.d.timeoutMs ?? 90_000)
       this.pending.set(id, { resolve, reject, timer })
       proc.send({ id, type, ...payload })
@@ -266,7 +267,7 @@ export class VoiceService {
 
   /** Tắt worker: hệ điều hành lấy lại toàn bộ RAM của model. */
   unload(): void {
-    const proc = this.drop('Đã dừng nhận dạng.')
+    const proc = this.drop(t('voice.engine.stopped'))
     if (!proc) return
     proc.kill()
     this.set({ engine: 'off' })

@@ -15,6 +15,8 @@ import {
   type PluginSlot,
   type PluginState
 } from '@shared/plugins'
+import type { PlainKey } from '@shared/i18n'
+import { fmtDateTime, fmtDuration, fmtTime, tx, useT } from '../../i18n'
 import { usePlugins } from '../../store/plugins'
 import { PluginFrame } from '../PluginFrame'
 import { useSettings } from '../../store/settings'
@@ -32,23 +34,23 @@ import { SkillAvatar } from './SkillsSection'
  * duyệt quyền trước khi chạy, trang mỗi plugin với Cấu hình / Trạng thái / Giới thiệu.
  */
 
-const STATE: Record<PluginState, { label: string; tone: Tone }> = {
-  ready: { label: 'Sẵn sàng', tone: 'ok' },
-  starting: { label: 'Đang khởi động', tone: 'muted' },
-  stopped: { label: 'Đã dừng', tone: 'muted' },
-  disabled: { label: 'Đang tắt', tone: 'muted' },
-  error: { label: 'Lỗi', tone: 'bad' },
-  approval_pending: { label: 'Chờ duyệt quyền', tone: 'warn' },
-  upgrade_pending: { label: 'Chờ duyệt quyền mới', tone: 'warn' }
+const STATE: Record<PluginState, { label: PlainKey; tone: Tone }> = {
+  ready: { label: 'plugins.state.ready', tone: 'ok' },
+  starting: { label: 'plugins.state.starting', tone: 'muted' },
+  stopped: { label: 'plugins.state.stopped', tone: 'muted' },
+  disabled: { label: 'plugins.state.disabled', tone: 'muted' },
+  error: { label: 'plugins.state.error', tone: 'bad' },
+  approval_pending: { label: 'plugins.state.approvalPending', tone: 'warn' },
+  upgrade_pending: { label: 'plugins.state.upgradePending', tone: 'warn' }
 }
-const SLOT: Record<PluginSlot['type'], string> = {
-  sidebar: 'Thanh bên',
-  globalToolbarButton: 'Thanh trên cùng',
-  agentMenu: 'Menu ⋯ của agent',
-  page: 'Tab trang riêng',
-  settingsPage: 'Trang cài đặt',
-  dashboardWidget: 'Widget trong lưới agent',
-  statusBarItem: 'Thanh trạng thái'
+const SLOT: Record<PluginSlot['type'], PlainKey> = {
+  sidebar: 'plugins.slot.sidebar',
+  globalToolbarButton: 'plugins.slot.globalToolbarButton',
+  agentMenu: 'plugins.slot.agentMenu',
+  page: 'plugins.slot.page',
+  settingsPage: 'plugins.slot.settingsPage',
+  dashboardWidget: 'plugins.slot.dashboardWidget',
+  statusBarItem: 'plugins.slot.statusBarItem'
 }
 
 const pluginSetApp =
@@ -61,11 +63,13 @@ const pluginSetApp =
   }
 
 function StateBadge({ state }: { state: PluginState }): React.JSX.Element {
+  const t = useT()
   const s = STATE[state]
-  return <Badge tone={s.tone}>{s.label}</Badge>
+  return <Badge tone={s.tone}>{t(s.label)}</Badge>
 }
 
 export function PluginsSection(): React.JSX.Element {
+  const t = useT()
   const focus = useUi((s) => s.settingsFocus)
   const agentLevel = useAgentLevel()
   const items = usePlugins((s) => s.items)
@@ -86,11 +90,11 @@ export function PluginsSection(): React.JSX.Element {
       <SectionTitle
         title={
           <span className="inline-flex items-center gap-2">
-            Plugin
+            {t('plugins.section.title')}
             <Badge>Alpha</Badge>
           </span>
         }
-        desc="Plugin mở rộng chính app stag.ai: thêm nút và trang riêng, thêm tool cho agent, nghe sự kiện của app, chạy việc theo lịch, nhận webhook. Mỗi plugin chạy trong tiến trình riêng và chỉ chạy sau khi bạn duyệt quyền."
+        desc={t('plugins.section.desc')}
         right={<LevelBar level={level} setLevel={setLevel} field="plugins" />}
       />
       {plugin ? (
@@ -121,36 +125,31 @@ export function PluginsSection(): React.JSX.Element {
 }
 
 function PluginList(p: { items: InstalledPlugin[]; lv: Level; onOpen: (id: string) => void; onInstall: () => void; onCreate: () => void }): React.JSX.Element {
+  const t = useT()
   const loaded = usePlugins((s) => s.loaded)
   return (
     <>
       <div className="mb-3 flex items-center justify-end gap-2">
-        <SmallButton onClick={p.onCreate}>Tạo plugin</SmallButton>
+        <SmallButton onClick={p.onCreate}>{t('plugins.list.create')}</SmallButton>
         <SmallButton variant="primary" icon="plus" onClick={p.onInstall}>
-          Cài plugin
+          {t('plugins.list.install')}
         </SmallButton>
       </div>
-      <Callout icon="shield">
-        Plugin là tính năng alpha. Plugin chạy chương trình trên máy bạn với quyền của bạn; quyền bạn duyệt chỉ giới hạn những gì nó làm <b>qua stag.ai</b>{' '}
-        (gõ vào agent, đọc vault…). Chỉ cài từ nguồn bạn tin.
-      </Callout>
-      <Group title={`Đã cài${p.items.length > 0 ? ` · ${p.items.length}` : ''}`}>
+      <Callout icon="shield">{tx('plugins.list.alphaNote', { via: <b>{t('plugins.list.viaStag')}</b> })}</Callout>
+      <Group title={p.items.length > 0 ? t('plugins.list.installedCount', { count: p.items.length }) : t('plugins.list.installed')}>
         {!loaded ? null : p.items.length === 0 ? (
-          <Empty title="Chưa cài plugin nào">
-            Cài một plugin có sẵn bên dưới, bấm "Cài plugin" để chọn một gói npm / một thư mục có <code>stagPlugin</code> trong package.json, hoặc "Tạo plugin" để
-            bắt đầu từ mẫu.
-          </Empty>
+          <Empty title={t('plugins.list.emptyTitle')}>{tx('plugins.list.emptyBody', { code: <code>stagPlugin</code> })}</Empty>
         ) : (
           <Tiles>
             {p.items.map((x) => {
               const line = [
                 x.manifest.id,
-                x.source.type === 'npm' ? `npm ${x.source.name}` : x.source.type === 'catalog' ? 'kèm app' : 'thư mục',
-                x.manifest.tools.length ? `${x.manifest.tools.length} tool` : '',
-                x.manifest.ui.slots.length ? `${x.manifest.ui.slots.length} nút / trang` : '',
-                x.manifest.events.length ? `${x.manifest.events.length} sự kiện` : '',
-                x.manifest.jobs.length ? `${x.manifest.jobs.length} việc theo lịch` : '',
-                x.manifest.webhooks.length ? `${x.manifest.webhooks.length} webhook` : ''
+                x.source.type === 'npm' ? `npm ${x.source.name}` : x.source.type === 'catalog' ? t('plugins.src.bundled') : t('plugins.src.folder'),
+                x.manifest.tools.length ? t('plugins.count.tools', { count: x.manifest.tools.length }) : '',
+                x.manifest.ui.slots.length ? t('plugins.count.slots', { count: x.manifest.ui.slots.length }) : '',
+                x.manifest.events.length ? t('plugins.count.events', { count: x.manifest.events.length }) : '',
+                x.manifest.jobs.length ? t('plugins.count.jobs', { count: x.manifest.jobs.length }) : '',
+                x.manifest.webhooks.length ? t('plugins.count.webhooks', { count: x.manifest.webhooks.length }) : ''
               ]
                 .filter(Boolean)
                 .join(' · ')
@@ -177,6 +176,7 @@ function PluginList(p: { items: InstalledPlugin[]; lv: Level; onOpen: (id: strin
 
 /** Mục "Có sẵn": plugin kèm app chưa cài (như "Available" của Paperclip). */
 function AvailablePlugins({ onInstalled }: { onInstalled: (id: string) => void }): React.JSX.Element | null {
+  const t = useT()
   const items = usePlugins((s) => s.items)
   const [catalog, setCatalog] = useState<PluginCatalogEntry[] | null>(null)
   const [busy, setBusy] = useState('')
@@ -190,7 +190,7 @@ function AvailablePlugins({ onInstalled }: { onInstalled: (id: string) => void }
   const list = (catalog ?? []).filter((c) => !items.some((x) => x.manifest.id === c.manifest.id))
   if (!list.length) return null
   return (
-    <Group title="Có sẵn · kèm app">
+    <Group title={t('plugins.available.title')}>
       <ErrorBar error={error} />
       <Tiles>
         {list.map((c) => (
@@ -215,7 +215,7 @@ function AvailablePlugins({ onInstalled }: { onInstalled: (id: string) => void }
                     .finally(() => setBusy(''))
                 }}
               >
-                {busy === c.slug ? 'Đang cài…' : 'Cài'}
+                {busy === c.slug ? t('plugins.installing') : t('common.install')}
               </SmallButton>
             }
           />
@@ -231,18 +231,21 @@ function AvailablePlugins({ onInstalled }: { onInstalled: (id: string) => void }
 type Tab = 'config' | 'status' | 'about' | `page:${string}`
 
 function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack: () => void }): React.JSX.Element {
+  const t = useT()
   const m = p.manifest
-  const [tab, setTab] = useState<Tab>(m.instanceConfigSchema ? 'config' : 'status')
+  // Plugin có trang cài đặt riêng mà không có cấu hình chung (vd. Stag Clip): mở thẳng trang đó.
+  const firstPage = m.ui.slots.find((x) => x.type === 'settingsPage')
+  const [tab, setTab] = useState<Tab>(m.instanceConfigSchema ? 'config' : firstPage ? `page:${firstPage.id}` : 'status')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
   const [confirmRemove, setConfirmRemove] = useState(false)
   const pending = p.status.state === 'approval_pending' || p.status.state === 'upgrade_pending'
   const settingsPages = m.ui.slots.filter((x) => x.type === 'settingsPage')
   const tabs: Array<[Tab, string]> = [
-    ['config', 'Cấu hình'],
+    ['config', t('plugins.tab.config')],
     ...settingsPages.map((x): [Tab, string] => [`page:${x.id}`, x.displayName]),
-    ['status', 'Trạng thái'],
-    ['about', 'Giới thiệu']
+    ['status', t('plugins.tab.status')],
+    ['about', t('plugins.tab.about')]
   ]
   const pageSlot = tab.startsWith('page:') ? settingsPages.find((x) => `page:${x.id}` === tab) : undefined
 
@@ -258,7 +261,7 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
     <>
       <DetailHead
         onBack={onBack}
-        backLabel="Tất cả plugin"
+        backLabel={t('plugins.detail.back')}
         logo={<SkillAvatar name={m.displayName} size={30} />}
         title={m.displayName}
         badge={
@@ -270,7 +273,7 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
         sub={m.description}
         control={
           <>
-            <span className="text-[12px] text-dim">{lv.lvl === 'app' ? 'Mọi nơi' : lv.name}</span>
+            <span className="text-[12px] text-dim">{lv.lvl === 'app' ? t('plugins.detail.everywhere') : lv.name}</span>
             <LevelToggle k={m.id} level={lv} label={m.displayName} field="plugins" setApp={pluginSetApp(m.id)} />
           </>
         }
@@ -286,11 +289,11 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
         <div className="flex gap-1.5">
           {m.entrypoints.worker && (
             <SmallButton onClick={() => act('restart', () => window.stag.plugins.restart(m.id))} disabled={!!busy}>
-              {busy === 'restart' ? 'Đang khởi động lại…' : 'Khởi động lại'}
+              {busy === 'restart' ? t('plugins.detail.restarting') : t('plugins.detail.restart')}
             </SmallButton>
           )}
           <SmallButton onClick={() => act('reload', () => window.stag.plugins.reload(m.id))} disabled={!!busy}>
-            {busy === 'reload' ? 'Đang đọc…' : p.source.type === 'local' ? 'Đọc lại gói' : 'Cài lại'}
+            {busy === 'reload' ? t('plugins.detail.reading') : p.source.type === 'local' ? t('plugins.detail.reloadPackage') : t('plugins.detail.reinstall')}
           </SmallButton>
           <SmallButton
             variant={confirmRemove ? 'dangerSolid' : 'danger'}
@@ -298,7 +301,7 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
             onBlur={() => setConfirmRemove(false)}
             disabled={!!busy}
           >
-            {confirmRemove ? 'Bấm lần nữa để gỡ' : 'Gỡ'}
+            {confirmRemove ? t('plugins.detail.removeConfirm') : t('common.remove')}
           </SmallButton>
         </div>
       </div>
@@ -310,7 +313,7 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
             <PluginFrame plugin={p} slot={pageSlot} autoHeight />
           </div>
         ) : (
-          <div className="text-[12px] text-dim">Trang này mở được khi plugin đã được duyệt quyền, đang bật và đang chạy.</div>
+          <div className="text-[12px] text-dim">{t('plugins.detail.pageUnavailable')}</div>
         ))}
       {tab === 'status' && <StatusTab p={p} />}
       {tab === 'about' && <AboutTab p={p} />}
@@ -319,18 +322,19 @@ function PluginDetail({ p, lv, onBack }: { p: InstalledPlugin; lv: Level; onBack
 }
 
 function ApprovalCard({ p, busy, onApprove }: { p: InstalledPlugin; busy: boolean; onApprove: () => void }): React.JSX.Element {
+  const t = useT()
   const fresh = p.manifest.capabilities.filter((c) => !p.approved.includes(c))
   const upgrade = p.status.state === 'upgrade_pending'
   return (
     <div className="mb-4 rounded-lg border border-wait/40 bg-wait/[0.06] px-4 py-3">
-      <div className="mb-1 text-[13px] font-semibold text-wait">{upgrade ? 'Bản mới xin thêm quyền' : 'Duyệt quyền để chạy plugin'}</div>
+      <div className="mb-1 text-[13px] font-semibold text-wait">{upgrade ? t('plugins.approval.upgradeTitle') : t('plugins.approval.title')}</div>
       <p className="mb-3 text-[12px] leading-relaxed text-muted">
         {upgrade
-          ? 'Plugin chưa chạy lại cho tới khi bạn duyệt các quyền mới dưới đây.'
-          : `${p.manifest.displayName} của ${p.manifest.author || 'tác giả không rõ'} xin các quyền dưới đây. Plugin chưa chạy cho tới khi bạn duyệt.`}
+          ? t('plugins.approval.upgradeBody')
+          : t('plugins.approval.body', { name: p.manifest.displayName, author: p.manifest.author || t('plugins.approval.unknownAuthor') })}
       </p>
       {p.manifest.capabilities.length === 0 ? (
-        <div className="mb-3 text-[12px] text-dim">Không xin quyền nào.</div>
+        <div className="mb-3 text-[12px] text-dim">{t('plugins.approval.none')}</div>
       ) : (
         <ul className="mb-3 space-y-1">
           {p.manifest.capabilities.map((c) => (
@@ -339,30 +343,32 @@ function ApprovalCard({ p, busy, onApprove }: { p: InstalledPlugin; busy: boolea
         </ul>
       )}
       <SmallButton variant="primary" onClick={onApprove} disabled={busy}>
-        {busy ? 'Đang khởi động…' : upgrade ? 'Duyệt quyền mới và chạy' : 'Duyệt và chạy'}
+        {busy ? t('plugins.approval.starting') : upgrade ? t('plugins.approval.approveNew') : t('plugins.approval.approve')}
       </SmallButton>
     </div>
   )
 }
 
 function CapabilityLine({ c, isNew }: { c: PluginCapability; isNew?: boolean }): React.JSX.Element {
+  const t = useT()
   const risky = RISKY_CAPABILITIES.includes(c)
   return (
     <li className="flex items-baseline gap-2 text-[12px]">
       <span className={risky ? 'text-danger' : 'text-fg'}>•</span>
       <span className={risky ? 'text-danger' : ''}>{PLUGIN_CAPABILITIES[c]}</span>
       <code className="font-mono text-[11px] text-dim">{c}</code>
-      {isNew && <span className="rounded bg-wait/20 px-1.5 text-[11px] text-wait">mới</span>}
+      {isNew && <span className="rounded bg-wait/20 px-1.5 text-[11px] text-wait">{t('plugins.cap.new')}</span>}
     </li>
   )
 }
 
 function ConfigForm({ p }: { p: InstalledPlugin }): React.JSX.Element {
+  const t = useT()
   const schema = p.manifest.instanceConfigSchema
   const [draft, setDraft] = useState<Record<string, unknown>>(p.config)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null)
-  if (!schema || !Object.keys(schema.properties).length) return <div className="text-[12px] text-dim">Plugin này không có gì để cấu hình.</div>
+  if (!schema || !Object.keys(schema.properties).length) return <div className="text-[12px] text-dim">{t('plugins.config.nothing')}</div>
   const dirty = JSON.stringify(draft) !== JSON.stringify(p.config)
   const save = (): void => {
     setSaving(true)
@@ -371,7 +377,7 @@ function ConfigForm({ p }: { p: InstalledPlugin }): React.JSX.Element {
       .setConfig(p.manifest.id, draft)
       .then((x) => {
         setDraft(x.config)
-        setMsg({ text: p.status.state === 'ready' && p.manifest.entrypoints.worker ? 'Đã lưu, plugin đã nhận cấu hình mới.' : 'Đã lưu.' })
+        setMsg({ text: p.status.state === 'ready' && p.manifest.entrypoints.worker ? t('plugins.config.savedApplied') : t('plugins.config.saved') })
       })
       .catch((e) => setMsg({ text: errText(e), bad: true }))
       .finally(() => setSaving(false))
@@ -397,16 +403,17 @@ function ConfigForm({ p }: { p: InstalledPlugin }): React.JSX.Element {
           disabled={saving || !dirty}
           className="inline-flex h-[26px] items-center rounded-md border border-accent bg-accent px-2.5 text-[12px] font-semibold text-accent-on hover:brightness-110 disabled:opacity-40"
         >
-          {saving ? 'Đang lưu…' : 'Lưu'}
+          {saving ? t('common.saving') : t('common.save')}
         </button>
-        {dirty && <SmallButton onClick={() => setDraft(p.config)}>Huỷ</SmallButton>}
-        <span className="text-[12px] text-dim">Không ghi mật khẩu / token ở đây: cấu hình lưu dạng chữ thường.</span>
+        {dirty && <SmallButton onClick={() => setDraft(p.config)}>{t('common.cancel')}</SmallButton>}
+        <span className="text-[12px] text-dim">{t('plugins.config.noSecrets')}</span>
       </div>
     </form>
   )
 }
 
 function Field({ name, f, required, value, onChange }: { name: string; f: PluginConfigField; required: boolean; value: unknown; onChange: (v: unknown) => void }): React.JSX.Element {
+  const t = useT()
   const id = `plugin-cfg-${name}`
   const label = (
     <>
@@ -425,7 +432,7 @@ function Field({ name, f, required, value, onChange }: { name: string; f: Plugin
   if (f.enum)
     control = (
       <select id={id} value={String(value ?? '')} onChange={(e) => onChange(f.type === 'string' ? e.target.value : Number(e.target.value))} className={`${INPUT} w-full`}>
-        {!required && <option value="">(mặc định)</option>}
+        {!required && <option value="">{t('plugins.config.defaultOption')}</option>}
         {f.enum.map((o) => (
           <option key={String(o)} value={String(o)}>
             {String(o)}
@@ -456,9 +463,7 @@ function Field({ name, f, required, value, onChange }: { name: string; f: Plugin
 }
 
 function since(iso: string | null): string {
-  if (!iso) return '—'
-  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000))
-  return s < 60 ? `${s} giây` : s < 3600 ? `${Math.floor(s / 60)} phút` : `${Math.floor(s / 3600)} giờ ${Math.floor((s % 3600) / 60)} phút`
+  return iso ? fmtDuration(Date.now() - Date.parse(iso)) : '—'
 }
 
 /** Một dòng "nhãn: giá trị" của trang Trạng thái / Giới thiệu. */
@@ -472,70 +477,75 @@ function KV({ label, children, breakAll }: { label: string; children: ReactNode;
 }
 
 function StatusTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
+  const t = useT()
   const m = p.manifest
   const s = p.status
   const [, tick] = useState(0)
   useEffect(() => {
-    const t = setInterval(() => tick((x) => x + 1), 5000)
-    return () => clearInterval(t)
+    const timer = setInterval(() => tick((x) => x + 1), 5000)
+    return () => clearInterval(timer)
   }, [])
   return (
     <div>
       <div>
-        <KV label="Trạng thái">
+        <KV label={t('plugins.tab.status')}>
           <StateBadge state={s.state} />
         </KV>
         {m.entrypoints.worker ? (
           <>
-            <KV label="Worker">{s.pid ? `đang chạy · PID ${s.pid}` : 'không chạy'}</KV>
-            <KV label="Chạy được">{s.pid ? since(s.startedAt) : '—'}</KV>
-            <KV label="Khởi động lại">{String(s.restarts)}</KV>
-            <KV label="Sức khoẻ">
+            <KV label="Worker">{s.pid ? t('plugins.status.workerRunning', { pid: String(s.pid) }) : t('plugins.status.workerStopped')}</KV>
+            <KV label={t('plugins.status.uptime')}>{s.pid ? since(s.startedAt) : '—'}</KV>
+            <KV label={t('plugins.status.restarts')}>{String(s.restarts)}</KV>
+            <KV label={t('plugins.status.health')}>
               <span className="flex items-center gap-2">
                 {s.health ? (
                   <span className={s.health.ok ? 'text-work' : 'text-danger'}>
-                    {s.health.ok ? 'ổn' : 'lỗi'}
-                    {s.health.message ? ` · ${s.health.message}` : ''} · {new Date(s.health.at).toLocaleTimeString()}
+                    {s.health.ok ? t('plugins.status.healthOk') : t('plugins.status.healthBad')}
+                    {s.health.message ? ` · ${s.health.message}` : ''} · {fmtTime(s.health.at, true)}
                   </span>
                 ) : (
-                  <span className="text-dim">chưa kiểm (30 giây / lần)</span>
+                  <span className="text-dim">{t('plugins.status.healthNever')}</span>
                 )}
-                {s.pid && <SmallButton onClick={() => void window.stag.plugins.health(m.id)}>Kiểm tra</SmallButton>}
+                {s.pid && <SmallButton onClick={() => void window.stag.plugins.health(m.id)}>{t('plugins.status.check')}</SmallButton>}
               </span>
             </KV>
-            <KV label="Lần gọi tool">{String(s.toolCalls)}</KV>
-            <KV label="Sự kiện đã gửi">{String(s.events)}</KV>
+            <KV label={t('plugins.status.toolCalls')}>{String(s.toolCalls)}</KV>
+            <KV label={t('plugins.status.eventsSent')}>{String(s.events)}</KV>
           </>
         ) : (
-          <KV label="Worker">không có (plugin chỉ có nút mở địa chỉ)</KV>
+          <KV label="Worker">{t('plugins.status.noWorker')}</KV>
         )}
         {s.lastError && (
-          <KV label="Lỗi gần nhất">
+          <KV label={t('plugins.status.lastError')}>
             <span className="text-danger">{s.lastError}</span>
           </KV>
         )}
       </div>
 
       {m.tools.length > 0 && (
-        <Group title="Tool cho agent">
-          {m.tools.map((t) => (
-            <div key={t.name} className="border-b border-line py-2 text-[12px]">
-              <code className="font-mono text-[12px]">{pluginToolName(m.id, t.name)}</code> <span className="text-dim">· {t.displayName}</span>
-              <div className="mt-0.5 text-[12px] text-dim">{t.description}</div>
+        <Group title={t('plugins.status.tools')}>
+          {m.tools.map((tool) => (
+            <div key={tool.name} className="border-b border-line py-2 text-[12px]">
+              <code className="font-mono text-[12px]">{pluginToolName(m.id, tool.name)}</code> <span className="text-dim">· {tool.displayName}</span>
+              <div className="mt-0.5 text-[12px] text-dim">{tool.description}</div>
             </div>
           ))}
         </Group>
       )}
       {m.ui.slots.length > 0 && (
-        <Group title="Nút và trang">
+        <Group title={t('plugins.status.slots')}>
           {m.ui.slots.map((x) => (
             <div key={x.id} className="flex items-baseline gap-3 border-b border-line py-2 text-[12px]">
-              <span className="w-40 shrink-0 text-dim">{SLOT[x.type]}</span>
+              <span className="w-40 shrink-0 text-dim">{t(SLOT[x.type])}</span>
               <span className="font-medium">{x.displayName}</span>
               <span className="truncate font-mono text-[11px] text-dim">
                 {[
-                  x.dataKey && `chữ từ dữ liệu "${x.dataKey}"`,
-                  x.path ? `${m.entrypoints.ui}/${x.path}` : x.open ? `mở ${x.open.url} (${x.open.target === 'browser' ? 'trong app' : 'trình duyệt'})` : x.action && `gọi ${x.action}`
+                  x.dataKey && t('plugins.status.slotData', { key: x.dataKey }),
+                  x.path
+                    ? `${m.entrypoints.ui}/${x.path}`
+                    : x.open
+                      ? t('plugins.status.slotOpen', { url: x.open.url, target: x.open.target === 'browser' ? t('plugins.status.inApp') : t('plugins.status.inBrowser') })
+                      : x.action && t('plugins.status.slotAction', { action: x.action })
                 ]
                   .filter(Boolean)
                   .join(' · ')}
@@ -547,7 +557,7 @@ function StatusTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
       {m.jobs.length > 0 && <JobsBlock p={p} />}
       {m.webhooks.length > 0 && <WebhooksBlock p={p} />}
       {m.events.length > 0 && (
-        <Group title="Sự kiện nhận">
+        <Group title={t('plugins.status.events')}>
           {m.events.map((e) => (
             <div key={e} className="flex gap-3 border-b border-line py-2 text-[12px]">
               <code className="w-44 shrink-0 font-mono text-[11px]">{e}</code>
@@ -556,14 +566,14 @@ function StatusTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
           ))}
         </Group>
       )}
-      <Group title="Nhật ký (200 dòng gần nhất)">
+      <Group title={t('plugins.status.log')}>
         <div className="max-h-72 overflow-y-auto rounded-lg border border-line-2 bg-bg px-3 py-2 font-mono text-[11px] leading-relaxed">
           {p.logs.length === 0 ? (
-            <span className="text-dim">Chưa có gì.</span>
+            <span className="text-dim">{t('plugins.status.logEmpty')}</span>
           ) : (
             [...p.logs].reverse().map((l, i) => (
               <div key={i} className={l.level === 'error' ? 'text-danger' : l.level === 'warn' ? 'text-muted' : ''}>
-                <span className="text-dim">{new Date(l.at).toLocaleTimeString()} </span>
+                <span className="text-dim">{fmtTime(l.at, true)} </span>
                 {l.message}
               </div>
             ))
@@ -574,14 +584,15 @@ function StatusTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
   )
 }
 
-const clock = (iso: string | null | undefined): string => (iso ? new Date(iso).toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' }) : '—')
+const clock = (iso: string | null | undefined): string => (iso ? fmtDateTime(iso, { dateStyle: 'short', timeStyle: 'medium' }) : '—')
 
 function JobsBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
+  const t = useT()
   const m = p.manifest
   const [error, setError] = useState('')
   const ready = p.status.state === 'ready'
   return (
-    <Block title="Việc theo lịch" note="Giờ máy; chỉ chạy khi app đang mở. Lỡ giờ lúc máy ngủ thì chạy bù một lần.">
+    <Block title={t('plugins.jobs.title')} note={t('plugins.jobs.note')}>
       {error && <div className="border-b border-line py-2 text-[12px] text-danger">{error}</div>}
       {m.jobs.map((j) => {
         const st = p.jobs.find((x) => x.key === j.key)
@@ -594,13 +605,13 @@ function JobsBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
               </div>
               {j.description && <div className="mt-0.5 text-[12px] text-dim">{j.description}</div>}
               <div className="mt-1 text-[12px] text-dim">
-                {describeCron(j.schedule)} <code className="font-mono text-[11px]">({j.schedule})</code> · lần tới: {st?.running ? 'đang chạy' : clock(st?.nextRun)}
+                {describeCron(j.schedule)} <code className="font-mono text-[11px]">({j.schedule})</code> · {t('plugins.jobs.next', { when: st?.running ? t('plugins.jobs.running') : clock(st?.nextRun) })}
                 {last && (
                   <>
                     {' '}
-                    · lần trước: {clock(last.startedAt)}{' '}
+                    · {t('plugins.jobs.last', { when: clock(last.startedAt) })}{' '}
                     <span className={last.ok === false ? 'text-danger' : last.ok ? 'text-work' : ''}>
-                      {last.ok === null ? 'đang chạy' : last.ok ? 'xong' : `lỗi: ${last.error ?? ''}`}
+                      {last.ok === null ? t('plugins.jobs.running') : last.ok ? t('plugins.jobs.done') : t('plugins.jobs.failed', { error: last.error ?? '' })}
                     </span>
                   </>
                 )}
@@ -613,19 +624,23 @@ function JobsBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
                 window.stag.plugins.runJob(m.id, j.key).catch((e) => setError(errText(e)))
               }}
             >
-              {st?.running ? 'Đang chạy…' : 'Chạy ngay'}
+              {st?.running ? t('plugins.jobs.runningBtn') : t('plugins.jobs.runNow')}
             </SmallButton>
           </div>
         )
       })}
       {p.jobRuns.length > 0 && (
         <details className="py-2 text-[12px]">
-          <summary className="cursor-pointer text-dim">Các lần chạy gần đây ({p.jobRuns.length})</summary>
+          <summary className="cursor-pointer text-dim">{t('plugins.jobs.recent', { count: p.jobRuns.length })}</summary>
           <div className="mt-1.5 space-y-0.5 font-mono text-[11px]">
             {p.jobRuns.map((r) => (
               <div key={r.runId} className={r.ok === false ? 'text-danger' : ''}>
-                <span className="text-dim">{clock(r.startedAt)}</span> {r.key} · {r.trigger === 'manual' ? 'bấm tay' : 'theo lịch'} ·{' '}
-                {r.ok === null ? 'đang chạy' : r.ok ? `xong (${Math.max(0, Date.parse(r.finishedAt ?? r.startedAt) - Date.parse(r.startedAt))} ms)` : `lỗi: ${r.error ?? ''}`}
+                <span className="text-dim">{clock(r.startedAt)}</span> {r.key} · {r.trigger === 'manual' ? t('plugins.jobs.manual') : t('plugins.jobs.scheduled')} ·{' '}
+                {r.ok === null
+                  ? t('plugins.jobs.running')
+                  : r.ok
+                    ? t('plugins.jobs.doneMs', { ms: Math.max(0, Date.parse(r.finishedAt ?? r.startedAt) - Date.parse(r.startedAt)) })
+                    : t('plugins.jobs.failed', { error: r.error ?? '' })}
               </div>
             ))}
           </div>
@@ -636,13 +651,14 @@ function JobsBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
 }
 
 function WebhooksBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
+  const t = useT()
   const m = p.manifest
   const [copied, setCopied] = useState('')
   const [confirm, setConfirm] = useState(false)
   return (
     <Block
-      title="Webhook"
-      note="Địa chỉ chỉ nhận yêu cầu từ chính máy này (127.0.0.1). Dịch vụ ngoài Internet cần một tunnel (vd. cloudflared, ngrok) trỏ về địa chỉ này. Địa chỉ có mã bí mật: đừng dán vào chỗ công khai."
+      title={t('plugins.webhooks.title')}
+      note={t('plugins.webhooks.note')}
     >
       {m.webhooks.map((w) => {
         const url = p.webhookUrls[w.endpointKey]
@@ -653,7 +669,7 @@ function WebhooksBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
             </div>
             {w.description && <div className="mt-0.5 text-[12px] text-dim">{w.description}</div>}
             <div className="mt-1.5 flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded border border-line-2 bg-bg px-2 py-1 font-mono text-[11px] select-text">{url ?? 'Máy chủ webhook chưa chạy.'}</code>
+              <code className="min-w-0 flex-1 truncate rounded border border-line-2 bg-bg px-2 py-1 font-mono text-[11px] select-text">{url ?? t('plugins.webhooks.notRunning')}</code>
               {url && (
                 <SmallButton
                   onClick={() =>
@@ -663,7 +679,7 @@ function WebhooksBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
                     })
                   }
                 >
-                  {copied === w.endpointKey ? 'Đã chép' : 'Chép'}
+                  {copied === w.endpointKey ? t('common.copied') : t('common.copy')}
                 </SmallButton>
               )}
             </div>
@@ -671,18 +687,18 @@ function WebhooksBlock({ p }: { p: InstalledPlugin }): React.JSX.Element {
         )
       })}
       <div className="flex items-center gap-2 border-b border-line py-2 text-[12px]">
-        <span className="flex-1 text-dim">Lộ địa chỉ? Đổi mã bí mật, địa chỉ cũ thôi dùng được.</span>
+        <span className="flex-1 text-dim">{t('plugins.webhooks.rotateHint')}</span>
         <SmallButton
           variant={confirm ? 'dangerSolid' : 'default'}
           onClick={() => (confirm ? void window.stag.plugins.rotateWebhook(m.id).then(() => setConfirm(false)) : setConfirm(true))}
           onBlur={() => setConfirm(false)}
         >
-          {confirm ? 'Bấm lần nữa để đổi' : 'Đổi mã'}
+          {confirm ? t('plugins.webhooks.rotateConfirm') : t('plugins.webhooks.rotate')}
         </SmallButton>
       </div>
       {p.deliveries.length > 0 && (
         <details className="py-2 text-[12px]">
-          <summary className="cursor-pointer text-dim">Lần nhận gần đây ({p.deliveries.length})</summary>
+          <summary className="cursor-pointer text-dim">{t('plugins.webhooks.recent', { count: p.deliveries.length })}</summary>
           <div className="mt-1.5 space-y-0.5 font-mono text-[11px]">
             {p.deliveries.map((d) => (
               <div key={d.requestId} className={d.status >= 400 ? 'text-danger' : ''}>
@@ -706,35 +722,40 @@ function Block({ title, note, children }: { title: string; note?: string; childr
 }
 
 function AboutTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
+  const t = useT()
   const m = p.manifest
   return (
     <div>
       <div>
-        <KV label="Mã plugin" breakAll>
+        <KV label={t('plugins.about.id')} breakAll>
           <code className="font-mono text-[11px]">{m.id}</code>
         </KV>
-        <KV label="Tác giả">{m.author || '—'}</KV>
-        <KV label="Gói" breakAll>{`${p.name || '—'}@${p.version}`}</KV>
-        <KV label="Nguồn" breakAll>
-          {p.source.type === 'npm' ? `npm · ${p.source.name}@${p.source.version}` : p.source.type === 'catalog' ? `kèm app · ${p.source.slug}` : `thư mục · ${p.source.path}`}
+        <KV label={t('plugins.about.author')}>{m.author || '—'}</KV>
+        <KV label={t('plugins.about.package')} breakAll>{`${p.name || '—'}@${p.version}`}</KV>
+        <KV label={t('plugins.about.source')} breakAll>
+          {p.source.type === 'npm'
+            ? `npm · ${p.source.name}@${p.source.version}`
+            : p.source.type === 'catalog'
+              ? `${t('plugins.src.bundled')} · ${p.source.slug}`
+              : `${t('plugins.src.folder')} · ${p.source.path}`}
         </KV>
-        <KV label="Thư mục" breakAll>
+        <KV label={t('plugins.about.folder')} breakAll>
           <span className="font-mono text-[11px]">{p.dir}</span>
         </KV>
         <KV label="Worker" breakAll>
-          {m.entrypoints.worker ? <code className="font-mono text-[11px]">{m.entrypoints.worker}</code> : 'không có'}
+          {m.entrypoints.worker ? <code className="font-mono text-[11px]">{m.entrypoints.worker}</code> : t('plugins.about.none')}
         </KV>
         {m.entrypoints.ui && (
-          <KV label="Giao diện" breakAll>
+          <KV label={t('plugins.about.ui')} breakAll>
             <code className="font-mono text-[11px]">{m.entrypoints.ui}</code>
           </KV>
         )}
-        <KV label="Cài lúc">{new Date(p.installedAt).toLocaleString()}</KV>
-        {m.categories.length > 0 && <KV label="Nhóm">{m.categories.join(', ')}</KV>}
+        <KV label={t('plugins.about.installedAt')}>{fmtDateTime(p.installedAt)}</KV>
+        {m.categories.length > 0 && <KV label={t('plugins.about.categories')}>{m.categories.join(', ')}</KV>}
       </div>
-      <Group title="Quyền">
+      <Group title={t('plugins.about.permissions')}>
         {m.capabilities.length === 0 ? (
-          <div className="border-b border-line py-2 text-[12px] text-dim">Không xin quyền nào.</div>
+          <div className="border-b border-line py-2 text-[12px] text-dim">{t('plugins.approval.none')}</div>
         ) : (
           <ul className="space-y-1 border-b border-line py-2.5">
             {m.capabilities.map((c) => (
@@ -750,6 +771,7 @@ function AboutTab({ p }: { p: InstalledPlugin }): React.JSX.Element {
 // ---- tạo plugin mới từ mẫu ----
 
 function CreatePluginDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (p: InstalledPlugin) => void }): React.JSX.Element {
+  const t = useT()
   const [name, setName] = useState('')
   const [id, setId] = useState('')
   const [idTouched, setIdTouched] = useState(false)
@@ -775,28 +797,27 @@ function CreatePluginDialog({ onClose, onCreated }: { onClose: () => void; onCre
   const label = 'mb-1 block text-[12px] font-medium'
   return (
     <Modal
-      title="Tạo plugin"
+      title={t('plugins.list.create')}
       onClose={onClose}
       footer={
         <>
-          <Button onClick={onClose}>Huỷ</Button>
+          <Button onClick={onClose}>{t('common.cancel')}</Button>
           <Button primary disabled={!ready || busy} onClick={() => void create()}>
-            {busy ? 'Đang tạo…' : 'Tạo và cài'}
+            {busy ? t('plugins.create.creating') : t('plugins.create.submit')}
           </Button>
         </>
       }
     >
       <p className="mb-3 text-[12px] leading-relaxed text-dim">
-        Tạo thư mục plugin từ mẫu (manifest, worker, SDK{template === 'page' ? ', trang riêng' : ''}) rồi cài tại chỗ. Sửa file xong bấm "Đọc lại gói". Muốn agent viết
-        tiếp: bật skill <code>stag-plugin-author</code> (Cài đặt → Skill → Khám phá) cho agent đó.
+        {tx('plugins.create.intro', { page: template === 'page' ? t('plugins.create.introPage') : '', skill: <code>stag-plugin-author</code> })}
       </p>
       <ErrorBar error={error} />
       <label className={label} htmlFor="new-plugin-name">
-        Tên
+        {t('plugins.create.name')}
       </label>
-      <input id="new-plugin-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Báo cáo tuần" className={`${INPUT} mb-3 w-full`} />
+      <input id="new-plugin-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('plugins.create.namePlaceholder')} className={`${INPUT} mb-3 w-full`} />
       <label className={label} htmlFor="new-plugin-id">
-        Mã plugin
+        {t('plugins.about.id')}
       </label>
       <input
         id="new-plugin-id"
@@ -806,34 +827,34 @@ function CreatePluginDialog({ onClose, onCreated }: { onClose: () => void; onCre
           setId(e.target.value)
         }}
         spellCheck={false}
-        placeholder="my.bao-cao-tuan"
+        placeholder={t('plugins.create.idPlaceholder')}
         className={`${INPUT_MONO} mb-1 w-full`}
       />
-      <p className={`mb-3 text-[12px] ${realId && !idOk ? 'text-danger' : 'text-dim'}`}>a-z, 0-9, ".", "_", "-"; không đổi được sau khi cài (dữ liệu riêng của plugin gắn với mã).</p>
-      <div className={label}>Thư mục chứa</div>
+      <p className={`mb-3 text-[12px] ${realId && !idOk ? 'text-danger' : 'text-dim'}`}>{t('plugins.create.idHint')}</p>
+      <div className={label}>{t('plugins.create.parent')}</div>
       <div className="mb-1 flex gap-2">
         <input value={parentDir} onChange={(e) => setParentDir(e.target.value)} spellCheck={false} placeholder="C:\Users\…\plugins" className={`${INPUT_MONO} min-w-0 flex-1`} />
         <SmallButton
           icon="folder"
           size="md"
           onClick={() =>
-            void window.stag.pickFolder('Chọn thư mục chứa plugin mới', parentDir || undefined).then((d) => {
+            void window.stag.pickFolder(t('plugins.create.pickTitle'), parentDir || undefined).then((d) => {
               if (d) setParentDir(d)
             })
           }
         >
-          Chọn…
+          {t('common.browse')}
         </SmallButton>
       </div>
       <p className="mb-3 truncate font-mono text-[11px] text-dim">
         {parentDir.trim() && idOk ? `${parentDir.trim().replace(/[\\/]+$/, '')}${sep}${pluginFolderFor(realId)}` : ' '}
       </p>
-      <div className={label}>Mẫu</div>
+      <div className={label}>{t('plugins.create.template')}</div>
       <div className="flex gap-2">
         {(
           [
-            ['page', 'Có trang', 'Tool cho agent, nút ở thanh bên, tab trang riêng'],
-            ['basic', 'Cơ bản', 'Tool cho agent, nút ở thanh bên']
+            ['page', t('plugins.create.tplPage'), t('plugins.create.tplPageDesc')],
+            ['basic', t('plugins.create.tplBasic'), t('plugins.create.tplBasicDesc')]
           ] as const
         ).map(([k, tmplLabel, desc]) => (
           <button
@@ -855,6 +876,7 @@ function CreatePluginDialog({ onClose, onCreated }: { onClose: () => void; onCre
 // ---- cài ----
 
 function InstallPluginDialog({ onClose, onInstalled }: { onClose: () => void; onInstalled: (p: InstalledPlugin) => void }): React.JSX.Element {
+  const t = useT()
   const [tab, setTab] = useState<'npm' | 'local'>('local')
   const [name, setName] = useState('')
   const [version, setVersion] = useState('')
@@ -879,16 +901,16 @@ function InstallPluginDialog({ onClose, onInstalled }: { onClose: () => void; on
   const label = 'mb-1 block text-[12px] font-medium'
   return (
     <Modal
-      title="Cài plugin"
+      title={t('plugins.list.install')}
       width="w-[500px]"
       onClose={busy ? undefined : onClose}
       footer={
         <>
           <Button onClick={onClose} disabled={busy}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button primary onClick={() => void install()} disabled={busy || !ready}>
-            {busy ? (tab === 'npm' ? 'Đang chạy npm install…' : 'Đang đọc gói…') : 'Cài'}
+            {busy ? (tab === 'npm' ? t('plugins.install.npmRunning') : t('plugins.install.reading')) : t('common.install')}
           </Button>
         </>
       }
@@ -900,7 +922,7 @@ function InstallPluginDialog({ onClose, onInstalled }: { onClose: () => void; on
         }}
       >
         <p className="mb-3 text-[12px] leading-relaxed text-dim">
-          Gói cần có mục <code>stagPlugin</code> trong package.json (xem <code>docs/plugins.md</code>). Cài xong, bạn xem quyền plugin xin rồi mới cho chạy.
+          {tx('plugins.install.intro', { section: <code>stagPlugin</code>, docs: <code>docs/plugins.md</code> })}
         </p>
         <Seg
           className="mb-4 self-start"
@@ -912,7 +934,7 @@ function InstallPluginDialog({ onClose, onInstalled }: { onClose: () => void; on
               label: (
                 <>
                   <Icon name="folder" size="s" />
-                  Thư mục
+                  {t('plugins.install.tabFolder')}
                 </>
               )
             },
@@ -921,7 +943,7 @@ function InstallPluginDialog({ onClose, onInstalled }: { onClose: () => void; on
               label: (
                 <>
                   <Icon name="hex" size="s" />
-                  Gói npm
+                  {t('plugins.install.tabNpm')}
                 </>
               )
             }
@@ -930,21 +952,21 @@ function InstallPluginDialog({ onClose, onInstalled }: { onClose: () => void; on
         {tab === 'npm' ? (
           <>
             <label className={label} htmlFor="plugin-npm-name">
-              Tên gói
+              {t('plugins.install.pkgName')}
             </label>
             <input id="plugin-npm-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="stag-plugin-example" spellCheck={false} className={field} />
             <label className={`${label} mt-3`} htmlFor="plugin-npm-version">
-              Phiên bản (tuỳ chọn)
+              {t('plugins.install.version')}
             </label>
             <input id="plugin-npm-version" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="latest" spellCheck={false} className={field} />
             <p className="mt-2 text-[12px] text-dim">
-              Cài bằng <code>npm install --ignore-scripts</code> vào thư mục riêng của app.
+              {tx('plugins.install.npmNote', { cmd: <code>npm install --ignore-scripts</code> })}
             </p>
           </>
         ) : (
           <>
             <label className={label} htmlFor="plugin-local-path">
-              Thư mục gói
+              {t('plugins.install.folder')}
             </label>
             <div className="flex gap-2">
               <input id="plugin-local-path" autoFocus value={path} onChange={(e) => setPath(e.target.value)} placeholder="D:\code\stag-plugin-example" spellCheck={false} className={field} />
@@ -952,19 +974,19 @@ function InstallPluginDialog({ onClose, onInstalled }: { onClose: () => void; on
                 icon="folder"
                 size="md"
                 onClick={() =>
-                  void window.stag.pickFolder('Chọn thư mục plugin (có package.json)', path || undefined).then((d) => {
+                  void window.stag.pickFolder(t('plugins.install.pickTitle'), path || undefined).then((d) => {
                     if (d) setPath(d)
                   })
                 }
               >
-                Chọn
+                {t('plugins.install.pick')}
               </SmallButton>
             </div>
-            <p className="mt-2 text-[12px] text-dim">Dùng tại chỗ, không chép: sửa gói rồi bấm "Đọc lại gói" ở trang plugin.</p>
+            <p className="mt-2 text-[12px] text-dim">{t('plugins.install.localNote')}</p>
           </>
         )}
         <Callout icon="shield" className="mt-4">
-          Plugin chạy chương trình trên máy bạn với quyền của bạn. Chỉ cài từ nguồn bạn tin.
+          {t('plugins.install.warning')}
         </Callout>
         {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-[12px] whitespace-pre-wrap text-danger">{error}</div>}
       </form>

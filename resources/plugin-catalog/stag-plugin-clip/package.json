@@ -1,0 +1,110 @@
+{
+  "name": "stag-plugin-clip",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stag Clip: agents find the best moments in long videos (podcasts, streams; YouTube, Twitch, Kick or a file) from the video's existing transcript and cut them into clips.",
+  "license": "MIT",
+  "type": "module",
+  "stagPlugin": {
+    "id": "stag.clip",
+    "apiVersion": 1,
+    "displayName": "Stag Clip",
+    "description": "Agents find the best moments in long videos from the video's existing transcript and cut them into clips, keeping the original frame and audio. Runs yt-dlp and ffmpeg on this computer (it can download them for you) and only downloads the parts it cuts. You review the clips on the Stag Clip page.",
+    "author": "stag.ai",
+    "categories": ["video"],
+    "icon": "clip",
+    "capabilities": [
+      "agent.tools.register",
+      "ui.page.register",
+      "instance.settings.register",
+      "plugin.state.read",
+      "plugin.state.write",
+      "agents.read",
+      "agent.sessions.send",
+      "files.read",
+      "artifacts.publish",
+      "browser.cookies"
+    ],
+    "entrypoints": {
+      "worker": "./worker.mjs",
+      "ui": "./ui"
+    },
+    "tools": [
+      {
+        "name": "clip_fetch",
+        "displayName": "Open a video",
+        "description": "Step 1 of Stag Clip (find the best moments in a long video and cut them into clips). Reads a video's details and its existing transcript, without downloading the video. source = a YouTube / Twitch / Kick URL, a video file path, or a source id. Returns the source id, duration, transcript language and the user's clip defaults. If the video has no transcript, tell the user and stop.",
+        "timeoutSec": 600,
+        "parametersSchema": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string", "description": "Video URL, video file path, or source id" },
+            "lang": { "type": "string", "description": "Transcript language code (e.g. en, vi). Default: the video's own language" }
+          },
+          "required": ["source"]
+        }
+      },
+      {
+        "name": "clip_transcript",
+        "displayName": "Read the transcript",
+        "description": "Read a source's transcript as timestamped sentences, one page at a time. Read the whole video page by page before choosing clips. The transcript is in the video's language; write clip titles and reasons in the user's language.",
+        "timeoutSec": 300,
+        "parametersSchema": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string", "description": "Source id from clip_fetch (or the URL / path)" },
+            "from": { "type": ["number", "string"], "description": "Start of the range: seconds or h:mm:ss. Default 0" },
+            "to": { "type": ["number", "string"], "description": "End of the range: seconds or h:mm:ss. Default: end of video" },
+            "lang": { "type": "string", "description": "Another transcript language listed by clip_fetch" }
+          },
+          "required": ["source"]
+        }
+      },
+      {
+        "name": "clip_cut",
+        "displayName": "Cut a clip",
+        "description": "Cut one clip from a source. start / end in seconds or h:mm:ss. The cut snaps to sentence boundaries (a few seconds of drift is normal). The clip keeps the original frame and audio; no subtitles are burned in. Only that part of an online video is downloaded. The user reviews each clip on the Stag Clip page (keep / drop).",
+        "timeoutSec": 1800,
+        "parametersSchema": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string", "description": "Source id from clip_fetch" },
+            "start": { "type": ["number", "string"], "description": "Start: seconds or h:mm:ss" },
+            "end": { "type": ["number", "string"], "description": "End: seconds or h:mm:ss" },
+            "title": { "type": "string", "description": "Short title in the user's language" },
+            "reason": { "type": "string", "description": "One sentence: why this moment works (user's language)" },
+            "snap": { "type": "boolean", "description": "Snap to sentence boundaries. Default true" }
+          },
+          "required": ["source", "start", "end", "title", "reason"]
+        }
+      },
+      {
+        "name": "clip_signals",
+        "displayName": "Find signals",
+        "description": "Hints about where the good moments are in a source: YouTube \"most replayed\" peaks, the busiest chat replay moments (with laughs), and loudness peaks (files on this computer). Use them to decide where to read the transcript closely; the transcript decides what makes a good clip.",
+        "timeoutSec": 1200,
+        "parametersSchema": {
+          "type": "object",
+          "properties": { "source": { "type": "string", "description": "Source id from clip_fetch" } },
+          "required": ["source"]
+        }
+      },
+      {
+        "name": "clip_list",
+        "displayName": "List clips",
+        "description": "List the clips already cut from a source and the user's decision on each (waiting / kept / dropped), so you do not cut the same moment twice.",
+        "parametersSchema": {
+          "type": "object",
+          "properties": { "source": { "type": "string", "description": "Source id from clip_fetch" } },
+          "required": ["source"]
+        }
+      }
+    ],
+    "ui": {
+      "slots": [
+        { "type": "page", "id": "review", "displayName": "Stag Clip", "path": "index.html" },
+        { "type": "settingsPage", "id": "settings", "displayName": "Stag Clip", "path": "settings.html" }
+      ]
+    }
+  }
+}

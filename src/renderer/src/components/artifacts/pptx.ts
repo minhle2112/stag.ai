@@ -3,6 +3,7 @@
 // thừa kế placeholder từ layout / master và hình trang trí của layout / master. Không vẽ: biểu đồ (chỉ khung),
 // SmartArt, hiệu ứng, hình dạng phức tạp (vẽ thành chữ nhật / elip / bo góc).
 import JSZip from 'jszip'
+import { t } from '@shared/i18n'
 
 const EMU_PX = 9525
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -193,7 +194,7 @@ export async function loadPptx(data: Uint8Array | ArrayBuffer): Promise<Deck> {
   }
 
   const pres = await part('ppt/presentation.xml')
-  if (!pres) throw new Error('Không phải file PowerPoint (.pptx) hợp lệ')
+  if (!pres) throw new Error(t('artifacts.pptx.invalid'))
   const root = pres.doc.documentElement
   const sz = kid(root, 'sldSz')
   const width = num(sz?.getAttribute('cx'), 9144000) / EMU_PX
@@ -358,7 +359,7 @@ async function drawTree(tree: Element | null, parent: HTMLElement, ctx: Ctx, xf:
         if (fb) await drawTree(fb, parent, ctx, xf, decorOnly)
       }
     } catch (e) {
-      console.warn('[pptx] bỏ qua một hình:', e)
+      console.warn('[pptx] skipped a shape:', e)
     }
   }
 }
@@ -513,9 +514,9 @@ async function drawFrame(frame: Element, parent: HTMLElement, ctx: Ctx, xf: Xf):
     div.appendChild(table)
   } else {
     const uri = data?.getAttribute('uri') ?? ''
-    const label = uri.includes('chart') ? 'Biểu đồ' : uri.includes('diagram') ? 'SmartArt' : 'Đối tượng'
+    const label = uri.includes('chart') ? t('artifacts.pptx.chart') : uri.includes('diagram') ? 'SmartArt' : t('artifacts.pptx.object')
     Object.assign(div.style, { border: '1px dashed #9aa4b2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontFamily: 'Segoe UI, sans-serif', fontSize: '14px', background: 'rgba(148,163,184,.08)' })
-    div.textContent = `${label} (app chưa vẽ được — bấm “Mở”)`
+    div.textContent = t('artifacts.pptx.unsupported', { label })
   }
   parent.appendChild(div)
 }

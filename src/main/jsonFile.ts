@@ -67,7 +67,7 @@ export class JsonFile {
     const bak = await parse(`${this.file}.bak`)
     if (broken) {
       jsonRecoveries.push({ file: this.file, fromBackup: !!bak })
-      console.error(`[json] ${this.file} hỏng: ${bak ? 'đọc bản .bak' : 'không có bản .bak, dùng mặc định'}`)
+      console.error(`[json] ${this.file} is damaged: ${bak ? 'read the .bak copy' : 'no .bak copy, using defaults'}`)
     }
     return { data: bak ?? null, broken, fromBackup: !!bak }
   }

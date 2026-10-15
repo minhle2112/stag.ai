@@ -5,6 +5,7 @@ import type { Agent, AgentActivity, AgentStatus, BoardSnapshot, ContextUsage, Ha
 import { agentFolder, joinRoot, projectNoteName, projectOf } from '@shared/projects'
 import { fileStamp } from './fileStamp'
 import { readText } from './fsutil'
+import { t } from '@shared/i18n'
 import { renameRetry } from './jsonFile'
 import type { ClosedTask } from './workLog'
 import { ensureIgnored } from './workspace'
@@ -250,7 +251,7 @@ export class Board {
     try {
       await fs.rename(file, aside)
     } catch (e) {
-      throw new Error(`File kanban ${file} bị hỏng và không cất sang ${aside} được: ${(e as Error).message}`)
+      throw new Error(t('app.error.boardBroken', { file, aside, message: (e as Error).message }))
     }
     return []
   }
@@ -290,7 +291,7 @@ export class Board {
     } catch (e) {
       // Việc đã đổi trong bộ nhớ (xong việc, mở việc…): báo lỗi cho agent lúc này thì nó gọi lại và nhận "không có việc
       // mở", còn dòng nhật ký bị mất. Giữ bản trong bộ nhớ, thử ghi lại sau một lúc.
-      console.error('[board] không ghi được', file, (e as Error).message)
+      console.error('[board] could not write', file, (e as Error).message)
       if (retry) setTimeout(() => void this.save(ws, false).catch(() => {}), 2000)
     }
     this.notify(ws.id)

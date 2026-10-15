@@ -36,6 +36,7 @@ import {
   type SaveInput
 } from '@shared/inspect'
 import type { Agent, Workspace } from '@shared/types'
+import { getLocale, onLocaleChange, t } from '@shared/i18n'
 import { STATIC_ROOTS, staticCandidates, staticTags, type StaticTag } from '@shared/inspectSource'
 import type { BrowserService, PageTab } from './browser'
 import { readText } from './fsutil'
@@ -108,6 +109,10 @@ export class InspectService {
     private events: InspectEvents
   ) {
     browser.attachInspect({ toggle: (wsId, tabId) => void this.toggle(wsId, tabId) })
+    // Lớp Soi trong trang hiện chữ theo ngôn ngữ giao diện: đổi ngôn ngữ thì đẩy lại trạng thái (kèm locale).
+    onLocaleChange(() => {
+      for (const id of this.known.keys()) void this.pushPages(id).catch(() => {})
+    })
   }
 
   /** Danh sách agent của workspace (AgentService, gắn sau). */
@@ -194,7 +199,7 @@ export class InspectService {
 
   private ws(id: string): Workspace {
     const ws = this.workspace(id)
-    if (!ws) throw new Error('Workspace không còn')
+    if (!ws) throw new Error(t('inspect.err.noWorkspace'))
     return ws
   }
 
@@ -297,7 +302,8 @@ export class InspectService {
       viewport: p.viewport,
       pins: url ? d.pins.filter((x) => x.url === url).map(toPagePin) : [],
       agents: team,
-      lastAgentId: pickAgent(team, d.lastAgent)
+      lastAgentId: pickAgent(team, d.lastAgent),
+      locale: getLocale()
     }
   }
 
@@ -336,9 +342,9 @@ export class InspectService {
   private async pageSave(p: PageTab, input: SaveInput): Promise<number> {
     const ws = this.ws(p.wsId)
     const text = String(input?.text ?? '').trim().slice(0, MAX_TEXT)
-    if (!text) throw new Error('Bình luận trống')
+    if (!text) throw new Error(t('inspect.err.empty'))
     const member = this.team(p.wsId).find((a) => a.id === input.agentId)
-    if (!member) throw new Error('Agent không còn trong workspace')
+    if (!member) throw new Error(t('inspect.err.agentGone'))
     const cap = input.captureId ? this.captures.get(input.captureId) : undefined
     if (cap) this.captures.delete(input.captureId!)
     const at = now()
@@ -348,7 +354,7 @@ export class InspectService {
       if (pin && pin.state !== 'draft') pin = undefined
       const target = cleanTarget(input.target)
       if (!pin) {
-        if (!target) throw new Error('Thiếu phần tử')
+        if (!target) throw new Error(t('inspect.err.noElement'))
         pin = {
           id: d.next++,
           url: pageKey(String(input.url ?? '')),
@@ -386,7 +392,7 @@ export class InspectService {
     const agents = await this.mutate(ws, (d) => {
       const drafts = d.pins.filter((x) => ids.includes(x.id) && x.state === 'draft')
       const gone = drafts.find((x) => !team.some((a) => a.id === x.agentId))
-      if (gone) throw new Error(`${gone.agentName} không còn trong workspace: xoá hoặc chọn agent khác cho bình luận #${gone.id}`)
+      if (gone) throw new Error(t('inspect.err.groupAgentGone', { name: gone.agentName, id: String(gone.id) }))
       return [...new Set(sendDrafts(d.pins, ids).map((x) => x.agentId))]
     })
     for (const a of agents) this.events.queued(a)

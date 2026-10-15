@@ -1,4 +1,5 @@
 import type { Connector, ConnectorsSettings, ConnectorValue, Settings, ToolPolicy } from './types'
+import { t } from './i18n'
 
 /** Connector (máy chủ MCP) và bí mật: chuẩn hoá, kiểm tra, bật / tắt theo cấp, nhập từ JSON. Dùng chung main + renderer. */
 
@@ -116,22 +117,22 @@ export function normalizeToggles(raw: unknown, inheritedOnly = false): Record<st
   return out
 }
 
-/** Lỗi cấu hình (tiếng Việt) hoặc null. `others` = id các connector khác (không được trùng). */
+/** Lỗi cấu hình (theo ngôn ngữ giao diện) hoặc null. `others` = id các connector khác (không được trùng). */
 export function validateConnector(c: Connector, others: string[]): string | null {
-  if (!CONNECTOR_ID_RE.test(c.id)) return 'Tên máy chủ chỉ gồm a-z, 0-9, "_" và "-", tối đa 40 ký tự, bắt đầu bằng chữ / số.'
-  if (RESERVED_CONNECTOR_IDS.includes(c.id)) return `"${c.id}" là máy chủ MCP của chính app, chọn tên khác.`
-  if (others.includes(c.id)) return `Đã có connector tên "${c.id}".`
+  if (!CONNECTOR_ID_RE.test(c.id)) return t('connectors.validate.id')
+  if (RESERVED_CONNECTOR_IDS.includes(c.id)) return t('connectors.validate.reserved', { id: c.id })
+  if (others.includes(c.id)) return t('connectors.validate.taken', { id: c.id })
   if (c.transport === 'stdio') {
-    if (!c.command) return 'Cần chương trình chạy máy chủ (vd. npx).'
+    if (!c.command) return t('connectors.validate.command')
   } else {
     let u: URL
     try {
       u = new URL(c.url)
     } catch {
-      return 'Địa chỉ máy chủ không hợp lệ (cần dạng https://…).'
+      return t('connectors.validate.url')
     }
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') return 'Địa chỉ máy chủ phải bắt đầu bằng https:// hoặc http://.'
-    if (u.username || u.password) return 'Không ghi tài khoản / mật khẩu vào địa chỉ; dùng bí mật làm Bearer token hoặc header.'
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return t('connectors.validate.protocol')
+    if (u.username || u.password) return t('connectors.validate.credentials')
   }
   return null
 }
@@ -189,7 +190,7 @@ export function slugify(name: string): string {
   const id = name
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/gi, 'd')
+    .replace(/đ/gi, 'd') // i18n-ignore: strips the Vietnamese letter đ from ids
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, '-')
     .replace(/^[-_]+|-+$/g, '')
@@ -227,7 +228,7 @@ export function parseMcpJson(text: string, taken: string[] = []): ParsedImport {
   try {
     raw = JSON.parse(text)
   } catch (e) {
-    return { connectors: [], secrets: [], errors: [`JSON không đọc được: ${(e as Error).message}`] }
+    return { connectors: [], secrets: [], errors: [t('connectors.import.badJson', { message: (e as Error).message })] }
   }
   const r = obj(raw)
   let map: Loose
@@ -246,10 +247,10 @@ export function importServers(map: Record<string, unknown>, taken: string[] = []
     const type = s(r.type).toLowerCase()
     const isHttp = typeof r.url === 'string' || type === 'http' || type === 'streamable_http' || type === 'sse'
     if (!isHttp && typeof r.command !== 'string') {
-      out.errors.push(`"${name}": thiếu "command" hoặc "url"`)
+      out.errors.push(t('connectors.import.missingCommand', { name }))
       continue
     }
-    if (type === 'sse') out.errors.push(`"${name}": kiểu SSE cũ — app thử nối bằng Streamable HTTP, có thể không chạy`)
+    if (type === 'sse') out.errors.push(t('connectors.import.sse', { name }))
     let id = slugify(name)
     for (let i = 2; used.has(id); i++) id = `${slugify(name).slice(0, 36)}-${i}`
     used.add(id)
@@ -281,6 +282,6 @@ export function importServers(map: Record<string, unknown>, taken: string[] = []
     const n = normalizeConnector(c)
     if (n) out.connectors.push(n)
   }
-  if (!out.connectors.length && !out.errors.length) out.errors.push('Không thấy máy chủ MCP nào trong JSON')
+  if (!out.connectors.length && !out.errors.length) out.errors.push(t('connectors.import.empty'))
   return out
 }

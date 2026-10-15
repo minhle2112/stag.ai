@@ -20,6 +20,7 @@ import {
   type LaunchConfig
 } from '@shared/launch'
 import type { DevServerApproval } from '@shared/agentApi'
+import { t } from '@shared/i18n'
 import type { Workspace } from '@shared/types'
 import type { AgentService } from './agents'
 import type { BrowserService } from './browser'
@@ -59,6 +60,16 @@ export function portOpen(port: number, timeout = 400): Promise<boolean> {
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+/** Lỗi khởi động dev server: `message` theo ngôn ngữ giao diện (tab Browser), `en` tiếng Anh cho agent (preview_start). */
+class DevStartError extends Error {
+  constructor(
+    readonly en: string,
+    ui: string
+  ) {
+    super(ui)
+  }
+}
+
 interface Starting {
   promise: Promise<string>
   cancel: () => void
@@ -92,7 +103,7 @@ export class DevServerService {
 
   private ws(wsId: string): Workspace {
     const ws = this.workspaces.get(wsId)
-    if (!ws) throw new Error('Workspace không tồn tại')
+    if (!ws) throw new Error('Workspace not found')
     return ws
   }
 
@@ -188,20 +199,29 @@ export class DevServerService {
       const t0 = Date.now()
       let ran = false
       for (;;) {
-        if (cancelled) throw new Error('Đã huỷ.')
+        if (cancelled) throw new DevStartError('Cancelled.', t('browser.dev.cancelled'))
         if (await portOpen(cfg.port)) return url
-        if (!this.agents.has(agentId)) throw new Error('Ô terminal của dev server đã bị xoá.')
+        if (!this.agents.has(agentId)) throw new DevStartError('The dev server terminal cell was deleted.', t('browser.dev.cellDeleted'))
         const running = this.agents.isRunning(agentId)
         if (running) ran = true
-        else if (ran) throw new Error(`Terminal đã đóng trước khi cổng ${cfg.port} mở. ${this.tail(agentId)}`.trim())
+        else if (ran) {
+          const tail = this.tail(agentId)
+          throw new DevStartError(
+            `The terminal closed before port ${cfg.port} opened. ${tail}`.trim(),
+            `${t('browser.dev.closed', { port: String(cfg.port) })} ${tail}`.trim()
+          )
+        }
         else if (Date.now() - t0 > OPEN_TIMEOUT)
-          throw new Error('Ô terminal chưa mở được (mở workspace này ở tab Agent một lần rồi thử lại).')
+          throw new DevStartError("The terminal cell couldn't be opened (the user should open this workspace's Agents tab once, then retry).", t('browser.dev.noCell'))
         if (running) {
           const bad = startupFailure(terminalLines(this.agents.terminalOutput(agentId).slice(skip)).slice(-200))
-          if (bad) throw new Error(`Lệnh lỗi: ${bad}`)
+          if (bad) throw new DevStartError(`Command failed: ${bad}`, t('browser.dev.failed', { error: bad }))
         }
         if (Date.now() - t0 > START_TIMEOUT)
-          throw new Error(`Chờ ${START_TIMEOUT / 60_000} phút mà cổng ${cfg.port} chưa mở. Xem log trong ô terminal; cổng trong ${LAUNCH_FILE} có đúng không?`)
+          throw new DevStartError(
+            `Port ${cfg.port} did not open within ${START_TIMEOUT / 60_000} minutes. Check the terminal log; is the port in ${LAUNCH_FILE} right?`,
+            t('browser.dev.timeout', { minutes: START_TIMEOUT / 60_000, port: String(cfg.port), file: LAUNCH_FILE })
+          )
         await delay(POLL_MS)
       }
     }
@@ -308,7 +328,7 @@ export class DevServerService {
           this.approved.add(approval)
         }
         const url = await this.start(wsId, cfg, { near: agentId }).catch((e: Error) => {
-          throw new Error(`Dev server "${cfg.name}" did not start: ${e.message} Read preview_logs for details.`)
+          throw new Error(`Dev server "${cfg.name}" did not start: ${e instanceof DevStartError ? e.en : e.message} Read preview_logs for details.`)
         })
         const cell = this.cellOf(wsId, cfg.name)
         return `Dev server "${cfg.name}" is up at ${url}${cell ? ` (running in the terminal cell "${devCellName(cfg.name)}"; config saved in ${LAUNCH_FILE})` : ' (its port was already open)'}. Open it with browser_navigate; read its output with preview_logs.`

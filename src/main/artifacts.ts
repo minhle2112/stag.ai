@@ -1,6 +1,7 @@
 import { createReadStream, mkdirSync, promises as fs, renameSync, writeFileSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 import { Readable } from 'node:stream'
+import { t as tr } from '@shared/i18n'
 import { projectRel } from '@shared/scope'
 import type { Agent, ArtifactEvent, ArtifactStat, ArtifactText, Workspace } from '@shared/types'
 import type { HookPayload } from './board'
@@ -110,7 +111,7 @@ export function isRunnableFile(path: string): boolean {
  */
 export async function artifactPath(ws: Workspace, rel: string, missingOk = false): Promise<string> {
   // Rỗng / "." = chính thư mục dự án, không phải file artifact.
-  if (!String(rel ?? '').split(/[\\/]+/).some((s) => s && s !== '.')) throw new Error('Đường dẫn nằm ngoài dự án')
+  if (!String(rel ?? '').split(/[\\/]+/).some((s) => s && s !== '.')) throw new Error(tr('artifacts.err.outside'))
   return realPathInside(ws.path, String(rel), missingOk)
 }
 
@@ -337,7 +338,7 @@ export class ArtifactLog {
     } catch {
       return null
     }
-    if (size > MAX_BYTES) throw new Error(`File quá lớn để xem trong app (${Math.round(size / 1024 / 1024)} MB, tối đa ${MAX_BYTES / 1024 / 1024} MB). Bấm “Mở”.`)
+    if (size > MAX_BYTES) throw new Error(tr('artifacts.err.tooLarge', { size: Math.round(size / 1024 / 1024), max: MAX_BYTES / 1024 / 1024 }))
     return new Uint8Array(await fs.readFile(full))
   }
 

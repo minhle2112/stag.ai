@@ -9,6 +9,7 @@ import { Button } from '../Modal'
 import { ChatList } from './ChatList'
 import { Composer } from './Composer'
 import { chatZoom, DEFAULT_CTX_LIMIT, EMPTY_ITEMS, firstPendingAsk, OFF_STATE } from './chatLogic'
+import { useT } from '../../i18n'
 
 export interface ChatCellProps {
   ws: Workspace
@@ -33,6 +34,7 @@ function Spinner(): React.JSX.Element {
  * Chiếm `absolute inset-0` trong vùng thân ô (dưới tiêu đề do AgentGrid vẽ).
  */
 export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatCellProps): React.JSX.Element {
+  const t = useT()
   const slice = useChat((s) => s.byAgent[agent.id])
   const ensure = useChat((s) => s.ensure)
   const handoff = useHandoffFor(agent.id)
@@ -68,12 +70,12 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
               {booting ? (
                 <>
                   <Spinner />
-                  <div>Đang mở phiên…</div>
+                  <div>{t('chat.starting')}</div>
                 </>
               ) : (
                 <>
                   <Icon name="chat" size={22} />
-                  <div className="min-w-0 break-words">Gõ để nói chuyện với {agent.name}</div>
+                  <div className="min-w-0 break-words">{t('chat.emptyHint', { name: agent.name })}</div>
                 </>
               )}
             </div>
@@ -98,20 +100,20 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
           {error ? (
             <div className="min-w-0 flex-1 rounded-md border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-danger">{error}</div>
           ) : (
-            <span className="min-w-0 flex-1 text-dim @max-[420px]/chat:basis-full">Phiên đã dừng.</span>
+            <span className="min-w-0 flex-1 text-dim @max-[420px]/chat:basis-full">{t('agents.grid.sessionStopped')}</span>
           )}
           <div className="flex min-w-0 max-w-full flex-wrap gap-2">
             <Button primary onClick={() => onStart(false)}>
-              Phiên mới
+              {t('agents.menu.newSession')}
             </Button>
-            {agent.lastSessionId && <Button onClick={() => onStart(true)}>Tiếp tục phiên trước</Button>}
+            {agent.lastSessionId && <Button onClick={() => onStart(true)}>{t('agents.menu.resume')}</Button>}
           </div>
         </div>
       )}
       {starting && !empty && (
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim">
           <Spinner />
-          Đang mở phiên…
+          {t('chat.starting')}
         </div>
       )}
 
@@ -129,7 +131,7 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
           queued={slice?.queued ?? EMPTY_QUEUE}
           error={slice?.error}
           ctxLimit={ctxLimit}
-          offLabel={starting ? 'Đang mở phiên…' : undefined}
+          offLabel={starting ? t('chat.starting') : undefined}
           focusRef={focusRef}
         />
       )}
@@ -140,13 +142,13 @@ export function ChatCell({ ws, agent, running, starting, error, onStart }: ChatC
           {error ? (
             <div className="max-w-md rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-center text-danger">{error}</div>
           ) : (
-            <div className="text-dim">Phiên đã dừng.</div>
+            <div className="text-dim">{t('agents.grid.sessionStopped')}</div>
           )}
           <div className="flex flex-wrap justify-center gap-2">
             <Button primary onClick={() => onStart(false)}>
-              Phiên mới
+              {t('agents.menu.newSession')}
             </Button>
-            {agent.lastSessionId && <Button onClick={() => onStart(true)}>Tiếp tục phiên trước</Button>}
+            {agent.lastSessionId && <Button onClick={() => onStart(true)}>{t('agents.menu.resume')}</Button>}
           </div>
         </div>
       )}

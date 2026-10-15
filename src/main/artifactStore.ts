@@ -17,6 +17,8 @@ import {
   type PublishFailure
 } from '@shared/artifacts'
 import type { Agent, Task, Workspace } from '@shared/types'
+import { t as tr } from '@shared/i18n'
+import { uiName } from '@shared/i18n/uiNames'
 import { fileStamp } from './fileStamp'
 import { readText } from './fsutil'
 import { renameRetry } from './jsonFile'
@@ -290,7 +292,7 @@ export class ArtifactStore {
           blocks = true
         }
         a.versions.push({ v, at, note, snapshot: snapRel, size, sha256, agentId: agent.id, agentName: agent.name, taskId: task.id, ...(blocks ? { blocks } : {}) })
-        lines.push(`Published "${title}" as v${v} (artifact ${a.id}, file ${rel}) under your task "${task.title}". stag.ai saved a snapshot; the user sees it in the stag.ai "Sản phẩm" (Artifacts) tab${isNew ? '' : ' with a diff against the previous version'}.`)
+        lines.push(`Published "${title}" as v${v} (artifact ${a.id}, file ${rel}) under your task "${task.title}". stag.ai saved a snapshot; the user sees it in the stag.ai "${uiName.artifacts()}" tab${isNew ? '' : ' with a diff against the previous version'}.`)
       }
       if (wasHidden) lines.push('It was hidden from the list before; it is shown again.')
       if (prevOwner) {
@@ -353,7 +355,7 @@ export class ArtifactStore {
       delete c.prevState
       c.updatedAt = msg.at
       a.updatedAt = msg.at
-      return `Reply added to ${c.id} on "${a.title}". The user sees it under "Needs you" and answers in the stag.ai "Sản phẩm" (Artifacts) tab; the answer comes back to your session.${took}`
+      return `Reply added to ${c.id} on "${a.title}". The user sees it under "Needs you" and answers in the stag.ai "${uiName.artifacts()}" tab; the answer comes back to your session.${took}`
     })
   }
 
@@ -375,7 +377,7 @@ export class ArtifactStore {
   /** Góp ý mới: nháp, hoặc gửi luôn (vào hàng chờ, gõ vào phiên agent khi agent rảnh). */
   async addComment(ws: Workspace, id: string, input: { v: number; anchor: CommentAnchor; text: string; send: boolean }): Promise<ArtifactComment> {
     const text = clean(input.text, MAX_TEXT, true)
-    if (!text) throw new Error('Góp ý trống')
+    if (!text) throw new Error(tr('artifacts.err.emptyComment'))
     const c = await this.mutate(ws, (d) => {
       const a = findArtifact(d, id)
       const at = now()
@@ -399,10 +401,10 @@ export class ArtifactStore {
   /** Sửa chữ của góp ý nháp (giữ chỗ neo). */
   async editDraft(ws: Workspace, cid: string, text: string): Promise<void> {
     const t = clean(text, MAX_TEXT, true)
-    if (!t) throw new Error('Góp ý trống')
+    if (!t) throw new Error(tr('artifacts.err.emptyComment'))
     await this.mutate(ws, (d) => {
       const { c } = findComment(d, cid)
-      if (c.state !== 'draft') throw new Error('Chỉ sửa được góp ý nháp')
+      if (c.state !== 'draft') throw new Error(tr('artifacts.err.onlyEditDraft'))
       c.thread[0] = { ...c.thread[0], text: t, at: now() }
       c.updatedAt = now()
     })
@@ -411,7 +413,7 @@ export class ArtifactStore {
   async deleteDraft(ws: Workspace, cid: string): Promise<void> {
     await this.mutate(ws, (d) => {
       const { a, c } = findComment(d, cid)
-      if (c.state !== 'draft') throw new Error('Chỉ xoá được góp ý nháp')
+      if (c.state !== 'draft') throw new Error(tr('artifacts.err.onlyDeleteDraft'))
       a.comments = a.comments.filter((x) => x !== c)
     })
   }
@@ -436,10 +438,10 @@ export class ArtifactStore {
   /** Người dùng viết tiếp trong mạch (trả lời, nút trả lời nhanh, "Chưa ổn…", "Mở lại…") → vào hàng chờ gửi agent. */
   async say(ws: Workspace, cid: string, text: string): Promise<void> {
     const t = clean(text, MAX_TEXT, true)
-    if (!t) throw new Error('Tin trống')
+    if (!t) throw new Error(tr('artifacts.err.emptyMessage'))
     const artifactId = await this.mutate(ws, (d) => {
       const { a, c } = findComment(d, cid)
-      if (c.state === 'draft') throw new Error('Góp ý này còn là nháp')
+      if (c.state === 'draft') throw new Error(tr('artifacts.err.isDraft'))
       if (c.state !== 'queued') c.prevState = c.state
       c.thread.push({ by: 'user', text: t, at: now() })
       c.state = 'queued'
@@ -452,7 +454,7 @@ export class ArtifactStore {
   async close(ws: Workspace, cid: string): Promise<void> {
     await this.mutate(ws, (d) => {
       const { c } = findComment(d, cid)
-      if (c.state === 'draft') throw new Error('Góp ý nháp thì xoá, không đóng')
+      if (c.state === 'draft') throw new Error(tr('artifacts.err.closeDraft'))
       c.state = 'closed'
       delete c.prevState
       c.updatedAt = now()
@@ -466,7 +468,7 @@ export class ArtifactStore {
   async unsend(ws: Workspace, cid: string): Promise<{ text: string; draft: boolean }> {
     return this.mutate(ws, (d) => {
       const { c } = findComment(d, cid)
-      if (c.state !== 'queued') throw new Error('Góp ý đã được gửi cho agent, không huỷ được nữa')
+      if (c.state !== 'queued') throw new Error(tr('artifacts.err.cannotUnsend'))
       if (c.thread.length <= 1) {
         c.state = 'draft'
         c.updatedAt = now()
@@ -555,7 +557,7 @@ export class ArtifactStore {
 
 /** Tin gõ vào phiên agent cho các góp ý đang chờ (tiếng Anh, agent đọc). */
 export function commentMessage(items: Delivery[]): string {
-  const lines: string[] = ['[stag.ai] Comments from the user on your artifacts (tab "Sản phẩm"):']
+  const lines: string[] = [`[stag.ai] Comments from the user on your artifacts ("${uiName.artifacts()}" tab):`]
   for (const { artifact: a, comments } of items) {
     const v = latestVersion(a)?.v ?? 1
     lines.push('', `Artifact ${a.id} "${a.title}" — file ${a.rel}, latest v${v}:`)
@@ -602,7 +604,7 @@ function parseIndex(raw: string): IndexFile | null {
 }
 
 function safeId(id: string): string {
-  if (!/^a\d+$/.test(id)) throw new Error('Mã sản phẩm không hợp lệ')
+  if (!/^a\d+$/.test(id)) throw new Error(tr('artifacts.err.badId'))
   return id
 }
 

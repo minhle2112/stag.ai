@@ -3,6 +3,7 @@ import type { PluginScaffoldRequest } from '@shared/plugins'
 /**
  * File của một plugin mới (Cài đặt → Plugin → "Tạo plugin"). SDK worker (stag-plugin-sdk.mjs) chép riêng từ
  * resources/plugin-sdk. Mẫu basic: tool + nút ở thanh bên + dữ liệu riêng; page: thêm tab trang riêng.
+ * Nội dung file viết cho người / agent viết plugin nên luôn bằng tiếng Anh (không theo ngôn ngữ giao diện).
  */
 export function scaffoldFiles(req: PluginScaffoldRequest): Record<string, string> {
   const page = req.template === 'page'
@@ -17,18 +18,18 @@ export function scaffoldFiles(req: PluginScaffoldRequest): Record<string, string
       id: req.id,
       apiVersion: 1,
       displayName: req.name,
-      description: `${req.name}: plugin mới tạo từ mẫu của stag.ai.`,
+      description: `${req.name}: a new plugin created from the stag.ai template.`,
       author: '',
       capabilities: ['agent.tools.register', 'ui.sidebar.register', 'plugin.state.read', 'plugin.state.write', ...(page ? ['ui.page.register'] : [])],
       entrypoints: { worker: './worker.mjs', ...(page ? { ui: './ui' } : {}) },
       instanceConfigSchema: {
         type: 'object',
-        properties: { greeting: { type: 'string', title: 'Lời chào', default: 'Xin chào' } }
+        properties: { greeting: { type: 'string', title: 'Greeting', default: 'Hello' } }
       },
       tools: [
         {
           name: tool,
-          displayName: 'Chào',
+          displayName: 'Hello',
           description: 'Say hello to someone. Example tool from the stag.ai plugin template.',
           parametersSchema: { type: 'object', properties: { name: { type: 'string', description: 'Who to greet' } }, required: ['name'] }
         }
@@ -42,29 +43,29 @@ export function scaffoldFiles(req: PluginScaffoldRequest): Record<string, string
     }
   }
 
-  const worker = `// Worker của plugin "${req.name}" (xem package.json → stagPlugin). Sửa xong: Cài đặt → Plugin → "Đọc lại gói".
+  const worker = `// Worker of the plugin "${req.name}" (see package.json → stagPlugin). After editing: Settings → Plugins → "Reload package".
 import { definePlugin, runWorker } from './stag-plugin-sdk.mjs'
 
 runWorker(
   definePlugin({
     async setup(ctx) {
-      // Tool cho agent: tên trong máy chủ MCP stag là <mã plugin>__${tool}.
+      // Tool for agents: its name in the stag MCP server is <plugin id>__${tool}.
       ctx.tools.register('${tool}', async ({ name }) => {
-        const { greeting = 'Xin chào' } = await ctx.config.get()
+        const { greeting = 'Hello' } = await ctx.config.get()
         return { content: \`\${greeting}, \${name}!\` }
       })
 
-      // Nút ở thanh bên: đếm số lần bấm (dữ liệu riêng của plugin).
+      // Sidebar button: counts clicks (the plugin's own data).
       ctx.actions.register('click', async () => {
         const clicks = ((await ctx.state.get('clicks')) ?? 0) + 1
         await ctx.state.set('clicks', clicks)
         ctx.streams.emit('clicks', { clicks })
-        return { message: \`Đã bấm \${clicks} lần.\` }
+        return { message: \`Clicked \${clicks} time\${clicks === 1 ? '' : 's'}.\` }
       })
 ${
   page
     ? `
-      // Trang riêng (ui/index.html) đọc dữ liệu này qua host.getData('info').
+      // The page (ui/index.html) reads this data through host.getData('info').
       ctx.data.register('info', async (_params, run) => ({
         clicks: (await ctx.state.get('clicks')) ?? 0,
         workspace: run.workspaceName ?? null
@@ -72,7 +73,7 @@ ${
 `
     : ''
 }
-      ctx.logger.info(${JSON.stringify(`${req.name} đã sẵn sàng`)})
+      ctx.logger.info(${JSON.stringify(`${req.name} is ready`)})
     }
   })
 )
@@ -80,14 +81,14 @@ ${
 
   const readme = `# ${req.name}
 
-Plugin stag.ai tạo từ mẫu "${page ? 'Có trang' : 'Cơ bản'}" (mã \`${req.id}\`).
+A stag.ai plugin created from the "${page ? 'With page' : 'Basic'}" template (id \`${req.id}\`).
 
-- \`package.json\` → \`stagPlugin\`: manifest (quyền, tool, nút${page ? ', trang' : ''}, cấu hình).
-- \`worker.mjs\`: mã chạy trong tiến trình riêng.${page ? '\n- `ui/`: trang riêng (khung cách ly), SDK của trang ở `/__stag/ui.js`.' : ''}
-- \`stag-plugin-sdk.mjs\`: SDK worker (đừng sửa; tạo plugin mới sẽ có bản mới).
+- \`package.json\` → \`stagPlugin\`: the manifest (capabilities, tools, buttons${page ? ', page' : ''}, settings).
+- \`worker.mjs\`: code that runs in its own process.${page ? '\n- `ui/`: the page (sandboxed frame); the page SDK is at `/__stag/ui.js`.' : ''}
+- \`stag-plugin-sdk.mjs\`: the worker SDK (don't edit it; new plugins get a fresh copy).
 
-Sửa xong bấm **Đọc lại gói** ở Cài đặt → Plugin → ${req.name}. Thêm quyền thì phải duyệt lại.
-Tài liệu: docs/plugins.md trong mã nguồn stag.ai, hoặc bật skill \`stag-plugin-author\` cho agent rồi nhờ agent viết tiếp.
+After editing, click **Reload package** in Settings → Plugins → ${req.name}. New capabilities must be approved again.
+Docs: docs/plugins.md in the stag.ai source, or turn on the \`stag-plugin-author\` skill for an agent and ask it to continue.
 `
 
   const files: Record<string, string> = {
@@ -97,7 +98,7 @@ Tài liệu: docs/plugins.md trong mã nguồn stag.ai, hoặc bật skill \`sta
   }
   if (page)
     files['ui/index.html'] = `<!doctype html>
-<html lang="vi">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>${escapeHtml(req.name)}</title>
@@ -110,8 +111,8 @@ Tài liệu: docs/plugins.md trong mã nguồn stag.ai, hoặc bật skill \`sta
     <main>
       <h1>${escapeHtml(req.name)} <span class="muted" id="ws"></span></h1>
       <div class="card">
-        <p>Đã bấm nút ở thanh bên <b id="clicks">…</b> lần.</p>
-        <button class="primary" id="click">Bấm</button>
+        <p>Sidebar button clicks: <b id="clicks">…</b></p>
+        <button class="primary" id="click">Click</button>
       </div>
     </main>
     <script type="module">

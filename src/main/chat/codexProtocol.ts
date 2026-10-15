@@ -6,6 +6,7 @@
 // mỗi item có item/started → delta → item/completed. Các item liền nhau của một lượt gom vào một mục assistant
 // (một khối mỗi item); có mục khác chen vào (thẻ xin quyền, thông báo) thì mở mục assistant mới để giữ thứ tự.
 import { CHAT_OUTPUT_MAX, type ChatBlock, type ChatItem } from '@shared/chat'
+import { t as tr } from '@shared/i18n'
 import { ChatModel, type Ingested } from './protocol'
 
 type AssistantItem = Extract<ChatItem, { kind: 'assistant' }>
@@ -51,7 +52,7 @@ function mcpResultText(item: Json): string {
   if (isObj(item.error) && str(item.error.message)) return str(item.error.message)
   const r = isObj(item.result) ? item.result : null
   if (!r) return ''
-  const parts = arr(r.content).map((c) => (isObj(c) ? (c.type === 'text' ? str(c.text) : c.type === 'image' ? '[ảnh]' : '') : ''))
+  const parts = arr(r.content).map((c) => (isObj(c) ? (c.type === 'text' ? str(c.text) : c.type === 'image' ? tr('chat.imagePlaceholder') : '') : ''))
   const text = parts.filter(Boolean).join('\n')
   if (text) return text
   return r.structuredContent === undefined || r.structuredContent === null ? '' : JSON.stringify(r.structuredContent, null, 2)
@@ -239,15 +240,15 @@ export class CodexChatModel extends ChatModel {
       }
       case 'error': {
         const e = isObj(p.error) ? p.error : {}
-        const text = str(e.message) || 'Codex báo lỗi'
-        out.changed.push(this.addNotice(p.willRetry === true ? 'warn' : 'error', p.willRetry === true ? `API đang thử lại… (${text})` : text))
+        const text = str(e.message) || tr('chat.codex.error')
+        out.changed.push(this.addNotice(p.willRetry === true ? 'warn' : 'error', p.willRetry === true ? tr('chat.retryingWith', { message: text }) : text))
         return out
       }
       case 'warning':
         if (str(p.message)) out.changed.push(this.addNotice('warn', str(p.message)))
         return out
       case 'thread/compacted':
-        out.changed.push(this.addNotice('info', 'Đã nén context'))
+        out.changed.push(this.addNotice('info', tr('chat.compacted')))
         return out
       case 'thread/started': {
         const t = isObj(p.thread) ? p.thread : {}
@@ -388,11 +389,11 @@ export class CodexChatModel extends ChatModel {
         return
       }
       case 'contextCompaction':
-        if (done) this.changed(out, this.addNotice('info', 'Đã nén context'))
+        if (done) this.changed(out, this.addNotice('info', tr('chat.compacted')))
         return
       case 'enteredReviewMode':
       case 'exitedReviewMode':
-        if (done) this.changed(out, this.addNotice('info', type === 'enteredReviewMode' ? 'Bắt đầu review' : 'Xong review'))
+        if (done) this.changed(out, this.addNotice('info', type === 'enteredReviewMode' ? tr('chat.codex.reviewStart') : tr('chat.codex.reviewDone')))
         return
     }
     const tool = toolOf(item)
@@ -507,7 +508,7 @@ export class CodexChatModel extends ChatModel {
       case 'mcpServer/elicitation/request':
         if (str(p.mode) !== 'url') {
           out.reply = { rpcId, result: { action: 'decline', content: null, _meta: null } }
-          this.changed(out, this.addNotice('warn', `Máy chủ MCP "${str(p.serverName)}" hỏi một biểu mẫu (chưa hỗ trợ trong ô chat): đã từ chối.`))
+          this.changed(out, this.addNotice('warn', tr('chat.codex.elicitationDeclined', { server: str(p.serverName) })))
           return out
         }
         tool = 'MCP'
@@ -519,7 +520,7 @@ export class CodexChatModel extends ChatModel {
         out.reply = { rpcId, result: { decision: 'denied' } }
         return out
       default:
-        out.reply = { rpcId, error: `stag.ai không hỗ trợ yêu cầu ${method}` }
+        out.reply = { rpcId, error: `stag.ai does not support the request ${method}` }
         return out
     }
     const item: AskItem = {

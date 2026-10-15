@@ -1,12 +1,14 @@
 import { useApprovals } from '../store/approvals'
 import { useSettings } from '../store/settings'
 import { useUi } from '../store/ui'
+import { useT } from '../i18n'
 
 /**
  * Góc dưới bên trái màn hình chính: có lần gọi tool connector đang chờ duyệt → nút mở Cài đặt → Connector → Duyệt.
  * Không đặt bên phải: trang web của khung Browser (bên phải) là view gốc, vẽ đè lên mọi HTML nên sẽ che mất.
  */
 export function ApprovalToast(): React.JSX.Element | null {
+  const t = useT()
   const items = useApprovals((s) => s.items)
   const settings = useUi((s) => s.settings)
   const open = useUi((s) => s.openSettings)
@@ -21,13 +23,17 @@ export function ApprovalToast(): React.JSX.Element | null {
     >
       <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-wait px-1 text-[12px] font-bold text-wait-on">{items.length}</span>
       <span className="min-w-0">
-        <span className="block text-[13px] font-medium">Đang chờ bạn duyệt</span>
+        <span className="block text-[13px] font-medium">{t('agents.approval.title')}</span>
         <span className="block truncate text-[12px] text-muted">
-          {first.agentName} muốn dùng {connectors.find((c) => c.id === first.connectorId)?.label || first.connectorId} · {first.tool}
+          {t('agents.approval.wants', {
+            name: first.agentName,
+            connector: connectors.find((c) => c.id === first.connectorId)?.label || first.connectorId
+          })}{' '}
+          · {first.tool}
           {items.length > 1 ? ` (+${items.length - 1})` : ''}
         </span>
       </span>
-      <span className="text-[12px] text-accent">Mở →</span>
+      <span className="text-[12px] text-accent">{t('agents.approval.open')}</span>
     </button>
   )
 }

@@ -1,4 +1,5 @@
 import { normalizeConnector, validateConnector } from '@shared/connectors'
+import { t } from '@shared/i18n'
 import { normalizeSettings, patchApp, patchOverrides, resolveHandoff, resolveModel } from '@shared/settings'
 import {
   DEFAULT_SETTINGS,
@@ -22,6 +23,8 @@ import { isObject, JsonFile } from './jsonFile'
 export class SettingsStore {
   private value: Settings = DEFAULT_SETTINGS
   private json: JsonFile
+  /** Lần đọc vừa rồi không có file cài đặt (bản cài mới, hoặc chưa từng lưu cài đặt). */
+  fresh = false
 
   constructor(
     private file: string,
@@ -32,6 +35,7 @@ export class SettingsStore {
 
   async load(): Promise<void> {
     const { data } = await this.json.read(isObject)
+    this.fresh = data == null
     try {
       this.value = normalizeSettings(data ?? { version: 2 })
     } catch {
@@ -80,7 +84,7 @@ export class SettingsStore {
    */
   async saveConnector(raw: Connector, prevId?: string): Promise<Settings> {
     const c = normalizeConnector(raw)
-    if (!c) throw new Error('Tên máy chủ chỉ gồm a-z, 0-9, "_" và "-", tối đa 40 ký tự, bắt đầu bằng chữ / số.')
+    if (!c) throw new Error(t('app.error.serverNameRule'))
     const items = this.value.app.connectors.items
     const problem = validateConnector(c, items.filter((x) => x.id !== (prevId ?? c.id)).map((x) => x.id))
     if (problem) throw new Error(problem)
@@ -100,7 +104,7 @@ export class SettingsStore {
     const items = [...this.value.app.connectors.items]
     for (const raw of list) {
       const c = normalizeConnector(raw)
-      const problem = c ? validateConnector(c, items.map((x) => x.id)) : 'Tên máy chủ không hợp lệ'
+      const problem = c ? validateConnector(c, items.map((x) => x.id)) : t('app.error.serverNameBad')
       if (problem || !c) throw new Error(`${raw.id}: ${problem}`)
       items.push(c)
     }

@@ -4,28 +4,14 @@ import { type AgentApiSettings } from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { LevelBar, useLevel, type LevelKey } from './levels'
 import { ErrorBar, Group, Note, Row, SectionTitle, Switch, useSaveError } from './controls'
+import type { PlainKey } from '@shared/i18n'
+import { useT } from '../../i18n'
 
-const ITEMS: Array<{ key: keyof AgentApiSettings; label: string; desc: string }> = [
-  {
-    key: 'manage',
-    label: 'Cho agent quản lý agent khác',
-    desc: 'Bạn nhắn agent "tạo agent tên…, dùng model…, làm việc…" là nó làm được: tạo, đổi tên / vai trò / model / quyền, mở, dừng, xoá agent (agent_create, agent_update, agent_open, agent_stop, agent_delete); tạo project, đổi tên / mục tiêu project (project_create, project_update; agent không xoá được project). Có hỏi bạn trước hay không: xem công tắc "Hỏi bạn trước…" bên dưới.'
-  },
-  {
-    key: 'message',
-    label: 'Cho agent nhắn agent khác',
-    desc: 'agent_send: app gõ tin vào ô của agent nhận khi nó rảnh và bạn không đang gõ ở đó; tin ghi rõ là từ agent, không phải từ bạn. Có giới hạn số tin để hai agent không nhắn qua lại mãi. Gồm cả agent_handoff: giao việc đang làm cho agent khác (thẻ việc + phạm vi chuyển sang agent nhận, bản bàn giao gõ vào ô của nó; agent nhận chưa chạy thì mở phiên mới, việc này cần thêm quyền quản lý agent).'
-  },
-  {
-    key: 'read',
-    label: 'Cho agent đọc trạng thái và nhật ký phiên của agent khác',
-    desc: 'agent_status: agent kia đang làm gì, % context, việc đang mở, việc xong gần nhất. agent_log: các lượt mới nhất trong phiên của agent kia (lời bạn, lời agent, lỗi, tuỳ chọn cả tool đã gọi), đã che key / token; không đọc đầu ra thô của terminal. Chỉ trong cùng workspace.'
-  },
-  {
-    key: 'confirmCreate',
-    label: 'Hỏi bạn trước khi agent tạo, dừng, xoá, đổi quyền agent / project, gửi việc sang project khác hoặc chạy dev server',
-    desc: 'Bật: hiện thẻ xác nhận khi agent tạo agent hoặc project, dừng / xoá agent, đổi quyền agent, gửi việc sang agent của project khác (từ Chung, vào Chung, hay cặp project đã "Luôn cho" thì không hỏi), gửi việc cho agent có quyền cao hơn nó, hoặc chạy dev server lần đầu (preview_start). Tắt: agent làm luôn mọi việc trên, không hỏi gì. Khoá phạm vi (sửa file của agent khác) có cài đặt riêng: Cài đặt → Khoá phạm vi.'
-  }
+const ITEMS: Array<{ key: keyof AgentApiSettings; label: PlainKey; desc: PlainKey }> = [
+  { key: 'manage', label: 'agentApi.manage', desc: 'agentApi.manageDesc' },
+  { key: 'message', label: 'agentApi.message', desc: 'agentApi.messageDesc' },
+  { key: 'read', label: 'agentApi.read', desc: 'agentApi.readDesc' },
+  { key: 'confirmCreate', label: 'agentApi.confirmCreate', desc: 'agentApi.confirmCreateDesc' }
 ]
 
 /**
@@ -39,6 +25,7 @@ export function AgentApiSection(): React.JSX.Element {
   const [key, setKey] = useState<LevelKey>('app')
   const [error, run] = useSaveError()
   const level = useLevel(key)
+  const t = useT()
 
   const own: Partial<AgentApiSettings> =
     level.lvl === 'ws' ? (settings.workspaces[level.wsId!]?.agentApi ?? {}) : level.lvl === 'agent' ? (settings.agents[level.agentId!]?.agentApi ?? {}) : {}
@@ -59,7 +46,7 @@ export function AgentApiSection(): React.JSX.Element {
     <>
       <SectionTitle
         title="Agent API"
-        desc="Agent dùng app thay bạn qua các tool agent_* của máy chủ MCP stag. Agent luôn xem được danh sách agent và các loại / model có trên máy (agent_list, adapter_models). Chỉ nên đồng ý những gì chính bạn đã nhờ agent làm."
+        desc={t('agentApi.desc')}
         right={<LevelBar level={key} setLevel={setKey} has={(o) => !!o?.agentApi} />}
       />
       <ErrorBar error={error} />
@@ -67,24 +54,21 @@ export function AgentApiSection(): React.JSX.Element {
         {ITEMS.map((it) => (
           <Row
             key={it.key}
-            label={it.label}
-            desc={it.desc}
+            label={t(it.label)}
+            desc={t(it.desc)}
             override={
-              level.lvl === 'app' ? undefined : { on: own[it.key] !== undefined, onReset: () => setOwn(it.key, undefined), parent: parent[it.key] ? 'bật' : 'tắt' }
+              level.lvl === 'app' ? undefined : { on: own[it.key] !== undefined, onReset: () => setOwn(it.key, undefined), parent: parent[it.key] ? t('common.on').toLowerCase() : t('common.off').toLowerCase() }
             }
           >
             {level.lvl === 'app' ? (
-              <Switch label={it.label} checked={settings.app.agentApi[it.key]} onChange={(v) => run(save({ agentApi: { [it.key]: v } }))} />
+              <Switch label={t(it.label)} checked={settings.app.agentApi[it.key]} onChange={(v) => run(save({ agentApi: { [it.key]: v } }))} />
             ) : (
-              <Switch label={`${it.label} — ${level.name}`} checked={own[it.key] ?? parent[it.key]} onChange={(v) => setOwn(it.key, v)} />
+              <Switch label={`${t(it.label)} — ${level.name}`} checked={own[it.key] ?? parent[it.key]} onChange={(v) => setOwn(it.key, v)} />
             )}
           </Row>
         ))}
       </Group>
-      <Note>
-        Tắt một nhóm: phiên mở sau không thấy các tool đó; phiên đang chạy gọi tới thì bị từ chối ngay. Agent biết có các tool này qua luật phiên, cập nhật từ
-        phiên mới tiếp theo.
-      </Note>
+      <Note>{t('agentApi.note')}</Note>
     </>
   )
 }

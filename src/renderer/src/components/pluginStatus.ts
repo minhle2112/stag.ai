@@ -40,7 +40,7 @@ export function errorLogOnce(log: (msg: string, err: unknown) => void = console.
     fail: (key, err) => {
       if (logged.has(key)) return
       logged.add(key)
-      log(`[plugin ${key}] không đọc được chữ cho thanh trạng thái:`, err)
+      log(`[plugin ${key}] could not read the status bar text:`, err)
     },
     ok: (key) => void logged.delete(key)
   }

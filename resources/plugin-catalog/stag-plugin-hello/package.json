@@ -2,14 +2,14 @@
   "name": "stag-plugin-hello",
   "version": "1.0.0",
   "private": true,
-  "description": "Plugin mẫu của stag.ai: tool đếm chữ cho agent, nút và trang riêng, đếm việc agent làm xong, việc theo lịch, webhook.",
+  "description": "Example stag.ai plugin: a word-count tool for agents, buttons and its own pages, counting tasks agents finish, a scheduled job, a webhook.",
   "license": "MIT",
   "type": "module",
   "stagPlugin": {
     "id": "stag.hello",
     "apiVersion": 1,
     "displayName": "Hello",
-    "description": "Plugin mẫu: tool word_count cho agent, nút \"Chào\" ở thanh bên, nút mở trang tài liệu, tab trang riêng \"Hello\", trang cài đặt \"Số liệu\", widget trong lưới agent, chữ trên thanh trạng thái, đếm việc agent làm xong, tổng kết mỗi giờ, webhook \"ping\".",
+    "description": "Example plugin: a word_count tool for agents, a \"Say hello\" sidebar button, a button that opens a docs page, its own \"Hello\" page tab, a \"Stats\" settings page, a widget in the agent grid, text in the status bar, counting tasks agents finish, an hourly summary, a \"ping\" webhook.",
     "author": "stag.ai",
     "categories": [
       "example"
@@ -38,21 +38,21 @@
       "properties": {
         "greeting": {
           "type": "string",
-          "title": "Lời chào",
-          "description": "Câu nút \"Chào\" hiện ra.",
-          "default": "Xin chào"
+          "title": "Greeting",
+          "description": "What the \"Say hello\" button shows.",
+          "default": "Hello"
         },
         "maxWords": {
           "type": "integer",
-          "title": "Giới hạn từ",
-          "description": "word_count báo vượt khi quá số này.",
+          "title": "Word limit",
+          "description": "word_count reports going over when the text is longer than this.",
           "default": 500,
           "minimum": 1
         },
         "docsUrl": {
           "type": "string",
-          "title": "Trang tài liệu",
-          "description": "Nút \"Tài liệu\" mở địa chỉ này (kèm tên workspace) trong trình duyệt của app.",
+          "title": "Docs page",
+          "description": "The \"Docs\" button opens this address (with the workspace name) in the app's browser.",
           "default": "https://example.com",
           "format": "url"
         }
@@ -61,7 +61,7 @@
     "tools": [
       {
         "name": "word_count",
-        "displayName": "Đếm từ",
+        "displayName": "Word count",
         "description": "Count the words in a piece of text and say whether it is over the user's limit.",
         "parametersSchema": {
           "type": "object",
@@ -86,19 +86,19 @@
         {
           "type": "sidebar",
           "id": "hello",
-          "displayName": "Chào",
+          "displayName": "Say hello",
           "action": "hello"
         },
         {
           "type": "agentMenu",
           "id": "stats",
-          "displayName": "Thống kê (Hello)",
+          "displayName": "Stats (Hello)",
           "action": "stats"
         },
         {
           "type": "globalToolbarButton",
           "id": "docs",
-          "displayName": "Tài liệu",
+          "displayName": "Docs",
           "open": {
             "url": "{config.docsUrl}/?workspace={workspace.name}",
             "target": "browser"
@@ -113,13 +113,13 @@
         {
           "type": "settingsPage",
           "id": "data",
-          "displayName": "Số liệu",
+          "displayName": "Stats",
           "path": "settings.html"
         },
         {
           "type": "dashboardWidget",
           "id": "board",
-          "displayName": "Hello · việc xong",
+          "displayName": "Hello · tasks done",
           "path": "widget.html"
         },
         {
@@ -134,8 +134,8 @@
     "jobs": [
       {
         "key": "summary",
-        "displayName": "Tổng kết",
-        "description": "Ghi vào nhật ký số việc mỗi agent đã xong.",
+        "displayName": "Summary",
+        "description": "Logs how many tasks each agent has finished.",
         "schedule": "0 * * * *"
       }
     ],
@@ -143,7 +143,7 @@
       {
         "endpointKey": "ping",
         "displayName": "Ping",
-        "description": "Nhận một JSON bất kỳ, lưu lại và hiện ngay trên trang Hello."
+        "description": "Accepts any JSON, saves it and shows it right away on the Hello page."
       }
     ]
   }

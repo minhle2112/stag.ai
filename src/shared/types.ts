@@ -1,4 +1,6 @@
 // Kiểu dữ liệu nghiệp vụ dùng chung giữa main và renderer.
+import type { Locale } from './i18n/types'
+import { DEFAULT_COMPUTER, type ComputerSettings } from './computer'
 
 export interface Workspace {
   id: string
@@ -510,6 +512,8 @@ export interface GeneralSettings {
   terminalFollowTheme: boolean
   /** Ghi theme `light-ansi` / `dark-ansi` của Claude Code vào ~/.claude.json theo màu terminal; tắt = trả lại theme cũ. */
   claudeThemeSync: boolean
+  /** Ngôn ngữ giao diện (Cài đặt → Giao diện). Chuỗi gửi cho agent luôn tiếng Anh, không theo mục này. */
+  language: Locale
 }
 
 export const ZOOM_MIN = 70
@@ -674,6 +678,8 @@ export interface AppSettings {
   browser: BrowserSettings
   voice: VoiceSettings
   memory: MemorySettings
+  /** Computer use: agent điều khiển chuột / bàn phím (Cài đặt → Máy tính). */
+  computer: ComputerSettings
 }
 
 export interface PluginsSettings {
@@ -706,6 +712,8 @@ export interface SettingsOverrides {
   /** Trình duyệt: chỉ bật / tắt tool trình duyệt của agent. */
   browser?: { agentTools?: boolean }
   memory?: Partial<MemorySettings>
+  /** Máy tính: chỉ bật / tắt computer use của agent. */
+  computer?: { agentTools?: boolean }
 }
 
 /** Sửa ghi đè: khoá có mặt thay cả mục đó, `null` = bỏ mục đó (theo cấp trên). Khoá vắng mặt giữ nguyên. */
@@ -739,6 +747,7 @@ export interface AppSettingsPatch {
   browser?: Partial<BrowserSettings>
   voice?: Partial<VoiceSettings>
   memory?: Partial<MemorySettings>
+  computer?: Partial<ComputerSettings>
 }
 
 export type OverrideLevel = 'workspace' | 'agent'
@@ -773,7 +782,8 @@ export const DEFAULT_GENERAL: GeneralSettings = {
   claudeUsage: true,
   theme: 'dark',
   terminalFollowTheme: true,
-  claudeThemeSync: true
+  claudeThemeSync: true,
+  language: 'vi'
 }
 const DEFAULT_CLI: CliAdapterSettings = { enabled: true, path: '', model: '', effort: '', defaultPermission: 'default', extraArgs: '', env: '' }
 export const DEFAULT_ADAPTERS: AdaptersSettings = {
@@ -783,7 +793,7 @@ export const DEFAULT_ADAPTERS: AdaptersSettings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 2,
-  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, agentApi: DEFAULT_AGENT_API, browser: DEFAULT_BROWSER, voice: DEFAULT_VOICE, memory: DEFAULT_MEMORY },
+  app: { general: DEFAULT_GENERAL, handoff: DEFAULT_HANDOFF, adapters: DEFAULT_ADAPTERS, connectors: { items: [], inherited: {} }, skills: { toggles: {} }, plugins: { toggles: {} }, scope: DEFAULT_SCOPE, agentApi: DEFAULT_AGENT_API, browser: DEFAULT_BROWSER, voice: DEFAULT_VOICE, memory: DEFAULT_MEMORY, computer: DEFAULT_COMPUTER },
   workspaces: {},
   agents: {}
 }

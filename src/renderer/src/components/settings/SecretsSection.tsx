@@ -6,6 +6,7 @@ import { useUi } from '../../store/ui'
 import { errText } from './AdaptersSection'
 import { Callout, ErrorBar, Group, INPUT_MONO, Note, Row, SectionTitle, SmallButton } from './controls'
 import { LevelBar } from './levels'
+import { fmtDateTime, tx, useT } from '../../i18n'
 
 /**
  * Settings → Secrets: token / API key cho connector. Mã hoá bằng Windows (safeStorage), chỉ tên đi tới giao diện;
@@ -21,6 +22,7 @@ export function SecretsSection(): React.JSX.Element {
   const [editing, setEditing] = useState<string | null>(null)
   const [newValue, setNewValue] = useState('')
   const [confirm, setConfirm] = useState<string | null>(null)
+  const t = useT()
 
   const usedBy = (n: string): string[] => connectors.filter((c) => connectorSecrets(c).includes(n)).map((c) => c.id)
   const exists = items.some((x) => x.name === name.trim())
@@ -43,18 +45,18 @@ export function SecretsSection(): React.JSX.Element {
   return (
     <>
       <SectionTitle
-        title="Kho bí mật"
-        desc="Token và API key cho connector. App mã hoá bằng Windows (gắn với tài khoản Windows của bạn), truyền cho phiên agent qua biến môi trường — không đưa lên dòng lệnh, không ghi vào cài đặt hay vault. Giá trị đã lưu không xem lại được, chỉ thay hoặc xoá."
+        title={t('secrets.title')}
+        desc={t('secrets.desc')}
         right={<LevelBar appOnly />}
       />
       {!available && (
-        <ErrorBar error="Windows chưa cho mã hoá dữ liệu (safeStorage) nên app không lưu bí mật được. Connector cần bí mật sẽ không chạy." />
+        <ErrorBar error={t('secrets.unavailable')} />
       )}
       <ErrorBar error={error} />
 
       {missing.length > 0 && (
         <Callout tone="wait" icon="key" className="mb-3">
-          <div className="font-medium">Connector đang cần bí mật chưa lưu</div>
+          <div className="font-medium">{t('secrets.missing')}</div>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {missing.map((n) => (
               <button
@@ -70,8 +72,8 @@ export function SecretsSection(): React.JSX.Element {
         </Callout>
       )}
 
-      <Group title="Thêm bí mật">
-        <Row label="Tên" desc="Chữ, số và _ (vd. GITHUB_TOKEN). Trùng tên = thay giá trị cũ." htmlFor="secret-name">
+      <Group title={t('secrets.add')}>
+        <Row label={t('secrets.name')} desc={t('secrets.nameDesc')} htmlFor="secret-name">
           <input
             id="secret-name"
             value={name}
@@ -81,7 +83,7 @@ export function SecretsSection(): React.JSX.Element {
             className={`${INPUT_MONO} w-56 ${name && !nameOk ? 'border-danger/60!' : ''}`}
           />
         </Row>
-        <Row label="Giá trị" htmlFor="secret-value">
+        <Row label={t('secrets.value')} htmlFor="secret-value">
           <input
             id="secret-value"
             type="password"
@@ -91,14 +93,14 @@ export function SecretsSection(): React.JSX.Element {
             className={`${INPUT_MONO} w-56`}
           />
           <SmallButton onClick={add} disabled={!available || !nameOk || !value}>
-            {exists ? 'Thay' : 'Lưu'}
+            {exists ? t('secrets.replace') : t('common.save')}
           </SmallButton>
         </Row>
       </Group>
 
-      <Group title={`Đã lưu (${items.length})`}>
+      <Group title={t('secrets.saved', { count: items.length })}>
         {items.length === 0 ? (
-          <div className="border-b border-line py-3 text-[12px] text-dim">{loaded ? 'Chưa có bí mật nào.' : 'Đang tải…'}</div>
+          <div className="border-b border-line py-3 text-[12px] text-dim">{loaded ? t('secrets.empty') : t('common.loading')}</div>
         ) : (
           items.map((s) => {
             const users = usedBy(s.name)
@@ -108,26 +110,28 @@ export function SecretsSection(): React.JSX.Element {
                 label={
                   <span className="font-mono text-[12px]">
                     {s.name}
-                    {s.name.startsWith('OAUTH_') && <span className="ml-2 font-sans text-[11px] text-dim">đăng nhập OAuth (app tự quản lý)</span>}
+                    {s.name.startsWith('OAUTH_') && <span className="ml-2 font-sans text-[11px] text-dim">{t('secrets.oauth')}</span>}
                   </span>
                 }
                 sub={
                   <>
-                    {s.updatedAt ? `Lưu ${new Date(s.updatedAt).toLocaleString()}` : ''}
+                    {s.updatedAt ? t('secrets.savedAt', { time: fmtDateTime(s.updatedAt) }) : ''}
                     {users.length ? (
                       <>
-                        {' · dùng bởi '}
-                        {users.map((id, i) => (
-                          <span key={id}>
-                            {i > 0 && ', '}
-                            <button type="button" className="underline decoration-dotted hover:text-muted" onClick={() => openSettings('connectors', { connector: id })}>
-                              {id}
-                            </button>
-                          </span>
-                        ))}
+                        {' · '}
+                        {tx('secrets.usedBy', {
+                          list: users.map((id, i) => (
+                            <span key={id}>
+                              {i > 0 && ', '}
+                              <button type="button" className="underline decoration-dotted hover:text-muted" onClick={() => openSettings('connectors', { connector: id })}>
+                                {id}
+                              </button>
+                            </span>
+                          ))
+                        })}
                       </>
                     ) : (
-                      ' · chưa connector nào dùng'
+                      ` · ${t('secrets.unused')}`
                     )}
                   </>
                 }
@@ -135,7 +139,7 @@ export function SecretsSection(): React.JSX.Element {
                 {editing === s.name ? (
                   <>
                     <input
-                      aria-label={`Giá trị mới cho ${s.name}`}
+                      aria-label={t('secrets.newValueFor', { name: s.name })}
                       type="password"
                       autoFocus
                       value={newValue}
@@ -147,9 +151,9 @@ export function SecretsSection(): React.JSX.Element {
                       className={`${INPUT_MONO} w-44`}
                     />
                     <SmallButton disabled={!newValue} onClick={() => run(window.stag.secrets.set(s.name, newValue), () => (setEditing(null), setNewValue('')))}>
-                      Lưu
+                      {t('common.save')}
                     </SmallButton>
-                    <SmallButton onClick={() => setEditing(null)}>Huỷ</SmallButton>
+                    <SmallButton onClick={() => setEditing(null)}>{t('common.cancel')}</SmallButton>
                   </>
                 ) : (
                   <>
@@ -161,20 +165,20 @@ export function SecretsSection(): React.JSX.Element {
                         }}
                         disabled={!available}
                       >
-                        Thay giá trị
+                        {t('secrets.replaceValue')}
                       </SmallButton>
                     )}
                     <SmallButton
                       variant={confirm === s.name ? 'dangerSolid' : 'danger'}
                       disabled={users.length > 0}
-                      tip={users.length ? `Đang được dùng bởi ${users.join(', ')}` : undefined}
+                      tip={users.length ? t('secrets.inUse', { names: users.join(', ') }) : undefined}
                       onClick={() => {
                         if (confirm !== s.name) return setConfirm(s.name)
                         setConfirm(null)
                         run(window.stag.secrets.remove(s.name))
                       }}
                     >
-                      {confirm === s.name ? 'Xoá thật' : 'Xoá'}
+                      {confirm === s.name ? t('secrets.reallyDelete') : t('common.delete')}
                     </SmallButton>
                   </>
                 )}
@@ -184,10 +188,7 @@ export function SecretsSection(): React.JSX.Element {
         )}
       </Group>
 
-      <Note>
-        Lưu ý: agent đọc được bí mật của connector trong phiên của nó (nằm trong biến môi trường của phiên). Chỉ bật connector cho agent bạn tin. File
-        bí mật nằm ở thư mục dữ liệu của app (secrets.json), chép sang máy / tài khoản Windows khác sẽ không giải mã được.
-      </Note>
+      <Note>{t('secrets.note')}</Note>
     </>
   )
 }

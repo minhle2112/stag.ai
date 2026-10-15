@@ -1,8 +1,9 @@
 import type { AgentKind, AgentStatus, HandoffSettings } from '@shared/types'
+import { t, type PlainKey } from '@shared/i18n'
 
 /** Lý do chờ người dùng, dạng ngắn ("cần bạn duyệt quyền"). */
 export function statusReason(reason: AgentStatus['reason'] | undefined): string {
-  return WAIT_LABEL[reason ?? 'turn']
+  return t(WAIT_LABEL[reason ?? 'turn'])
 }
 
 /**
@@ -21,36 +22,36 @@ export interface StatusView {
   waiting: boolean
 }
 
-const WAIT_LABEL: Record<NonNullable<AgentStatus['reason']>, string> = {
-  turn: 'chờ bạn trả lời',
-  permission: 'cần bạn duyệt quyền',
-  question: 'đang hỏi bạn',
-  idle: 'chờ bạn lâu rồi',
-  interrupted: 'bạn đã ngắt'
+const WAIT_LABEL: Record<NonNullable<AgentStatus['reason']>, PlainKey> = {
+  turn: 'status.wait.turn',
+  permission: 'status.wait.permission',
+  question: 'status.wait.question',
+  idle: 'status.wait.idle',
+  interrupted: 'status.wait.interrupted'
 }
 
 /** Trạng thái hiển thị của một agent, dùng chung cho ô terminal và kanban. */
 export function statusView(running: boolean, starting: boolean, status: AgentStatus | undefined, kind: AgentKind = 'claude'): StatusView {
   // Terminal thường không có hook: chỉ biết đang mở hay đã đóng.
   if (kind === 'terminal') {
-    if (starting) return { mark: 'off', dot: 'bg-muted animate-pulse', label: 'đang mở terminal', waiting: false }
-    if (!running) return { mark: 'off', dot: 'bg-muted/50', label: 'terminal đã đóng', waiting: false }
-    return { mark: 'tm', dot: 'bg-info/70', label: 'terminal', waiting: false }
+    if (starting) return { mark: 'off', dot: 'bg-muted animate-pulse', label: t('status.terminal.opening'), waiting: false }
+    if (!running) return { mark: 'off', dot: 'bg-muted/50', label: t('status.terminal.closed'), waiting: false }
+    return { mark: 'tm', dot: 'bg-info/70', label: t('status.terminal.open'), waiting: false }
   }
-  if (starting) return { mark: 'off', dot: 'bg-muted animate-pulse', label: 'đang mở phiên', waiting: false }
+  if (starting) return { mark: 'off', dot: 'bg-muted animate-pulse', label: t('status.session.opening'), waiting: false }
   // Bàn giao: phiên cũ đóng rồi mở phiên mới ngay, nên giữ nhãn này cả lúc tiến trình đã thoát.
-  if (status?.handoff === 'restarting') return { mark: 'in', dot: 'bg-info animate-pulse', label: 'đang chuyển sang phiên mới', waiting: false }
-  if (!running) return { mark: 'off', dot: 'bg-muted/50', label: 'phiên đã dừng', waiting: false }
+  if (status?.handoff === 'restarting') return { mark: 'in', dot: 'bg-info animate-pulse', label: t('status.session.restarting'), waiting: false }
+  if (!running) return { mark: 'off', dot: 'bg-muted/50', label: t('status.session.stopped'), waiting: false }
   // Adapter ngoài không có hook: chỉ biết phiên đang chạy.
-  if (kind === 'external' && (!status || status.activity === 'starting')) return { mark: 'ok', dot: 'bg-work/70', label: 'đang chạy', waiting: false }
-  if (status?.activity === 'starting') return { mark: 'off', dot: 'bg-muted animate-pulse', label: 'đang khởi động', waiting: false }
-  if (status?.handoff === 'asking') return { mark: 'in', dot: 'bg-info animate-pulse', label: 'đang viết bàn giao', waiting: false }
+  if (kind === 'external' && (!status || status.activity === 'starting')) return { mark: 'ok', dot: 'bg-work/70', label: t('status.session.running'), waiting: false }
+  if (status?.activity === 'starting') return { mark: 'off', dot: 'bg-muted animate-pulse', label: t('status.session.starting'), waiting: false }
+  if (status?.handoff === 'asking') return { mark: 'in', dot: 'bg-info animate-pulse', label: t('status.session.writingHandoff'), waiting: false }
   if (status?.activity === 'waiting')
-    return { mark: 'wa', dot: 'bg-wait', label: WAIT_LABEL[status.reason ?? 'turn'], waiting: true }
+    return { mark: 'wa', dot: 'bg-wait', label: t(WAIT_LABEL[status.reason ?? 'turn']), waiting: true }
   return {
     mark: 'ok',
     dot: 'bg-work animate-pulse',
-    label: status?.tool ? `đang chạy ${toolName(status.tool)}` : 'đang làm',
+    label: status?.tool ? t('status.session.runningTool', { tool: toolName(status.tool) }) : t('status.session.working'),
     waiting: false
   }
 }
@@ -77,12 +78,12 @@ export function contextView(status: AgentStatus | undefined, settings: HandoffSe
   const c = status?.context
   if (!c) return null
   const failed = status?.handoff === 'failed'
-  const auto = settings.autoHandoff ? `tự bàn giao ở ${settings.handoffPercent}%` : 'tự bàn giao đang tắt'
-  const fail = failed ? '\nLần tự bàn giao vừa rồi không thành (agent hết lượt mà chưa bàn giao). Bàn giao tay ở menu ⋯ của agent.' : ''
+  const auto = settings.autoHandoff ? t('status.ctx.autoAt', { percent: settings.handoffPercent }) : t('status.ctx.autoOff')
+  const fail = failed ? `\n${t('status.ctx.failed')}` : ''
   if (!c.size) {
     return {
       text: formatTokens(c.used),
-      title: `Context: ${c.used.toLocaleString('vi-VN')} token (chưa biết kích thước cửa sổ nên chưa tính được %, chưa tự bàn giao)${fail}`,
+      title: t('status.ctx.unknownSize', { used: c.used }) + fail,
       tone: 'normal',
       failed
     }
@@ -92,21 +93,21 @@ export function contextView(status: AgentStatus | undefined, settings: HandoffSe
   const tone = settings.autoHandoff && pct >= limit ? 'full' : pct >= limit - 10 ? 'warn' : 'normal'
   return {
     text: `${Math.floor(pct)}%`,
-    title: `Context: ${c.used.toLocaleString('vi-VN')} / ${formatTokens(c.size)} token (${pct.toFixed(1)}%) · ${auto}${fail}`,
+    title: t('status.ctx.known', { used: c.used, size: formatTokens(c.size), percent: pct.toFixed(1), auto }) + fail,
     tone,
     failed
   }
 }
 
-/** "vừa xong", "5 phút", "2 giờ", "3 ngày". */
+/** "vừa xong", "5 phút", "2 giờ", "3 ngày" (theo ngôn ngữ giao diện). */
 export function ago(iso: string, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000))
-  if (s < 45) return 'vừa xong'
+  if (s < 45) return t('common.justNow')
   const m = Math.round(s / 60)
-  if (m < 60) return `${m} phút`
+  if (m < 60) return t('status.ago.minutes', { count: m })
   const h = Math.round(m / 60)
-  if (h < 24) return `${h} giờ`
-  return `${Math.round(h / 24)} ngày`
+  if (h < 24) return t('status.ago.hours', { count: h })
+  return t('status.ago.days', { count: Math.round(h / 24) })
 }
 
 /** Ngày địa phương YYYY-MM-DD của một mốc thời gian ISO. */

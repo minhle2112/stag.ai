@@ -1,21 +1,22 @@
 import { BrowserWindow, Notification } from 'electron'
 import type { GeneralSettings } from '@shared/types'
 import type { BoardEvent } from './board'
+import { t } from '@shared/i18n'
 
 const WAIT_TEXT = {
-  turn: 'đã xong lượt, đang chờ bạn',
-  question: 'đang hỏi bạn',
-  permission: 'đang xin quyền'
+  turn: 'app.notify.waitTurn',
+  question: 'app.notify.waitQuestion',
+  permission: 'app.notify.waitPermission'
 } as const
 
 /** Nội dung thông báo cho một sự kiện, hoặc null nếu người dùng đã tắt loại đó. */
 export function notificationFor(e: BoardEvent, g: GeneralSettings, workspaceName: string): { title: string; body: string } | null {
   if (e.kind === 'waiting') {
     if (!g.notifyWaiting) return null
-    return { title: `${e.agentName} ${WAIT_TEXT[e.reason]}`, body: workspaceName }
+    return { title: t(WAIT_TEXT[e.reason], { agent: e.agentName }), body: workspaceName }
   }
   if (e.kind === 'taskStarted' || !g.notifyTaskDone) return null
-  return { title: `${e.agentName} đã xong việc`, body: `${e.title} · ${workspaceName}` }
+  return { title: t('app.notify.taskDone', { agent: e.agentName }), body: `${e.title} · ${workspaceName}` }
 }
 
 /**
@@ -39,7 +40,7 @@ export class Notifier {
 
   /** Nút "Gửi thử" trong Settings: luôn hiện (kể cả khi cửa sổ đang được chọn). */
   test(): void {
-    this.show('stag.ai', 'Thông báo thử: agent sẽ báo bạn như thế này.')
+    this.show('stag.ai', t('app.notify.test'))
   }
 
   /** Thông báo của chính app (vd. vẫn chạy dưới khay). */

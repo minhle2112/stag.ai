@@ -9,6 +9,7 @@ import { useSettings } from '../store/settings'
 import { useUi } from '../store/ui'
 import { handoffNow } from './ContextBadge'
 import { ProjectMark } from './projects/ProjectMark'
+import { useT } from '../i18n'
 
 export function MenuItem({ label, onClick, danger, hint }: { label: string; onClick: () => void; danger?: boolean; hint?: string }): React.JSX.Element {
   return (
@@ -47,6 +48,7 @@ export function AgentMenuPanel({
   hideBrowser?: boolean
   className?: string
 }): React.JSX.Element {
+  const t = useT()
   const state = useAgents((s) => s.byWs[ws.id])
   const { start, stop, hide, remove, setCell, adopt } = useAgents()
   const openTask = useBoard((s) => s.byWs[ws.id]?.tasks.find((t) => t.agentId === agent.id && t.status === 'open'))
@@ -78,13 +80,7 @@ export function AgentMenuPanel({
   }
 
   async function removeAgent(): Promise<void> {
-    const msg = terminal
-      ? `Xoá terminal "${agent.name}"? Terminal đang mở sẽ bị đóng.`
-      : `Xoá agent "${agent.name}"?\n\n` +
-        `• Dừng phiên nếu đang chạy\n` +
-        `• Chuyển note 60 Agents/${agent.name}.md trong vault vào Thùng rác (khôi phục được)\n` +
-        `• Bỏ việc đang dở của agent\n\n` +
-        `Lịch sử việc đã xong được giữ.`
+    const msg = terminal ? t('agents.menu.deleteTerminalAsk', { name: agent.name }) : t('agents.menu.deleteAgentAsk', { name: agent.name })
     if (!window.confirm(msg)) return
     try {
       await remove(ws.id, agent.id)
@@ -106,8 +102,8 @@ export function AgentMenuPanel({
     if (!openTask) return
     const ask =
       how === 'done'
-        ? `Đánh dấu xong việc "${openTask.title}" của ${agent.name}?\n\nKhoá phạm vi của việc được nhả. Agent không được báo.`
-        : `Bỏ việc "${openTask.title}" của ${agent.name}?\n\nKhoá phạm vi của việc được nhả, việc không ghi vào nhật ký. Agent không được báo.`
+        ? t('agents.menu.taskDoneAsk', { task: openTask.title, name: agent.name })
+        : t('agents.menu.taskDropAsk', { task: openTask.title, name: agent.name })
     if (!window.confirm(ask)) return
     try {
       if (how === 'done') await window.stag.board.completeTask(ws.id, openTask.id)
@@ -131,20 +127,23 @@ export function AgentMenuPanel({
   return (
     <div className={`z-20 w-52 overflow-hidden rounded-lg border border-line-2 bg-pop p-1 text-[13px] shadow-pop ${className}`}>
       {before}
-      {!shown && item('Mở ô', () => openAgent(ws.id, agent.id))}
-      {!running && !starting && item(terminal ? 'Mở terminal' : 'Phiên mới', () => openAndStart(false))}
-      {!terminal && !running && !starting && agent.lastSessionId && item('Tiếp tục phiên trước', () => openAndStart(true))}
-      {!terminal && !external && running && item('Bàn giao sang phiên mới', () => void handoffNow(agent.id))}
-      {running && item(terminal ? 'Đóng terminal' : 'Dừng phiên', () => void Promise.resolve(stop(agent.id)).catch((e) => window.alert(String((e as Error).message ?? e))))}
-      {shown && item('Đóng ô', () => hide(ws.id, agent.id))}
-      {item('Đổi tên…', onRename)}
+      {!shown && item(t('agents.menu.openCell'), () => openAgent(ws.id, agent.id))}
+      {!running && !starting && item(terminal ? t('agents.menu.openTerminal') : t('agents.menu.newSession'), () => openAndStart(false))}
+      {!terminal && !running && !starting && agent.lastSessionId && item(t('agents.menu.resume'), () => openAndStart(true))}
+      {!terminal && !external && running && item(t('agents.menu.handoff'), () => void handoffNow(agent.id))}
+      {running &&
+        item(terminal ? t('agents.menu.closeTerminal') : t('agents.menu.stopSession'), () =>
+          void Promise.resolve(stop(agent.id)).catch((e) => window.alert(String((e as Error).message ?? e)))
+        )}
+      {shown && item(t('agents.menu.closeCell'), () => hide(ws.id, agent.id))}
+      {item(t('agents.menu.rename'), onRename)}
       {(agentKind(agent) === 'claude' || agentKind(agent) === 'codex') &&
         !running &&
         !starting &&
-        item(agent.cell === 'chat' ? 'Đổi sang ô CLI (terminal)' : 'Đổi sang ô Chat', () => void setCell(ws.id, agent.id, agent.cell === 'chat' ? 'cli' : 'chat').catch((e) => window.alert(String((e as Error).message ?? e))))}
+        item(agent.cell === 'chat' ? t('agents.menu.toCli') : t('agents.menu.toChat'),() => void setCell(ws.id, agent.id, agent.cell === 'chat' ? 'cli' : 'chat').catch((e) => window.alert(String((e as Error).message ?? e))))}
       {external
-        ? item('Cài đặt adapter…', () => openSettings('adapters', { external: agent.adapterId }))
-        : !terminal && item('Model & effort…', () => openSettings('adapters', { adapter: agentKind(agent) as 'claude' | 'codex', agentId: agent.id }))}
+        ? item(t('agents.menu.adapterSettings'), () => openSettings('adapters', { external: agent.adapterId }))
+        : !terminal && item(t('agents.menu.modelEffort'),() => openSettings('adapters', { adapter: agentKind(agent) as 'claude' | 'codex', agentId: agent.id }))}
       {!terminal && item('Connector (MCP)…', () => openSettings('connectors', { agentId: agent.id }))}
       {!terminal && item('Skill…', () => openSettings('skills', { agentId: agent.id }))}
       {!terminal &&
@@ -155,36 +154,36 @@ export function AgentMenuPanel({
         <>
           <div className="my-1 border-t border-line-2" />
           <div className="truncate px-2.5 pt-1 pb-0.5 text-[11px] font-semibold tracking-wider text-dim" title={openTask.title}>
-            VIỆC ĐANG MỞ
+            {t('agents.menu.openTaskHeader')}
           </div>
-          {item('Đánh dấu việc xong…', () => void closeTask('done'))}
-          {item('Bỏ việc…', () => void closeTask('drop'))}
+          {item(t('agents.menu.taskDone'), () => void closeTask('done'))}
+          {item(t('agents.menu.taskDrop'), () => void closeTask('drop'))}
         </>
       )}
       {!terminal && cloneTargets.length > 0 && (
         <>
           <div className="my-1 border-t border-line-2" />
-          <div className="px-2.5 pt-1 pb-0.5 text-[11px] font-semibold tracking-wider text-dim">NHÂN BẢN SANG</div>
-          {cloneTargets.map((t) => (
+          <div className="px-2.5 pt-1 pb-0.5 text-[11px] font-semibold tracking-wider text-dim">{t('agents.menu.cloneHeader')}</div>
+          {cloneTargets.map((c) => (
             <button
-              key={t.id}
+              key={c.id}
               onClick={(e) => {
                 e.stopPropagation()
                 onClose()
-                void cloneTo(t.project ? t.project.id : null)
+                void cloneTo(c.project ? c.project.id : null)
               }}
-              data-tip="Agent mới cùng vai trò, model, skill, connector · phiên trống"
+              data-tip={t('agents.menu.cloneTip')}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left whitespace-nowrap hover:bg-panel-3"
             >
-              <ProjectMark project={t.project} />
-              <span className="min-w-0 flex-1 truncate">{t.project ? t.project.name : 'Chung'}</span>
-              <span className="shrink-0 font-mono text-[11px] text-dim">{t.project ? t.project.folder : 'gốc'}</span>
+              <ProjectMark project={c.project} />
+              <span className="min-w-0 flex-1 truncate">{c.project ? c.project.name : t('common.name.rootProject')}</span>
+              <span className="shrink-0 font-mono text-[11px] text-dim">{c.project ? c.project.folder : t('agents.menu.root')}</span>
             </button>
           ))}
         </>
       )}
       <div className="my-1 border-t border-line-2" />
-      {item(terminal ? 'Xoá terminal…' : 'Xoá agent…', () => void removeAgent(), true)}
+      {item(terminal ? t('agents.menu.deleteTerminal') : t('agents.menu.deleteAgent'), () => void removeAgent(), true)}
     </div>
   )
 }

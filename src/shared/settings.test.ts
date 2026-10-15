@@ -244,3 +244,21 @@ describe('normalizeMemory: dọn _INDEX', () => {
     expect(normalizeOverrides({ memory: { indexKeepDays: 7 } })?.memory).toEqual({ indexKeepDays: 7 })
   })
 })
+
+describe('computer settings', () => {
+  it('is off by default, normalizes values and resolves agent → workspace → app', async () => {
+    const { computerToolsOn, normalizeComputer } = await import('./settings')
+    const d = normalizeSettings({ version: 2, app: {} })
+    expect(d.app.computer).toMatchObject({ agentTools: false, stopHotkey: 'ctrl+alt+q', minimizeApp: true, pauseOnUser: true, screenshotAfter: true, tiers: {} })
+    expect(normalizeComputer({ agentTools: true, stopHotkey: 'bogus', tiers: { 'CapCut.EXE': 'click', 'x.dll': 'full', 'a.exe': 'nope', 'c:\\a\\b.exe': 'full' } })).toMatchObject({
+      agentTools: true,
+      stopHotkey: 'ctrl+alt+q',
+      tiers: { 'capcut.exe': 'click' }
+    })
+    const s = normalizeSettings({ version: 2, app: { computer: { agentTools: false } }, workspaces: { w1: { computer: { agentTools: true } } }, agents: { a2: { computer: { agentTools: false } } } })
+    expect(computerToolsOn(s, 'w1', 'a1')).toBe(true)
+    expect(computerToolsOn(s, 'w1', 'a2')).toBe(false)
+    expect(computerToolsOn(s, 'w2', null)).toBe(false)
+    expect(patchApp(s.app, { computer: { pauseOnUser: false } }).computer).toMatchObject({ agentTools: false, pauseOnUser: false })
+  })
+})

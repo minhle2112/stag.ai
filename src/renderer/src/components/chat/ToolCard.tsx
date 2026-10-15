@@ -3,6 +3,7 @@ import type { ChatBlock } from '@shared/chat'
 import { Icon } from '../Icon'
 import { jsonEqual } from './chatLogic'
 import { Markdown } from './Markdown'
+import { useLocale, useT } from '../../i18n'
 import { clipLines, describeTool, stepName, stepResult, type AskQuestion, type DiffRow, type TodoItem, type ToolDetail } from './toolSummary'
 
 type ToolBlock = Extract<ChatBlock, { type: 'tool' }>
@@ -14,16 +15,18 @@ const WRITE_LINES = 15
 
 /** Gập / mở thêm cho khối dài. */
 function MoreButton({ open, hidden, onClick }: { open: boolean; hidden: number; onClick: () => void }): React.JSX.Element {
+  const t = useT()
   return (
     <button type="button" onClick={onClick} className="mt-1 inline-flex items-center gap-1 text-[11px] text-dim hover:text-fg">
       <Icon name="cd" size={12} className={open ? 'rotate-180' : ''} />
-      {open ? 'Thu gọn' : `Hiện thêm ${hidden} dòng`}
+      {open ? t('chat.collapse') : t('chat.tool.showMore', { count: hidden })}
     </button>
   )
 }
 
 /** Output của tool (mono, gập sau 12 dòng). */
 function OutputBox({ text, truncated, error }: { text: string; truncated?: boolean; error?: boolean }): React.JSX.Element | null {
+  const t = useT()
   const [all, setAll] = useState(false)
   const c = useMemo(() => clipLines(text, OUTPUT_LINES), [text])
   if (!text.trim()) return null
@@ -31,7 +34,7 @@ function OutputBox({ text, truncated, error }: { text: string; truncated?: boole
     <div>
       <div className={`${MONO_BOX} ${error ? 'text-danger' : 'text-muted'}`}>{all ? text : c.head}</div>
       {c.hidden > 0 && <MoreButton open={all} hidden={c.hidden} onClick={() => setAll(!all)} />}
-      {truncated && <div className="mt-1 text-[11px] text-dim">Output đã bị cắt bớt.</div>}
+      {truncated && <div className="mt-1 text-[11px] text-dim">{t('chat.tool.truncated')}</div>}
     </div>
   )
 }
@@ -129,6 +132,7 @@ export function ToolDetailView({
   truncated?: boolean
   error?: boolean
 }): React.JSX.Element {
+  const t = useT()
   const out = output ? <OutputBox text={output} truncated={truncated} error={error} /> : null
   switch (detail.kind) {
     case 'bash':
@@ -154,8 +158,8 @@ export function ToolDetailView({
         <div className="flex flex-col gap-1.5">
           <Field label="File">
             <span className="font-mono">{detail.path}</span>
-            {detail.replaceAll && <span className="ml-2 text-dim">thay mọi chỗ</span>}
-            {detail.edits > 1 && <span className="ml-2 text-dim">{detail.edits} chỗ sửa</span>}
+            {detail.replaceAll && <span className="ml-2 text-dim">{t('chat.tool.replaceAll')}</span>}
+            {detail.edits > 1 && <span className="ml-2 text-dim">{t('chat.tool.edits', { count: detail.edits })}</span>}
           </Field>
           <DiffBox rows={detail.rows} />
           {out}
@@ -166,7 +170,7 @@ export function ToolDetailView({
         <div className="flex flex-col gap-1.5">
           <Field label="File">
             <span className="font-mono">{detail.path}</span>
-            <span className="ml-2 text-dim">{detail.lines} dòng</span>
+            <span className="ml-2 text-dim">{t('chat.tool.lines', { count: detail.lines })}</span>
           </Field>
           <DiffBox rows={detail.content.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n').map((s): DiffRow => ({ t: '+', s }))} max={WRITE_LINES} />
           {out}
@@ -175,25 +179,25 @@ export function ToolDetailView({
     case 'search':
       return (
         <div className="flex flex-col gap-1.5">
-          <Field label="Mẫu">
+          <Field label={t('chat.tool.pattern')}>
             <span className="font-mono text-fg">{detail.pattern}</span>
           </Field>
           {detail.path && (
-            <Field label="Trong">
+            <Field label={t('chat.tool.in')}>
               <span className="font-mono">{detail.path}</span>
             </Field>
           )}
-          {detail.extra && <Field label="Lọc">{detail.extra}</Field>}
+          {detail.extra && <Field label={t('chat.tool.filter')}>{detail.extra}</Field>}
           {out}
         </div>
       )
     case 'web':
       return (
         <div className="flex flex-col gap-1.5">
-          <Field label={detail.isQuery ? 'Tìm' : 'URL'}>
+          <Field label={detail.isQuery ? t('common.search') : 'URL'}>
             <span className="font-mono">{detail.target}</span>
           </Field>
-          {detail.prompt && <Field label="Hỏi">{detail.prompt}</Field>}
+          {detail.prompt && <Field label={t('chat.tool.ask')}>{detail.prompt}</Field>}
           {out}
         </div>
       )
@@ -201,7 +205,7 @@ export function ToolDetailView({
       return (
         <div className="flex flex-col gap-1.5">
           {detail.description && <div className="text-[12px] text-fg">{detail.description}</div>}
-          {detail.subagent && <Field label="Loại">{detail.subagent}</Field>}
+          {detail.subagent && <Field label={t('agents.req.kind')}>{detail.subagent}</Field>}
           {detail.prompt && <div className={`${MONO_BOX} text-muted`}>{clipLines(detail.prompt, 10).head}</div>}
           {out}
         </div>
@@ -253,7 +257,10 @@ const RESULT_TONE = { ok: 'text-work', err: 'text-danger', dim: 'text-dim' } as 
  */
 export const StepRow = memo(
   function StepRow({ block, root }: { block: ToolBlock; root?: string }): React.JSX.Element {
-    const view = useMemo(() => describeTool(block.name, block.input, { root }), [block.name, block.input, root])
+    const t = useT()
+    const locale = useLocale()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const view = useMemo(() => describeTool(block.name, block.input, { root }), [block.name, block.input, root, locale])
     const [open, setOpen] = useState(false)
     const failed = block.state === 'error' || block.state === 'denied'
     const result = stepResult(block.name, block.state, block.output)
@@ -276,7 +283,7 @@ export const StepRow = memo(
             {view.summary || '…'}
           </span>
           {block.state === 'running' ? (
-            <span className="sdot in" data-tip="Đang chạy" />
+            <span className="sdot in" data-tip={t('chat.running')} />
           ) : stats && (stats.add || stats.del) ? (
             <DiffStat add={stats.add} del={stats.del} />
           ) : (
@@ -287,7 +294,7 @@ export const StepRow = memo(
         {open && (
           <div className="border-t border-line bg-panel p-2">
             <ToolDetailView detail={view.detail} output={block.output} truncated={block.truncated} error={failed} />
-            {block.state === 'running' && !block.output && <div className="mt-1.5 text-[11px] text-dim">Đang chạy…</div>}
+            {block.state === 'running' && !block.output && <div className="mt-1.5 text-[11px] text-dim">{t('chat.tool.runningDots')}</div>}
           </div>
         )}
       </div>

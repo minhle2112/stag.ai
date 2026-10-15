@@ -1,0 +1,230 @@
+import type { EnNamespace } from '../types'
+import type vi from '../vi/passwords'
+
+const en: EnNamespace<typeof vi> = {
+  // Ask policy
+  'policy.ask': 'Ask every time',
+  'policy.first': 'Ask once per agent',
+  'policy.auto': 'Don’t ask',
+  'policy.off': 'No agent access',
+
+  // 2FA key
+  'totp.empty': 'No key yet.',
+  'totp.badLink': 'Can’t read the otpauth:// link.',
+  'totp.hotp': 'HOTP (counter-based) codes aren’t supported yet, only TOTP.',
+  'totp.notTotp': 'The otpauth:// link isn’t TOTP.',
+  'totp.badSecret': 'The otpauth:// link has a missing or invalid key.',
+  'totp.badAlg': 'Algorithm {alg} isn’t supported yet.',
+  'totp.badDigits': 'The code must have 6, 7 or 8 digits.',
+  'totp.badPeriod': 'Invalid code period.',
+  'totp.badKey': 'The 2FA key must be base32 (letters A–Z, digits 2–7), at least 16 characters, or an otpauth:// link.',
+
+  // Import
+  'import.noUrl': 'Skipped "{name}": no website address.',
+  'import.notJson': 'The file isn’t JSON.',
+  'import.encrypted': 'This Bitwarden file is encrypted. Export it again as .json (unencrypted).',
+  'import.noItems': 'No item list (items) found in the Bitwarden file.',
+  'import.emptyCsv': 'The CSV file is empty.',
+  'import.notBitwardenCsv': 'Not a Bitwarden CSV (missing login_uri / login_password columns).',
+  'import.notChromeCsv': 'Not a Chrome / Edge password CSV (missing url / password columns).',
+  'import.tooBig': 'File too large (over 20 MB).',
+  'import.expired': 'The preview has expired. Choose the file again.',
+
+  // Store
+  'store.noCipher': 'Windows doesn’t allow data encryption (safeStorage), so the app can’t save passwords.',
+  'store.noName': 'The item needs a name.',
+  'store.wildTooBroad': '“{domain}” matches too many sites. Use the site’s own domain, e.g. *.shop-abc.com or admin.shop-abc.com.',
+  'store.noDomain': 'The item needs at least one domain (e.g. admin.shop-abc.com).',
+  'store.tooLong': 'Password too long.',
+  'store.gone': 'This item is no longer in the password store.',
+  'store.decrypt': 'Can’t decrypt this item (password store copied from another Windows account?).',
+  'store.noSecret': 'The item needs a password or a 2FA key.',
+  'store.full': 'The password store is full.',
+
+  // Page notices in the Browser pane
+  'page.insecure': 'stag.ai doesn’t save passwords for http:// pages (not encrypted).',
+  'page.updated': 'Password updated.',
+  'page.saved': 'Saved “{name}”. Change it in Settings → Passwords.',
+  'page.saveFailed': 'Couldn’t save: {message}',
+  'page.never': 'Won’t ask again for {host}. Undo in Settings → Passwords.',
+  'page.watchQr': 'Open this site’s security / authenticator app setup page. stag picks up the QR code when it appears.',
+  'page.totpSaved': '2FA key saved · current code {code}',
+
+  // File pickers / QR scan
+  'dialog.pickQr': 'Choose a QR code image',
+  'dialog.images': 'Images',
+  'dialog.pickExport': 'Choose the export file',
+  'scan.noQrImage': 'No QR code found in the image.',
+  'scan.noQrScreen': 'No QR code found on screen. Make the QR code clearly visible, then try again.',
+
+  // Bubble in the Browser pane
+  'bubble.agents': 'Agents allowed',
+  'bubble.waiting': '{names} preselected because they’re waiting for this page.',
+  'bubble.updateTitle': 'Update password?',
+  'bubble.saveTitle': 'Save password for this site?',
+  'bubble.updateSub': 'The password you just used differs from the one saved in “{name}”.',
+  'bubble.saveSub': 'You just signed in to {host} in the Browser pane.',
+  'bubble.username': 'Username',
+  'bubble.notSeen': '(not found)',
+  'bubble.password': 'Password',
+  'bubble.show20': 'Show for 20 seconds',
+  'bubble.update': 'Update',
+  'bubble.later': 'Not now',
+  'bubble.never': 'Never for this site',
+  'bubble.2faTitle': 'This site uses 2FA. Save the 2FA key too?',
+  'bubble.2faWhy': 'The 6-digit code you just typed works only once. For an agent to sign in by itself next time, stag needs the {key}: the site shows it only when you turn on or reset 2FA.',
+  'bubble.2faSecretKey': 'secret key',
+  'bubble.2faQrTitle': 'Open the security page to get the QR code',
+  'bubble.2faQrDesc': 'Reset the authenticator app in the Browser pane. stag picks up the QR code on the page.',
+  'bubble.2faKeyPlaceholder': 'Secret key or otpauth://…',
+  'bubble.2faPasteTitle': 'Paste the secret key',
+  'bubble.2faPasteDesc': 'If you still have the key from when you turned on 2FA (or in a Bitwarden / Authy export).',
+  'bubble.2faSkip': 'Later, the agent will ask me for the code',
+  'bubble.qrSavedTitle': '2FA key saved to “{name}”',
+  'bubble.qrSavedSub': 'When the site asks for a verification code, type it or let stag fill it in.',
+  'bubble.qrFill': 'Let stag fill the code',
+  'bubble.qrTitle': 'stag found a 2FA QR code on the page',
+  'bubble.qrCode': 'QR code',
+  'bubble.qrCodeOf': 'QR code for {account}',
+  'bubble.qrHasKey': 'already has a 2FA key',
+  'bubble.qrReplaceSub':
+    '{qr}. “{target}”{user} {hasKey}: replacing it deletes the old key for good. Only replace it if you just reset 2FA for this exact account.',
+  'bubble.qrReplace': 'Replace 2FA key',
+  'bubble.qrSaveNew': 'Save as new item',
+  'bubble.qrSkip': 'Skip',
+  'bubble.qrNewSub': 'Save as new item “{target}”{account}?',
+  'bubble.qrIntoSub': 'Save to “{target}”?',
+  'bubble.qrRescan': 'Remember to scan the same code with your phone: resetting makes the old code on your phone stop working.',
+  'bubble.qrSave': 'Save 2FA key',
+
+  // Blocked toast
+  'blocked.title': 'Password fill blocked',
+  'blocked.body': '{agent} wanted to use “{item}” on {host}. This item is only for {allowed}. It may be a fake page.',
+  'blocked.viewLog': 'View log',
+
+  // Settings → Passwords
+  'section.desc':
+    'Password store for agents. Agents ask the app to sign in, and the app fills the page in the Browser pane, only on the item’s exact domain. Agents never see passwords or 2FA codes. Encrypted by Windows, never written to the vault or settings.',
+  'section.import': 'Import',
+  'section.emptyTitle': 'No passwords yet',
+  'section.emptyBody':
+    'Click {add}, import from Bitwarden / Chrome, or sign in to a site yourself in the Browser pane: the app asks whether to save it. Agents call the {tool} tool to have the app fill it in.',
+  'section.search': 'Search name, domain, account…',
+  'section.onlyYou': 'only you',
+  'section.agentCount': { one: '{count} agent', other: '{count} agents' },
+  'section.noMatch': 'No matching items.',
+  'section.never': 'Never ask to save',
+  'section.neverRemove': 'Remove from list',
+
+  'importMenu.bitwardenJson': 'Unencrypted export, includes 2FA keys',
+  'importMenu.chromeCsv': 'Passwords saved in the browser (no 2FA)',
+  'importMenu.note': 'Preview and untick items before importing. Delete the export file afterwards.',
+
+  'policyHint.ask': 'Every time an agent wants to sign in, the app shows you a confirm card.',
+  'policyHint.first':
+    'The first time each agent uses this item, the app asks you. Choose “Always allow this agent” and it won’t ask again. Agents you selected above count as allowed.',
+  'policyHint.auto':
+    'Selected agents fill right away without asking. Other agents can still request it, and the app asks you. Still only on the exact domain, and every use is logged.',
+  'policyHint.off': 'This item is only for you to view / copy. Agents don’t see it in credential_list.',
+
+  'action.login': 'filled the login',
+  'action.username': 'filled the username',
+  'action.password': 'filled the password',
+  'action.totp': 'filled the 2FA code',
+  'action.blocked': 'tried to fill on a wrong domain',
+  'action.insecure': 'tried to fill on an http:// page (not encrypted)',
+  'action.denied': 'asked to fill, denied',
+  'action.needsUser': 'hit 2FA the password store can’t fill',
+  'action.saved': 'saved the item',
+  'action.updated': 'updated the item',
+  'action.imported': 'imported',
+  'action.totpSaved': 'saved the 2FA key',
+
+  'when.today': 'Today {time}',
+  'when.yesterday': 'Yesterday {time}',
+
+  'field.domain': 'Domain',
+  'field.username': 'Username',
+  'field.password': 'Password',
+  'field.totp': '2FA code',
+
+  'detail.lastUsed': 'Last used: {when}',
+  'detail.never': 'Never',
+  'detail.deleteForGood': 'Delete for good',
+  'detail.login': 'Sign-in',
+  'detail.none': '(none)',
+  'detail.hide': 'Hide',
+  'detail.reveal': 'Show (hides after 20 seconds)',
+  'detail.copyPassword': 'Copy (cleared from clipboard after 30 seconds)',
+  'detail.autoHide': 'hides after 20 seconds',
+  'detail.notSet': 'Not set',
+  'detail.add2fa': 'Add 2FA',
+  'detail.agents': 'Agents allowed',
+  'detail.allWorkspaces': 'All workspaces',
+  'detail.workspace': 'Workspace: {name}',
+  'detail.noAgents': 'No agents yet.',
+  'detail.whenUsed': 'When an agent uses it',
+  'detail.log': 'Usage log',
+  'detail.logNote': '90 days · passwords never logged',
+  'detail.logEmpty': 'Not used yet.',
+
+  'log.you': 'You',
+  'log.line': '{who} {action}',
+  'log.lineOn': '{who} {action} on {host}',
+  'log.allowedOnce': ' · you allowed',
+  'log.allowedAlways': ' · you allowed, always',
+  'log.chipBlocked': 'blocked',
+  'log.chipDenied': 'denied',
+  'log.chipNeedsUser': 'needs you',
+  'log.chipFilled': 'filled',
+
+  // Add / edit dialog
+  'item.qrUnreadable': 'Can’t read the QR code.',
+  'item.addTitle': 'Add password',
+  'item.editTitle': 'Edit password',
+  'item.name': 'Name',
+  'item.domainHint': 'The app fills only on this exact domain. Add {wild} to include subdomains. Separate several domains with commas.',
+  'item.keep': '(unchanged)',
+  'item.show': 'Show',
+  'item.generate': 'Generate strong password',
+  'item.keyFor': '2FA key for “{name}”',
+  'item.totpOptional': '2FA code (optional)',
+  'item.tabKey': 'Paste key',
+  'item.tabQr': 'Scan QR',
+  'item.keyReplace': '(2FA key saved — paste a new key to replace it)',
+  'item.keyPlaceholder': 'JBSW Y3DP EHPK 3PXP… or otpauth://totp/…',
+  'item.keyHint': 'The secret key the site shows when you turn on 2FA (“can’t scan the code?”), or paste the whole {link} link. Pasting a QR image (Ctrl+V) works too.',
+  'item.scanScreen': 'Scan the screen',
+  'item.scanScreenDesc': 'Open the page showing the QR code (the Browser pane works too), then click. The app looks for a QR code on screen.',
+  'item.pickImage': 'Choose QR image',
+  'item.pickImageDesc': 'or paste an image with Ctrl+V',
+  'item.verifyAsk': 'Does the 2FA app on your phone show this same code?',
+  'item.verified': 'Verified',
+  'item.match': 'Matches',
+  'item.removeTotp': 'Remove the saved 2FA key',
+  'item.agentsOpenWs': 'Agents allowed (open workspace)',
+  'item.noAgentsWs': 'No agents in the open workspace yet.',
+  'item.policyEdit': 'Change the ask policy on the detail page.',
+  'item.policyNew': 'New items: “Ask every time”. Agents not selected can still request it, and the app will ask you.',
+  'item.verifyFirst': 'Click “Matches” after comparing the code with the app on your phone; then you can save.',
+
+  // Import dialog
+  'importDlg.title': 'Import passwords',
+  'importDlg.run': { one: 'Import {count} item', other: 'Import {count} items' },
+  'importDlg.done': {
+    one: 'Added {count} item. Imported items use “Ask every time”, with no agents selected.',
+    other: 'Added {count} items. Imported items use “Ask every time”, with no agents selected.'
+  },
+  'importDlg.doneUpdated': {
+    one: 'Added {count} item, updated {updated} existing. Imported items use “Ask every time”, with no agents selected.',
+    other: 'Added {count} items, updated {updated} existing. Imported items use “Ask every time”, with no agents selected.'
+  },
+  'importDlg.deleteFile': 'Delete the export file now',
+  'importDlg.plainFile': '{file} contains unencrypted passwords.',
+  'importDlg.openFolder': 'Open folder',
+  'importDlg.summary': { one: '{file} · {count} login. Untick anything you don’t want to import.', other: '{file} · {count} logins. Untick anything you don’t want to import.' },
+  'importDlg.moreErrors': { one: '… and {count} more line', other: '… and {count} more lines' },
+  'importDlg.duplicate': 'exists → update'
+}
+
+export default en

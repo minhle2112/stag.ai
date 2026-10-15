@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import JSZip from 'jszip'
+import { t } from '@shared/i18n'
 import { parseSkillMd, setSkillName, SKILL_NAME_RE, skillMd, skillProblem, type EffectiveSkills } from '@shared/skills'
 import type { InheritedSkill, LibrarySkill, SkillCatalogEntry, SkillDoc, SkillFile, SkillScan, SkillSource } from '@shared/types'
 import { codexHome, tomlString } from './codex'
@@ -48,8 +49,8 @@ export async function skillFiles(dir: string): Promise<SkillFile[]> {
         const size = (await fs.stat(p)).size
         bytes += size
         out.push({ path: posix(relative(dir, p)), bytes: size })
-        if (out.length > SKILL_MAX_FILES) throw new Error(`Skill ${basename(dir)} có hơn ${SKILL_MAX_FILES} file.`)
-        if (bytes > SKILL_MAX_BYTES) throw new Error(`Skill ${basename(dir)} lớn hơn ${SKILL_MAX_BYTES / 1024 / 1024} MB.`)
+        if (out.length > SKILL_MAX_FILES) throw new Error(t('skills.err.tooManyFiles', { name: basename(dir), count: SKILL_MAX_FILES }))
+        if (bytes > SKILL_MAX_BYTES) throw new Error(t('skills.err.tooBig', { name: basename(dir), mb: String(SKILL_MAX_BYTES / 1024 / 1024) }))
       }
     }
   }
@@ -121,7 +122,7 @@ export class SkillLibrary {
   }
 
   private dir(name: string): string {
-    if (!SKILL_NAME_RE.test(name)) throw new Error(`Tên skill không hợp lệ: ${name}`)
+    if (!SKILL_NAME_RE.test(name)) throw new Error(t('skills.err.badName', { name }))
     return join(this.root, name)
   }
 
@@ -140,7 +141,7 @@ export class SkillLibrary {
       const md = await readText(join(dir, 'SKILL.md'))
       const p = md === null ? null : parseSkillMd(md, e.name)
       let files: SkillFile[] = []
-      let problem = md === null ? 'Thiếu file SKILL.md.' : (p!.error ?? undefined)
+      let problem = md === null ? t('skills.err.noSkillMd') : (p!.error ?? undefined)
       try {
         files = await skillFiles(dir)
       } catch (err) {
@@ -172,14 +173,14 @@ export class SkillLibrary {
   async read(name: string): Promise<SkillDoc> {
     const dir = this.dir(name)
     const md = await readText(join(dir, 'SKILL.md'))
-    if (md === null && !(await exists(dir))) throw new Error(`Không có skill ${name}.`)
+    if (md === null && !(await exists(dir))) throw new Error(t('skills.err.notFound', { name }))
     return { name, dir, md: md ?? '', files: await skillFiles(dir).catch(() => []), editable: true }
   }
 
   async create(name: string, description: string, body?: string): Promise<void> {
     const problem = skillProblem(name, description.trim())
     if (problem) throw new Error(problem)
-    if (await this.has(name)) throw new Error(`Đã có skill "${name}" trong thư viện.`)
+    if (await this.has(name)) throw new Error(t('skills.err.exists', { name }))
     const dir = this.dir(name)
     await fs.mkdir(dir, { recursive: true })
     await fs.writeFile(join(dir, 'SKILL.md'), skillMd(name, description, body ?? defaultBody(name)), 'utf8')
@@ -192,11 +193,11 @@ export class SkillLibrary {
    */
   async save(name: string, md: string): Promise<{ name: string; problem: string | null }> {
     const dir = this.dir(name)
-    if (!(await exists(dir))) throw new Error(`Không có skill ${name}.`)
+    if (!(await exists(dir))) throw new Error(t('skills.err.notFound', { name }))
     const p = parseSkillMd(md)
     let target = name
     if (p.name && p.name !== name && SKILL_NAME_RE.test(p.name)) {
-      if (await this.has(p.name)) throw new Error(`Đã có skill "${p.name}" trong thư viện; chọn tên khác.`)
+      if (await this.has(p.name)) throw new Error(t('skills.err.existsRename', { name: p.name }))
       target = p.name
     }
     await fs.writeFile(join(dir, 'SKILL.md'), md, 'utf8')
@@ -221,7 +222,7 @@ export class SkillLibrary {
    */
   async importDir(root: string, source: Omit<SkillSource, 'at'>): Promise<{ added: string[]; skipped: Array<{ name: string; reason: string }> }> {
     const dirs = await findSkillDirs(root)
-    if (!dirs.length) throw new Error('Không thấy SKILL.md nào trong thư mục này (tìm sâu 3 cấp).')
+    if (!dirs.length) throw new Error(t('skills.err.noneInFolder'))
     const added: string[] = []
     const skipped: Array<{ name: string; reason: string }> = []
     for (const d of dirs) {
@@ -231,11 +232,11 @@ export class SkillLibrary {
       const name = SKILL_NAME_RE.test(p.name) ? p.name : SKILL_NAME_RE.test(folder) ? folder : ''
       const label = p.name || basename(d)
       if (!name) {
-        skipped.push({ name: label, reason: 'tên không hợp lệ (chỉ a-z, 0-9, "-")' })
+        skipped.push({ name: label, reason: t('skills.skip.badName') })
         continue
       }
       if ((await this.has(name)) || added.includes(name)) {
-        skipped.push({ name, reason: 'đã có trong thư viện' })
+        skipped.push({ name, reason: t('skills.skip.exists') })
         continue
       }
       try {
@@ -267,11 +268,11 @@ export class SkillLibrary {
         const rel = normalize(entry.name.replace(/\\/g, '/'))
         const to = resolve(tmp, rel)
         if (/(^|[\\/])\.\.([\\/]|$)/.test(raw) || isAbsolute(raw) || /^[A-Za-z]:/.test(raw) || rel.startsWith('..') || !to.startsWith(tmp + sep))
-          throw new Error(`File zip có đường dẫn không an toàn: ${raw}`)
-        if (++count > SKILL_MAX_FILES * 5) throw new Error('File zip có quá nhiều file.')
+          throw new Error(t('skills.err.zipUnsafe', { path: raw }))
+        if (++count > SKILL_MAX_FILES * 5) throw new Error(t('skills.err.zipTooMany'))
         const buf = await entry.async('nodebuffer')
         bytes += buf.length
-        if (bytes > SKILL_MAX_BYTES * 3) throw new Error('File zip giải nén ra quá lớn.')
+        if (bytes > SKILL_MAX_BYTES * 3) throw new Error(t('skills.err.zipTooBig'))
         await fs.mkdir(dirname(to), { recursive: true })
         await fs.writeFile(to, buf)
       }
@@ -291,17 +292,17 @@ export class SkillLibrary {
 
   /** Đường dẫn SKILL.md của một skill trong danh mục (xem trước). */
   async catalogDoc(slug: string): Promise<SkillDoc> {
-    if (!(await this.catalog()).some((e) => e.slug === slug)) throw new Error(`Không có skill ${slug} trong danh mục.`)
+    if (!(await this.catalog()).some((e) => e.slug === slug)) throw new Error(t('skills.err.notInCatalog', { name: slug }))
     return readSkillDir(join(this.catalogDir, slug), false)
   }
 
   async installCatalog(slug: string): Promise<{ added: string[]; skipped: Array<{ name: string; reason: string }> }> {
-    if (!(await this.catalog()).some((e) => e.slug === slug)) throw new Error(`Không có skill ${slug} trong danh mục.`)
+    if (!(await this.catalog()).some((e) => e.slug === slug)) throw new Error(t('skills.err.notInCatalog', { name: slug }))
     return this.importDir(join(this.catalogDir, slug), { kind: 'catalog', from: slug })
   }
 
   private sessionDir(sessionId: string): string {
-    if (!/^[A-Za-z0-9-]{1,80}$/.test(sessionId)) throw new Error('id phiên không hợp lệ')
+    if (!/^[A-Za-z0-9-]{1,80}$/.test(sessionId)) throw new Error(t('skills.err.badSessionId'))
     return join(this.sessionsRoot, sessionId)
   }
 
@@ -364,7 +365,7 @@ function defaultBody(name: string): string {
 /** Đọc một thư mục skill bất kỳ (skill có sẵn của CLI, danh mục) để xem. */
 export async function readSkillDir(dir: string, editable: boolean): Promise<SkillDoc> {
   const md = await readText(join(dir, 'SKILL.md'))
-  if (md === null) throw new Error(`Không đọc được ${join(dir, 'SKILL.md')}.`)
+  if (md === null) throw new Error(t('skills.err.cannotRead', { path: join(dir, 'SKILL.md') }))
   return { name: parseSkillMd(md).name || basename(dir), dir, md, files: await skillFiles(dir).catch(() => []), editable }
 }
 
@@ -454,12 +455,12 @@ export function scanCodexSkills(exe: string, cwd: string, env: NodeJS.ProcessEnv
       p.kill()
       fn()
     }
-    const timer = setTimeout(() => finish(() => reject(new Error('Codex không trả lời danh sách skill sau 20 giây.'))), timeoutMs)
+    const timer = setTimeout(() => finish(() => reject(new Error(t('skills.err.codexTimeout')))), timeoutMs)
     const send = (o: unknown): void => {
       p.stdin.write(JSON.stringify(o) + '\n')
     }
     p.on('error', (e) => finish(() => reject(e)))
-    p.on('exit', (code) => finish(() => reject(new Error(`Codex thoát (mã ${code}). ${err.trim().split('\n').pop() ?? ''}`.trim()))))
+    p.on('exit', (code) => finish(() => reject(new Error(t('skills.err.codexExited', { code: String(code), detail: err.trim().split('\n').pop() ?? '' }).trim()))))
     p.stderr.on('data', (d) => (err = (err + String(d)).slice(-2000)))
     p.stdout.on('data', (d) => {
       buf += String(d)
@@ -477,7 +478,7 @@ export function scanCodexSkills(exe: string, cwd: string, env: NodeJS.ProcessEnv
           send({ method: 'initialized' })
           send({ id: 2, method: 'skills/list', params: { cwds: [cwd], forceReload: true } })
         } else if (m.id === 2) {
-          if (m.error) finish(() => reject(new Error(m.error?.message ?? 'Codex báo lỗi khi liệt kê skill.')))
+          if (m.error) finish(() => reject(new Error(m.error?.message ?? t('skills.err.codexList'))))
           else finish(() => resolveP(codexSkillsFromList(m.result)))
         }
       }

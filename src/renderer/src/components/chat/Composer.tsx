@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatImage, ChatItem, ChatState } from '@shared/chat'
+import type { ComputerAttach, ComputerWindow } from '@shared/computer'
+import { filterWindows, PickerOffNote, useOpenWindows, WindowList } from '../computer/WindowPicker'
 import { registerComposer, useChat, type ComposerHandle } from '../../store/chat'
 import { useSettings } from '../../store/settings'
 import { beginVoice, endVoice, useVoice, useVoiceFor } from '../../store/voice'
 import { Icon } from '../Icon'
+import { useT } from '../../i18n'
 import {
   appendText,
+  atQuery,
   checkImage,
   CHOICE_TOOLS,
   ctxInfo,
@@ -25,6 +29,14 @@ interface Attached {
   /** data: URL để hiện thumbnail. */
   url: string
   image: ChatImage
+}
+
+/** Cửa sổ Windows chọn bằng `@` (computer use): gửi kèm dòng ngữ cảnh + ảnh cửa sổ. */
+interface WinChip {
+  id: string
+  win: ComputerWindow
+  /** Kết quả gắn (main đã cấp app cho phiên, chụp ảnh); vắng = đang chụp. */
+  attach?: ComputerAttach
 }
 
 export interface ComposerProps {
@@ -57,7 +69,7 @@ export interface ComposerProps {
 /**
  * Bản nháp đang gõ theo agent: ô chat bị gỡ khi chuyển tab project (canvas mỗi tab một bản), gắn lại thì lấy về.
  */
-const drafts = new Map<string, { text: string; images: Attached[] }>()
+const drafts = new Map<string, { text: string; images: Attached[]; wins?: WinChip[] }>()
 
 /**
  * Ô soạn tin: một hộp bo tròn — trên là chip tin xếp hàng + ảnh đã dán, giữa là ô nhập (Enter gửi, Shift+Enter xuống
@@ -79,8 +91,18 @@ export function Composer({
   offLabel,
   focusRef
 }: ComposerProps): React.JSX.Element {
+  const t = useT()
   const [text, setTextState] = useState(() => drafts.get(agentId)?.text ?? '')
   const [images, setImagesState] = useState<Attached[]>(() => drafts.get(agentId)?.images ?? [])
+  const [wins, setWinsState] = useState<WinChip[]>(() => drafts.get(agentId)?.wins ?? [])
+  const winsRef = useRef<WinChip[]>(wins)
+  /** Bảng @ cửa sổ đang mở: vị trí `@` và chữ lọc. */
+  const [at, setAt] = useState<{ start: number; end: number; query: string } | null>(null)
+  const [atSel, setAtSel] = useState(0)
+  /** Esc đóng bảng ở `@` này: không mở lại tới khi gõ một `@` khác. */
+  const atDismissed = useRef<number | null>(null)
+  const { list: winList } = useOpenWindows(!!at)
+  const atItems = useMemo(() => filterWindows(winList ?? [], at?.query ?? ''), [winList, at?.query])
   const [note, setNote] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -94,7 +116,7 @@ export function Composer({
   const idSeq = useRef(0)
 
   const keepDraft = (): void => {
-    if (textRef.current || imagesRef.current.length) drafts.set(agentId, { text: textRef.current, images: imagesRef.current })
+    if (textRef.current || imagesRef.current.length || winsRef.current.length) drafts.set(agentId, { text: textRef.current, images: imagesRef.current, wins: winsRef.current })
     else drafts.delete(agentId)
   }
   const setText = (v: string): void => {
@@ -105,6 +127,11 @@ export function Composer({
   const setImages = (v: Attached[]): void => {
     imagesRef.current = v
     setImagesState(v)
+    keepDraft()
+  }
+  const setWins = (v: WinChip[]): void => {
+    winsRef.current = v
+    setWinsState(v)
     keepDraft()
   }
   const flash = (msg: string): void => {
@@ -124,12 +151,19 @@ export function Composer({
 
   const doSend = (override?: string): boolean => {
     if (!enabledRef.current) return false
-    const t = (override ?? textRef.current).trim()
+    const typed = (override ?? textRef.current).trim()
     const imgs = imagesRef.current
-    if (!t && !imgs.length) return false
-    void useChat.getState().send(agentId, t, imgs.map((i) => i.image))
+    // Cửa sổ chọn bằng @: dòng ngữ cảnh đứng trước tin, ảnh cửa sổ đi cùng ảnh dán. Còn đang chụp thì chờ.
+    if (winsRef.current.some((w) => !w.attach)) return false
+    const picked = winsRef.current.filter((w) => w.attach?.ok)
+    const body = [picked.map((w) => w.attach!.context).filter(Boolean).join('\n'), typed].filter(Boolean).join('\n\n')
+    const winImgs: ChatImage[] = picked.filter((w) => w.attach!.image).map((w) => ({ mediaType: 'image/jpeg', data: w.attach!.image! }))
+    if (!body && !imgs.length) return false
+    void useChat.getState().send(agentId, body, [...imgs.map((i) => i.image), ...winImgs])
     setText('')
     setImages([])
+    setWins([])
+    setAt(null)
     hist.current = { index: null, draft: '' }
     return true
   }
@@ -192,7 +226,7 @@ export function Composer({
         const image = dataUrlToImage(url)
         if (image) setImages([...imagesRef.current, { id: `img${++idSeq.current}`, url, image }])
       }
-      reader.onerror = () => flash('Không đọc được ảnh vừa dán')
+      reader.onerror = () => flash(t('chat.composer.pasteFailed'))
       reader.readAsDataURL(f)
     }
   }
@@ -222,11 +256,73 @@ export function Composer({
     }
   }
 
+  /** Xem lại `@` trước con trỏ sau mỗi lần gõ / di con trỏ: mở, lọc hoặc đóng bảng cửa sổ. */
+  function detectAt(ta: HTMLTextAreaElement): void {
+    if (!enabledRef.current || ta.selectionStart !== ta.selectionEnd) return setAt(null)
+    const q = atQuery(ta.value, ta.selectionStart)
+    if (!q) {
+      atDismissed.current = null
+      return setAt(null)
+    }
+    if (atDismissed.current === q.start) return setAt(null)
+    setAt((prev) => {
+      if (!prev || prev.start !== q.start) setAtSel(0)
+      return { start: q.start, end: ta.selectionStart, query: q.query }
+    })
+  }
+
+  /** Chọn một cửa sổ: bỏ `@chữ` khỏi ô, thêm chip; main cấp app cho phiên và chụp cửa sổ. */
+  function pickWindow(w: ComputerWindow): void {
+    if (!at) return
+    const cur = textRef.current
+    setText(cur.slice(0, at.start) + cur.slice(at.end).replace(/^ /, ''))
+    const pos = at.start
+    setAt(null)
+    requestAnimationFrame(() => {
+      const ta = taRef.current
+      if (!ta) return
+      ta.focus()
+      ta.setSelectionRange(pos, pos)
+    })
+    const id = `win${++idSeq.current}`
+    setWins([...winsRef.current.filter((c) => c.win.id !== w.id), { id, win: w }])
+    void window.stag.computer
+      .attachWindow(agentId, w.id)
+      .catch((e: Error) => ({ ok: false, error: e.message }) as ComputerAttach)
+      .then((r) => {
+        if (!r.ok) {
+          flash(t('computer.picker.failed', { error: r.error ?? '' }))
+          return setWins(winsRef.current.filter((c) => c.id !== id))
+        }
+        setWins(winsRef.current.map((c) => (c.id === id ? { ...c, attach: r } : c)))
+      })
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
     const k = { key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode }
     // Đang gõ IME (Telex): Enter / Esc / mũi tên thuộc về bộ gõ.
     if (isImeKey(k)) return
-    const empty = !textRef.current.trim() && !imagesRef.current.length
+    // Bảng @ cửa sổ đang mở: ↑↓ chọn, Enter / Tab chèn, Esc đóng.
+    if (at) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setAtSel((i) => Math.max(0, Math.min(atItems.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))))
+        return
+      }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && atItems.length) {
+        e.preventDefault()
+        const w = atItems[Math.min(atSel, atItems.length - 1)]
+        if (w.tier !== 'blocked') pickWindow(w)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        atDismissed.current = at.start
+        setAt(null)
+        return
+      }
+    }
+    const empty = !textRef.current.trim() && !imagesRef.current.length && !winsRef.current.length
     if (shouldSubmit(k)) {
       e.preventDefault()
       if (!empty) doSend()
@@ -269,20 +365,30 @@ export function Composer({
   const q7 = quotaLabel(state.quota?.sevenDay, '7d')
   const quota = q5 ?? q7
   const quotaTip = useMemo(() => [q5?.title, q7?.title].filter(Boolean).join('\n'), [q5?.title, q7?.title])
-  const canSend = enabled && (!!text.trim() || images.length > 0)
+  const canSend = enabled && (!!text.trim() || images.length > 0 || wins.length > 0) && !wins.some((w) => !w.attach)
   const waiting = phase === 'waiting'
-  const waitingHint = waiting ? (pending?.tool === 'AskUserQuestion' ? 'Chờ bạn trả lời ở thẻ phía trên' : 'Chờ bạn duyệt ở thẻ phía trên') : null
+  const waitingHint = waiting ? (pending?.tool === 'AskUserQuestion' ? t('chat.composer.waitAnswer') : t('chat.composer.waitApprove')) : null
   const model = shortModel(state.model) || shortModel(modelHint)
   const pill = [model, effort].filter(Boolean).join(' · ')
-  const placeholder = !enabled ? (offLabel ?? 'Phiên đã dừng') : (waitingHint ?? `Nhắn cho ${agentName}…`)
+  const placeholder = !enabled ? (offLabel ?? t('chat.composer.stopped')) : (waitingHint ?? t('chat.composer.placeholder', { name: agentName }))
 
   return (
     <div className="shrink-0 px-3 pt-1 pb-3 @max-[420px]/chat:px-2 @max-[420px]/chat:pb-2">
-      <div className="mx-auto w-full max-w-[860px]">
+      <div className="relative mx-auto w-full max-w-[860px]">
+        {at && enabled && (
+          <div className="absolute right-0 bottom-full left-0 z-30 mb-1.5 overflow-hidden rounded-[12px] border border-line-2 bg-panel shadow-card">
+            <div className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-[11px] text-dim">
+              <span className="font-semibold text-muted">{t('computer.picker.title')}</span>
+              <span className="ml-auto">{t('computer.picker.hint')}</span>
+            </div>
+            <PickerOffNote wsId={wsId} agentId={agentId} />
+            <WindowList items={atItems} loading={winList === null} sel={Math.min(atSel, Math.max(0, atItems.length - 1))} onHover={setAtSel} onPick={pickWindow} />
+          </div>
+        )}
         {error && (
           <div className="mb-1.5 flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-[12px] text-danger">
             <span className="min-w-0 flex-1 break-words">{error}</span>
-            <button type="button" onClick={() => useChat.getState().clearError(agentId)} aria-label="Đóng" className="shrink-0 text-danger/80 hover:text-danger">
+            <button type="button" onClick={() => useChat.getState().clearError(agentId)} aria-label={t('common.close')} className="shrink-0 text-danger/80 hover:text-danger">
               <Icon name="x" size="s" />
             </button>
           </div>
@@ -300,7 +406,7 @@ export function Composer({
             }
           }}
         >
-          {(queued.length > 0 || images.length > 0) && (
+          {(queued.length > 0 || images.length > 0 || wins.length > 0) && (
             <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
               {/* Tin đã gửi lúc agent bận: đã nằm trong hàng đợi của CLI nên không rút lại được (không có ×). */}
               {queued.map((q, i) => (
@@ -310,8 +416,28 @@ export function Composer({
                   className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-dashed border-line-3 px-2 py-px text-[11px] text-muted"
                 >
                   <Icon name="hist" size={11} className="shrink-0 text-dim" />
-                  <span className="shrink-0 text-dim">Xếp hàng:</span>
+                  <span className="shrink-0 text-dim">{t('chat.composer.queued')}</span>
                   <span className="min-w-0 truncate">{q}</span>
+                </span>
+              ))}
+              {wins.map((w) => (
+                <span
+                  key={w.id}
+                  data-tip={w.attach ? w.win.title : t('computer.picker.attaching')}
+                  className={`inline-flex max-w-[260px] min-w-0 items-center gap-1 rounded-full border border-accent/40 bg-accent/10 py-px pr-1 pl-1.5 text-[11.5px] text-fg ${w.attach ? '' : 'animate-pulse'}`}
+                >
+                  {w.win.icon ? <img src={w.win.icon} alt="" className="h-3.5 w-3.5 shrink-0" /> : <Icon name="monitor" size={11} className="shrink-0" />}
+                  <b className="shrink-0">@{w.win.displayName}</b>
+                  <span className="min-w-0 truncate text-muted">— {w.win.title}</span>
+                  <button
+                    type="button"
+                    onClick={() => setWins(winsRef.current.filter((x) => x.id !== w.id))}
+                    data-tip={t('computer.chip.remove')}
+                    aria-label={t('computer.chip.remove')}
+                    className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-muted hover:text-fg"
+                  >
+                    <Icon name="x" size={10} />
+                  </button>
                 </span>
               ))}
               {images.map((im) => (
@@ -320,8 +446,8 @@ export function Composer({
                   <button
                     type="button"
                     onClick={() => setImages(imagesRef.current.filter((x) => x.id !== im.id))}
-                    data-tip="Bỏ ảnh"
-                    aria-label="Bỏ ảnh"
+                    data-tip={t('chat.composer.removeImage')}
+                    aria-label={t('chat.composer.removeImage')}
                     className="absolute top-0 right-0 grid h-4 w-4 place-items-center rounded-bl-md bg-bg0/85 text-muted hover:text-fg"
                   >
                     <Icon name="x" size={10} />
@@ -338,12 +464,15 @@ export function Composer({
             spellCheck={false}
             autoComplete="off"
             placeholder={placeholder}
-            data-tip={enabled && !waitingHint ? 'Enter gửi · Shift+Enter xuống dòng · ↑ tin cũ' : undefined}
+            data-tip={enabled && !waitingHint ? t('chat.composer.keysTip') : undefined}
             onChange={(e) => {
               setText(e.target.value)
               // Gõ tiếp thì thôi duyệt lịch sử (bản đang hiện thành bản nháp).
               if (hist.current.index !== null) hist.current = { index: null, draft: e.target.value }
+              detectAt(e.target)
             }}
+            onSelect={(e) => detectAt(e.currentTarget)}
+            onBlur={() => setAt(null)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             className="block max-h-[168px] min-h-[44px] w-full resize-none bg-transparent px-3 py-2.5 text-[13px] leading-[1.5] text-fg outline-none field-sizing-content placeholder:text-dim"
@@ -364,8 +493,8 @@ export function Composer({
               type="button"
               disabled={!enabled}
               onClick={() => fileRef.current?.click()}
-              data-tip="Đính kèm ảnh (hoặc dán thẳng vào ô)"
-              aria-label="Đính kèm ảnh"
+              data-tip={t('chat.composer.attachTip')}
+              aria-label={t('chat.composer.attach')}
               className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line-2 text-muted hover:border-line-3 hover:text-fg disabled:opacity-40"
             >
               <Icon name="img" size="s" />
@@ -375,7 +504,7 @@ export function Composer({
                 type="button"
                 onClick={onModel}
                 disabled={!onModel}
-                data-tip={state.model ? `${state.model} · đổi model / effort` : 'Đổi model / effort'}
+                data-tip={state.model ? `${state.model} · ${t('chat.composer.changeModelLower')}` : t('chat.composer.changeModel')}
                 className="inline-flex h-6 min-w-0 shrink items-center gap-1 rounded-full border border-line-2 px-2 text-[11px] text-muted hover:border-line-3 hover:text-fg disabled:hover:border-line-2 disabled:hover:text-muted"
               >
                 <span className="min-w-0 truncate">{pill}</span>
@@ -404,8 +533,8 @@ export function Composer({
               <button
                 type="button"
                 onClick={() => useChat.getState().interrupt(agentId)}
-                data-tip="Dừng lượt này · Esc"
-                aria-label="Dừng"
+                data-tip={t('chat.composer.stopTip')}
+                aria-label={t('chat.composer.stop')}
                 className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-fg text-bg0 hover:brightness-90"
               >
                 <Icon name="stop" size="s" />
@@ -416,8 +545,8 @@ export function Composer({
                 type="button"
                 disabled={!canSend}
                 onClick={() => doSend()}
-                data-tip={busy ? 'Gửi (xếp hàng) · Enter' : 'Gửi · Enter'}
-                aria-label="Gửi"
+                data-tip={busy ? t('chat.composer.sendQueuedTip') : t('chat.composer.sendTip')}
+                aria-label={t('common.send')}
                 className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent text-accent-on hover:brightness-110 disabled:bg-panel-3 disabled:text-dim disabled:hover:brightness-100"
               >
                 <Icon name="send" size="s" />
@@ -432,6 +561,7 @@ export function Composer({
 
 /** Mic trên hàng nút của ô soạn tin: bấm để nói (chữ vào ô này), bấm lần nữa để dừng. Ẩn khi tắt giọng nói trong Cài đặt. */
 function ComposerMic({ wsId, agentId }: { wsId: string; agentId: string }): React.JSX.Element | null {
+  const t = useT()
   const on = useSettings((s) => s.value.app.voice.enabled)
   const mine = useVoiceFor(agentId)
   const phase = useVoice((s) => s.phase)
@@ -441,8 +571,8 @@ function ComposerMic({ wsId, agentId }: { wsId: string; agentId: string }): Reac
     <button
       type="button"
       onClick={() => (live ? void endVoice() : void beginVoice({ wsId, agentId }))}
-      data-tip={live ? 'Dừng nói' : 'Nói để gõ'}
-      aria-label={live ? 'Dừng nói' : 'Nói để gõ'}
+      data-tip={live ? t('chat.composer.micStop') : t('chat.composer.micStart')}
+      aria-label={live ? t('chat.composer.micStop') : t('chat.composer.micStart')}
       className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${live ? 'animate-pulse bg-danger/20 text-danger' : 'text-muted hover:bg-panel-3 hover:text-fg'}`}
     >
       <Icon name="mic" size="s" />

@@ -1,0 +1,27 @@
+// Chuỗi giao diện tiếng Việt (nguồn), namespace `status`: trạng thái agent, context, thời gian ngắn. Tham số dạng {tên}.
+export default {
+  'wait.turn': 'chờ bạn trả lời',
+  'wait.permission': 'cần bạn duyệt quyền',
+  'wait.question': 'đang hỏi bạn',
+  'wait.idle': 'chờ bạn lâu rồi',
+  'wait.interrupted': 'bạn đã ngắt',
+  'terminal.opening': 'đang mở terminal',
+  'terminal.closed': 'terminal đã đóng',
+  'terminal.open': 'terminal',
+  'session.opening': 'đang mở phiên',
+  'session.restarting': 'đang chuyển sang phiên mới',
+  'session.stopped': 'phiên đã dừng',
+  'session.running': 'đang chạy',
+  'session.starting': 'đang khởi động',
+  'session.writingHandoff': 'đang viết bàn giao',
+  'session.runningTool': 'đang chạy {tool}',
+  'session.working': 'đang làm',
+  'ctx.autoAt': 'tự bàn giao ở {percent}%',
+  'ctx.autoOff': 'tự bàn giao đang tắt',
+  'ctx.failed': 'Lần tự bàn giao vừa rồi không thành (agent hết lượt mà chưa bàn giao). Bàn giao tay ở menu ⋯ của agent.',
+  'ctx.unknownSize': 'Context: {used} token (chưa biết kích thước cửa sổ nên chưa tính được %, chưa tự bàn giao)',
+  'ctx.known': 'Context: {used} / {size} token ({percent}%) · {auto}',
+  'ago.minutes': '{count} phút',
+  'ago.hours': '{count} giờ',
+  'ago.days': '{count} ngày'
+} as const

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>Hello</title>
@@ -11,26 +11,26 @@
       <header>
         <div>
           <h1>Hello <span class="muted" id="ws"></span></h1>
-          <p class="muted">Trang mẫu của plugin Hello: chạy trong khung cách ly, lấy dữ liệu từ worker qua <code>host.getData</code>.</p>
+          <p class="muted">Example page of the Hello plugin: runs in a sandboxed frame and gets its data from the worker through <code>host.getData</code>.</p>
         </div>
-        <button class="primary" id="hello">Chào</button>
+        <button class="primary" id="hello">Say hello</button>
       </header>
 
       <section class="card">
-        <h2>Việc agent đã xong</h2>
+        <h2>Tasks agents have finished</h2>
         <table>
           <thead>
-            <tr><th>Agent</th><th>Đang chạy</th><th>Việc xong</th></tr>
+            <tr><th>Agent</th><th>Running</th><th>Done</th></tr>
           </thead>
-          <tbody id="agents"><tr><td colspan="3" class="muted">Đang tải…</td></tr></tbody>
+          <tbody id="agents"><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
         </table>
         <p class="muted" id="summary"></p>
       </section>
 
       <section class="card">
-        <h2>Webhook "ping" gần nhất</h2>
-        <p class="muted">Gửi thử: chép địa chỉ ở Cài đặt → Plugin → Hello → Trạng thái → Webhook, rồi <code>curl -X POST -H "Content-Type: application/json" -d "{\"hi\":1}" "&lt;địa chỉ&gt;"</code>.</p>
-        <pre id="ping" class="muted">Chưa nhận gì.</pre>
+        <h2>Last "ping" webhook</h2>
+        <p class="muted">To try it: copy the address from Settings → Plugins → Hello → Status → Webhooks, then run <code>curl -X POST -H "Content-Type: application/json" -d "{\"hi\":1}" "&lt;address&gt;"</code>.</p>
+        <pre id="ping" class="muted">Nothing received yet.</pre>
       </section>
     </main>
     <script type="module" src="./hello.js"></script>

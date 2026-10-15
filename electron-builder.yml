@@ -21,6 +21,9 @@ files:
   # conpty.dll + OpenConsole.exe chỉ dùng khi bật `useConptyDll` (pty.ts không bật) → dùng ConPTY có sẵn của Windows.
   - '!node_modules/node-pty/prebuilds/win32-x64/conpty/**'
   - '!node_modules/node-pty/lib/**/*.{test.js,map}'
+  # koffi: bản build sẵn nằm ở gói @koromix/koffi-win32-x64; bỏ header Node-API, tài liệu, mã C++ (giữ static.cjs / trampolines.cjs).
+  - '!node_modules/koffi/{vendor,doc}/**'
+  - '!node_modules/koffi/src/koffi/src/**/*.{cc,hh,inc,S,asm}'
 
 # templates.ts đọc process.resourcesPath/templates khi app.isPackaged.
 extraResources:
@@ -63,6 +66,9 @@ asarUnpack:
   # Nhận dạng giọng nói: sherpa-onnx.node + onnxruntime.dll (nạp trong tiến trình voiceWorker).
   - node_modules/sherpa-onnx-node/**
   - node_modules/sherpa-onnx-win-x64/**
+  # Computer use: koffi (FFI gọi user32 / SendInput) + bản build sẵn koffi.node cho win32-x64.
+  - node_modules/koffi/**
+  - node_modules/@koromix/**
 
 # Không build lại module native: node-pty 1.1 có sẵn prebuild N-API (prebuilds/win32-x64) chạy được
 # trong Electron mà không cần biên dịch, còn máy không có Visual Studio Build Tools để node-gyp chạy.

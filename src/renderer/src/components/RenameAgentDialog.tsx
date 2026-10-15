@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { useAgents } from '../store/agents'
 import { Button, Modal } from './Modal'
+import { tx, useT } from '../i18n'
 
 /** Hộp thoại đổi tên agent: mở từ menu ⋯ ở thanh bên hoặc double-click tên trên đầu ô. */
 export function RenameAgentDialog({ wsId, agentId, onClose }: { wsId: string; agentId: string; onClose: () => void }): React.JSX.Element | null {
+  const t = useT()
   const state = useAgents((s) => s.byWs[wsId])
   const rename = useAgents((s) => s.rename)
   const agent = state?.agents.find((a) => a.id === agentId)
@@ -17,9 +19,7 @@ export function RenameAgentDialog({ wsId, agentId, onClose }: { wsId: string; ag
   const unchanged = trimmed === agent.name
   const problem =
     agentNameProblem(trimmed) ??
-    (state.agents.some((a) => a.id !== agent.id && sameAgentName(a.name, trimmed))
-      ? `Đã có agent tên "${trimmed}" trong workspace này`
-      : null)
+    (state.agents.some((a) => a.id !== agent.id && sameAgentName(a.name, trimmed)) ? t('agents.name.taken', { name: trimmed }) : null)
   const live = !!state.running[agent.id] || !!state.starting[agent.id]
 
   async function submit(): Promise<void> {
@@ -37,16 +37,16 @@ export function RenameAgentDialog({ wsId, agentId, onClose }: { wsId: string; ag
 
   return (
     <Modal
-      title={`Đổi tên agent "${agent.name}"`}
+      title={t('agents.rename.title', { name: agent.name })}
       width="w-[460px]"
       onClose={busy ? undefined : onClose}
       footer={
         <>
           <Button onClick={onClose} disabled={busy}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button primary onClick={submit} disabled={busy || !!problem || unchanged}>
-            {busy ? 'Đang đổi…' : 'Đổi tên'}
+            {busy ? t('agents.rename.busy') : t('agents.rename.ok')}
           </Button>
         </>
       }
@@ -57,7 +57,7 @@ export function RenameAgentDialog({ wsId, agentId, onClose }: { wsId: string; ag
           submit()
         }}
       >
-        <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">Tên mới</div>
+        <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted">{t('agents.rename.newName')}</div>
         <input
           autoFocus
           value={name}
@@ -70,15 +70,13 @@ export function RenameAgentDialog({ wsId, agentId, onClose }: { wsId: string; ag
         />
         {problem && trimmed !== '' && <div className="mt-1.5 text-[12px] text-danger">{problem}</div>}
         <p className="mt-3 text-[12px] text-muted">
-          Note bộ nhớ <code>60 Agents/{agent.name}.md</code> trong vault sẽ đổi thành <code>60 Agents/{trimmed || '…'}.md</code>.
-          Liên kết <code>[[{agent.name}]]</code> trong các note khác không tự sửa.
+          {tx('agents.rename.note', {
+            from: <code>60 Agents/{agent.name}.md</code>,
+            to: <code>60 Agents/{trimmed || '…'}.md</code>,
+            link: <code>[[{agent.name}]]</code>
+          })}
         </p>
-        {live && (
-          <div className="mt-3 rounded-md border border-wait/40 bg-wait/10 px-3 py-2 text-[12px] text-wait">
-            Phiên đang chạy vẫn mang tên cũ và vẫn nhớ đường dẫn note cũ cho tới phiên sau. Nên đổi tên lúc agent không chạy, hoặc mở phiên mới
-            sau khi đổi.
-          </div>
-        )}
+        {live && <div className="mt-3 rounded-md border border-wait/40 bg-wait/10 px-3 py-2 text-[12px] text-wait">{t('agents.rename.live')}</div>}
         {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}
       </form>
     </Modal>

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { dirname } from 'node:path'
+import { t as tr } from '@shared/i18n'
 import { CLOUD_TERMS_MAX, SONIOX_SECRET } from '@shared/voice'
 
 /**
@@ -43,10 +44,10 @@ interface Reply {
 /** Câu báo lỗi dễ hiểu theo `error_type` / mã lỗi của Soniox. */
 export function cloudError(r: Reply): string {
   const t = r.error_type ?? ''
-  if (t === 'unauthenticated' || r.error_code === 401) return 'API key Soniox không đúng hoặc đã bị thu hồi (Cài đặt → Giọng nói).'
-  if (r.error_code === 402 || /payment|balance|credit|quota/i.test(t)) return 'Tài khoản Soniox hết tiền hoặc hết hạn mức (console.soniox.com).'
-  if (r.error_code === 429) return 'Soniox đang giới hạn số yêu cầu, thử lại sau ít giây.'
-  return `Soniox báo lỗi: ${(r.error_message ?? t ?? 'không rõ').slice(0, 200)}`
+  if (t === 'unauthenticated' || r.error_code === 401) return tr('voice.cloud.badKey')
+  if (r.error_code === 402 || /payment|balance|credit|quota/i.test(t)) return tr('voice.cloud.noBalance')
+  if (r.error_code === 429) return tr('voice.cloud.rateLimited')
+  return tr('voice.cloud.error', { message: (r.error_message || t || tr('common.unknown')).slice(0, 200) })
 }
 
 /** Float32 [-1, 1] → PCM 16-bit little-endian. */
@@ -97,9 +98,9 @@ export class CloudSession {
       if (this.ending) this.ws.send('')
     }
     this.ws.onmessage = (e) => this.onReply(e.data)
-    this.ws.onerror = () => this.fail('Không kết nối được Soniox (kiểm tra mạng).')
+    this.ws.onerror = () => this.fail(tr('voice.cloud.connectFailed'))
     this.ws.onclose = (e) => {
-      if (!this.done) this.fail(this.error ?? `Soniox đóng kết nối giữa chừng (mã ${e.code}).`)
+      if (!this.done) this.fail(this.error ?? tr('voice.cloud.closed', { code: String(e.code) }))
     }
   }
 
@@ -170,7 +171,7 @@ export class CloudSession {
     if (this.error) return Promise.reject(new Error(this.error))
     if (this.done) return Promise.resolve(this.finalText.trim())
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.fail('Soniox trả lời quá lâu.'), this.o.finishTimeoutMs ?? 15_000)
+      const timer = setTimeout(() => this.fail(tr('voice.cloud.timeout')), this.o.finishTimeoutMs ?? 15_000)
       this.ending = { resolve, reject, timer }
       if (this.ready) this.ws.send('')
     })
@@ -180,7 +181,7 @@ export class CloudSession {
     this.done = true
     if (this.ending) {
       clearTimeout(this.ending.timer)
-      this.ending.reject(new Error('Đã huỷ.'))
+      this.ending.reject(new Error(tr('voice.cloud.cancelled')))
       this.ending = null
     }
     this.close()
@@ -261,7 +262,7 @@ export class VoiceCloud {
 
   start(id: string, terms: readonly string[], onText: (final: string, partial: string) => void, onError?: (message: string) => void): void {
     const key = this.d.key()
-    if (!key) throw new Error(`Chưa có API key Soniox (Cài đặt → Giọng nói, lưu trong bí mật ${SONIOX_SECRET}).`)
+    if (!key) throw new Error(tr('voice.cloud.noKeyLong', { secret: SONIOX_SECRET }))
     this.sessions.get(id)?.cancel()
     this.sessions.set(id, new CloudSession({ key, terms, url: this.d.url, ws: this.d.ws, onText, onError }))
   }
@@ -273,7 +274,7 @@ export class VoiceCloud {
   /** Kết thúc lượt nói → chữ cuối cùng (lỗi thì ném, renderer tự chuyển sang máy trên máy nếu có). */
   async end(id: string): Promise<string> {
     const s = this.sessions.get(id)
-    if (!s) throw new Error('Lượt nói đã kết thúc.')
+    if (!s) throw new Error(tr('voice.cloud.ended'))
     try {
       return await s.finish()
     } finally {
@@ -292,7 +293,7 @@ export class VoiceCloud {
   /** Thử key: gửi nửa giây im lặng, chờ Soniox kết thúc bình thường. */
   async test(): Promise<void> {
     const key = this.d.key()
-    if (!key) throw new Error('Chưa có API key Soniox.')
+    if (!key) throw new Error(tr('voice.cloud.noKey'))
     const s = new CloudSession({ key, terms: [], url: this.d.url, ws: this.d.ws, finishTimeoutMs: 10_000 })
     s.audio(new Float32Array(8000))
     await s.finish()

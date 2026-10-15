@@ -6,6 +6,7 @@ import { Button } from '../Modal'
 import { isImeKey } from './chatLogic'
 import { Markdown } from './Markdown'
 import { ToolDetailView } from './ToolCard'
+import { useLocale, useT } from '../../i18n'
 import { answersInput, answersOf, askHeadline, describeTool, parseQuestions, planOf, rememberLabel, type AskQuestion, type ToolView } from './toolSummary'
 
 type AskItem = Extract<ChatItem, { kind: 'ask' }>
@@ -34,6 +35,7 @@ const answer = (agentId: string, requestId: string, behavior: 'allow' | 'deny', 
 
 /** Xin quyền chạy một tool: lý do, tóm tắt (lệnh / đường dẫn / diff) + Cho phép / Luôn cho phép / Từ chối (bên phải). */
 function PermissionAsk({ item, view, agentId, agentName, primary }: { item: AskItem; view: ToolView; agentId: string; agentName: string; primary: boolean }): React.JSX.Element {
+  const t = useT()
   const title = askHeadline(agentName, item.tool)
   return (
     <div role="group" aria-label={title} className={FRAME}>
@@ -44,18 +46,18 @@ function PermissionAsk({ item, view, agentId, agentName, primary }: { item: AskI
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <Button primary onClick={() => answer(agentId, item.requestId, 'allow')}>
-          Cho phép {primary && <Kbd>Enter</Kbd>}
+          {t('common.allow')} {primary && <Kbd>Enter</Kbd>}
         </Button>
         {item.canRemember && (
           <Button onClick={() => answer(agentId, item.requestId, 'allow', { remember: true })}>
-            <span className="max-w-[260px] truncate" data-tip="Cho phép cả những lần sau trong phiên này (theo gợi ý của agent)">
+            <span className="max-w-[260px] truncate" data-tip={t('chat.ask.rememberTip')}>
               {rememberLabel(item.tool, item.input)}
             </span>
           </Button>
         )}
         <span className="flex-1" />
         <Button variant="danger" onClick={() => answer(agentId, item.requestId, 'deny')}>
-          Từ chối {primary && <Kbd>Esc</Kbd>}
+          {t('common.deny')} {primary && <Kbd>Esc</Kbd>}
         </Button>
       </div>
     </div>
@@ -92,6 +94,7 @@ function QuestionAsk({
   agentName: string
   primary: boolean
 }): React.JSX.Element {
+  const t = useT()
   const draftKey = `${agentId}:${item.requestId}`
   const [picked, setPicked] = useState<Record<string, string[]>>(() => askDrafts.get(draftKey)?.picked ?? {})
   const [other, setOther] = useState<Record<string, string>>(() => askDrafts.get(draftKey)?.other ?? {})
@@ -138,7 +141,7 @@ function QuestionAsk({
             <div className="text-[13px] text-fg">
               {q.header && <span className="mr-1.5 rounded bg-panel-3 px-1.5 py-px text-[11px] text-muted">{q.header}</span>}
               {q.question}
-              {q.multiSelect && <span className="ml-1.5 text-[11px] text-dim">chọn nhiều</span>}
+              {q.multiSelect && <span className="ml-1.5 text-[11px] text-dim">{t('chat.ask.multi')}</span>}
             </div>
             <div className="flex flex-col gap-1">
               {q.options.map((o) => {
@@ -170,7 +173,7 @@ function QuestionAsk({
                     submit(finalPicked)
                   }
                 }}
-                placeholder="Khác…"
+                placeholder={t('chat.ask.other')}
                 spellCheck={false}
                 className="h-7 rounded-md border border-line-2 bg-bg px-2.5 text-[12px] text-fg outline-none placeholder:text-dim focus:border-line-3"
               />
@@ -180,11 +183,11 @@ function QuestionAsk({
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <Button primary disabled={!complete} onClick={() => submit(finalPicked)}>
-          Gửi
+          {t('common.send')}
         </Button>
         <span className="flex-1" />
         <Button variant="danger" onClick={() => answer(agentId, item.requestId, 'deny')}>
-          Bỏ qua {primary && <Kbd>Esc</Kbd>}
+          {t('chat.ask.skip')} {primary && <Kbd>Esc</Kbd>}
         </Button>
       </div>
     </div>
@@ -193,21 +196,22 @@ function QuestionAsk({
 
 /** Claude xin duyệt kế hoạch (ExitPlanMode): hiện kế hoạch markdown, Duyệt / Từ chối. */
 function PlanAsk({ item, agentId, agentName, primary }: { item: AskItem; agentId: string; agentName: string; primary: boolean }): React.JSX.Element {
+  const t = useT()
   const plan = planOf(item.input)
   const title = askHeadline(agentName, 'ExitPlanMode')
   return (
     <div role="group" aria-label={title} className={FRAME}>
       <Head title={title} />
       <div className="mt-2 max-h-[340px] overflow-y-auto rounded-lg border border-line bg-bg px-3 py-2">
-        {plan ? <Markdown text={plan} /> : <div className="text-[12px] text-dim">Claude chưa gửi nội dung kế hoạch.</div>}
+        {plan ? <Markdown text={plan} /> : <div className="text-[12px] text-dim">{t('chat.ask.noPlan')}</div>}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <Button primary onClick={() => answer(agentId, item.requestId, 'allow')}>
-          Duyệt kế hoạch
+          {t('chat.ask.approvePlan')}
         </Button>
         <span className="flex-1" />
         <Button variant="danger" onClick={() => answer(agentId, item.requestId, 'deny')}>
-          Từ chối {primary && <Kbd>Esc</Kbd>}
+          {t('common.deny')} {primary && <Kbd>Esc</Kbd>}
         </Button>
       </div>
     </div>
@@ -216,18 +220,19 @@ function PlanAsk({ item, agentId, agentName, primary }: { item: AskItem; agentId
 
 /** Thẻ đã trả lời: thu về một dòng. */
 function Resolved({ item, view }: { item: AskItem; view: ToolView }): React.JSX.Element {
+  const t = useT()
   const allowed = item.state === 'allowed'
   const cancelled = item.state === 'cancelled'
   let head: string
   let tail = [view.label, view.summary].filter(Boolean).join(' · ')
   if (item.tool === 'AskUserQuestion') {
-    head = allowed ? 'Đã trả lời' : cancelled ? 'Đã huỷ câu hỏi' : 'Đã bỏ qua câu hỏi'
+    head = allowed ? t('chat.ask.answered') : cancelled ? t('chat.ask.questionCancelled') : t('chat.ask.questionSkipped')
     tail = allowed ? Object.values(answersOf(item.input)).join(' · ') : (parseQuestions(item.input)[0]?.question ?? '')
   } else if (item.tool === 'ExitPlanMode') {
-    head = allowed ? 'Đã duyệt kế hoạch' : cancelled ? 'Đã huỷ' : 'Đã từ chối kế hoạch'
+    head = allowed ? t('chat.ask.planApproved') : cancelled ? t('chat.ask.cancelled') : t('chat.ask.planDenied')
     tail = ''
   } else {
-    head = allowed ? 'Đã cho phép' : cancelled ? 'Đã huỷ' : 'Đã từ chối'
+    head = allowed ? t('chat.ask.allowed') : cancelled ? t('chat.ask.cancelled') : t('chat.ask.denied')
   }
   return (
     <div className="flex min-w-0 items-center gap-2 px-1 text-[12px] text-dim" data-tip={tail.length > 60 ? tail : undefined}>
@@ -254,7 +259,9 @@ export const AskCard = memo(function AskCard({
   /** Thẻ đang nhận phím tắt Enter / Esc của composer (hiện gợi ý phím). */
   primary: boolean
 }): React.JSX.Element {
-  const view = useMemo(() => describeTool(item.tool, item.input, { root }), [item.tool, item.input, root])
+  const locale = useLocale()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const view = useMemo(() => describeTool(item.tool, item.input, { root }), [item.tool, item.input, root, locale])
   if (item.state !== 'pending') return <Resolved item={item} view={view} />
   if (item.tool === 'AskUserQuestion') {
     const questions = parseQuestions(item.input)

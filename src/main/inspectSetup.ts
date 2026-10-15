@@ -2,6 +2,8 @@ import { promises as fs } from 'node:fs'
 import { dirname, join, posix, relative, sep } from 'node:path'
 import type { SourceKind, SourceSetup } from '@shared/inspect'
 import type { Workspace } from '@shared/types'
+import { t } from '@shared/i18n'
+import { uiName } from '@shared/i18n/uiNames'
 import { ensureIgnored } from './workspace'
 
 /** File plugin của chế độ Soi chép vào `<dự án>/.stag/inspect/` (Vite / Next). */
@@ -55,7 +57,7 @@ export async function detectSetup(ws: Workspace): Promise<SourceSetup> {
 export async function installSetup(ws: Workspace, kind: SourceKind, resources: string): Promise<string[]> {
   const setup = await detectSetup(ws)
   if (kind === 'wordpress') {
-    if (!setup.wordpress) throw new Error('Không thấy wp-content trong thư mục dự án')
+    if (!setup.wordpress) throw new Error(t('inspect.setup.noWpContent'))
     const target = join(ws.path, ...setup.wordpress.wpContent.split('/'), 'mu-plugins', MU_PLUGIN)
     await fs.mkdir(dirname(target), { recursive: true })
     await fs.copyFile(join(resources, MU_PLUGIN), target)
@@ -91,7 +93,7 @@ export function setupMessage(kind: 'vite' | 'next', config: string): string {
   if (kind === 'vite') {
     const p = importPath(config, 'stag-inspect-vite.mjs')
     return [
-      `[stag.ai] Please enable stag.ai "Soi" source mapping for the Vite dev server in ${config}.`,
+      `[stag.ai] Please enable stag.ai "${uiName.inspect()}" source mapping for the Vite dev server in ${config}.`,
       `stag.ai copied a small dev-only Vite plugin to ${p} (from the config's folder). It adds data-stag-src="file:line:col" to HTML elements while \`vite dev\` runs (apply: 'serve', enforce: 'pre'); builds are unchanged.`,
       `Add it as the FIRST plugin. .stag/ is git-ignored, so load it without breaking the config for people who do not have the file, e.g.:`,
       `  const stagInspect = await import('${p}').then((m) => m.default()).catch(() => null)`,
@@ -101,7 +103,7 @@ export function setupMessage(kind: 'vite' | 'next', config: string): string {
   }
   const p = importPath(config, 'stag-inspect-next-loader.cjs')
   return [
-    `[stag.ai] Please enable stag.ai "Soi" source mapping for the Next.js dev server in ${config}.`,
+    `[stag.ai] Please enable stag.ai "${uiName.inspect()}" source mapping for the Next.js dev server in ${config}.`,
     `stag.ai copied a dev-only loader to ${p} (from the config's folder). It adds data-stag-src="file:line:col" to HTML elements in .jsx/.tsx/.js while \`next dev\` runs.`,
     `Webpack: in the next config add  webpack(config, { dev }) { if (dev) config.module.rules.push({ test: /\\.(jsx|tsx|js)$/, exclude: /node_modules/, enforce: 'pre', use: [path.resolve('${p}')] }); return config }  (keep any existing webpack function).`,
     `Turbopack (next dev --turbopack): turbopack: { rules: { '*.{jsx,tsx}': { loaders: [path.resolve('${p}')] } } }.`,

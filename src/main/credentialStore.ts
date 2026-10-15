@@ -16,6 +16,7 @@ import {
   type ImportRow,
   type TotpParams
 } from '@shared/credentials'
+import { t } from '@shared/i18n'
 import { isObject, JsonFile } from './jsonFile'
 import type { Cipher } from './secrets'
 
@@ -134,19 +135,19 @@ export class CredentialStore {
 
   /** Thêm (không có id) hoặc sửa một mục. */
   async save(input: CredentialInput): Promise<CredentialView> {
-    if (!this.cipher.available()) throw new Error('Windows chưa cho mã hoá dữ liệu (safeStorage) nên app không lưu mật khẩu được.')
+    if (!this.cipher.available()) throw new Error(t('passwords.store.noCipher'))
     const name = input.name.trim()
-    if (!name) throw new Error('Mục cần có tên.')
+    if (!name) throw new Error(t('passwords.store.noName'))
     const domains = cleanDomains(input.domains)
     if (!domains.length) {
       const wild = input.domains.map((d) => d.trim()).find((d) => d.startsWith('*.'))
       throw new Error(
         wild
-          ? `“${wild}” khớp với quá nhiều trang. Dùng tên miền của chính trang, vd. *.shop-abc.vn hoặc admin.shop-abc.vn.`
-          : 'Mục cần ít nhất một tên miền (vd. admin.shop-abc.vn).'
+          ? t('passwords.store.wildTooBroad', { domain: wild })
+          : t('passwords.store.noDomain')
       )
     }
-    if ((input.password?.length ?? 0) > MAX_PASSWORD) throw new Error('Mật khẩu dài quá.')
+    if ((input.password?.length ?? 0) > MAX_PASSWORD) throw new Error(t('passwords.store.tooLong'))
     let totp: TotpParams | undefined | null
     if (input.totp === null) totp = null
     else if (typeof input.totp === 'string' && input.totp.trim()) {
@@ -156,16 +157,16 @@ export class CredentialStore {
     }
     const at = new Date(this.now()).toISOString()
     const old = input.id ? this.items.find((x) => x.id === input.id) : undefined
-    if (input.id && !old) throw new Error('Mục này không còn trong kho.')
+    if (input.id && !old) throw new Error(t('passwords.store.gone'))
     const prev = old ? this.secretOf(old) : undefined
-    if (old && !prev) throw new Error('Không giải mã được mục này (kho chép từ tài khoản Windows khác?).')
+    if (old && !prev) throw new Error(t('passwords.store.decrypt'))
     const sec: CredentialSecret = {
       username: input.username.trim(),
       password: input.password ?? prev?.password ?? '',
       ...(totp === null ? {} : totp ? { totp } : prev?.totp ? { totp: prev.totp } : {})
     }
-    if (!sec.password && !sec.totp) throw new Error('Mục cần mật khẩu hoặc khoá 2FA.')
-    if (!old && this.items.length >= MAX_ITEMS) throw new Error('Kho đã đầy.')
+    if (!sec.password && !sec.totp) throw new Error(t('passwords.store.noSecret'))
+    if (!old && this.items.length >= MAX_ITEMS) throw new Error(t('passwords.store.full'))
     const policy = input.policy ?? old?.policy ?? 'ask'
     const agents = input.agents ?? old?.agents ?? []
     const next: Stored = {
@@ -192,7 +193,7 @@ export class CredentialStore {
   /** Đổi phần không bí mật (agent được dùng, chế độ hỏi, workspace, tên, tên miền). */
   async patch(id: string, p: CredentialPatch): Promise<CredentialView> {
     const old = this.items.find((x) => x.id === id)
-    if (!old) throw new Error('Mục này không còn trong kho.')
+    if (!old) throw new Error(t('passwords.store.gone'))
     const agents = p.agents ?? old.agents
     const next: Stored = {
       ...old,
@@ -220,14 +221,14 @@ export class CredentialStore {
   async setPassword(id: string, password: string): Promise<void> {
     const old = this.items.find((x) => x.id === id)
     const sec = old && this.secretOf(old)
-    if (!old || !sec) throw new Error('Mục này không còn trong kho.')
+    if (!old || !sec) throw new Error(t('passwords.store.gone'))
     await this.replace(old, { ...sec, password })
   }
 
   async setTotp(id: string, totp: TotpParams | null): Promise<void> {
     const old = this.items.find((x) => x.id === id)
     const sec = old && this.secretOf(old)
-    if (!old || !sec) throw new Error('Mục này không còn trong kho.')
+    if (!old || !sec) throw new Error(t('passwords.store.gone'))
     const { totp: _t, ...rest } = sec
     await this.replace(old, totp ? { ...rest, totp } : rest)
   }

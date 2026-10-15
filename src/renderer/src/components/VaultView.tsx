@@ -3,6 +3,7 @@ import type { VaultActivity, VaultNode, VaultSearchHit, Workspace } from '@share
 import { resolveNote } from '@shared/wikilink'
 import { ago } from '../status'
 import { useUi } from '../store/ui'
+import { fmtDate, fmtDateTime, fmtTime, useLocale, useT } from '../i18n'
 import { useVaultActivity } from '../store/vaultActivity'
 import { useVaultIndex } from '../vaultIndex'
 import { Icon } from './Icon'
@@ -39,12 +40,14 @@ const LINKS_MIN = 980
 /** Giờ lưu lần cuối: hôm nay chỉ giờ, ngày khác thêm ngày. */
 function savedAt(ms: number): { short: string; full: string } {
   const d = new Date(ms)
-  const hm = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+  const hm = fmtTime(d)
   const today = new Date().toDateString() === d.toDateString()
-  return { short: today ? hm : `${d.getDate()}/${d.getMonth() + 1} ${hm}`, full: d.toLocaleString('vi-VN') }
+  return { short: today ? hm : `${fmtDate(d, { day: 'numeric', month: 'numeric' })} ${hm}`, full: fmtDateTime(d, { dateStyle: 'short', timeStyle: 'medium' }) }
 }
 
 export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.Element {
+  const t = useT()
+  const locale = useLocale()
   const { vaultPath } = workspace
   const vaultName = vaultPath.split(/[\\/]/).filter(Boolean).pop() ?? vaultPath
   const [tree, setTree] = useState<VaultNode[]>([])
@@ -95,8 +98,8 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
   }, [workspace.id, loadActivity])
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(timer)
   }, [])
   const recent = useMemo(() => touchesByNote(events ?? [], Date.now() - RECENT_MS), [events, now])
   const allTouches = useMemo(() => touchesByNote(events ?? []), [events])
@@ -230,7 +233,8 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
       doc?.text != null
         ? renderNote(doc.text, { current: doc.rel, notes: index?.notes ?? null, propsBox: propsOpen ? 'open' : 'closed' }).html
         : '',
-    [doc, index, propsOpen]
+    // `locale`: chữ "Thuộc tính" / "Chưa có note" trong HTML đổi theo ngôn ngữ.
+    [doc, index, propsOpen, locale]
   )
 
   // Note mới hiện ra (hoặc vừa đọc lại) → cuộn tới chỗ đã hẹn.
@@ -303,10 +307,10 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
             <Icon name="vault" className="text-dim" />
             <span className="truncate">{vaultName}</span>
           </h1>
-          <IconButton icon="al" tip="Lùi · Alt+←" onClick={() => go(-1)} className={hist.pos <= 0 ? 'pointer-events-none opacity-30' : ''} />
+          <IconButton icon="al" tip={t('vault.back')} onClick={() => go(-1)} className={hist.pos <= 0 ? 'pointer-events-none opacity-30' : ''} />
           <IconButton
             icon="ar"
-            tip="Tiến · Alt+→"
+            tip={t('vault.forward')}
             onClick={() => go(1)}
             className={hist.pos >= hist.entries.length - 1 ? 'pointer-events-none opacity-30' : ''}
           />
@@ -314,8 +318,8 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
             value={view}
             onChange={setView}
             options={[
-              { value: 'note', label: <Icon name="file" />, tip: 'Note' },
-              { value: 'graph', label: <Icon name="graph" />, tip: 'Đồ thị liên kết · Ctrl+G' }
+              { value: 'note', label: <Icon name="file" />, tip: t('vault.noteView') },
+              { value: 'graph', label: <Icon name="graph" />, tip: t('vault.graphView') }
             ]}
           />
           <div className="ml-1.5 flex h-7 max-w-[230px] min-w-24 flex-1 items-center gap-1.5 rounded-md border border-line-2 bg-bg0 pr-1 pl-2 focus-within:border-accent/40">
@@ -326,7 +330,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
               onKeyDown={(e) => {
                 if (e.key === 'Escape') setQuery('')
               }}
-              placeholder="Tìm trong vault"
+              placeholder={t('vault.searchPlaceholder')}
               spellCheck={false}
               className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-dim"
             />
@@ -334,8 +338,8 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
               <button
                 type="button"
                 onClick={() => setQuery('')}
-                data-tip="Xoá · Esc"
-                aria-label="Xoá"
+                data-tip={t('vault.clearSearch')}
+                aria-label={t('common.delete')}
                 className="grid h-5 w-5 shrink-0 place-items-center rounded text-dim hover:bg-panel-3 hover:text-fg"
               >
                 <Icon name="x" size="s" />
@@ -343,16 +347,16 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
             )}
           </div>
           <div className="min-w-0 flex-1" />
-          <IconButton icon="plus" tip="Note mới" onClick={() => setNewNote(true)} />
+          <IconButton icon="plus" tip={t('vault.newNote')} onClick={() => setNewNote(true)} />
           <IconButton
             icon="ref"
-            tip="Làm mới cây note và chỉ mục"
+            tip={t('vault.refresh')}
             onClick={() => setReload((n) => n + 1)}
           />
-          <IconButton icon="folder" tip="Mở thư mục vault" onClick={() => window.stag.openFolder(vaultPath)} />
+          <IconButton icon="folder" tip={t('vault.openFolder')} onClick={() => window.stag.openFolder(vaultPath)} />
           <IconButton
             icon="pen"
-            tip={editing && view === 'note' ? 'Xong sửa · Ctrl+E' : 'Sửa · Ctrl+E'}
+            tip={editing && view === 'note' ? t('vault.editDone') : t('vault.edit')}
             on={editing && view === 'note'}
             onClick={() => toggleEditRef.current()}
             className={!canEdit && !editing && !(view === 'graph' && docReady) ? 'opacity-40' : ''}
@@ -360,7 +364,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
           {(width < TREE_MIN || treeOpen === false) && (
             <IconButton
               icon="side"
-              tip={treeShown ? 'Ẩn cột note' : 'Hiện cột note'}
+              tip={treeShown ? t('vault.hideTree') : t('vault.showTree')}
               on={treeShown}
               onClick={() => setTreeOpen(!treeShown)}
             />
@@ -369,8 +373,8 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
             <button
               type="button"
               onClick={() => setLinksOpen(!linksShown)}
-              data-tip={linksShown ? 'Ẩn liên kết ngược / ra' : 'Hiện liên kết ngược / ra'}
-              aria-label="Liên kết ngược / ra"
+              data-tip={linksShown ? t('vault.hideLinks') : t('vault.showLinks')}
+              aria-label={t('vault.links')}
               aria-pressed={linksShown}
               className={`no-drag inline-grid h-6 w-6 shrink-0 place-items-center rounded-md hover:bg-panel-3 hover:text-fg ${linksShown ? 'text-accent' : 'text-muted'}`}
             >
@@ -392,7 +396,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
                     value={side}
                     onChange={setSide}
                     options={[
-                      { value: 'tree', label: <Icon name="folder" size="s" />, tip: 'Cây note' },
+                      { value: 'tree', label: <Icon name="folder" size="s" />, tip: t('vault.treeTab') },
                       {
                         value: 'activity',
                         label: (
@@ -401,11 +405,11 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
                             {recent.size > 0 && <span className="font-mono text-[11px]">{recent.size}</span>}
                           </>
                         ),
-                        tip: recent.size ? `Agent đọc / ghi note · ${recent.size} note gần đây` : 'Agent đọc / ghi note'
+                        tip: recent.size ? t('vault.activityTabRecent', { count: recent.size }) : t('vault.activityTab')
                       }
                     ]}
                   />
-                  {index && <span className="ml-auto font-mono text-[11px] text-dim">{index.notes.length} note</span>}
+                  {index && <span className="ml-auto font-mono text-[11px] text-dim">{t('vault.noteCount', { count: index.notes.length })}</span>}
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
                   {side === 'activity' ? (
@@ -417,11 +421,11 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
                     />
                   ) : (
                     <>
-                      {tree.length === 0 && <div className="px-3 text-dim">Vault trống hoặc không tồn tại.</div>}
+                      {tree.length === 0 && <div className="px-3 text-dim">{t('vault.emptyVault')}</div>}
                       <Tree nodes={tree} depth={0} selected={current} onSelect={open} recent={recent} now={now} />
                     </>
                   )}
-                  {error && <div className="mt-2 px-3 text-[11px] text-danger">Không đọc được chỉ mục: {error}</div>}
+                  {error && <div className="mt-2 px-3 text-[11px] text-danger">{t('vault.indexError', { error })}</div>}
                 </div>
               </>
             )}
@@ -432,7 +436,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
               index ? (
                 <GraphView index={index} current={current} onOpen={(rel) => open(rel)} activity={recent} />
               ) : (
-                <div className="p-4 text-muted">Đang đọc vault…</div>
+                <div className="p-4 text-muted">{t('vault.reading')}</div>
               )
             ) : (
               <>
@@ -452,7 +456,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
                       <span className="shrink-0 text-[11px] text-dim">Markdown</span>
                     ) : (
                       saved && (
-                        <span className="shrink-0 font-mono text-[11px] text-dim" data-tip={`Lưu lần cuối · ${saved.full}`}>
+                        <span className="shrink-0 font-mono text-[11px] text-dim" data-tip={t('vault.lastSaved', { when: saved.full })}>
                           {saved.short}
                         </span>
                       )
@@ -472,17 +476,17 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
                 ) : (
                   <article ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto select-text">
                     {!current ? (
-                      <div className="p-6 text-dim">Chọn một note bên trái.</div>
+                      <div className="p-6 text-dim">{t('vault.pickNote')}</div>
                     ) : doc ? (
                       <div className="max-w-[800px] px-10 pt-6 pb-[60px]">
                         {doc.text === null ? (
-                          <div className="rounded-md border border-line bg-bg px-3 py-2 text-muted">Note đã bị xoá hoặc đổi tên.</div>
+                          <div className="rounded-md border border-line bg-bg px-3 py-2 text-muted">{t('vault.noteGone')}</div>
                         ) : (
                           <div ref={bodyRef} className={NOTE_PROSE} onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: html }} />
                         )}
                       </div>
                     ) : (
-                      <div className="p-6 text-dim">Đang mở…</div>
+                      <div className="p-6 text-dim">{t('vault.opening')}</div>
                     )}
                   </article>
                 )}
@@ -494,7 +498,7 @@ export function VaultView({ workspace }: { workspace: Workspace }): React.JSX.El
             {index ? (
               <Backlinks index={index} current={current} vaultPath={vaultPath} changed={changed} onOpen={openAt} />
             ) : (
-              <div className="px-3 py-2 text-dim">Đang đọc vault…</div>
+              <div className="px-3 py-2 text-dim">{t('vault.reading')}</div>
             )}
           </aside>
         </div>
@@ -545,6 +549,7 @@ function NewNoteDialog({
   onCancel: () => void
   onCreated: (rel: string) => void
 }): React.JSX.Element {
+  const t = useT()
   const [name, setName] = useState('')
   const [folder, setFolder] = useState(folders.includes(initialFolder) ? initialFolder : '')
   const [error, setError] = useState<string | null>(null)
@@ -564,16 +569,16 @@ function NewNoteDialog({
     'h-7 w-full rounded-md border border-line-2 bg-bg0 px-2.5 text-[13px] outline-none focus:border-accent/40'
   return (
     <Modal
-      title="Note mới"
+      title={t('vault.new.title')}
       width="w-[440px]"
       onClose={busy ? undefined : onCancel}
       footer={
         <>
           <Button onClick={onCancel} disabled={busy}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button primary onClick={submit} disabled={busy || !name.trim()}>
-            Tạo và sửa
+            {t('vault.new.create')}
           </Button>
         </>
       }
@@ -585,8 +590,8 @@ function NewNoteDialog({
         }}
       >
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.07em] text-dim">
-          TÊN NOTE
-          <span data-tip="Vault viết bằng tiếng Anh (quy ước của dự án): tên và nội dung note nên là tiếng Anh." className="inline-flex cursor-help">
+          {t('vault.new.name')}
+          <span data-tip={t('vault.new.nameTip')} className="inline-flex cursor-help">
             <Icon name="info" size="s" />
           </span>
         </div>
@@ -594,14 +599,14 @@ function NewNoteDialog({
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="vd. Login flow"
+          placeholder={t('vault.new.namePlaceholder')}
           className={`mb-4 ${field}`}
         />
-        <div className="mb-1.5 text-[11px] font-semibold tracking-[0.07em] text-dim">THƯ MỤC</div>
+        <div className="mb-1.5 text-[11px] font-semibold tracking-[0.07em] text-dim">{t('vault.new.folder')}</div>
         <select value={folder} onChange={(e) => setFolder(e.target.value)} className={field}>
           {folders.map((f) => (
             <option key={f} value={f}>
-              {f || '(gốc vault)'}
+              {f || t('vault.new.root')}
             </option>
           ))}
         </select>
@@ -613,16 +618,17 @@ function NewNoteDialog({
 
 /** Trạng thái lưu của trình soạn (cạnh đường dẫn): chấm + chữ; hổ phách chỉ khi đang chờ bạn chọn bản. */
 function SaveBadge({ status }: { status: EditorStatus }): React.JSX.Element {
+  const t = useT()
   const { state, conflict } = status
   const [label, tone, dot] = conflict
-    ? ['Chờ bạn chọn bản', 'text-wait', 'bg-wait']
+    ? [t('vault.save.conflict'), 'text-wait', 'bg-wait']
     : state === 'error'
-      ? ['Lỗi lưu', 'text-danger', 'bg-danger']
+      ? [t('vault.save.error'), 'text-danger', 'bg-danger']
       : state === 'saved'
-        ? ['Đã lưu', 'text-dim', '']
-        : [state === 'saving' ? 'Đang lưu…' : 'Chưa lưu', 'text-fg', 'bg-fg']
+        ? [t('vault.save.saved'), 'text-dim', '']
+        : [state === 'saving' ? t('vault.save.saving') : t('vault.save.dirty'), 'text-fg', 'bg-fg']
   return (
-    <span data-tip="Ctrl+S lưu · Ctrl+E xong · gõ [[ để chèn link" className={`inline-flex shrink-0 items-center gap-1.5 text-[12px] ${tone}`}>
+    <span data-tip={t('vault.save.tip')} className={`inline-flex shrink-0 items-center gap-1.5 text-[12px] ${tone}`}>
       {dot && <span className={`h-[7px] w-[7px] rounded-full ${dot}`} />}
       {label}
     </span>
@@ -641,8 +647,8 @@ function ActivityList({
   selected: string | null
   onOpen: (rel: string) => void
 }): React.JSX.Element {
-  if (!events.length)
-    return <div className="px-3 text-[12px] text-dim">Chưa có agent nào đọc/ghi note từ lúc mở app. Hoạt động hiện ở đây khi agent làm việc.</div>
+  const t = useT()
+  if (!events.length) return <div className="px-3 text-[12px] text-dim">{t('vault.noActivity')}</div>
   return (
     <>
       {[...events]

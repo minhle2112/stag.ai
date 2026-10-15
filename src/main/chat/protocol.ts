@@ -2,6 +2,7 @@
 // --include-partial-messages` thành danh sách `ChatItem` + `ChatState` (shared/chat.ts). Thuần dữ liệu, không I/O,
 // để thử bằng chuỗi sự kiện thật (xem protocol.test.ts).
 import { CHAT_OUTPUT_MAX, type ChatBlock, type ChatItem, type ChatState } from '@shared/chat'
+import { t as tr } from '@shared/i18n'
 
 /** Giữ tối đa chừng này mục trong bộ nhớ; vượt thì bỏ TRIM_ITEMS mục cũ nhất. */
 const MAX_ITEMS = 1500
@@ -29,7 +30,7 @@ export function resultText(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
   return content
-    .map((c) => (isObj(c) ? (c.type === 'text' ? str(c.text) : c.type === 'image' ? '[ảnh]' : '') : ''))
+    .map((c) => (isObj(c) ? (c.type === 'text' ? str(c.text) : c.type === 'image' ? tr('chat.imagePlaceholder') : '') : ''))
     .filter(Boolean)
     .join('\n')
 }
@@ -234,7 +235,7 @@ export class ChatModel {
       const changed = this.setToolState(toolUseId, 'denied')
       if (changed) out.changed.push(changed)
     } else if (sub === 'api_retry') {
-      const n = this.addNotice('warn', 'API đang thử lại…')
+      const n = this.addNotice('warn', tr('chat.retrying'))
       out.changed.push(n)
     }
     return out

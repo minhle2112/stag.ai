@@ -297,7 +297,9 @@ export const IPC = {
   themeGet: 'theme:get',
   themeGetSync: 'theme:get-sync',
   themeToggle: 'theme:toggle',
-  themeChanged: 'theme:changed'
+  themeChanged: 'theme:changed',
+  /** Ngôn ngữ giao diện lúc mở trang (đồng bộ, trước khi React vẽ); đổi sau đó đi qua settingsChanged. */
+  localeGetSync: 'locale:get-sync'
 } as const
 
 export interface AppInfo {

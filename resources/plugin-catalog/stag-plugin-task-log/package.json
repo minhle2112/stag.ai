@@ -2,14 +2,14 @@
   "name": "stag-plugin-task-log",
   "version": "1.0.0",
   "private": true,
-  "description": "Plugin của stag.ai: cuối ngày ghi các việc agent đã xong vào vault của workspace.",
+  "description": "stag.ai plugin: at the end of the day, writes the tasks agents finished into the workspace vault.",
   "license": "MIT",
   "type": "module",
   "stagPlugin": {
     "id": "stag.task-log",
     "apiVersion": 1,
-    "displayName": "Nhật ký việc",
-    "description": "Cuối mỗi ngày làm việc ghi các việc agent đã xong (và việc còn mở) vào vault của từng workspace, một note mỗi ngày, để bạn và agent xem lại. Note do plugin tạo lại mỗi lần ghi.",
+    "displayName": "Task log",
+    "description": "At the end of each workday, writes the tasks agents finished (and those still open) into each workspace's vault, one note per day, for you and your agents to look back on. The plugin rewrites the note on every run.",
     "author": "stag.ai",
     "categories": ["vault", "productivity"],
     "capabilities": ["agents.read", "board.read", "vault.write", "jobs.schedule", "ui.sidebar.register"],
@@ -21,13 +21,13 @@
       "properties": {
         "folder": {
           "type": "string",
-          "title": "Thư mục trong vault",
-          "description": "Note ghi vào <thư mục>/YYYY-MM-DD.md trong vault của workspace.",
+          "title": "Vault folder",
+          "description": "Notes are written to <folder>/YYYY-MM-DD.md in the workspace vault.",
           "default": "Task log"
         },
         "includeOpen": {
           "type": "boolean",
-          "title": "Ghi cả việc còn mở",
+          "title": "Include open tasks",
           "default": true
         }
       }
@@ -35,8 +35,8 @@
     "jobs": [
       {
         "key": "daily",
-        "displayName": "Ghi nhật ký cuối ngày",
-        "description": "18:00 thứ 2–6: ghi việc xong hôm nay của mọi workspace có việc xong.",
+        "displayName": "End-of-day log",
+        "description": "18:00 Monday–Friday: logs today's finished tasks for every workspace that has any.",
         "schedule": "0 18 * * 1-5"
       }
     ],
@@ -45,7 +45,7 @@
         {
           "type": "sidebar",
           "id": "today",
-          "displayName": "Ghi nhật ký hôm nay",
+          "displayName": "Log today",
           "action": "writeToday"
         }
       ]

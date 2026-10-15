@@ -208,7 +208,7 @@ export function findSecrets(text: string, known: string[] = []): string[] {
 const WHO: Record<LogEntry['who'], string> = { user: 'USER', agent: 'AGENT', tool: 'TOOL', error: 'ERROR' }
 
 /** Bỏ dấu tiếng Việt và hoa / thường để tìm. */
-const fold = (s: string): string => s.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase()
+const fold = (s: string): string => s.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase() // i18n-ignore: folds Vietnamese letters for search
 
 /**
  * Lượt mới nhất (sau khi lọc `query`): tối đa `last` lượt, tổng không quá `maxChars` ký tự, cũ trước mới sau.

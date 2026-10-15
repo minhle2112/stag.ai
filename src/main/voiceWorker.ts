@@ -53,7 +53,8 @@ function decode(samples: Float32Array, hotwords: string[], language: string): st
 }
 
 function transcribe(raw: Float32Array | number[], hotwords: string[], language: string): VoiceResult {
-  if (!rec) throw new Error('Model chưa nạp.')
+  // Mã lỗi: main đổi thành chữ theo ngôn ngữ giao diện (tiến trình này không biết ngôn ngữ).
+  if (!rec) throw new Error('model_not_loaded')
   const samples = raw instanceof Float32Array ? raw : Float32Array.from(raw)
   const t = performance.now()
   let text = decode(samples, hotwords, language)

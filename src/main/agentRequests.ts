@@ -38,7 +38,7 @@ export class AgentRequestQueue {
   answer(id: string, allow: boolean | 'always'): void {
     const p = this.pending.get(id)
     if (!p) return
-    p.done(allow === 'always' ? (p.req.action === 'cross' || p.req.action === 'credential' ? 'always' : 'allow') : allow ? 'allow' : 'deny')
+    p.done(allow === 'always' ? (p.req.action === 'cross' || p.req.action === 'credential' || p.req.action === 'computer' ? 'always' : 'allow') : allow ? 'allow' : 'deny')
   }
 
   /** Phiên của agent đã xin đóng / agent bị xoá: bỏ các yêu cầu của nó. */

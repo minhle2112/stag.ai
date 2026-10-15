@@ -245,6 +245,23 @@ export class BrowserService {
     return b
   }
 
+  /**
+   * Cookie của ô Browser (session của workspace) cho một tên miền và mọi tên miền con, dạng file cookies.txt của
+   * Netscape (yt-dlp `--cookies`). Plugin có quyền browser.cookies dùng để tải video cần đăng nhập (vd. Stag Clip).
+   */
+  async cookieFile(wsId: string, domain: string): Promise<{ text: string; count: number }> {
+    const list = await this.sessionFor(wsId).cookies.get({ domain })
+    const lines = ['# Netscape HTTP Cookie File']
+    for (const c of list) {
+      const host = c.domain ?? domain
+      const sub = host.startsWith('.') || !c.hostOnly
+      const dom = sub && !host.startsWith('.') ? `.${host}` : host
+      const expiry = c.session || !c.expirationDate ? 0 : Math.floor(c.expirationDate)
+      lines.push([dom, sub ? 'TRUE' : 'FALSE', c.path ?? '/', c.secure ? 'TRUE' : 'FALSE', String(expiry), c.name, c.value].join('\t'))
+    }
+    return { text: lines.join('\n') + '\n', count: list.length }
+  }
+
   private findByContents(wc: WebContents): Tab | undefined {
     for (const b of this.byWs.values()) {
       const t = b.tabs.find((x) => x.view.webContents === wc)

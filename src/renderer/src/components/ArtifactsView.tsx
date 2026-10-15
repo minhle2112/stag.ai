@@ -6,6 +6,7 @@ import { useAgents } from '../store/agents'
 import { useBoard } from '../store/board'
 import { useProducts } from '../store/artifacts'
 import { useUi } from '../store/ui'
+import { tx, useLocale, useT } from '../i18n'
 import { highlight } from './vault/highlight'
 import { ArtifactDetail, type Delivery } from './artifacts/ArtifactDetail'
 import { buildEntries, emptyCount, entryBadges, groupEntries, OLDER_PAGE, searchArtifacts, visibleEntries, type TaskEntry } from './artifacts/products'
@@ -34,6 +35,8 @@ export function deliveryOf(running: boolean, status: AgentStatus | undefined): D
 
 /** Tab "Sản phẩm": thứ agent tự nộp (artifact_publish), gom theo việc của agent, có phiên bản và góp ý. Có project → lọc theo project. */
 export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): React.JSX.Element {
+  const t = useT()
+  const locale = useLocale()
   const snap = useProducts((s) => s.byWs[ws.id])
   const loadProducts = useProducts((s) => s.load)
   const board = useBoard((s) => s.byWs[ws.id])
@@ -65,11 +68,12 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
   // Giờ hiện tại cho nhóm theo ngày: tính lại mỗi phút (qua nửa đêm "Hôm nay" thành "Hôm qua").
   const [tick, setTick] = useState(0)
   useEffect(() => {
-    const t = setInterval(() => setTick((x) => x + 1), 60_000)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setTick((x) => x + 1), 60_000)
+    return () => clearInterval(timer)
   }, [])
 
-  const allEntries = useMemo(() => buildEntries(board?.tasks ?? [], snap, new Date()), [board?.tasks, snap, tick])
+  // `locale`: tên "Không gắn việc" đổi theo ngôn ngữ.
+  const allEntries = useMemo(() => buildEntries(board?.tasks ?? [], snap, new Date()), [board?.tasks, snap, tick, locale])
   // Chỗ của một việc: project của nó (project đã xoá → Chung); việc cũ / không gắn việc thì theo agent.
   const entries = useMemo(() => {
     if (!projects.length || projF === 'all') return allEntries
@@ -91,7 +95,7 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
   const shownArts = useMemo(() => new Set(entries.flatMap((e) => e.artifacts.map((a) => a.id))), [entries])
   const inbox = useMemo(
     () => inboxOf(snap?.artifacts ?? []).filter((x) => (!agentF || arts.get(x.artifactId)?.agentId === agentF) && (projF === 'all' || !projects.length || shownArts.has(x.artifactId))),
-    [snap, agentF, arts, projF, projects.length, shownArts]
+    [snap, agentF, arts, projF, projects.length, shownArts, locale]
   )
   const hits = useMemo(() => (q.trim() ? searchArtifacts(entries, q, agentF) : []), [entries, q, agentF])
 
@@ -133,18 +137,18 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && setQ('')}
-            placeholder="Tìm sản phẩm, việc, agent…"
+            placeholder={t('artifacts.list.searchPlaceholder')}
             className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-dim"
           />
           {q && (
-            <button type="button" onClick={() => setQ('')} className="px-0.5 text-dim hover:text-fg" aria-label="Xoá tìm kiếm">
+            <button type="button" onClick={() => setQ('')} className="px-0.5 text-dim hover:text-fg" aria-label={t('artifacts.list.clearSearch')}>
               <Icon name="x" size="s" />
             </button>
           )}
         </label>
         {projects.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1 px-2.5 pb-1.5" aria-label="Lọc theo project">
-            {[{ id: 'all', label: 'Tất cả', p: undefined as Project | null | undefined }, { id: CHUNG, label: 'Chung', p: null }, ...projects.map((p) => ({ id: p.id, label: p.name, p }))].map((o) => (
+          <div className="flex flex-wrap items-center gap-1 px-2.5 pb-1.5" aria-label={t('artifacts.list.filterProject')}>
+            {[{ id: 'all', label: t('artifacts.list.all'), p: undefined as Project | null | undefined }, { id: CHUNG, label: t('common.name.rootProject'), p: null }, ...projects.map((p) => ({ id: p.id, label: p.name, p }))].map((o) => (
               <button
                 key={o.id}
                 type="button"
@@ -167,7 +171,7 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
               onClick={() => setAgentF(null)}
               className={`rounded-md border px-2 py-0.5 text-[11.5px] ${!agentF ? 'border-line-3 bg-panel-2 text-fg' : 'border-transparent text-muted hover:text-fg'}`}
             >
-              Mọi agent
+              {t('artifacts.list.allAgents')}
             </button>
             {agentList.map((a) => (
               <button
@@ -188,7 +192,7 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
             hits.length ? (
               <>
                 <div className="px-2 pt-3 pb-1.5 text-[11px] font-semibold tracking-[0.07em] text-dim">
-                  KẾT QUẢ <span className="font-mono tracking-normal">{hits.length}</span>
+                  {t('artifacts.list.results')} <span className="font-mono tracking-normal">{hits.length}</span>
                 </div>
                 {hits.map((h) => (
                   <button
@@ -209,11 +213,13 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
               </>
             ) : (
               <div className="mx-2.5 my-8 text-center leading-relaxed text-dim">
-                <b className="mb-1.5 block text-[14px] text-fg">Không thấy sản phẩm nào khớp “{q.trim()}”</b>
-                Tìm theo tên, mô tả, file, việc hoặc agent{agentF ? ` (đang lọc: ${agentList.find((a) => a.id === agentF)?.name ?? ''})` : ''}.
+                <b className="mb-1.5 block text-[14px] text-fg">{t('artifacts.list.noMatch', { q: q.trim() })}</b>
+                {agentF
+                  ? t('artifacts.list.noMatchHintFiltered', { name: agentList.find((a) => a.id === agentF)?.name ?? '' })
+                  : t('artifacts.list.noMatchHint')}
                 <div className="mt-2.5">
                   <button type="button" className={BTN} onClick={() => setQ('')}>
-                    Xoá tìm kiếm
+                    {t('artifacts.list.clearSearch')}
                   </button>
                 </div>
               </div>
@@ -223,7 +229,7 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
               {inbox.length > 0 && (
                 <div className="mt-1.5 mb-1 rounded-[9px] border border-wait/25 bg-[color-mix(in_srgb,var(--color-wait)_5%,var(--color-panel))] p-1">
                   <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-wait">
-                    CẦN BẠN XEM <span className="font-mono tracking-normal">{inbox.length}</span>
+                    {t('artifacts.inbox.title')} <span className="font-mono tracking-normal">{inbox.length}</span>
                   </div>
                   {inbox.map((x) => {
                     const a = arts.get(x.artifactId)!
@@ -241,11 +247,13 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
                         <div className="mt-[5px] ml-[25px] flex flex-wrap gap-1">
                           {x.newVersions > 0 && (
                             <Kc cls="bg-accent/15 text-accent-text">
-                              {x.newVersions > 1 ? `${x.newVersions} bản mới (v${a.seen + 1}–v${latestVersion(a).v})` : `Bản mới v${latestVersion(a).v}`}
+                              {x.newVersions > 1
+                                ? t('artifacts.inbox.newVersions', { count: x.newVersions, from: a.seen + 1, to: latestVersion(a).v })
+                                : t('artifacts.inbox.newVersion', { v: latestVersion(a).v })}
                             </Kc>
                           )}
-                          {x.asks > 0 && <Kc cls="bg-wait/15 text-wait-text">{x.asks} hỏi bạn</Kc>}
-                          {x.fixed > 0 && <Kc cls="bg-work/15 text-work-text">{x.fixed} đã sửa, chờ bạn xem</Kc>}
+                          {x.asks > 0 && <Kc cls="bg-wait/15 text-wait-text">{t('artifacts.inbox.asks', { count: x.asks })}</Kc>}
+                          {x.fixed > 0 && <Kc cls="bg-work/15 text-work-text">{t('artifacts.inbox.fixed', { count: x.fixed })}</Kc>}
                         </div>
                         <div className="mt-1 ml-[25px] truncate text-[11.5px] text-dim">{x.sub}</div>
                       </button>
@@ -258,10 +266,10 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
                   <button
                     type="button"
                     onClick={() => setClosed((c) => ({ ...c, [g.id]: !c[g.id] }))}
-                    className="flex w-full items-center gap-1.5 px-2 pt-3 pb-[5px] text-left text-[11px] font-semibold tracking-[0.07em] text-dim hover:text-muted"
+                    className="flex w-full items-center gap-1.5 px-2 pt-3 pb-[5px] text-left text-[11px] font-semibold tracking-[0.07em] text-dim uppercase hover:text-muted"
                   >
                     <Icon name={closed[g.id] ? 'cr' : 'cd'} size="s" />
-                    {g.label}
+                    {t(g.label)}
                     <span className="font-mono tracking-normal">{g.entries.length + g.more}</span>
                   </button>
                   {!closed[g.id] &&
@@ -272,14 +280,14 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
                       onClick={() => setOlderShown((n) => n + OLDER_PAGE)}
                       className="mx-0.5 my-2 block w-[calc(100%-4px)] rounded-[7px] border border-dashed border-line-2 p-[7px] text-[12px] text-muted hover:bg-panel-2 hover:text-fg"
                     >
-                      Còn {g.more} việc cũ hơn — Tải thêm
+                      {t('artifacts.list.moreOlder', { count: g.more })}
                     </button>
                   )}
                 </div>
               ))}
               {!loading && !groups.length && !inbox.length && (
                 <div className="mx-3 my-10 text-center leading-relaxed text-dim">
-                  {agentF ? 'Agent này chưa có việc nào có sản phẩm.' : 'Chưa có việc nào.'}
+                  {agentF ? t('artifacts.list.agentNoTasks') : t('artifacts.list.noTasks')}
                 </div>
               )}
             </>
@@ -300,7 +308,7 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
             className="inline-flex items-center gap-[7px] rounded-md px-1.5 py-[3px] hover:bg-panel-2 hover:text-fg"
           >
             <Switch on={showEmpty} />
-            Hiện việc không có sản phẩm ({emptyCount(entries, agentF)})
+            {t('artifacts.list.showEmpty', { count: emptyCount(entries, agentF) })}
           </button>
         </div>
       </aside>
@@ -323,14 +331,14 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
         ) : (
           <div className="mx-auto mt-24 max-w-[440px] px-6 text-center leading-relaxed text-dim">
             {loading ? (
-              'Đang tải…'
+              t('common.loading')
             ) : noneAtAll ? (
               <>
-                <b className="mb-1.5 block text-[14px] text-fg">Chưa có sản phẩm nào</b>
-                Khi agent làm xong một thứ cho bạn xem (báo cáo, mockup, ảnh, video…), agent nộp nó bằng tool <code className="font-mono text-accent">artifact_publish</code> và sản phẩm hiện ở đây, gom theo việc agent đang làm. Code agent sửa không hiện ở đây.
+                <b className="mb-1.5 block text-[14px] text-fg">{t('artifacts.empty.title')}</b>
+                {tx('artifacts.empty.body', { tool: <code className="font-mono text-accent">artifact_publish</code> })}
               </>
             ) : (
-              'Chọn một việc ở cột trái.'
+              t('artifacts.pickTask')
             )}
           </div>
         )}
@@ -339,7 +347,8 @@ export function ArtifactsView({ workspace: ws }: { workspace: Workspace }): Reac
       <button
         type="button"
         onClick={() => setHelp(!help)}
-        title="Sản phẩm là gì?"
+        title={t('artifacts.help.button')}
+        data-artifacts-help
         className={`absolute top-2 right-3 z-30 h-[22px] w-[22px] rounded-full border border-line-2 text-[12px] font-semibold ${help ? 'bg-panel-3 text-fg' : 'bg-bg text-muted hover:bg-panel-3 hover:text-fg'}`}
       >
         ?
@@ -371,6 +380,7 @@ function Hl({ text, q }: { text: string; q: string }): React.JSX.Element {
 }
 
 function TaskRow({ e, on, onClick }: { e: TaskEntry; on: boolean; onClick: () => void }): React.JSX.Element {
+  const t = useT()
   const b = entryBadges(e)
   const n = e.artifacts.length
   const run = e.status === 'open'
@@ -380,32 +390,30 @@ function TaskRow({ e, on, onClick }: { e: TaskEntry; on: boolean; onClick: () =>
         <ProductAvatar name={e.agentName} />
         <span className={`min-w-0 flex-1 truncate font-medium ${e.status === 'dropped' ? 'text-muted line-through decoration-dim' : ''}`}>{e.title}</span>
         {b.drafts > 0 && (
-          <span className="inline-flex items-center gap-0.5 font-mono text-[11px] font-semibold text-accent" title={`${b.drafts} góp ý nháp chưa gửi`}>
+          <span className="inline-flex items-center gap-0.5 font-mono text-[11px] font-semibold text-accent" title={t('artifacts.row.drafts', { count: b.drafts })}>
             <Mi name="pen" />
             {b.drafts}
           </span>
         )}
         {b.you > 0 && (
-          <span className="font-mono text-[11px] font-semibold text-wait" title={`${b.you} góp ý cần bạn`}>
+          <span className="font-mono text-[11px] font-semibold text-wait" title={t('artifacts.row.you', { count: b.you })}>
             ●{b.you}
           </span>
         )}
-        {b.unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title="Có bản mới" />}
+        {b.unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title={t('artifacts.row.unread')} />}
       </div>
       <div className="mt-[3px] flex gap-[5px] overflow-hidden pl-[25px] text-[11.5px] whitespace-nowrap text-dim">
         {run ? (
           <>
-            <span className="text-work">● đang làm · {shortWhen(e.when)}</span>
+            <span className="text-work">{t('artifacts.row.working', { when: shortWhen(e.when) })}</span>
             <span>·</span>
-            <span>{n ? `${n} sản phẩm` : 'chưa nộp gì'}</span>
+            <span>{n ? t('artifacts.row.count', { count: n }) : t('artifacts.row.nothingYet')}</span>
           </>
         ) : (
           <>
-            <span>{n ? `${n} sản phẩm` : 'không có sản phẩm'}</span>
+            <span>{n ? t('artifacts.row.count', { count: n }) : t('artifacts.row.none')}</span>
             <span>·</span>
-            <span>
-              {e.status === 'dropped' ? 'bỏ' : 'xong'} {shortWhen(e.when)}
-            </span>
+            <span>{e.status === 'dropped' ? t('artifacts.row.dropped', { when: shortWhen(e.when) }) : t('artifacts.row.done', { when: shortWhen(e.when) })}</span>
           </>
         )}
       </div>
@@ -414,10 +422,11 @@ function TaskRow({ e, on, onClick }: { e: TaskEntry; on: boolean; onClick: () =>
 }
 
 function Help({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const down = (e: MouseEvent): void => {
-      if (!ref.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest?.('[title="Sản phẩm là gì?"]')) onClose()
+      if (!ref.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest?.('[data-artifacts-help]')) onClose()
     }
     const key = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose()
@@ -435,23 +444,27 @@ function Help({ onClose }: { onClose: () => void }): React.JSX.Element {
       ref={ref}
       className="absolute top-9 right-3 z-30 max-h-[calc(100%-48px)] w-[400px] overflow-auto rounded-[10px] border border-line-2 bg-pop px-4 py-3.5 leading-relaxed text-muted shadow-pop select-text"
     >
-      <h3 className="mb-1 text-[13px] font-semibold text-fg">Tab Sản phẩm chỉ có thứ agent tự nộp</h3>
-      Code đã sửa, file tạm, config không hiện ở đây. Khi có thứ cho bạn xem, agent gọi tool của stag:
+      <h3 className="mb-1 text-[13px] font-semibold text-fg">{t('artifacts.help.title')}</h3>
+      {t('artifacts.help.intro')}
       <pre className="mt-1.5 rounded-md border border-line bg-bg0 px-2.5 py-2 font-mono text-[11.5px] whitespace-pre-wrap text-muted">
         {`artifact_publish(
   file: "docs/reports/smoke-0.1.2.md",
-  title: "Báo cáo smoke test 0.1.2",
-  description: "6/6 pass, 1 lỗi nhỏ…",
-  note: "Sửa theo 2 góp ý…",   // từ lần nộp thứ 2
-  fixes: ["c2"])                // góp ý đã sửa`}
+  title: "${t('artifacts.help.sampleTitle')}",
+  description: "${t('artifacts.help.sampleDesc')}",
+  note: "${t('artifacts.help.sampleNote')}",   // ${t('artifacts.help.sampleNoteCmt')}
+  fixes: ["c2"])                // ${t('artifacts.help.sampleFixesCmt')}`}
       </pre>
-      Sản phẩm gắn vào việc đang mở của agent đó (task_start).
-      <h3 className="mt-3 mb-1 text-[13px] font-semibold text-fg">Phiên bản</h3>
-      Nộp lại cùng file → v2, v3… App chụp lại file mỗi lần nộp (<code className={code}>.stag/artifacts/</code>), nên file gốc bị xoá hay sửa tiếp vẫn xem lại được từng bản. Tài liệu so sánh được hai bản bất kỳ, tô tới từng chữ; ảnh so sánh đặt cạnh nhau.
-      <h3 className="mt-3 mb-1 text-[13px] font-semibold text-fg">Góp ý</h3>
-      Tài liệu: bôi chọn một đoạn. Ảnh, PDF: ghim một điểm. Video: góp ý tại thời điểm đang xem. Bảng: bấm vào ô. Viết xong bấm <b className="text-fg">Lưu nháp</b> để gom nhiều góp ý, hoặc <b className="text-fg">Gửi</b>. Agent đang rảnh thì góp ý được gõ vào phiên ngay; agent đang làm thì chờ hết lượt (không cắt ngang); phiên đang đóng thì chờ tới khi phiên mới mở. Agent trả lời bằng <code className={code}>artifact_reply(id, text)</code>, mỗi góp ý là một mạch trao đổi.
-      <h3 className="mt-3 mb-1 text-[13px] font-semibold text-fg">Neo góp ý</h3>
-      Mỗi góp ý lưu: khối, vị trí trong khối, và chữ được trích. Sang bản mới, app tìm đúng chữ trích ở vị trí cũ, rồi chỗ gần nhất trong khối, rồi tìm gần đúng (gạch chấm); khối đã bị bỏ thì hiện “Xem ở vN”.
+      {t('artifacts.help.attach')}
+      <h3 className="mt-3 mb-1 text-[13px] font-semibold text-fg">{t('artifacts.help.versions')}</h3>
+      {tx('artifacts.help.versionsBody', { dir: <code className={code}>.stag/artifacts/</code> })}
+      <h3 className="mt-3 mb-1 text-[13px] font-semibold text-fg">{t('artifacts.help.comments')}</h3>
+      {tx('artifacts.help.commentsBody', {
+        draft: <b className="text-fg">{t('artifacts.saveDraft')}</b>,
+        send: <b className="text-fg">{t('common.send')}</b>,
+        reply: <code className={code}>artifact_reply(id, text)</code>
+      })}
+      <h3 className="mt-3 mb-1 text-[13px] font-semibold text-fg">{t('artifacts.help.anchor')}</h3>
+      {t('artifacts.help.anchorBody')}
     </div>
   )
 }

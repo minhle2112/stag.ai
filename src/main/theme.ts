@@ -186,7 +186,7 @@ async function syncClaudeTheme(file: string, backupFile: string, enabled: boolea
       } catch (e) {
         if (i >= 4) {
           await fs.rm(tmp, { force: true })
-          console.warn('[theme] không đổi được theme của Claude Code', (e as Error).message)
+          console.warn('[theme] could not change the Claude Code theme', (e as Error).message)
           return
         }
       }

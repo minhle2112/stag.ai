@@ -71,7 +71,7 @@ describe('parseSrc', () => {
     expect(parseSrc('themes/child/header.php:4')).toMatchObject({ chip: 'theme', file: 'themes/child/header.php', line: 4 })
     const parent = parseSrc('themes/parent/footer.php:6 · (parent theme)')
     expect(parent).toMatchObject({ chip: 'theme', line: 6 })
-    expect(parent.effect).toMatch(/Theme cha/)
+    expect(parent.effect).toMatch(/Parent theme/)
     expect(parent.hint).toMatch(/child theme/)
     expect(parseSrc('plugins/bm-menu/views/item.php:3', true)).toMatchObject({ chip: 'plugin', inherited: true })
   })
@@ -79,7 +79,7 @@ describe('parseSrc', () => {
   it('block WordPress, template part', () => {
     const b = parseSrc('post:12 · block 3 · core/paragraph')
     expect(b).toMatchObject({ chip: 'wp' })
-    expect(b.label).toBe('Block core/paragraph · bài #12 · block 3')
+    expect(b.label).toBe('Block core/paragraph · post #12 · block 3')
     expect(b.hint).toMatch(/wp post get 12/)
     expect(b.file).toBeUndefined()
     expect(parseSrc('template-part:header · core/template-part')).toMatchObject({ chip: 'wp', label: 'Template part "header"' })

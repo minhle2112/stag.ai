@@ -6,6 +6,7 @@ import { promises as fs } from 'node:fs'
 import type { ChatItem } from '@shared/chat'
 import { CodexChatModel } from './codexProtocol'
 import { userItem } from './history'
+import { t } from '@shared/i18n'
 
 /** Chỉ đọc phần cuối file chừng này (rollout có thể rất lớn). */
 const TAIL_BYTES = 3 * 1024 * 1024
@@ -119,7 +120,7 @@ export function itemsFromRollout(text: string, partial = false): ChatItem[] {
         model.addTurn(typeof p.duration_ms === 'number' ? p.duration_ms : 0, str(p.reason) === 'interrupted' ? 'interrupted' : 'error_during_execution')
         break
       case 'context_compacted':
-        model.addNotice('info', 'Đã nén context')
+        model.addNotice('info', t('chat.compacted'))
         break
     }
   }

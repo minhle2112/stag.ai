@@ -4,6 +4,7 @@ import { ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import { parseUsage, planLabel, type ClaudeAccount, type ClaudeUsageState } from '@shared/claudeUsage'
 import { claudeConfigDir } from './context'
+import { t } from '@shared/i18n'
 
 /**
  * Hỏi usage của tài khoản Claude đang đăng nhập trong Claude Code (mục "Claude" ở thanh trạng thái).
@@ -115,22 +116,22 @@ export class ClaudeUsageService {
 
   private async run(force: boolean): Promise<void> {
     const creds = await this.readCreds()
-    if (!creds) return this.signedOut('Không thấy tài khoản Claude Code trên máy.')
-    if (creds.expiresAt !== null && creds.expiresAt <= this.now()) return this.signedOut('Phiên đăng nhập Claude Code đã hết hạn.')
+    if (!creds) return this.signedOut(t('usage.error.noAccount'))
+    if (creds.expiresAt !== null && creds.expiresAt <= this.now()) return this.signedOut(t('usage.error.expired'))
     try {
       const raw = await this.request(creds.token, '/api/oauth/usage')
       const usage = parseUsage(raw)
-      if (!usage) throw new Error('Không đọc được dữ liệu usage (Claude đổi dạng trả về?).')
+      if (!usage) throw new Error(t('usage.error.unreadable'))
       if (!this.email || force) this.email = await this.request(creds.token, '/api/oauth/profile').then(profileEmail, () => this.email)
       if (!this.deps.enabled()) return
       const account: ClaudeAccount = { email: this.email, plan: creds.plan }
       this.set({ status: 'ok', usage, account, fetchedAt: this.now() })
     } catch (e) {
       if (!this.deps.enabled()) return
-      if (e instanceof AuthError) return this.signedOut('Claude từ chối phiên đăng nhập hiện tại.')
+      if (e instanceof AuthError) return this.signedOut(t('usage.error.rejected'))
       if (e instanceof RateLimited) this.pausedUntil = this.now() + BACKOFF_MS
       // Giữ số lần trước (nếu có), chỉ báo lỗi.
-      this.set({ ...this.state, status: this.state.usage ? 'ok' : 'error', error: e instanceof Error ? e.message : 'Lỗi không rõ.' })
+      this.set({ ...this.state, status: this.state.usage ? 'ok' : 'error', error: e instanceof Error ? e.message : t('usage.error.unknown') })
     }
   }
 
@@ -163,11 +164,11 @@ export class ClaudeUsageService {
         signal: AbortSignal.timeout(TIMEOUT_MS)
       })
     } catch {
-      throw new Error('Không kết nối được tới Claude.')
+      throw new Error(t('usage.error.connect'))
     }
     if (res.status === 401 || res.status === 403) throw new AuthError()
-    if (res.status === 429) throw new RateLimited('Claude đang giới hạn số lần hỏi, thử lại sau ít phút.')
-    if (!res.ok) throw new Error(`Claude trả lỗi ${res.status}.`)
+    if (res.status === 429) throw new RateLimited(t('usage.error.rateLimited'))
+    if (!res.ok) throw new Error(t('usage.error.status', { status: String(res.status) }))
     return res.json()
   }
 }

@@ -16,6 +16,7 @@ import {
 import type { Workspace } from '@shared/types'
 import { useAgents } from '../../store/agents'
 import { useUi } from '../../store/ui'
+import { t, tx, useT } from '../../i18n'
 import { CodeView } from './CodeView'
 import { anchorMode, DocView, renderBlock, type DocMark, type RenderedBlock } from './DocView'
 import { cleanError, DocxView, FontView, HtmlView, Note, OtherView, PdfView, PptxView, SheetView, ZipView, type PinMark } from './previewers'
@@ -26,19 +27,21 @@ import { BTN, BTN_GHOST, BTN_PRI, Mi, ProductAvatar, Switch, typeLabel, when } f
 /** Agent nhận góp ý: rảnh (gửi ngay) / đang làm (chờ hết lượt) / phiên đóng (chờ phiên mới). */
 export type Delivery = 'idle' | 'busy' | 'closed'
 
-const deliveryLine = (d: Delivery, a: string): string =>
+const deliveryLine = (d: Delivery, agent: string): string =>
+  d === 'idle' ? t('artifacts.delivery.idle', { agent }) : d === 'busy' ? t('artifacts.delivery.busy', { agent }) : t('artifacts.delivery.closed', { agent })
+const queuedLine = (d: Delivery): string => (d === 'idle' ? t('artifacts.queued.idle') : d === 'busy' ? t('artifacts.queued.busy') : t('artifacts.queued.closed'))
+const sentToast = (d: Delivery, agent: string, n = 1): string =>
   d === 'idle'
-    ? `${a} đang rảnh — góp ý được gửi ngay.`
+    ? n > 1
+      ? t('artifacts.sent.idleMany', { count: n, agent })
+      : t('artifacts.sent.idle', { agent })
     : d === 'busy'
-      ? `${a} đang làm — góp ý được gõ vào khi hết lượt, không cắt ngang.`
-      : `Phiên của ${a} đang đóng — góp ý chờ tới khi phiên mới mở.`
-const queuedLine = (d: Delivery): string => (d === 'idle' ? 'đang gửi…' : d === 'busy' ? 'sẽ gõ vào khi agent hết lượt' : 'gửi khi phiên mới mở')
-const sentToast = (d: Delivery, a: string, n = 1): string =>
-  d === 'idle'
-    ? `Đã gửi ${n > 1 ? `${n} góp ý ` : ''}cho ${a}`
-    : d === 'busy'
-      ? `${n > 1 ? `${n} góp ý chờ gửi` : 'Chờ gửi'} — sẽ gõ vào khi ${a} hết lượt`
-      : `${n > 1 ? `${n} góp ý chờ gửi` : 'Chờ gửi'} — phiên của ${a} đang đóng, gửi khi phiên mới mở`
+      ? n > 1
+        ? t('artifacts.sent.busyMany', { count: n, agent })
+        : t('artifacts.sent.busy', { agent })
+      : n > 1
+        ? t('artifacts.sent.closedMany', { count: n, agent })
+        : t('artifacts.sent.closed', { agent })
 
 const tone = (c: ArtifactComment): string => (c.state === 'draft' ? 'draft' : c.state === 'you' ? 'you' : c.state === 'fixed' ? 'fixed' : c.state === 'closed' ? 'closed' : 'open')
 
@@ -101,6 +104,7 @@ export function ArtifactDetail({
   toast: (t: string) => void
   onBack: () => void
 }): React.JSX.Element {
+  useT()
   const latest = latestVersion(a)
   const kind = previewKind(a.rel)
   const isImage = kind === 'image'
@@ -223,15 +227,15 @@ export function ArtifactDetail({
         const { compose: k, drafts } = live.current
         if (k && !k.edit && k.text.trim()) {
           void window.stag.products.comment(ws.id, a.id, { v: k.v, anchor: k.anchor, text: k.text, send: false }).catch(() => {})
-          toast(`Góp ý đang viết dở đã được lưu vào nháp ở “${a.title}”.`)
-        } else if (drafts) toast(`Còn ${drafts} góp ý nháp chưa gửi ở “${a.title}” — vẫn giữ trong sản phẩm này.`)
+          toast(t('artifacts.toast.stashedIn', { title: a.title }))
+        } else if (drafts) toast(t('artifacts.toast.draftsLeft', { count: drafts, title: a.title }))
       }, 0)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const startCompose = async (anchor: CommentAnchor, text = '', edit?: string): Promise<void> => {
-    if (await stash().catch(() => false)) toast('Góp ý đang viết dở đã được lưu vào nháp')
+    if (await stash().catch(() => false)) toast(t('artifacts.toast.stashed'))
     setReply(null)
     setPinning(false)
     setRtab('cmt')
@@ -257,12 +261,12 @@ export function ArtifactDetail({
     const k = compose
     if (!k || !k.text.trim()) return
     if (k.edit) {
-      if (await act(() => window.stag.products.editDraft(ws.id, k.edit!, k.text), 'Đã sửa nháp')) setCompose(null)
+      if (await act(() => window.stag.products.editDraft(ws.id, k.edit!, k.text), t('artifacts.toast.draftEdited'))) setCompose(null)
       return
     }
     const done = await act(
       () => window.stag.products.comment(ws.id, a.id, { v: k.v, anchor: k.anchor, text: k.text, send }),
-      send ? sentToast(delivery, a.agentName) : 'Đã lưu nháp — gửi cả loạt ở cuối cột'
+      send ? sentToast(delivery, a.agentName) : t('artifacts.toast.draftSaved')
     )
     if (done) setCompose(null)
   }
@@ -340,10 +344,10 @@ export function ArtifactDetail({
         marks={marks}
         onMark={focusComment}
         onComment={(an) => void startCompose({ type: 'text', ...an })}
-        onDiffSelect={() => toast('Đang so sánh — tắt “So với” để góp ý')}
+        onDiffSelect={() => toast(t('artifacts.toast.diffSelect'))}
       />
     ) : (
-      <Note>Đang mở…</Note>
+      <Note>{t('artifacts.opening')}</Note>
     )
   } else if (isImage && comparing) {
     const old = a.versions.find((v) => v.v === cmp)!
@@ -418,9 +422,9 @@ export function ArtifactDetail({
     if (c.v > ver)
       return (
         <div className="mt-1.5 text-[11.5px] text-dim">
-          Góp ý trên v{c.v} ·{' '}
+          {t('artifacts.anchor.onVersion', { v: c.v })} ·{' '}
           <button type="button" className="text-info" onClick={() => (pickVer(c.v), focusComment(c.id))}>
-            Xem
+            {t('artifacts.view')}
           </button>
         </div>
       )
@@ -429,7 +433,7 @@ export function ArtifactDetail({
     if (m === 'gone')
       return (
         <div className="mt-1.5 text-[11.5px] text-dim">
-          Đoạn này không còn ở v{ver} ·{' '}
+          {t('artifacts.anchor.gone', { v: ver })} ·{' '}
           <button
             type="button"
             className="text-info"
@@ -439,11 +443,11 @@ export function ArtifactDetail({
               focusComment(c.id)
             }}
           >
-            Xem ở v{c.v}
+            {t('artifacts.anchor.viewIn', { v: c.v })}
           </button>
         </div>
       )
-    if (m === 'fuzzy' || m === 'whole') return <div className="mt-1.5 text-[11.5px] text-dim">Đoạn đã đổi ở v{ver}, neo gần đúng (gạch chấm)</div>
+    if (m === 'fuzzy' || m === 'whole') return <div className="mt-1.5 text-[11.5px] text-dim">{t('artifacts.anchor.fuzzy', { v: ver })}</div>
     return null
   }
 
@@ -455,55 +459,55 @@ export function ArtifactDetail({
     let status: React.ReactNode = null
     if (c.state === 'draft')
       status = (
-        <Stt cls="text-accent" icon="pen" text="Nháp · chưa gửi">
+        <Stt cls="text-accent" icon="pen" text={t('artifacts.status.draft')}>
           <button type="button" className={BTN_GHOST} onClick={() => void startCompose(c.anchor, c.thread[0]?.text ?? '', c.id)}>
-            Sửa
+            {t('common.edit')}
           </button>
-          <button type="button" className={BTN_GHOST} onClick={() => void act(() => window.stag.products.deleteDraft(ws.id, c.id), 'Đã xoá nháp')}>
-            Xoá
+          <button type="button" className={BTN_GHOST} onClick={() => void act(() => window.stag.products.deleteDraft(ws.id, c.id), t('artifacts.toast.draftDeleted'))}>
+            {t('common.delete')}
           </button>
         </Stt>
       )
     else if (c.state === 'queued')
       status = (
-        <Stt icon="clock" text={`Chờ gửi · ${queuedLine(delivery)}`}>
+        <Stt icon="clock" text={t('artifacts.status.queued', { when: queuedLine(delivery) })}>
           <button
             type="button"
             className={BTN_GHOST}
             onClick={() =>
               void act(async () => {
                 const r = await window.stag.products.unsend(ws.id, c.id)
-                if (r.draft) toast('Đã huỷ gửi, góp ý về lại nháp')
+                if (r.draft) toast(t('artifacts.toast.unsentDraft'))
                 else {
                   replyDrafts.set(`${ws.id}:${c.id}`, r.text)
                   setCompose(null)
                   setReply({ cid: c.id, mode: 'reply' })
-                  toast('Đã huỷ gửi — tin vừa rồi ở lại ô trả lời')
+                  toast(t('artifacts.toast.unsentReply'))
                 }
               })
             }
           >
-            Huỷ gửi
+            {t('artifacts.unsend')}
           </button>
         </Stt>
       )
-    else if (c.state === 'sent') status = <Stt icon="clock" text={`Đã gửi cho ${a.agentName} · chờ agent trả lời / sửa`} />
+    else if (c.state === 'sent') status = <Stt icon="clock" text={t('artifacts.status.sent', { agent: a.agentName })} />
     else if (c.state === 'fixed')
       status = (
-        <Stt cls="text-work" icon="check" text={`${a.agentName} báo đã sửa ở v${c.fixedIn}`}>
+        <Stt cls="text-work" icon="check" text={t('artifacts.status.fixed', { agent: a.agentName, v: c.fixedIn ?? '' })}>
           {c.fixedIn !== ver && c.fixedIn != null && (
             <button type="button" className="text-[11.5px] text-info" onClick={() => pickVer(c.fixedIn!)}>
-              xem v{c.fixedIn}
+              {t('artifacts.viewVersion', { v: c.fixedIn })}
             </button>
           )}
         </Stt>
       )
-    else if (c.state === 'you') status = <Stt cls="text-wait" text={`● ${a.agentName} trả lời, chờ bạn`} />
+    else if (c.state === 'you') status = <Stt cls="text-wait" text={t('artifacts.status.you', { agent: a.agentName })} />
     else if (c.state === 'closed')
       status = (
-        <Stt text={`Đã đóng${c.fixedIn ? ` · sửa ở v${c.fixedIn}` : ''}`}>
+        <Stt text={c.fixedIn ? t('artifacts.status.closedFixed', { v: c.fixedIn }) : t('artifacts.status.closed')}>
           <button type="button" className={BTN_GHOST} onClick={() => openReply(c.id, 'reopen')}>
-            Mở lại…
+            {t('artifacts.reopen')}
           </button>
         </Stt>
       )
@@ -511,11 +515,11 @@ export function ArtifactDetail({
     const acts =
       isReplying || isEditing ? null : c.state === 'fixed' ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          <button type="button" className={BTN_PRI} disabled={busy} onClick={() => void act(() => window.stag.products.close(ws.id, c.id).then(() => replyDrafts.delete(`${ws.id}:${c.id}`)), 'Đã đóng góp ý')}>
-            Ổn, đóng
+          <button type="button" className={BTN_PRI} disabled={busy} onClick={() => void act(() => window.stag.products.close(ws.id, c.id).then(() => replyDrafts.delete(`${ws.id}:${c.id}`)), t('artifacts.toast.closed'))}>
+            {t('artifacts.okClose')}
           </button>
           <button type="button" className={BTN} onClick={() => openReply(c.id, 'again')}>
-            Chưa ổn…
+            {t('artifacts.notOk')}
           </button>
         </div>
       ) : c.state === 'you' ? (
@@ -526,10 +530,10 @@ export function ArtifactDetail({
             </button>
           ))}
           <button type="button" className={lastAgent?.options?.length ? BTN_GHOST : BTN_PRI} onClick={() => openReply(c.id, 'reply')}>
-            Trả lời…
+            {t('artifacts.reply')}
           </button>
-          <button type="button" className={BTN_GHOST} onClick={() => void act(() => window.stag.products.close(ws.id, c.id).then(() => replyDrafts.delete(`${ws.id}:${c.id}`)), 'Đã đóng góp ý')}>
-            Đóng
+          <button type="button" className={BTN_GHOST} onClick={() => void act(() => window.stag.products.close(ws.id, c.id).then(() => replyDrafts.delete(`${ws.id}:${c.id}`)), t('artifacts.toast.closed'))}>
+            {t('common.close')}
           </button>
         </div>
       ) : null
@@ -547,19 +551,19 @@ export function ArtifactDetail({
         {isEditing && compose ? (
           <Composer
             value={compose.text}
-            onChange={(t) => setCompose({ ...compose, text: t })}
-            placeholder="Sửa góp ý…"
-            hint="Ctrl+Enter để lưu"
+            onChange={(text) => setCompose({ ...compose, text })}
+            placeholder={t('artifacts.edit.placeholder')}
+            hint={t('artifacts.edit.hint')}
             onCancel={() => setCompose(null)}
             onSubmit={() => void submit(false)}
             buttons={
               <>
                 <button type="button" className={BTN_GHOST} onClick={() => setCompose(null)}>
-                  Huỷ
+                  {t('common.cancel')}
                 </button>
                 <span className="flex-1" />
                 <button type="button" className={BTN_PRI} disabled={busy || !compose.text.trim()} onClick={() => void submit(false)}>
-                  Lưu
+                  {t('common.save')}
                 </button>
               </>
             }
@@ -572,10 +576,10 @@ export function ArtifactDetail({
         {acts}
         {isReplying && reply && (
           <div className="mt-2.5">
-            <div className="mb-1.5 text-[11.5px] text-dim">{reply.mode === 'again' ? 'Gửi lại kèm lý do' : reply.mode === 'reopen' ? 'Mở lại kèm lý do' : `Trả lời ${a.agentName}`}</div>
+            <div className="mb-1.5 text-[11.5px] text-dim">{reply.mode === 'again' ? t('artifacts.reply.again') : reply.mode === 'reopen' ? t('artifacts.reply.reopen') : t('artifacts.reply.to', { agent: a.agentName })}</div>
             <ReplyBox
               k={`${ws.id}:${c.id}`}
-              placeholder={reply.mode === 'reply' ? `Trả lời ${a.agentName}…` : 'Chưa ổn ở chỗ nào?'}
+              placeholder={reply.mode === 'reply' ? t('artifacts.reply.placeholder', { agent: a.agentName }) : t('artifacts.reply.againPlaceholder')}
               busy={busy}
               onCancel={() => setReply(null)}
               onSend={() => void sendReply()}
@@ -587,7 +591,7 @@ export function ArtifactDetail({
   }
 
   const openReply = (cid: string, mode: Reply['mode']): void => {
-    void stash().then((saved) => saved && toast('Góp ý đang viết dở đã được lưu vào nháp'))
+    void stash().then((saved) => saved && toast(t('artifacts.toast.stashed')))
     setCompose(null)
     setReply({ cid, mode })
     setHot(cid)
@@ -598,9 +602,9 @@ export function ArtifactDetail({
       <AnchorQuote anchor={compose.anchor} kind={kind} label={compose.anchor.type === 'pin' ? '+' : undefined} accent />
       <Composer
         value={compose.text}
-        onChange={(t) => setCompose({ ...compose, text: t })}
-        placeholder="Góp ý cho chỗ này…"
-        hint={drafts.length ? 'Ctrl+Enter: thêm vào nháp (đang có nháp chờ gửi cả loạt)' : 'Ctrl+Enter để gửi · Esc: giữ thành nháp'}
+        onChange={(text) => setCompose({ ...compose, text })}
+        placeholder={t('artifacts.compose.placeholder')}
+        hint={drafts.length ? t('artifacts.compose.hintDrafts') : t('artifacts.compose.hint')}
         onCancel={() => {
           if (compose.text.trim()) void submit(false)
           else setCompose(null)
@@ -609,14 +613,14 @@ export function ArtifactDetail({
         buttons={
           <>
             <button type="button" className={BTN_GHOST} onClick={() => setCompose(null)}>
-              Huỷ
+              {t('common.cancel')}
             </button>
             <span className="flex-1" />
             <button type="button" className={BTN} disabled={busy || !compose.text.trim()} onClick={() => void submit(false)}>
-              Lưu nháp
+              {t('artifacts.saveDraft')}
             </button>
             <button type="button" className={BTN_PRI} disabled={busy || !compose.text.trim()} onClick={() => void submit(true)}>
-              Gửi
+              {t('common.send')}
             </button>
           </>
         }
@@ -625,35 +629,35 @@ export function ArtifactDetail({
   )
 
   const emptyHint: Record<string, string> = {
-    doc: 'Chưa có góp ý. Bôi chọn một đoạn trong tài liệu rồi bấm “＋ Góp ý” (hoặc phím C).',
-    image: 'Chưa có góp ý. Bấm “Ghim góp ý” rồi bấm vào chỗ trên ảnh.',
-    pdf: 'Chưa có góp ý. Bấm “Ghim góp ý” rồi bấm vào chỗ trên trang.',
-    sheet: 'Chưa có góp ý. Bấm vào một ô trong bảng để góp ý.',
-    video: 'Chưa có góp ý. Dừng ở chỗ cần nói rồi bấm “Góp ý tại …”.',
-    audio: 'Chưa có góp ý. Dừng ở chỗ cần nói rồi bấm “Góp ý tại …”.'
+    doc: t('artifacts.emptyHint.doc'),
+    image: t('artifacts.emptyHint.image'),
+    pdf: t('artifacts.emptyHint.pdf'),
+    sheet: t('artifacts.emptyHint.sheet'),
+    video: t('artifacts.emptyHint.media'),
+    audio: t('artifacts.emptyHint.media')
   }
   const cmtTab = (
     <>
       {composerTop}
-      {you.length > 0 && <Sub cls="text-wait">CẦN BẠN · {you.length}</Sub>}
+      {you.length > 0 && <Sub cls="text-wait">{t('artifacts.sec.you', { count: you.length })}</Sub>}
       {[...you].sort(byNew).map(card)}
-      {drafts.length > 0 && <Sub cls="text-accent">NHÁP · {drafts.length}</Sub>}
+      {drafts.length > 0 && <Sub cls="text-accent">{t('artifacts.sec.drafts', { count: drafts.length })}</Sub>}
       {drafts.map(card)}
-      {waiting.length > 0 && <Sub>CHỜ AGENT · {waiting.length}</Sub>}
+      {waiting.length > 0 && <Sub>{t('artifacts.sec.waiting', { count: waiting.length })}</Sub>}
       {[...waiting].sort(byNew).map(card)}
       {closed.length > 0 && (
         <>
           <button type="button" onClick={() => setOpenClosed(!openClosed)} className="flex w-full items-center gap-1.5 px-1 pt-2.5 pb-1.5 text-left text-[11px] font-semibold tracking-[0.07em] text-dim hover:text-muted">
-            {openClosed ? '▾' : '▸'} ĐÃ ĐÓNG · {closed.length}
+            {openClosed ? '▾' : '▸'} {t('artifacts.sec.closed', { count: closed.length })}
           </button>
           {openClosed && [...closed].sort(byNew).map(card)}
         </>
       )}
-      {!comments.length && !compose && <div className="px-1.5 py-2 text-[12.5px] leading-relaxed text-dim">{emptyHint[cur.blocks ? 'doc' : kind] ?? 'Chưa có góp ý.'}</div>}
+      {!comments.length && !compose && <div className="px-1.5 py-2 text-[12.5px] leading-relaxed text-dim">{emptyHint[cur.blocks ? 'doc' : kind] ?? t('artifacts.emptyHint.none')}</div>}
       {!compose && (
         <div className="mt-1.5">
           <button type="button" className={BTN_GHOST} onClick={() => void startCompose({ type: 'general' })}>
-            ＋ Góp ý chung cho cả sản phẩm
+            {t('artifacts.generalComment')}
           </button>
         </div>
       )}
@@ -667,15 +671,15 @@ export function ArtifactDetail({
         <div key={v.v} className="flex gap-2.5 border-b border-line px-1 py-[9px]">
           <span className={`w-[26px] shrink-0 font-mono text-[11.5px] font-semibold ${v.v === ver ? 'text-accent' : 'text-muted'}`}>v{v.v}</span>
           <div className="min-w-0 flex-1 leading-normal">
-            <div>{v.note || (v.v === a.versions[0].v ? 'Bản đầu' : 'Không ghi chú')}</div>
+            <div>{v.note || (v.v === a.versions[0].v ? t('artifacts.hist.first') : t('artifacts.hist.noNote'))}</div>
             <div className="text-[11.5px] text-dim">
               {when(v.at)} · {v.agentName}
-              {fixedCount(v.v) ? ` · sửa ${fixedCount(v.v)} góp ý` : ''}
+              {fixedCount(v.v) ? ` · ${t('artifacts.hist.fixed', { count: fixedCount(v.v) })}` : ''}
             </div>
           </div>
           {v.v !== ver && (
             <button type="button" className="self-start rounded-[5px] px-1.5 py-0.5 text-[11.5px] text-muted hover:bg-panel-2 hover:text-fg" onClick={() => pickVer(v.v)}>
-              Xem
+              {t('artifacts.view')}
             </button>
           )}
         </div>
@@ -686,25 +690,25 @@ export function ArtifactDetail({
   const infoTab = (
     <div>
       <dl className="m-0 grid grid-cols-[92px_1fr] gap-x-2.5 gap-y-[9px] text-[12.5px]">
-        <dt className="text-dim">File</dt>
+        <dt className="text-dim">{t('artifacts.info.file')}</dt>
         <dd className="m-0 font-mono text-[11.5px] break-all select-text">
           {a.rel}
-          {gone && <span className="text-danger"> (đã bị xoá)</span>}
+          {gone && <span className="text-danger"> {t('artifacts.info.deleted')}</span>}
         </dd>
-        <dt className="text-dim">Loại</dt>
+        <dt className="text-dim">{t('artifacts.info.type')}</dt>
         <dd className="m-0">{typeLabel(kind)}</dd>
-        <dt className="text-dim">Nộp bởi</dt>
+        <dt className="text-dim">{t('artifacts.info.by')}</dt>
         <dd className="m-0 flex items-center gap-1.5">
           <ProductAvatar name={a.agentName} small />
           {a.agentName}
         </dd>
-        <dt className="text-dim">Việc</dt>
+        <dt className="text-dim">{t('artifacts.info.task')}</dt>
         <dd className="m-0">{entry.title}</dd>
-        <dt className="text-dim">Nộp lần đầu</dt>
+        <dt className="text-dim">{t('artifacts.info.first')}</dt>
         <dd className="m-0">{when(a.versions[0].at)}</dd>
-        <dt className="text-dim">Phiên bản</dt>
+        <dt className="text-dim">{t('artifacts.info.versions')}</dt>
         <dd className="m-0">{a.versions.length}</dd>
-        <dt className="text-dim">Bản chụp</dt>
+        <dt className="text-dim">{t('artifacts.info.snapshot')}</dt>
         <dd className="m-0 font-mono text-[11.5px] break-all select-text">.stag/artifacts/{a.id}/</dd>
       </dl>
       <div className="mt-4">
@@ -712,12 +716,12 @@ export function ArtifactDetail({
           type="button"
           className={`${BTN_GHOST} text-danger hover:text-danger`}
           onClick={() =>
-            void act(() => window.stag.products.hide(ws.id, a.id), `Đã gỡ “${a.title}” khỏi danh sách — file vẫn giữ; agent nộp lại thì hiện lại.`).then((ok) => ok && onBack())
+            void act(() => window.stag.products.hide(ws.id, a.id), t('artifacts.toast.hidden', { title: a.title })).then((ok) => ok && onBack())
           }
         >
-          Gỡ khỏi danh sách sản phẩm
+          {t('artifacts.hide')}
         </button>
-        <div className="mt-1 pl-2 text-[11.5px] text-dim">File trong dự án không bị xoá.</div>
+        <div className="mt-1 pl-2 text-[11.5px] text-dim">{t('artifacts.hideNote')}</div>
       </div>
     </div>
   )
@@ -738,16 +742,16 @@ export function ArtifactDetail({
             <h2 className="m-0 min-w-0 flex-1 text-[18px] font-semibold">{a.title}</h2>
             {pinnable && (
               <button type="button" className={pinning ? BTN_PRI : BTN} onClick={() => setPinning(!pinning)}>
-                <Mi name="pin" /> {pinning ? 'Bấm vào chỗ cần góp ý…' : 'Ghim góp ý'}
+                <Mi name="pin" /> {pinning ? t('artifacts.pin.picking') : t('artifacts.pin.button')}
               </button>
             )}
             {!gone && (
               <>
                 <button type="button" className={BTN} onClick={() => void act(() => window.stag.artifacts.open(ws.id, a.rel))}>
-                  Mở bằng app mặc định
+                  {t('artifacts.openDefault')}
                 </button>
                 <button type="button" className={BTN_GHOST} onClick={() => void act(() => window.stag.artifacts.reveal(ws.id, a.rel))}>
-                  Hiện trong thư mục
+                  {t('artifacts.reveal')}
                 </button>
               </>
             )}
@@ -759,7 +763,7 @@ export function ArtifactDetail({
                 {[...a.versions].reverse().map((v) => (
                   <option key={v.v} value={v.v}>
                     v{v.v}
-                    {v.v === latest.v ? ' · mới nhất' : ''}
+                    {v.v === latest.v ? ` · ${t('artifacts.latest')}` : ''}
                   </option>
                 ))}
               </select>
@@ -779,13 +783,14 @@ export function ArtifactDetail({
             )}
             <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[12px] whitespace-nowrap text-dim">
               <ProductAvatar name={cur.agentName} small />
-              <span>{cur.agentName} nộp</span>·<b className="truncate font-medium text-muted">{cur.note || (cur.v === a.versions[0].v ? 'Bản đầu' : 'không ghi chú')}</b>· {when(cur.at)}
+              <span>{t('artifacts.publishedBy', { agent: cur.agentName })}</span>·
+              <b className="truncate font-medium text-muted">{cur.note || (cur.v === a.versions[0].v ? t('artifacts.hist.first') : t('artifacts.hist.noNoteLower'))}</b>· {when(cur.at)}
             </span>
             {canDiff && (
               <>
                 <button type="button" onClick={() => (setDiff(!comparing), setHintOff(true), (changeIdx.current = -1), setPinning(false))} className="inline-flex items-center gap-[7px] rounded-md px-1.5 py-[3px] text-[12px] text-muted hover:bg-panel-2 hover:text-fg">
                   <Switch on={comparing} />
-                  {isImage ? 'Đặt cạnh' : 'So với'}
+                  {isImage ? t('artifacts.sideBySide') : t('artifacts.compareWith')}
                 </button>
                 <select
                   value={Math.min(cmp, ver - 1)}
@@ -809,7 +814,7 @@ export function ArtifactDetail({
             <div className="mt-2 flex items-center gap-2 text-[12px] text-accent">
               {newSince ? (
                 <>
-                  Có bản mới v{latest.v}
+                  {t('artifacts.newVersionAvail', { v: latest.v })}
                   <button
                     type="button"
                     className={BTN_GHOST}
@@ -822,14 +827,14 @@ export function ArtifactDetail({
                       }
                     }}
                   >
-                    Xem thay đổi
+                    {t('artifacts.viewChanges')}
                   </button>
                 </>
               ) : (
                 <>
-                  v{latest.v} mới so với bản bạn đã xem (v{prevSeen})
+                  {t('artifacts.newSinceSeen', { v: latest.v, seen: prevSeen })}
                   <button type="button" className={BTN_GHOST} onClick={() => (setCmp(prevSeen), setDiff(true), setHintOff(true))}>
-                    Xem thay đổi
+                    {t('artifacts.viewChanges')}
                   </button>
                 </>
               )}
@@ -840,11 +845,11 @@ export function ArtifactDetail({
           <div className="flex items-center gap-2.5 border-b border-line bg-danger/6 px-[22px] py-2 text-[12.5px] text-danger-text">
             <Mi name="warn" />
             <span className="min-w-0">
-              File gốc <span className="font-mono">{a.rel}</span> đã bị xoá khỏi dự án. Đây là bản chụp lúc nộp v{cur.v}.
+              {tx('artifacts.gone', { file: <span className="font-mono">{a.rel}</span>, v: cur.v })}
             </span>
             <span className="flex-1" />
-            <button type="button" className={BTN} onClick={() => void act(async () => (await window.stag.products.saveAs(ws.id, cur.snapshot)) && toast('Đã lưu bản chụp'))}>
-              Lưu bản chụp ra file…
+            <button type="button" className={BTN} onClick={() => void act(async () => (await window.stag.products.saveAs(ws.id, cur.snapshot)) && toast(t('artifacts.toast.snapshotSaved')))}>
+              {t('artifacts.saveSnapshot')}
             </button>
           </div>
         )}
@@ -853,15 +858,15 @@ export function ArtifactDetail({
             <span>
               v{cmp} → v{ver}:
             </span>
-            {stats.add > 0 && <span className="text-work">+{stats.add} mục mới</span>}
-            {stats.chg > 0 && <span className="text-info">{stats.chg} mục sửa</span>}
-            {stats.del > 0 && <span className="text-danger">−{stats.del} mục bỏ</span>}
-            {!stats.add && !stats.chg && !stats.del && <span>không khác</span>}
+            {stats.add > 0 && <span className="text-work">{t('artifacts.diff.added', { count: stats.add })}</span>}
+            {stats.chg > 0 && <span className="text-info">{t('artifacts.diff.changed', { count: stats.chg })}</span>}
+            {stats.del > 0 && <span className="text-danger">{t('artifacts.diff.removed', { count: stats.del })}</span>}
+            {!stats.add && !stats.chg && !stats.del && <span>{t('artifacts.diff.same')}</span>}
             <span className="flex-1" />
-            <span className="text-dim">Đang so sánh · tắt để góp ý</span>
+            <span className="text-dim">{t('artifacts.diff.note')}</span>
             {stats.add + stats.chg + stats.del > 0 && (
               <button type="button" className={BTN} onClick={nextChange}>
-                ↓ Thay đổi tiếp
+                {t('artifacts.diff.next')}
               </button>
             )}
           </div>
@@ -875,9 +880,9 @@ export function ArtifactDetail({
         <div className="flex gap-0.5 border-b border-line px-2.5 pt-2">
           {(
             [
-              ['cmt', 'Góp ý', you.length ? `${you.length} cần bạn` : comments.length || ''],
-              ['hist', 'Phiên bản', a.versions.length],
-              ['info', 'Thông tin', '']
+              ['cmt', t('artifacts.tab.comments'), you.length ? t('artifacts.tab.needYou', { count: you.length }) : comments.length || ''],
+              ['hist', t('artifacts.tab.versions'), a.versions.length],
+              ['info', t('artifacts.tab.info'), '']
             ] as const
           ).map(([id, label, n]) => (
             <button
@@ -896,14 +901,14 @@ export function ArtifactDetail({
           <div className="border-t border-line bg-panel p-2.5">
             {drafts.length > 0 && (
               <div className="mb-1.5 flex items-center gap-2">
-                <span className="flex-1">{drafts.length} góp ý nháp</span>
+                <span className="flex-1">{t('artifacts.draftsCount', { count: drafts.length })}</span>
                 <button
                   type="button"
                   className={BTN_PRI}
                   disabled={busy}
                   onClick={() => void act(() => window.stag.products.sendDrafts(ws.id, a.id), sentToast(delivery, a.agentName, drafts.length))}
                 >
-                  Gửi {drafts.length} góp ý cho {a.agentName}
+                  {t('artifacts.sendDrafts', { count: drafts.length, agent: a.agentName })}
                 </button>
               </div>
             )}
@@ -922,7 +927,7 @@ export function ArtifactDetail({
                         show(ws.id, a.agentId)
                       }}
                     >
-                      Mở ô {a.agentName}
+                      {t('artifacts.openCell', { agent: a.agentName })}
                     </button>
                   </>
                 )}
@@ -954,46 +959,49 @@ function Stt({ cls = 'text-dim', icon, text, children }: { cls?: string; icon?: 
 
 /** Nhãn chỗ neo của góp ý (đoạn trích / ghim / thời điểm / ô / chung). */
 function AnchorQuote({ c, anchor, kind, label, accent }: { c?: ArtifactComment; anchor?: CommentAnchor; kind: string; label?: string; accent?: boolean }): React.JSX.Element {
+  const t = useT()
   const an = anchor ?? c!.anchor
   const bar = accent ? 'border-accent' : 'border-line-3'
   let body: React.ReactNode
   if (an.type === 'text') body = an.quote
-  else if (an.type === 'pin')
+  else if (an.type === 'pin') {
+    const n = String(label ?? c?.no ?? '')
     body = (
       <>
-        <Mi name="pin" /> Ghim {label ?? c?.no} trên {kind === 'pdf' ? `PDF${an.page ? `, trang ${an.page}` : ''}` : 'ảnh'}
+        <Mi name="pin" />{' '}
+        {kind !== 'pdf' ? t('artifacts.anchor.pinImage', { n }) : an.page ? t('artifacts.anchor.pinPdfPage', { n, page: an.page }) : t('artifacts.anchor.pinPdf', { n })}
       </>
     )
-  else if (an.type === 'time')
+  } else if (an.type === 'time')
     body = (
       <>
-        <Mi name="play" /> Tại {formatTime(an.t)}
+        <Mi name="play" /> {t('artifacts.anchor.at', { time: formatTime(an.t) })}
       </>
     )
   else if (an.type === 'cell')
     body = (
       <>
-        <Mi name="cell" /> Ô {an.sheet ? `${an.sheet} · ` : ''}
-        {an.cell}: {an.value || '(trống)'}
+        <Mi name="cell" /> {t('artifacts.anchor.cell', { cell: `${an.sheet ? `${an.sheet} · ` : ''}${an.cell}`, value: an.value || t('artifacts.anchor.empty') })}
       </>
     )
-  else body = 'Góp ý chung'
+  else body = t('artifacts.anchor.general')
   return <div className={`mb-[7px] line-clamp-2 border-l-2 pl-2 text-[12px] text-muted ${bar}`}>{body}</div>
 }
 
 function Thread({ c, agent }: { c: ArtifactComment; agent: string }): React.JSX.Element {
+  const t = useT()
   return (
     <div>
       {c.thread.map((m, i) => (
         <div key={i} className={`flex gap-[7px] leading-normal ${i ? 'mt-2 border-t border-line pt-2' : ''}`}>
           {m.by === 'user' ? (
-            <span className="grid h-[15px] w-[15px] shrink-0 place-items-center rounded-[4px] border border-line-2 bg-panel-3 text-[8px] font-bold text-muted">B</span>
+            <span className="grid h-[15px] w-[15px] shrink-0 place-items-center rounded-[4px] border border-line-2 bg-panel-3 text-[8px] font-bold text-muted">{t('artifacts.youInitial')}</span>
           ) : (
             <ProductAvatar name={m.name ?? agent} small />
           )}
           <div className="min-w-0 flex-1">
             <div className="mb-px text-[11.5px] text-dim">
-              <b className="font-semibold text-fg">{m.by === 'user' ? 'Bạn' : (m.name ?? agent)}</b> · {when(m.at)}
+              <b className="font-semibold text-fg">{m.by === 'user' ? t('artifacts.you') : (m.name ?? agent)}</b> · {when(m.at)}
             </div>
             <div className={`break-words whitespace-pre-wrap select-text ${m.by === 'user' ? 'text-fg' : 'text-muted'}`}>{m.text}</div>
           </div>
@@ -1054,26 +1062,27 @@ function Composer({
 
 /** Ô trả lời trong mạch: chữ giữ trong `replyDrafts` (không mất khi chuyển góp ý khác). */
 function ReplyBox({ k, placeholder, busy, onCancel, onSend }: { k: string; placeholder: string; busy: boolean; onCancel: () => void; onSend: () => void }): React.JSX.Element {
+  const t = useT()
   const [text, setText] = useState(replyDrafts.get(k) ?? '')
   return (
     <Composer
       value={text}
-      onChange={(t) => {
-        setText(t)
-        replyDrafts.set(k, t)
+      onChange={(v) => {
+        setText(v)
+        replyDrafts.set(k, v)
       }}
       placeholder={placeholder}
-      hint="Ctrl+Enter để gửi · Esc: đóng (chữ vẫn giữ)"
+      hint={t('artifacts.reply.hint')}
       onCancel={onCancel}
       onSubmit={onSend}
       buttons={
         <>
           <button type="button" className={BTN_GHOST} onClick={onCancel}>
-            Đóng
+            {t('common.close')}
           </button>
           <span className="flex-1" />
           <button type="button" className={BTN_PRI} disabled={busy || !text.trim()} onClick={onSend}>
-            Gửi
+            {t('common.send')}
           </button>
         </>
       }
@@ -1083,8 +1092,9 @@ function ReplyBox({ k, placeholder, busy, onCancel, onSend }: { k: string; place
 
 /** Ảnh + ghim góp ý (toạ độ 0–1 theo ảnh). */
 function PinImage({ src, pins, picking, onPick, onPin }: { src: string; pins: PinMark[]; picking: boolean; onPick: (p: { x: number; y: number }) => void; onPin: (id: string) => void }): React.JSX.Element {
+  const t = useT()
   const [failed, setFailed] = useState(false)
-  if (failed) return <Note>Trình xem trong app không đọc được ảnh này.</Note>
+  if (failed) return <Note>{t('artifacts.imageFailed')}</Note>
   return (
     <div className="mx-auto my-[22px] max-w-[840px] px-[18px]">
       <div
@@ -1146,6 +1156,7 @@ function Player({
   onMark: (id: string) => void
   onComment: (t: number) => void
 }): React.JSX.Element {
+  const tr = useT()
   const ref = useRef<HTMLVideoElement & HTMLAudioElement>(null)
   const [t, setT] = useState(0)
   const [dur, setDur] = useState(0)
@@ -1159,7 +1170,7 @@ function Player({
       el.pause()
     }
   }, [hot, comments])
-  if (failed) return <Note>Trình phát trong app không đọc được định dạng / codec của file này. Bấm “Mở bằng app mặc định”.</Note>
+  if (failed) return <Note>{tr('artifacts.mediaFailed')}</Note>
   const marks = [...comments.map((c) => ({ id: c.id, t: c.anchor.type === 'time' ? c.anchor.t : 0, tone: tone(c) })), ...(draft != null ? [{ id: '__new', t: draft, tone: 'draft' }] : [])]
   const TM: Record<string, string> = { you: 'bg-wait', draft: 'bg-accent', fixed: 'bg-work', closed: 'bg-line-3', open: 'bg-[#c9ced5]' }
   const media = { ref, src, controls: true, onError: () => setFailed(true), onTimeUpdate: () => setT(ref.current?.currentTime ?? 0), onLoadedMetadata: () => setDur(ref.current?.duration ?? 0) }
@@ -1182,7 +1193,7 @@ function Player({
             ))}
         </div>
         <div className="flex items-center gap-2 border-t border-line bg-panel-2 px-2.5 py-[7px] font-mono text-[11.5px] text-dim">
-          {formatTime(t)} / {formatTime(dur)} · bản chụp lúc nộp
+          {tr('artifacts.player.snapshot', { pos: formatTime(t), dur: formatTime(dur) })}
           <span className="flex-1" />
           <button
             type="button"
@@ -1192,7 +1203,7 @@ function Player({
               onComment(ref.current?.currentTime ?? t)
             }}
           >
-            <Mi name="cmt" /> Góp ý tại {formatTime(t)}
+            <Mi name="cmt" /> {tr('artifacts.player.commentAt', { time: formatTime(t) })}
           </button>
         </div>
       </div>
@@ -1202,20 +1213,21 @@ function Player({
 
 /** Tài liệu chữ không tách khối (quá lớn): hiện như code, chỉ góp ý chung. */
 function TextFallback({ ws, rel, vkey }: { ws: Workspace; rel: string; vkey: string }): React.JSX.Element {
+  const t = useT()
   const [text, setText] = useState<string | null>(null)
-  const [msg, setMsg] = useState<string | null>(null)
+  const [msg, setMsg] = useState<'missingSnapshot' | 'notText' | null>(null)
   useEffect(() => {
     let alive = true
     window.stag.artifacts.text(ws.id, rel).then((r) => {
       if (!alive) return
       if (r.status === 'ok') setText(r.text)
-      else setMsg(r.status === 'missing' ? 'Không còn bản chụp này.' : 'File không phải văn bản.')
+      else setMsg(r.status === 'missing' ? 'missingSnapshot' : 'notText')
     })
     return () => {
       alive = false
     }
   }, [ws.id, rel, vkey])
-  if (msg) return <Note>{msg}</Note>
-  if (text == null) return <Note>Đang mở…</Note>
+  if (msg) return <Note>{t(`artifacts.${msg}`)}</Note>
+  if (text == null) return <Note>{t('artifacts.opening')}</Note>
   return <CodeView text={text} rel={rel} />
 }

@@ -9,6 +9,7 @@ import { EditorState, StateField, type Extension } from '@codemirror/state'
 import { Decoration, type DecorationSet, drawSelection, EditorView, highlightActiveLine, keymap, MatchDecorator, placeholder, ViewPlugin, type ViewUpdate } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import type { VaultNoteInfo } from '@shared/types'
+import { t as tNow, useT } from '../../i18n'
 import { Button } from '../Modal'
 import { syncAction, wikilinkQuery } from './editSync'
 
@@ -133,6 +134,7 @@ const frontmatterTint: Extension = StateField.define<DecorationSet>({
  * Trạng thái lưu báo lên qua `onStatus` (hiện ở thanh đầu của Vault); ở đây chỉ còn thanh xung đột / lỗi.
  */
 export function NoteEditor({ vaultPath, rel, disk, notes, onStatus }: Props): React.JSX.Element {
+  const t = useT()
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   /** Nội dung coi như đang có trên đĩa: lần đọc / lưu gần nhất. */
@@ -242,7 +244,7 @@ export function NoteEditor({ vaultPath, rel, disk, notes, onStatus }: Props): Re
           wikilinks,
           frontmatterTint,
           EditorView.lineWrapping,
-          placeholder('Note trống…'),
+          placeholder(tNow('vault.editor.placeholder')),
           noteTheme,
           keymap.of([
             { key: 'Mod-s', preventDefault: true, run: () => (void saveRef.current(), true) },
@@ -300,8 +302,8 @@ export function NoteEditor({ vaultPath, rel, disk, notes, onStatus }: Props): Re
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-wait/40 bg-wait/10 px-4 py-2 text-[12px] text-wait">
           <span className="min-w-0 flex-1">
             {conflict.disk === null
-              ? 'Note vừa bị xoá hoặc đổi tên bên ngoài (agent hoặc chương trình khác) trong lúc bạn sửa.'
-              : 'Note vừa bị sửa bên ngoài (agent hoặc chương trình khác) trong lúc bạn đang sửa. Chưa ghi gì đè lên nhau.'}
+              ? t('vault.editor.deleted')
+              : t('vault.editor.changed')}
           </span>
           {conflict.disk !== null && (
             <Button
@@ -313,19 +315,19 @@ export function NoteEditor({ vaultPath, rel, disk, notes, onStatus }: Props): Re
                 setState('saved')
               }}
             >
-              Lấy bản bên ngoài (bỏ chữ của tôi)
+              {t('vault.editor.takeDisk')}
             </Button>
           )}
           <Button small onClick={() => void save(true)}>
-            {conflict.disk === null ? 'Ghi lại bản của tôi' : 'Giữ bản của tôi (ghi đè)'}
+            {conflict.disk === null ? t('vault.editor.rewrite') : t('vault.editor.keepMine')}
           </Button>
         </div>
       )}
       {state === 'error' && (
         <div className="flex shrink-0 items-center gap-2 border-b border-danger/40 bg-danger/10 px-4 py-2 text-[12px] text-danger">
-          <span className="min-w-0 flex-1 break-words">Không lưu được{error ? `: ${error}` : ''}</span>
+          <span className="min-w-0 flex-1 break-words">{error ? t('vault.editor.saveFailedWith', { error }) : t('vault.editor.saveFailed')}</span>
           <Button small onClick={() => void save()}>
-            Lưu lại
+            {t('vault.editor.retry')}
           </Button>
         </div>
       )}

@@ -8,6 +8,7 @@ import { formatDuration, jsonEqual, stepsActive, stepsSummary, turnLine, type St
 import { Markdown } from './Markdown'
 import { DiffBox, DiffStat, StepRow } from './ToolCard'
 import { describeTool, fileChanges, firstLine, mergeFileChanges, shortenPath, stepName, type DiffRow } from './toolSummary'
+import { t as tr, useLocale, useT } from '../../i18n'
 
 type Of<K extends ChatItem['kind']> = Extract<ChatItem, { kind: K }>
 type ToolBlock = Extract<ChatBlock, { type: 'tool' }>
@@ -34,6 +35,7 @@ function Fold({ open, onClick, children }: { open: boolean; onClick: () => void;
 
 /** Tin của người dùng / agent khác: bong bóng căn phải (agent khác tông xanh dương kèm avatar + tên). Lời mở của app: dòng gập. */
 export const UserItem = memo(function UserItem({ item }: { item: Of<'user'> }): React.JSX.Element {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const long = item.text.length > LONG_CHARS || item.text.split('\n').length > LONG_LINES
 
@@ -41,7 +43,7 @@ export const UserItem = memo(function UserItem({ item }: { item: Of<'user'> }): 
     return (
       <div>
         <Fold open={open} onClick={() => setOpen(!open)}>
-          Lời mở của app
+          {t('chat.appIntro')}
         </Fold>
         {open && <div className="mt-1 rounded-md border border-line px-3 py-2 text-[12px] break-words whitespace-pre-wrap text-muted select-text">{item.text}</div>}
       </div>
@@ -69,13 +71,14 @@ export const UserItem = memo(function UserItem({ item }: { item: Of<'user'> }): 
       {long && (
         <div className="mt-1">
           <Fold open={open} onClick={() => setOpen(!open)}>
-            {open ? 'Thu gọn' : 'Xem hết'}
+            {open ? t('chat.collapse') : t('chat.expand')}
           </Fold>
         </div>
       )}
       {!!item.images && (
         <div className="mt-1.5 inline-flex items-center gap-1 rounded bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted">
-          <Icon name="img" size={12} />+{item.images} ảnh
+          <Icon name="img" size={12} />
+          {t('chat.images', { count: item.images })}
         </div>
       )}
     </div>
@@ -115,6 +118,7 @@ function useTick(on: boolean): void {
 
 /** Dòng suy nghĩ trong khối bước: dòng đầu mờ, bấm mở toàn văn. */
 function ThinkingStep({ text, active }: { text: string; active: boolean }): React.JSX.Element {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const head = firstLine(text)
   return (
@@ -126,8 +130,8 @@ function ThinkingStep({ text, active }: { text: string; active: boolean }): Reac
         aria-expanded={open}
         className="flex min-h-[30px] w-full items-center gap-2 px-2.5 py-1 text-left text-[12px] text-dim italic hover:bg-panel disabled:hover:bg-transparent"
       >
-        <span className="min-w-[42px] shrink-0 font-semibold not-italic">Nghĩ</span>
-        <span className="min-w-0 flex-1 truncate">{head || 'Đang suy nghĩ…'}</span>
+        <span className="min-w-[42px] shrink-0 font-semibold not-italic">{t('chat.think')}</span>
+        <span className="min-w-0 flex-1 truncate">{head || t('chat.thinking')}</span>
         {active && <span className="sdot in" />}
       </button>
       {open && <div className="border-t border-line bg-panel px-3 py-2 text-[12px] leading-[1.55] break-words whitespace-pre-wrap text-dim italic select-text">{text}</div>}
@@ -138,7 +142,7 @@ function ThinkingStep({ text, active }: { text: string; active: boolean }): Reac
 /** Chữ cho tool đang chạy: lệnh của Bash, còn lại "Read src/a.ts". */
 function runningText(b: ToolBlock, root?: string): string {
   const v = describeTool(b.name, b.input, { root })
-  if (b.name === 'Bash') return v.summary || 'lệnh'
+  if (b.name === 'Bash') return v.summary || tr('chat.command')
   return [stepName(b.name), v.summary].filter(Boolean).join(' ')
 }
 
@@ -160,7 +164,10 @@ function entryEqual(a: StepEntry, b: StepEntry): boolean {
  */
 const StepsGroup = memo(
   function StepsGroup({ entries, agentId, agentName, root }: { entries: StepEntry[]; agentId: string; agentName: string; root?: string }): React.JSX.Element {
-    const s = useMemo(() => stepsSummary(entries), [entries])
+    const t = useT()
+    const locale = useLocale()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const s = useMemo(() => stepsSummary(entries), [entries, locale])
     const active = stepsActive(entries)
     const [userOpen, setUserOpen] = useState<boolean | null>(null)
     const open = userOpen ?? active
@@ -184,18 +191,18 @@ const StepsGroup = memo(
               <span className="min-w-0 truncate">
                 {s.running ? (
                   <>
-                    Đang chạy <span className="font-mono text-fg">{runningText(s.running, root)}</span>
+                    {t('chat.running')} <span className="font-mono text-fg">{runningText(s.running, root)}</span>
                     {since >= 1000 && <> · {formatDuration(since)}</>}
                   </>
                 ) : (
-                  'Đang suy nghĩ…'
+                  t('chat.thinking')
                 )}
               </span>
             </>
           ) : (
             <span className="min-w-0 truncate">{s.label}</span>
           )}
-          {s.failed > 0 && <span className="shrink-0 text-danger">· {s.failed} lỗi</span>}
+          {s.failed > 0 && <span className="shrink-0 text-danger">· {t('chat.errors', { count: s.failed })}</span>}
           {chips.length > 0 && (
             <span className="ml-auto flex shrink-0 gap-1 @max-[420px]/chat:hidden">
               {chips.map((c) => (
@@ -234,6 +241,7 @@ const StepsGroup = memo(
 
 /** Một file đã sửa trong lượt: tên, +/−, nút Mở, vài dòng diff (bấm để xem hết). */
 function FileCard({ path, rows, add, del, root, wsId }: { path: string; rows: DiffRow[]; add: number; del: number; root?: string; wsId: string }): React.JSX.Element {
+  const t = useT()
   const [all, setAll] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const changed = useMemo(() => rows.filter((r) => r.t === '+' || r.t === '-'), [rows])
@@ -243,7 +251,8 @@ function FileCard({ path, rows, add, del, root, wsId }: { path: string; rows: Di
     setErr(null)
     window.stag.artifacts.open(wsId, path).catch((e: unknown) => setErr(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
   }
-  const errLabel = err && /ngoài dự án/.test(err) ? 'File nằm ngoài dự án' : 'Không mở được file'
+  // Main báo file ngoài dự án (câu theo ngôn ngữ giao diện).
+  const errLabel = err && /ngoài dự án|outside (the|this) project/i.test(err) ? t('chat.file.outside') : t('chat.file.openFailed') // i18n-ignore: khớp lỗi tiếng Việt của main
   return (
     <div className="border-t border-line first:border-t-0">
       <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5">
@@ -259,26 +268,28 @@ function FileCard({ path, rows, add, del, root, wsId }: { path: string; rows: Di
           </span>
         )}
         <Button small onClick={open}>
-          Mở
+          {t('common.open')}
         </Button>
       </div>
       {all ? (
         <div className="border-t border-line bg-bg p-2">
           <DiffBox rows={rows} />
           <button type="button" onClick={() => setAll(false)} className="mt-1 text-[11px] text-dim hover:text-fg">
-            Thu gọn
+            {t('chat.collapse')}
           </button>
         </div>
       ) : (
         mini.length > 0 && (
-          <button type="button" onClick={() => setAll(true)} data-tip="Xem hết diff" className="block w-full border-t border-line bg-bg py-0.5 text-left font-mono text-[11.5px] leading-[1.6]">
+          <button type="button" onClick={() => setAll(true)} data-tip={t('chat.fullDiff')} className="block w-full border-t border-line bg-bg py-0.5 text-left font-mono text-[11.5px] leading-[1.6]">
             {mini.map((r, i) => (
               <div key={i} className={`truncate px-2.5 whitespace-pre ${r.t === '+' ? 'bg-work/[0.08] text-add-text' : 'bg-danger/[0.08] text-del-text'}`}>
                 {r.t}
                 {r.s || ' '}
               </div>
             ))}
-            {changed.length > mini.length && <div className="px-2.5 font-sans text-[11px] text-dim">+{changed.length - mini.length} dòng nữa…</div>}
+            {changed.length > mini.length && (
+              <div className="px-2.5 font-sans text-[11px] text-dim">{t('chat.moreLines', { count: changed.length - mini.length })}</div>
+            )}
           </button>
         )
       )}
@@ -288,7 +299,8 @@ function FileCard({ path, rows, add, del, root, wsId }: { path: string; rows: Di
 
 const FilesCard = memo(
   function FilesCard({ tools, root, wsId }: { tools: ToolBlock[]; root?: string; wsId: string }): React.JSX.Element | null {
-    const files = useMemo(() => mergeFileChanges(tools.flatMap((t) => fileChanges(t.name, t.input))), [tools])
+    const t = useT()
+    const files = useMemo(() => mergeFileChanges(tools.flatMap((x) => fileChanges(x.name, x.input))), [tools])
     const [all, setAll] = useState(false)
     if (!files.length) return null
     const shown = all ? files : files.slice(0, FILES_SHOWN)
@@ -299,7 +311,7 @@ const FilesCard = memo(
         ))}
         {files.length > FILES_SHOWN && (
           <button type="button" onClick={() => setAll(!all)} className="block w-full border-t border-line px-2.5 py-1 text-left text-[11px] text-dim hover:text-fg">
-            {all ? 'Thu gọn' : `+${files.length - FILES_SHOWN} file khác`}
+            {all ? t('chat.collapse') : t('chat.moreFiles', { count: files.length - FILES_SHOWN })}
           </button>
         )}
       </div>
@@ -312,6 +324,7 @@ const FilesCard = memo(
 
 /** "1m 42s · $0,21" + nút chép chữ trả lời của lượt. */
 const MetaLine = memo(function MetaLine({ turn, copyText }: { turn: Of<'turn'> | null; copyText: string }): React.JSX.Element | null {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const line = turn ? turnLine(turn) : null
   const failed = !!turn && turn.outcome !== 'success'
@@ -327,8 +340,8 @@ const MetaLine = memo(function MetaLine({ turn, copyText }: { turn: Of<'turn'> |
             setCopied(true)
             setTimeout(() => setCopied(false), 1200)
           }}
-          data-tip={copied ? 'Đã chép' : 'Chép câu trả lời'}
-          aria-label="Chép câu trả lời"
+          data-tip={copied ? t('common.copied') : t('chat.copyAnswer')}
+          aria-label={t('chat.copyAnswer')}
           className="inline-flex h-5 items-center gap-1 rounded px-1 text-dim hover:bg-panel-3 hover:text-fg"
         >
           <Icon name={copied ? 'check' : 'copy'} size={12} />
@@ -352,6 +365,7 @@ export interface RowCtx {
 
 /** Một dòng của hội thoại (đã gom bằng buildRows). */
 export function ChatRow({ row, ctx }: { row: ViewRow; ctx: RowCtx }): React.JSX.Element | null {
+  const t = useT()
   switch (row.type) {
     case 'user':
       return <UserItem item={row.item} />
@@ -365,7 +379,7 @@ export function ChatRow({ row, ctx }: { row: ViewRow; ctx: RowCtx }): React.JSX.
       return (
         <div className="inline-flex items-center gap-1.5 text-[12px] text-dim">
           <span className="sdot in" />
-          Đang trả lời…
+          {t('chat.answering')}
         </div>
       )
     case 'steps':

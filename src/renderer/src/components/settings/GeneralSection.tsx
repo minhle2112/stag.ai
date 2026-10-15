@@ -4,12 +4,14 @@ import { useSettings } from '../../store/settings'
 import { useUi } from '../../store/ui'
 import { ErrorBar, Group, Row, SectionTitle, Select, SmallButton, Stepper, Switch, useSaveError } from './controls'
 import { LevelBar } from './levels'
+import { useT } from '../../i18n'
 
 const ZOOMS = [70, 80, 90, 100, 110, 125, 150]
 
 export function GeneralSection(): React.JSX.Element {
   const g = useSettings((s) => s.value.app.general)
   const save = useSettings((s) => s.save)
+  const t = useT()
   const [error, run] = useSaveError()
   const openSettings = useUi((s) => s.openSettings)
   const [meta, setMeta] = useState<AppMeta | null>(null)
@@ -22,82 +24,71 @@ export function GeneralSection(): React.JSX.Element {
   const set = (patch: Partial<GeneralSettings>): void => run(save({ general: patch }))
 
   async function pickProjectsDir(): Promise<void> {
-    const dir = await window.stag.pickFolder('Chọn thư mục chứa các dự án', g.projectsDir || undefined)
+    const dir = await window.stag.pickFolder(t('settings.general.projectsDirPick'), g.projectsDir || undefined)
     if (dir) set({ projectsDir: dir })
   }
 
   return (
     <>
-      <SectionTitle title="Chung" desc="Các cài đặt áp dụng cho cả app. Thay đổi được lưu ngay." right={<LevelBar appOnly />} />
+      <SectionTitle title={t('settings.general.title')} desc={t('settings.general.desc')} right={<LevelBar appOnly />} />
       <ErrorBar error={error} />
 
-      <Group title="Giao diện">
-        <Row label="Ngôn ngữ" desc="Giao diện hiện chỉ có tiếng Việt. Agent vẫn trả lời theo ngôn ngữ bạn dùng.">
-          <Select
-            label="Ngôn ngữ"
-            value="vi"
-            onChange={() => {}}
-            options={[
-              { value: 'vi', label: 'Tiếng Việt' },
-              { value: 'en', label: 'English (sắp có)', disabled: true }
-            ]}
-          />
+      <Group title={t('settings.general.appearance')}>
+        <Row label={t('settings.general.languageTheme')} desc={t('settings.general.languageThemeDesc')}>
+          <SmallButton onClick={() => openSettings('appearance')}>{t('settings.general.openAppearance')}</SmallButton>
         </Row>
-        <Row label="Sáng / tối" desc="Chọn ở Cài đặt → Giao diện.">
-          <SmallButton onClick={() => openSettings('appearance')}>Mở Giao diện</SmallButton>
-        </Row>
-        <Row label="Thu phóng" desc="Phóng to / thu nhỏ toàn bộ giao diện app (không đổi cỡ chữ terminal).">
+        <Row label={t('settings.general.zoom')} desc={t('settings.general.zoomDesc')}>
           <Select
-            label="Thu phóng"
+            label={t('settings.general.zoom')}
             value={g.zoom}
             onChange={(zoom) => set({ zoom })}
             options={(ZOOMS.includes(g.zoom) ? ZOOMS : [...ZOOMS, g.zoom].sort((a, b) => a - b)).map((z) => ({ value: z, label: `${z}%` }))}
           />
         </Row>
         <Row
-          label="Usage Claude ở thanh trạng thái"
-          desc="% phiên 5 giờ và % tuần của tài khoản đang đăng nhập trong Claude Code, hỏi lại mỗi 3 phút và sau mỗi lượt của agent Claude."
+          label={t('settings.general.usage')}
+          desc={t('settings.general.usageDesc')}
         >
-          <Switch label="Usage Claude ở thanh trạng thái" checked={g.claudeUsage} onChange={(claudeUsage) => set({ claudeUsage })} />
+          <Switch label={t('settings.general.usage')} checked={g.claudeUsage} onChange={(claudeUsage) => set({ claudeUsage })} />
         </Row>
       </Group>
 
-      <Group title="Khởi động">
+      <Group title={t('settings.general.startup')}>
         <Row
-          label="Chạy cùng Windows"
-          desc="Mở stag.ai khi đăng nhập Windows."
-          sub={meta && !meta.packaged ? 'Chỉ có tác dụng ở bản cài đặt (bạn đang chạy bản dev).' : undefined}
+          label={t('settings.general.openAtLogin')}
+          desc={t('settings.general.openAtLoginDesc')}
+          sub={meta && !meta.packaged ? t('settings.general.openAtLoginDev') : undefined}
         >
-          <Switch label="Chạy cùng Windows" checked={g.openAtLogin} onChange={(openAtLogin) => set({ openAtLogin })} />
+          <Switch label={t('settings.general.openAtLogin')} checked={g.openAtLogin} onChange={(openAtLogin) => set({ openAtLogin })} />
         </Row>
-        <Row label="Mở lại workspace lần trước" desc="Tắt thì app luôn mở workspace đầu tiên trong danh sách.">
-          <Switch label="Mở lại workspace lần trước" checked={g.reopenLastWorkspace} onChange={(reopenLastWorkspace) => set({ reopenLastWorkspace })} />
+        <Row label={t('settings.general.reopen')} desc={t('settings.general.reopenDesc')}>
+          <Switch label={t('settings.general.reopen')} checked={g.reopenLastWorkspace} onChange={(reopenLastWorkspace) => set({ reopenLastWorkspace })} />
         </Row>
       </Group>
 
-      <Group title="Dự án">
+      <Group title={t('settings.general.projects')}>
         <Row
-          label="Thư mục mặc định"
+          label={t('settings.general.projectsDir')}
           sub={
             g.projectsDir ? (
               <span className="break-all font-mono text-[11px]">{g.projectsDir}</span>
             ) : (
-              'Chưa đặt: hộp thoại chọn thư mục mở ở chỗ Windows tự chọn.'
+              t('settings.general.projectsDirUnset')
             )
           }
         >
-          {g.projectsDir && <SmallButton onClick={() => set({ projectsDir: '' })}>Bỏ</SmallButton>}
-          <SmallButton onClick={() => void pickProjectsDir()}>Chọn…</SmallButton>
+          {g.projectsDir && <SmallButton onClick={() => set({ projectsDir: '' })}>{t('settings.general.projectsDirClear')}</SmallButton>}
+          <SmallButton onClick={() => void pickProjectsDir()}>{t('common.browse')}</SmallButton>
         </Row>
       </Group>
 
-      <Group title="Terminal">
-        <Row label="Shell cho ô Terminal" desc="Đã chuyển sang Adapter → Terminal.">
-          <SmallButton onClick={() => openSettings('adapters', { adapter: 'terminal' })}>Mở</SmallButton>
+      <Group title={t('settings.general.terminal')}>
+        <Row label={t('settings.general.shell')} desc={t('settings.general.shellDesc')}>
+          <SmallButton onClick={() => openSettings('adapters', { adapter: 'terminal' })}>{t('common.open')}</SmallButton>
         </Row>
-        <Row label="Cỡ chữ" desc="Cho mọi ô agent (terminal và ô Chat) và ô Terminal. Áp dụng ngay.">
+        <Row label={t('settings.general.fontSize')} desc={t('settings.general.fontSizeDesc')}>
           <Stepper
-            label="Cỡ chữ terminal"
+            label={t('settings.general.fontSizeLabel')}
             value={g.terminalFontSize}
             min={TERMINAL_FONT_MIN}
             max={TERMINAL_FONT_MAX}
@@ -107,20 +98,20 @@ export function GeneralSection(): React.JSX.Element {
         </Row>
       </Group>
 
-      <Group title="Thông báo">
-        <Row label="Khi agent chờ bạn" desc="Agent hết lượt, hỏi bạn, hoặc xin quyền. Chỉ báo khi bạn không ở cửa sổ stag.ai.">
-          <Switch label="Báo khi agent chờ bạn" checked={g.notifyWaiting} onChange={(notifyWaiting) => set({ notifyWaiting })} />
+      <Group title={t('settings.general.notifications')}>
+        <Row label={t('settings.general.notifyWaiting')} desc={t('settings.general.notifyWaitingDesc')}>
+          <Switch label={t('settings.general.notifyWaitingLabel')} checked={g.notifyWaiting} onChange={(notifyWaiting) => set({ notifyWaiting })} />
         </Row>
-        <Row label="Khi agent xong việc" desc="Agent đánh dấu xong một việc (task_done).">
-          <Switch label="Báo khi agent xong việc" checked={g.notifyTaskDone} onChange={(notifyTaskDone) => set({ notifyTaskDone })} />
+        <Row label={t('settings.general.notifyDone')} desc={t('settings.general.notifyDoneDesc')}>
+          <Switch label={t('settings.general.notifyDoneLabel')} checked={g.notifyTaskDone} onChange={(notifyTaskDone) => set({ notifyTaskDone })} />
         </Row>
-        <Row label="Âm thanh">
-          <Switch label="Âm thanh thông báo" checked={g.notifySound} onChange={(notifySound) => set({ notifySound })} />
+        <Row label={t('settings.general.sound')}>
+          <Switch label={t('settings.general.soundLabel')} checked={g.notifySound} onChange={(notifySound) => set({ notifySound })} />
         </Row>
         <Row
-          label="Thử thông báo"
-          desc="Bấm thông báo của agent sẽ mở đúng agent đó."
-          sub={tested ? 'Đã gửi. Không thấy thì kiểm tra Cài đặt Windows → Hệ thống → Thông báo.' : undefined}
+          label={t('settings.general.notifyTest')}
+          desc={t('settings.general.notifyTestDesc')}
+          sub={tested ? t('settings.general.notifyTestSent') : undefined}
         >
           <SmallButton
             onClick={() => {
@@ -128,25 +119,25 @@ export function GeneralSection(): React.JSX.Element {
               void window.stag.settings.notifyTest()
             }}
           >
-            Gửi thử
+            {t('settings.general.notifyTestBtn')}
           </SmallButton>
         </Row>
       </Group>
 
-      <Group title="Đóng cửa sổ">
-        <Row label="Khi bấm ×" desc="Thu xuống khay: agent vẫn chạy, mở lại bằng icon stag.ai ở khay hệ thống (góc phải thanh tác vụ).">
+      <Group title={t('settings.general.closeWindow')}>
+        <Row label={t('settings.general.closeAction')} desc={t('settings.general.closeActionDesc')}>
           <Select
-            label="Khi bấm ×"
+            label={t('settings.general.closeAction')}
             value={g.closeAction}
             onChange={(closeAction) => set({ closeAction })}
             options={[
-              { value: 'quit', label: 'Thoát hẳn' },
-              { value: 'tray', label: 'Thu xuống khay' }
+              { value: 'quit', label: t('settings.general.closeQuit') },
+              { value: 'tray', label: t('settings.general.closeTray') }
             ]}
           />
         </Row>
-        <Row label="Hỏi trước khi thoát" desc="Nếu còn agent / terminal đang chạy (thoát sẽ dừng các phiên đó).">
-          <Switch label="Hỏi trước khi thoát" checked={g.confirmQuitRunning} onChange={(confirmQuitRunning) => set({ confirmQuitRunning })} />
+        <Row label={t('settings.general.confirmQuit')} desc={t('settings.general.confirmQuitDesc')}>
+          <Switch label={t('settings.general.confirmQuit')} checked={g.confirmQuitRunning} onChange={(confirmQuitRunning) => set({ confirmQuitRunning })} />
         </Row>
       </Group>
     </>

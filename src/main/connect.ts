@@ -4,6 +4,7 @@ import type { ConnectAccess, ConnectRequest, Connector } from '@shared/types'
 import type { OAuthService } from './oauth'
 import type { SecretStore } from './secrets'
 import type { SettingsStore } from './settings'
+import { t } from '@shared/i18n'
 
 /**
  * "Connect" từ danh mục: dựng connector theo cách kết nối đã chọn, cất key / đăng nhập OAuth, lưu, rồi bật cho
@@ -11,7 +12,7 @@ import type { SettingsStore } from './settings'
  */
 export async function connectFromCatalog(req: ConnectRequest, deps: { settings: SettingsStore; secrets: SecretStore; oauth: OAuthService }): Promise<string> {
   const found = findCatalog(req.slug, req.method)
-  if (!found) throw new Error('Không thấy dịch vụ / cách kết nối này trong danh mục.')
+  if (!found) throw new Error(t('connectors.connect.notFound'))
   const { entry, method: m } = found
   const items = deps.settings.get().app.connectors.items
   let id = entry.slug
@@ -30,9 +31,9 @@ export async function connectFromCatalog(req: ConnectRequest, deps: { settings: 
       try {
         u = new URL(url)
       } catch {
-        throw new Error('Dán đầy đủ URL máy chủ (bắt đầu bằng https://).')
+        throw new Error(t('connectors.connect.pasteUrl'))
       }
-      if (u.protocol !== 'https:') throw new Error('URL máy chủ phải bắt đầu bằng https://.')
+      if (u.protocol !== 'https:') throw new Error(t('connectors.connect.https'))
       // Token nằm trong URL: cất cả URL thành bí mật, cài đặt chỉ giữ bản rút gọn để hiện.
       const name = secretNameFor(id, 'URL')
       secrets.push({ name, value: url })
@@ -41,7 +42,7 @@ export async function connectFromCatalog(req: ConnectRequest, deps: { settings: 
     } else c.url = fillServerUrl(m, req.fields ?? {})
     if (m.kind === 'key') {
       const value = (req.value ?? '').trim()
-      if (!value) throw new Error(`Cần ${m.keyLabel ?? 'API key'}.`)
+      if (!value) throw new Error(t('connectors.connect.keyRequired', { label: m.keyLabel ?? 'API key' }))
       const name = secretNameFor(id, 'KEY')
       secrets.push({ name, value })
       const h = m.header ?? { name: 'Authorization', prefix: 'Bearer ' }

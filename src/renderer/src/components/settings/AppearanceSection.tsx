@@ -2,8 +2,10 @@ import type { GeneralSettings, ThemePref } from '@shared/types'
 import { useSettings } from '../../store/settings'
 import { useTheme } from '../../store/theme'
 import { Icon, type IconName } from '../Icon'
-import { ErrorBar, Group, Row, SectionTitle, Switch, useSaveError } from './controls'
+import { ErrorBar, Group, Row, SectionTitle, Select, Switch, useSaveError } from './controls'
 import { LevelBar } from './levels'
+import { tx, useT } from '../../i18n'
+import type { PlainKey } from '@shared/i18n'
 
 /** Màu của ảnh xem trước (app thu nhỏ) cho từng chế độ: cố định, không theo theme đang dùng. */
 const MINI = {
@@ -35,26 +37,41 @@ function MiniApp({ kind }: { kind: 'dark' | 'light' }): React.JSX.Element {
   )
 }
 
-const OPTIONS: { id: ThemePref; name: string; desc: string; icon: IconName }[] = [
-  { id: 'dark', name: 'Tối', desc: 'Bảng màu “Xưởng”', icon: 'moon' },
-  { id: 'light', name: 'Sáng', desc: 'Nền trắng, teal sẫm', icon: 'sun' },
-  { id: 'system', name: 'Theo Windows', desc: 'Đổi theo Windows', icon: 'monitor' }
+const OPTIONS: { id: ThemePref; name: PlainKey; desc: PlainKey; icon: IconName }[] = [
+  { id: 'dark', name: 'settings.appearance.dark', desc: 'settings.appearance.darkDesc', icon: 'moon' },
+  { id: 'light', name: 'settings.appearance.light', desc: 'settings.appearance.lightDesc', icon: 'sun' },
+  { id: 'system', name: 'settings.appearance.system', desc: 'settings.appearance.systemDesc', icon: 'monitor' }
 ]
 
 export function AppearanceSection(): React.JSX.Element {
   const g = useSettings((s) => s.value.app.general)
   const save = useSettings((s) => s.save)
   const windowsDark = useTheme((s) => s.windowsDark)
+  const t = useT()
   const [error, run] = useSaveError()
   const set = (patch: Partial<GeneralSettings>): void => run(save({ general: patch }))
 
   return (
     <>
-      <SectionTitle title="Giao diện" desc="Màu của app. Áp dụng ngay, không cần khởi động lại." right={<LevelBar appOnly />} />
+      <SectionTitle title={t('settings.appearance.title')} desc={t('settings.appearance.desc')} right={<LevelBar appOnly />} />
       <ErrorBar error={error} />
 
-      <Group title="Chế độ màu" flush>
-        <div role="radiogroup" aria-label="Chế độ màu" className="grid grid-cols-3 gap-3 py-2">
+      <Group title={t('settings.appearance.language')}>
+        <Row label={t('settings.appearance.language')} desc={t('settings.appearance.languageDesc')}>
+          <Select
+            label={t('settings.appearance.language')}
+            value={g.language}
+            onChange={(language) => set({ language })}
+            options={[
+              { value: 'vi', label: t('settings.appearance.languageVi') },
+              { value: 'en', label: t('settings.appearance.languageEn') }
+            ]}
+          />
+        </Row>
+      </Group>
+
+      <Group title={t('settings.appearance.colorMode')} flush>
+        <div role="radiogroup" aria-label={t('settings.appearance.colorMode')} className="grid grid-cols-3 gap-3 py-2">
           {OPTIONS.map((o) => {
             const on = g.theme === o.id
             return (
@@ -83,9 +100,9 @@ export function AppearanceSection(): React.JSX.Element {
                     {on && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
                   </span>
                   <Icon name={o.icon} className="text-muted" />
-                  {o.name}
+                  {t(o.name)}
                 </div>
-                <div className="mt-px pl-5 text-[11.5px] text-dim">{o.desc}</div>
+                <div className="mt-px pl-5 text-[11.5px] text-dim">{t(o.desc)}</div>
               </button>
             )
           })}
@@ -93,27 +110,25 @@ export function AppearanceSection(): React.JSX.Element {
         {g.theme === 'system' && (
           <div className="mb-1 flex items-start gap-2 rounded-md bg-info/10 px-2.5 py-2 text-[12px] text-fg">
             <Icon name="info" className="mt-px shrink-0 text-info" />
-            <span>
-              Windows đang <b>{windowsDark ? 'tối' : 'sáng'}</b>. Đổi trong Windows → Cá nhân hoá → Màu, app đổi theo.
-            </span>
+            <span>{tx('settings.appearance.windowsNow', { mode: <b>{t(windowsDark ? 'settings.appearance.windowsIsDark' : 'settings.appearance.windowsIsLight')}</b> })}</span>
           </div>
         )}
       </Group>
 
-      <Group title="Terminal và agent">
-        <Row label="Terminal theo giao diện app" desc="Tắt thì ô terminal luôn nền tối, kể cả khi app sáng.">
-          <Switch label="Terminal theo giao diện app" checked={g.terminalFollowTheme} onChange={(terminalFollowTheme) => set({ terminalFollowTheme })} />
+      <Group title={t('settings.appearance.terminalAgent')}>
+        <Row label={t('settings.appearance.terminalFollow')} desc={t('settings.appearance.terminalFollowDesc')}>
+          <Switch label={t('settings.appearance.terminalFollow')} checked={g.terminalFollowTheme} onChange={(terminalFollowTheme) => set({ terminalFollowTheme })} />
         </Row>
         <Row
-          label="Đổi theme của Claude Code theo app"
-          desc="Terminal sáng thì Claude Code dùng theme light-ansi (ghi vào ~/.claude.json, nên cũng đổi khi chạy ngoài app); tắt thì trả lại theme cũ. Agent đang chạy đổi màu khi mở lại phiên."
+          label={t('settings.appearance.claudeSync')}
+          desc={t('settings.appearance.claudeSyncDesc')}
         >
-          <Switch label="Đổi theme của Claude Code theo app" checked={g.claudeThemeSync} onChange={(claudeThemeSync) => set({ claudeThemeSync })} />
+          <Switch label={t('settings.appearance.claudeSync')} checked={g.claudeThemeSync} onChange={(claudeThemeSync) => set({ claudeThemeSync })} />
         </Row>
       </Group>
 
-      <Group title="Phím tắt">
-        <Row label="Đổi nhanh sáng / tối" desc="Cũng có ở nút mặt trời trên thanh tiêu đề và trong Ctrl+K.">
+      <Group title={t('settings.appearance.shortcuts')}>
+        <Row label={t('settings.appearance.quickToggle')} desc={t('settings.appearance.quickToggleDesc')}>
           {['Ctrl', 'Shift', 'L'].map((k) => (
             <kbd key={k} className="rounded border border-b-2 border-line-2 bg-panel-2 px-1.5 font-mono text-[11px] text-muted">
               {k}

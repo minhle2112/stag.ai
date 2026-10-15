@@ -16,12 +16,15 @@ import { HandoffSection } from './HandoffSection'
 import { ScopeSection } from './ScopeSection'
 import { AgentApiSection } from './AgentApiSection'
 import { BrowserSection } from './BrowserSection'
+import { ComputerSection } from './ComputerSection'
 import { VoiceSection } from './VoiceSection'
 import { VaultSection } from './VaultSection'
+import { useT } from '../../i18n'
+import type { PlainKey } from '@shared/i18n'
 
 interface NavItem {
   id: SettingsSection
-  label: string
+  label: PlainKey
   icon: IconName
   /** Chưa làm: hiện nhãn "sắp có" và trang mô tả. */
   soon?: string
@@ -30,28 +33,29 @@ interface NavItem {
 /** Menu trái theo thứ tự đã chốt: Chung đầu tiên (xem vault: Settings). Mỗi mảng là một nhóm. */
 const NAV: NavItem[][] = [
   [
-    { id: 'general', label: 'Chung', icon: 'gear' },
-    { id: 'appearance', label: 'Giao diện', icon: 'palette' },
-    { id: 'voice', label: 'Giọng nói', icon: 'mic' }
+    { id: 'general', label: 'settings.nav.general', icon: 'gear' },
+    { id: 'appearance', label: 'settings.nav.appearance', icon: 'palette' },
+    { id: 'voice', label: 'settings.nav.voice', icon: 'mic' }
   ],
   [
-    { id: 'adapters', label: 'Adapter', icon: 'term' },
-    { id: 'connectors', label: 'Connector (MCP)', icon: 'conn' },
-    { id: 'skills', label: 'Skill', icon: 'book' },
-    { id: 'plugins', label: 'Plugin', icon: 'plug' },
-    { id: 'secrets', label: 'Kho bí mật', icon: 'key' },
-    { id: 'passwords', label: 'Mật khẩu', icon: 'shield' }
+    { id: 'adapters', label: 'settings.nav.adapters', icon: 'term' },
+    { id: 'connectors', label: 'settings.nav.connectors', icon: 'conn' },
+    { id: 'skills', label: 'settings.nav.skills', icon: 'book' },
+    { id: 'plugins', label: 'settings.nav.plugins', icon: 'plug' },
+    { id: 'secrets', label: 'settings.nav.secrets', icon: 'key' },
+    { id: 'passwords', label: 'settings.nav.passwords', icon: 'shield' }
   ],
   [
-    { id: 'handoff', label: 'Agent & bàn giao', icon: 'bot' },
-    { id: 'vault', label: 'Vault & bộ nhớ', icon: 'vault' },
-    { id: 'scope', label: 'Khoá phạm vi', icon: 'lock' },
-    { id: 'agentApi', label: 'Agent API', icon: 'code' },
-    { id: 'browser', label: 'Trình duyệt', icon: 'globe' }
+    { id: 'handoff', label: 'settings.nav.handoff', icon: 'bot' },
+    { id: 'vault', label: 'settings.nav.vault', icon: 'vault' },
+    { id: 'scope', label: 'settings.nav.scope', icon: 'lock' },
+    { id: 'agentApi', label: 'settings.nav.agentApi', icon: 'code' },
+    { id: 'browser', label: 'settings.nav.browser', icon: 'globe' },
+    { id: 'computer', label: 'settings.nav.computer', icon: 'monitor' }
   ],
   [
-    { id: 'data', label: 'Dữ liệu', icon: 'folder' },
-    { id: 'about', label: 'Giới thiệu', icon: 'info' }
+    { id: 'data', label: 'settings.nav.data', icon: 'folder' },
+    { id: 'about', label: 'settings.nav.about', icon: 'info' }
   ]
 ]
 
@@ -60,6 +64,7 @@ const NAV: NavItem[][] = [
 const SOON: Partial<Record<SettingsSection, { title: string; points: string[] }>> = {}
 
 export function SettingsPage(): React.JSX.Element {
+  const t = useT()
   const section = useUi((s) => s.settings) ?? 'general'
   const open = useUi((s) => s.openSettings)
   const close = useUi((s) => s.closeSettings)
@@ -75,7 +80,7 @@ export function SettingsPage(): React.JSX.Element {
   }, [close])
 
   return (
-    <div className="absolute inset-0 z-10 flex bg-bg" role="region" aria-label="Cài đặt">
+    <div className="absolute inset-0 z-10 flex bg-bg" role="region" aria-label={t('settings.page.aria')}>
       <nav className="flex w-[200px] shrink-0 flex-col border-r border-line bg-bg">
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {NAV.map((group, i) => (
@@ -89,10 +94,10 @@ export function SettingsPage(): React.JSX.Element {
                   }`}
                 >
                   <Icon name={item.icon} className={section === item.id ? 'text-fg' : 'text-dim'} />
-                  <span className="flex-1">{item.label}</span>
-                  {item.soon && <span className="rounded bg-line/60 px-1.5 text-[11px] text-muted">sắp có</span>}
+                  <span className="flex-1">{t(item.label)}</span>
+                  {item.soon && <span className="rounded bg-line/60 px-1.5 text-[11px] text-muted">{t('settings.page.soon')}</span>}
                   {item.id === 'connectors' && pending > 0 && (
-                    <span className="rounded-full bg-wait px-1.5 text-[11px] font-semibold text-wait-on" data-tip="Đang chờ bạn duyệt">
+                    <span className="rounded-full bg-wait px-1.5 text-[11px] font-semibold text-wait-on" data-tip={t('settings.page.pendingTip')}>
                       {pending}
                     </span>
                   )}
@@ -140,6 +145,8 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
       return <AgentApiSection />
     case 'browser':
       return <BrowserSection />
+    case 'computer':
+      return <ComputerSection />
     case 'voice':
       return <VoiceSection />
     case 'vault':
@@ -154,11 +161,12 @@ function Section({ id }: { id: SettingsSection }): React.JSX.Element {
 }
 
 function SoonSection({ id }: { id: SettingsSection }): React.JSX.Element {
+  const t = useT()
   const info = SOON[id]
   const stage = NAV.flat().find((n) => n.id === id)?.soon
   return (
     <>
-      <SectionTitle title={info?.title ?? id} desc={`Sắp có (đợt ${stage}).`} />
+      <SectionTitle title={info?.title ?? id} desc={t('settings.page.soonDesc', { stage: stage ?? '' })} />
       <div className="rounded-lg border border-dashed border-line-2 px-5 py-4">
         <ul className="list-disc space-y-1.5 pl-5 text-[13px] leading-relaxed text-muted">
           {info?.points.map((p) => (
@@ -179,23 +187,25 @@ function useMeta(): AppMeta | null {
 }
 
 function DataSection(): React.JSX.Element {
+  const t = useT()
   const meta = useMeta()
   return (
     <>
-      <SectionTitle title="Dữ liệu" desc="Danh sách workspace, agent, cài đặt và mẫu của app nằm ở thư mục dữ liệu. Code và vault nằm trong thư mục dự án." />
-      <Group title="Thư mục dữ liệu">
-        <Row label="Vị trí" sub={<span className="break-all font-mono text-[11px]">{meta ? meta.userData : '…'}</span>}>
+      <SectionTitle title={t('settings.nav.data')} desc={t('settings.data.desc')} />
+      <Group title={t('settings.data.folder')}>
+        <Row label={t('settings.data.location')} sub={<span className="break-all font-mono text-[11px]">{meta ? meta.userData : '…'}</span>}>
           <SmallButton disabled={!meta} onClick={() => meta && void window.stag.openFolder(meta.userData)}>
-            Mở
+            {t('common.open')}
           </SmallButton>
         </Row>
-        <Row label="Xuất / nhập cấu hình, sao lưu" sub="Sắp có." disabled />
+        <Row label={t('settings.data.backup')} sub={t('settings.data.soon')} disabled />
       </Group>
     </>
   )
 }
 
 function AboutSection(): React.JSX.Element {
+  const t = useT()
   const meta = useMeta()
   const line = (label: string, value: string | undefined): React.JSX.Element => (
     <Row label={label}>
@@ -204,15 +214,15 @@ function AboutSection(): React.JSX.Element {
   )
   return (
     <>
-      <SectionTitle title="Giới thiệu" desc="stag.ai: điều hành một đội agent AI viết code, mỗi workspace có một vault (note markdown) làm bộ nhớ, agent đọc / sửa qua app." />
-      <Group title="Phiên bản">
+      <SectionTitle title={t('settings.nav.about')} desc={t('settings.about.desc')} />
+      <Group title={t('settings.about.version')}>
         {line('stag.ai', meta ? `${meta.version}${meta.packaged ? '' : ' (dev)'}` : undefined)}
         {line('Electron', meta?.electron)}
         {line('Chromium', meta?.chrome)}
         {line('Node.js', meta?.node)}
       </Group>
-      <Group title="Cập nhật">
-        <Row label="Tự kiểm tra bản mới" desc="Chưa có: cần nơi phát hành bản cài (máy chủ cập nhật) trước." sub="Sắp có." disabled />
+      <Group title={t('settings.about.updates')}>
+        <Row label={t('settings.about.autoUpdate')} desc={t('settings.about.autoUpdateDesc')} sub={t('settings.data.soon')} disabled />
       </Group>
     </>
   )

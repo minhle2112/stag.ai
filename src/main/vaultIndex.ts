@@ -26,7 +26,7 @@ function vaultKey(vaultPath: string): string {
 
 /** Bỏ dấu tiếng Việt + chữ thường để tìm "ke hoach" ra "Kế hoạch". */
 export function fold(s: string): string {
-  return s.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase()
+  return s.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase() // i18n-ignore: bỏ dấu tiếng Việt khi tìm
 }
 
 /** Tag của note = tag trong frontmatter + `#tag` trong thân (như Obsidian), không trùng (không phân biệt hoa thường). */

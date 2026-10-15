@@ -1,14 +1,16 @@
 // Kho mật khẩu cho agent: kiểu dữ liệu + hàm thuần dùng chung giữa main, lớp trang của ô Browser và renderer.
 // Nguyên tắc: agent không bao giờ thấy mật khẩu hay mã 2FA. App tự điền vào trang trong ô Browser, chỉ trên đúng tên miền.
+import { t, type Locale, type PlainKey } from './i18n'
 
 /** Khi agent muốn dùng mục: hỏi mỗi lần / hỏi lần đầu của mỗi agent / không hỏi (agent đã chọn) / agent không được dùng. */
 export type CredentialPolicy = 'ask' | 'first' | 'auto' | 'off'
 
-export const POLICY_LABEL: Record<CredentialPolicy, string> = {
-  ask: 'Hỏi mỗi lần',
-  first: 'Hỏi lần đầu của mỗi agent',
-  auto: 'Không hỏi',
-  off: 'Agent không được dùng'
+/** Khoá từ điển của nhãn chế độ hỏi: gọi `t(POLICY_LABEL[p])` lúc vẽ. */
+export const POLICY_LABEL: Record<CredentialPolicy, PlainKey> = {
+  ask: 'passwords.policy.ask',
+  first: 'passwords.policy.first',
+  auto: 'passwords.policy.auto',
+  off: 'passwords.policy.off'
 }
 export const POLICIES: CredentialPolicy[] = ['ask', 'first', 'auto', 'off']
 
@@ -245,23 +247,23 @@ export function base32Decode(s: string): Uint8Array {
 /** Đọc khoá 2FA bạn dán: khoá base32 hoặc link `otpauth://totp/...`. */
 export function parseTotp(raw: string): TotpParams | { error: string } {
   const s = raw.trim()
-  if (!s) return { error: 'Chưa có khoá.' }
+  if (!s) return { error: t('passwords.totp.empty') }
   if (/^otpauth:/i.test(s)) {
     let u: URL
     try {
       u = new URL(s)
     } catch {
-      return { error: 'Link otpauth:// không đọc được.' }
+      return { error: t('passwords.totp.badLink') }
     }
-    if (u.host.toLowerCase() !== 'totp') return { error: u.host.toLowerCase() === 'hotp' ? 'Mã HOTP (đếm theo lần) chưa hỗ trợ, chỉ TOTP.' : 'Link otpauth:// không phải TOTP.' }
+    if (u.host.toLowerCase() !== 'totp') return { error: u.host.toLowerCase() === 'hotp' ? t('passwords.totp.hotp') : t('passwords.totp.notTotp') }
     const secret = cleanBase32(u.searchParams.get('secret') ?? '')
-    if (!secret) return { error: 'Link otpauth:// thiếu khoá hoặc khoá sai.' }
+    if (!secret) return { error: t('passwords.totp.badSecret') }
     const alg = (u.searchParams.get('algorithm') ?? 'SHA1').toUpperCase().replace('-', '')
-    if (alg !== 'SHA1' && alg !== 'SHA256' && alg !== 'SHA512') return { error: `Thuật toán ${alg} chưa hỗ trợ.` }
+    if (alg !== 'SHA1' && alg !== 'SHA256' && alg !== 'SHA512') return { error: t('passwords.totp.badAlg', { alg }) }
     const digits = Number(u.searchParams.get('digits') ?? 6)
     const period = Number(u.searchParams.get('period') ?? 30)
-    if (![6, 7, 8].includes(digits)) return { error: 'Số chữ số của mã phải là 6, 7 hoặc 8.' }
-    if (!Number.isInteger(period) || period < 10 || period > 300) return { error: 'Chu kỳ mã không hợp lệ.' }
+    if (![6, 7, 8].includes(digits)) return { error: t('passwords.totp.badDigits') }
+    if (!Number.isInteger(period) || period < 10 || period > 300) return { error: t('passwords.totp.badPeriod') }
     let label = ''
     try {
       label = decodeURIComponent(u.pathname.replace(/^\/+/, ''))
@@ -273,7 +275,7 @@ export function parseTotp(raw: string): TotpParams | { error: string } {
     return { secret, algorithm: alg, digits, period, ...(issuer ? { issuer } : {}), ...(acc.trim() ? { account: acc.trim() } : {}) }
   }
   const secret = cleanBase32(s)
-  if (!secret) return { error: 'Khoá 2FA phải là chuỗi base32 (chữ A–Z, số 2–7), ít nhất 16 ký tự, hoặc link otpauth://.' }
+  if (!secret) return { error: t('passwords.totp.badKey') }
   return { secret, algorithm: 'SHA1', digits: 6, period: 30 }
 }
 
@@ -324,11 +326,11 @@ export type PageStep =
   | { kind: 'otp'; via: 'app' | 'sms' | 'email' | 'unknown' }
   | { kind: 'needs_user'; how: TwoFaKind }
 
-const APP_RE = /authenticator|authentication app|auth app|app xác thực|ứng dụng xác thực|totp|google auth|authy|2fa app|two-factor app|mã từ ứng dụng/
-const SMS_RE = /\bsms\b|text message|texted|sent (?:a |the )?code to (?:your )?(?:phone|mobile|number|\+|\*)|tin nhắn|số điện thoại/
-const EMAIL_RE = /(?:sent|emailed).{0,40}(?:e-?mail|inbox)|check your (?:e-?mail|inbox)|code.{0,30}e-?mail|e-?mail.{0,30}code|mã.{0,30}email|email.{0,30}mã/
-const PUSH_RE = /check your phone|approve (?:the |this )?(?:sign[- ]?in|login|request)|tap (?:yes|approve)|sent (?:a )?(?:push|notification)|duo push|xác nhận trên điện thoại|phê duyệt (?:đăng nhập|trên)/
-const PASSKEY_RE = /passkey|security key|khóa bảo mật|khoá bảo mật|windows hello|touch id|face id|use your fingerprint|vân tay/
+const APP_RE = /authenticator|authentication app|auth app|app xác thực|ứng dụng xác thực|totp|google auth|authy|2fa app|two-factor app|mã từ ứng dụng/ // i18n-ignore: matches Vietnamese text on web pages
+const SMS_RE = /\bsms\b|text message|texted|sent (?:a |the )?code to (?:your )?(?:phone|mobile|number|\+|\*)|tin nhắn|số điện thoại/ // i18n-ignore: matches Vietnamese text on web pages
+const EMAIL_RE = /(?:sent|emailed).{0,40}(?:e-?mail|inbox)|check your (?:e-?mail|inbox)|code.{0,30}e-?mail|e-?mail.{0,30}code|mã.{0,30}email|email.{0,30}mã/ // i18n-ignore: matches Vietnamese text on web pages
+const PUSH_RE = /check your phone|approve (?:the |this )?(?:sign[- ]?in|login|request)|tap (?:yes|approve)|sent (?:a )?(?:push|notification)|duo push|xác nhận trên điện thoại|phê duyệt (?:đăng nhập|trên)/ // i18n-ignore: matches Vietnamese text on web pages
+const PASSKEY_RE = /passkey|security key|khóa bảo mật|khoá bảo mật|windows hello|touch id|face id|use your fingerprint|vân tay/ // i18n-ignore: matches Vietnamese text on web pages
 
 /** Trang đang hỏi gì, từ các ô tìm thấy + chữ trên trang. */
 export function classifyStep(f: { user: boolean; pass: boolean; otp: boolean; text: string }): PageStep {
@@ -453,7 +455,7 @@ export function parseImport(kind: ImportKind, text: string): { rows: ImportRow[]
     const domains = domainsOf(uris)
     if (!password && !totp) return
     if (!domains.length) {
-      errors.push(`Bỏ qua "${name || username}": không có địa chỉ trang web.`)
+      errors.push(t('passwords.import.noUrl', { name: name || username }))
       return
     }
     rows.push({ name: name.trim() || domains[0], domains, username: username.trim(), password, totp: totp.trim() })
@@ -463,11 +465,11 @@ export function parseImport(kind: ImportKind, text: string): { rows: ImportRow[]
     try {
       data = JSON.parse(text.replace(/^﻿/, ''))
     } catch {
-      return { rows, errors: ['File không phải JSON.'] }
+      return { rows, errors: [t('passwords.import.notJson')] }
     }
     const d = data as { encrypted?: boolean; items?: unknown }
-    if (d?.encrypted) return { rows, errors: ['File Bitwarden này đã mã hoá. Hãy export lại dạng .json (không mã hoá).'] }
-    if (!Array.isArray(d?.items)) return { rows, errors: ['Không thấy danh sách mục (items) trong file Bitwarden.'] }
+    if (d?.encrypted) return { rows, errors: [t('passwords.import.encrypted')] }
+    if (!Array.isArray(d?.items)) return { rows, errors: [t('passwords.import.noItems')] }
     for (const it of d.items as Array<Record<string, unknown>>) {
       const login = it?.login as { username?: string; password?: string; totp?: string; uris?: Array<{ uri?: string }> } | undefined
       if (it?.type !== 1 || !login) continue
@@ -476,12 +478,12 @@ export function parseImport(kind: ImportKind, text: string): { rows: ImportRow[]
     return { rows, errors }
   }
   const table = parseCsv(text)
-  if (!table.length) return { rows, errors: ['File CSV trống.'] }
+  if (!table.length) return { rows, errors: [t('passwords.import.emptyCsv')] }
   const head = table[0].map((h) => h.trim().toLowerCase())
   const col = (n: string): number => head.indexOf(n)
   if (kind === 'bitwarden-csv') {
     const [iType, iName, iUri, iUser, iPass, iTotp] = ['type', 'name', 'login_uri', 'login_username', 'login_password', 'login_totp'].map(col)
-    if (iUri < 0 || iPass < 0) return { rows, errors: ['Không phải CSV của Bitwarden (thiếu cột login_uri / login_password).'] }
+    if (iUri < 0 || iPass < 0) return { rows, errors: [t('passwords.import.notBitwardenCsv')] }
     for (const r of table.slice(1)) {
       if (iType >= 0 && r[iType] && r[iType] !== 'login') continue
       push(r[iName] ?? '', (r[iUri] ?? '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean), r[iUser] ?? '', r[iPass] ?? '', iTotp >= 0 ? (r[iTotp] ?? '') : '')
@@ -489,7 +491,7 @@ export function parseImport(kind: ImportKind, text: string): { rows: ImportRow[]
     return { rows, errors }
   }
   const [iName, iUrl, iUser, iPass] = ['name', 'url', 'username', 'password'].map(col)
-  if (iUrl < 0 || iPass < 0) return { rows, errors: ['Không phải CSV mật khẩu của Chrome / Edge (thiếu cột url / password).'] }
+  if (iUrl < 0 || iPass < 0) return { rows, errors: [t('passwords.import.notChromeCsv')] }
   for (const r of table.slice(1)) push(r[iName] ?? '', [r[iUrl] ?? ''].filter(Boolean), iUser >= 0 ? (r[iUser] ?? '') : '', r[iPass] ?? '', '')
   return { rows, errors }
 }
@@ -502,7 +504,7 @@ export function slugId(name: string, taken: ReadonlySet<string>): string {
     name
       .normalize('NFD')
       .replace(/[̀-ͯ]/g, '')
-      .replace(/[đĐ]/g, 'd')
+      .replace(/[đĐ]/g, 'd') // i18n-ignore: folds Vietnamese letters into ASCII ids
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
@@ -598,6 +600,8 @@ export interface CredPageUi {
   toast?: string
   /** Đổi khi main gửi lại cùng một thông báo (để trang hiện lại). */
   toastId?: number
+  /** Ngôn ngữ giao diện của app (main gắn vào mỗi lần gửi): lớp trang vẽ chữ theo nó. */
+  locale?: Locale
 }
 
 export type CredAct =

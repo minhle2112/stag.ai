@@ -1,0 +1,52 @@
+// Chuỗi giao diện tiếng Việt (nguồn), namespace `workspace` (tạo workspace). Tham số dạng {tên}.
+export default {
+  // Hộp "Tạo workspace"
+  'create.title': 'Tạo workspace',
+  'create.submit': 'Tạo workspace',
+  'create.creating': 'Đang tạo…',
+  'create.projectFolder': 'Thư mục dự án',
+  'create.projectName': 'Tên dự án',
+  'create.projectItself': '(chính thư mục dự án)',
+  'create.vault': 'Vault (bộ nhớ)',
+  'create.useExisting': 'Dùng vault có sẵn: {name}',
+  'create.augment': 'Bổ sung thư mục/note còn thiếu theo template (chỉ thêm, không sửa hay xoá)',
+  'create.newVault': 'Tạo vault mới: {name}',
+  'create.noVaults': 'Không tìm thấy vault nào trong thư mục này.',
+  'create.pickOther': 'Chọn thư mục vault khác…',
+  'create.pickOtherLong': 'Chọn thư mục vault khác… (thư mục bất kỳ, kể cả ngoài dự án)',
+  'create.gitRepo': 'Thư mục là repo git: app sẽ thêm vault và .sessions/ vào .gitignore.',
+  'create.gitRepoOutside': 'Thư mục là repo git: app sẽ thêm .sessions/ vào .gitignore.',
+  'create.gitInit': 'Khởi tạo git cho thư mục này',
+  'create.claudeNote': 'App cũng đảm bảo có CLAUDE.md (quy tắc recall vault) và cache auto memory của Claude Code. File đã có sẽ không bị ghi đè.',
+  'tag.empty': 'thư mục trống',
+  'tag.stag': 'đúng mẫu stag.ai',
+  'tag.other': 'vault khác mẫu',
+  'tag.custom': 'tự chọn',
+  'tag.outside': 'ngoài thư mục dự án',
+
+  // Lỗi khi tạo (main)
+  'err.creating': 'Đang tạo workspace cho thư mục này',
+  'err.noFolder': 'Không tìm thấy thư mục: {path}',
+  'err.noVault': 'Không tìm thấy thư mục vault: {path}',
+  'err.already': 'Thư mục này đã là một workspace trong app',
+  'err.vaultExists': 'Đã có thư mục "{dir}". Hãy chọn "dùng vault có sẵn".',
+
+  // Báo cáo sau khi tạo (main → hộp "Đã tạo workspace")
+  'report.title': 'Đã tạo workspace "{name}"',
+  'report.gitInit': 'Khởi tạo git (nhánh main)',
+  'report.newVault': 'Tạo vault mới "{dir}" ({count} note)',
+  'report.augmented': 'Bổ sung vào vault có sẵn (không ghi đè): {files}',
+  'report.vaultComplete': 'Vault có sẵn đã đủ cấu trúc, không thêm gì',
+  'report.vaultKept': 'Dùng vault có sẵn "{dir}", giữ nguyên',
+  'report.gitignoreVaultIsProject': '.gitignore: vault chính là thư mục dự án, không thêm được vào .gitignore',
+  'report.gitignoreOutside': '.gitignore: vault nằm ngoài thư mục dự án, không cần loại trừ',
+  'report.gitignoreOutsideAdded': '.gitignore: vault nằm ngoài thư mục dự án, không cần loại trừ; thêm {items}',
+  'report.gitignoreAdded': '.gitignore: thêm {items}',
+  'report.gitignoreKept': '.gitignore: đã loại trừ vault và .sessions/, giữ nguyên',
+  'report.claudeMdCreated': 'Tạo CLAUDE.md có quy tắc recall vault',
+  'report.claudeMdKept': 'CLAUDE.md đã có mục Memory, giữ nguyên',
+  'report.claudeMdAppended': 'CLAUDE.md có sẵn: thêm mục Memory vào cuối file',
+  'report.memoryCreated': 'Tạo cache auto memory trỏ về vault',
+  'report.memoryKept': 'Cache auto memory đã trỏ về vault, giữ nguyên',
+  'report.memoryAppended': 'Cache auto memory có sẵn: thêm dòng trỏ về vault'
+} as const

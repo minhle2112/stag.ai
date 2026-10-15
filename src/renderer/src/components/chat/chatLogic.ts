@@ -1,6 +1,7 @@
 // Logic thuần của ô chat (không DOM, không window): áp sự kiện vào danh sách, gom khối, định dạng số liệu, phím gửi,
 // lịch sử ↑, kiểm tra ảnh dán. Tách riêng để vitest chạy trong Node.
 import type { ChatBlock, ChatEvent, ChatImage, ChatItem, ChatState } from '@shared/chat'
+import { fmtNumber, fmtTime, t as tr, type PlainKey } from '@shared/i18n'
 
 type AskItem = Extract<ChatItem, { kind: 'ask' }>
 type ToolBlock = Extract<ChatBlock, { type: 'tool' }>
@@ -237,9 +238,9 @@ export function stepsSummary(entries: StepEntry[]): { label: string; chips: stri
     }
   }
   let label: string
-  if (tools) label = `Đã làm ${tools} bước${thinking ? ' · có suy nghĩ' : ''}`
-  else if (thinking) label = 'Suy nghĩ'
-  else label = `${asks} yêu cầu đã trả lời`
+  if (tools) label = `${tr('chat.steps.done', { count: tools })}${thinking ? tr('chat.steps.withThinking') : ''}`
+  else if (thinking) label = tr('chat.steps.thinking')
+  else label = tr('chat.steps.asks', { count: asks })
   return { label, chips, failed, running }
 }
 
@@ -286,19 +287,20 @@ export function formatDuration(ms: number): string {
 /** 0.0312 → "$0,03", 0.004 → "<$0,01" (dấu phẩy thập phân kiểu Việt). */
 export function formatCost(usd: number | undefined): string {
   if (usd === undefined || !(usd > 0)) return ''
-  return usd < 0.01 ? '<$0,01' : `$${usd.toFixed(2).replace('.', ',')}`
+  const money = (n: number): string => fmtNumber(n, { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false })
+  return usd < 0.01 ? `<$${money(0.01)}` : `$${money(usd)}`
 }
 
-const OUTCOME_LABEL: Record<string, string> = {
-  interrupted: 'đã ngắt',
-  error_max_turns: 'hết lượt',
-  error_during_execution: 'lỗi khi chạy'
+const OUTCOME_LABEL: Record<string, PlainKey> = {
+  interrupted: 'chat.outcome.interrupted',
+  error_max_turns: 'chat.outcome.maxTurns',
+  error_during_execution: 'chat.outcome.execError'
 }
 
 /** Dòng số liệu cuối lượt: "1m 42s · $0,21"; lượt không thành công thì có nhãn đầu ("đã ngắt · 3s"). null = không có gì. */
 export function turnLine(t: { durationMs: number; costUsd?: number; outcome: string }): string | null {
   const parts: string[] = []
-  if (t.outcome !== 'success') parts.push(OUTCOME_LABEL[t.outcome] ?? t.outcome.replace(/^error_/, '').replace(/_/g, ' '))
+  if (t.outcome !== 'success') parts.push(OUTCOME_LABEL[t.outcome] ? tr(OUTCOME_LABEL[t.outcome]) : t.outcome.replace(/^error_/, '').replace(/_/g, ' '))
   const d = formatDuration(t.durationMs)
   const c = formatCost(t.costUsd)
   if (d) parts.push(d)
@@ -328,14 +330,18 @@ function tokens(n: number): string {
 /** Số hiện ở composer: "ctx 42%"; đỏ khi ≥ ngưỡng (bàn giao tự động nếu bật, không thì 85%), hổ phách chưa tới 10 điểm. */
 export function ctxInfo(used: number | undefined, size: number | undefined, limit: number): CtxInfo | null {
   if (used === undefined || !(used >= 0)) return null
-  if (!size) return { pct: null, text: tokens(used), tone: 'normal', title: `Context: ${used.toLocaleString('vi-VN')} token` }
+  if (!size) return { pct: null, text: tokens(used), tone: 'normal', title: tr('chat.ctx.titleUsed', { used: fmtNumber(used) }) }
   const pct = Math.min(100, (used / size) * 100)
   const tone: CtxTone = pct >= limit ? 'full' : pct >= limit - 10 ? 'warn' : 'normal'
   return {
     pct,
     text: `${Math.floor(pct)}%`,
     tone,
-    title: `Context: ${used.toLocaleString('vi-VN')} / ${tokens(size)} token (${pct.toFixed(1)}%)`
+    title: tr('chat.ctx.title', {
+      used: fmtNumber(used),
+      size: tokens(size),
+      pct: fmtNumber(pct, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    })
   }
 }
 
@@ -350,10 +356,16 @@ export function quotaLabel(
   const left = Math.max(0, w.resetsAt * 1000 - now)
   const h = Math.floor(left / 3_600_000)
   const m = Math.round((left % 3_600_000) / 60_000)
-  const at = new Date(w.resetsAt * 1000)
-  const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
-  const when = left <= 0 ? 'đã làm mới' : h >= 48 ? `làm mới sau ${Math.round(h / 24)} ngày` : h > 0 ? `làm mới sau ${h} giờ ${m} phút` : `làm mới sau ${m} phút`
-  return { text: `${name} ${pct}%`, title: `Hạn mức ${name}: ${pct}% · ${when} (${hhmm})`, pct }
+  const hhmm = fmtTime(w.resetsAt * 1000)
+  const when =
+    left <= 0
+      ? tr('chat.quota.reset')
+      : h >= 48
+        ? tr('chat.quota.inDays', { count: Math.round(h / 24) })
+        : h > 0
+          ? tr('chat.quota.inHm', { h, m })
+          : tr('chat.quota.inM', { count: m })
+  return { text: `${name} ${pct}%`, title: tr('chat.quota.title', { name, pct, when, time: hhmm }), pct }
 }
 
 // ---------- composer ----------
@@ -417,9 +429,9 @@ export type ImageCheck = { ok: true } | { ok: false; reason: string }
 
 /** Kiểm một ảnh dán vào: loại, dung lượng, và số ảnh đã có. */
 export function checkImage(file: { type: string; size: number }, already: number): ImageCheck {
-  if (already >= MAX_IMAGES) return { ok: false, reason: `Tối đa ${MAX_IMAGES} ảnh mỗi tin` }
-  if (!(IMAGE_TYPES as readonly string[]).includes(file.type)) return { ok: false, reason: 'Chỉ nhận ảnh png, jpeg, gif, webp' }
-  if (file.size > MAX_IMAGE_BYTES) return { ok: false, reason: `Ảnh quá ${MAX_IMAGE_BYTES / 1024 / 1024} MB` }
+  if (already >= MAX_IMAGES) return { ok: false, reason: tr('chat.image.tooMany', { count: MAX_IMAGES }) }
+  if (!(IMAGE_TYPES as readonly string[]).includes(file.type)) return { ok: false, reason: tr('chat.image.badType') }
+  if (file.size > MAX_IMAGE_BYTES) return { ok: false, reason: tr('chat.image.tooBig', { size: MAX_IMAGE_BYTES / 1024 / 1024 }) }
   return { ok: true }
 }
 
@@ -456,4 +468,10 @@ export function chatZoom(fontSize: number | undefined): number {
 /** Cách đáy ≤ `slack` px thì coi là đang ở đáy (tự cuộn theo nội dung mới). */
 export function nearBottom(el: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack = 40): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= slack
+}
+
+/** `@chữ` ngay trước con trỏ (đầu dòng hoặc sau khoảng trắng, không có khoảng trắng sau @ — email không bật bảng). */
+export function atQuery(value: string, caret: number): { start: number; query: string } | null {
+  const m = /(?:^|\s)@([^\s@]{0,40})$/.exec(value.slice(0, caret))
+  return m ? { start: caret - m[1].length - 1, query: m[1] } : null
 }

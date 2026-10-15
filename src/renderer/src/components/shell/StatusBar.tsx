@@ -8,9 +8,11 @@ import { Icon } from '../Icon'
 import { PluginStatusItems } from '../PluginStatusBar'
 import { ClaudeUsageItem } from './ClaudeUsage'
 import { useWaitingAgents } from './useWaiting'
+import { useT } from '../../i18n'
 
 /** Thanh trạng thái dưới cùng (cao 24px): số agent đang chạy / chờ bạn, usage Claude, khoá phạm vi đang giữ, mục của plugin. */
 export function StatusBar(): React.JSX.Element {
+  const t = useT()
   const ws = useActiveWorkspace()
   const board = useBoard((s) => (ws ? s.byWs[ws.id] : undefined))
   const agents = useAgents((s) => (ws ? s.byWs[ws.id] : undefined))
@@ -24,10 +26,10 @@ export function StatusBar(): React.JSX.Element {
   return (
     <footer className="relative flex h-6 shrink-0 items-center gap-0.5 overflow-hidden border-t border-line bg-bg0 px-1.5 text-[12px] whitespace-nowrap text-muted">
       {ws && (
-        <span className="flex h-[22px] items-center gap-1.5 px-2" data-tip={`${total} agent · ${running} đang chạy · ${waiting} chờ bạn`}>
+        <span className="flex h-[22px] items-center gap-1.5 px-2" data-tip={t('shell.status.agentsTip', { count: total, running, waiting })}>
           <span className={`sdot ${waiting ? 'wa' : running ? 'ok' : 'off'}`} />
           {running}/{total}
-          {waiting > 0 && <span className="text-wait">· {waiting} chờ bạn</span>}
+          {waiting > 0 && <span className="text-wait">{t('shell.status.waiting', { count: waiting })}</span>}
         </span>
       )}
       <ClaudeUsageItem />
@@ -36,7 +38,7 @@ export function StatusBar(): React.JSX.Element {
           <button
             type="button"
             onClick={() => setLockOpen((v) => !v)}
-            data-tip={`${locks.length} khoá phạm vi đang giữ`}
+            data-tip={t('shell.status.locksTip', { count: locks.length })}
             className="flex h-[22px] items-center gap-1.5 rounded px-2 hover:bg-panel-2 hover:text-fg"
           >
             <Icon name="lock" size="s" />
@@ -46,13 +48,13 @@ export function StatusBar(): React.JSX.Element {
             <>
               <div className="fixed inset-0 z-40" onMouseDown={() => setLockOpen(false)} />
               <div className="absolute bottom-full left-0 z-50 mb-1 w-80 overflow-hidden rounded-lg border border-line-2 bg-pop p-1 text-[12px] shadow-pop">
-                <div className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-dim">KHOÁ PHẠM VI ĐANG GIỮ</div>
+                <div className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-dim">{t('shell.status.locksTitle')}</div>
                 {locks.map((l) => {
                   const a = agents?.agents.find((x) => x.id === l.task.agentId)
                   return (
                     <div key={l.task.id} className="flex items-center gap-2 px-2.5 py-1.5">
                       <span className="shrink-0 font-medium text-fg">{a?.name ?? 'agent'}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-dim">{l.entries.map((e) => e.label || '(cả dự án)').join(', ')}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-dim">{l.entries.map((e) => e.label || t('shell.status.wholeProject')).join(', ')}</span>
                     </div>
                   )
                 })}
@@ -64,7 +66,7 @@ export function StatusBar(): React.JSX.Element {
                   }}
                   className="mt-1 block w-full rounded-md px-2.5 py-1.5 text-left text-muted hover:bg-panel-3 hover:text-fg"
                 >
-                  Cài đặt Khoá phạm vi…
+                  {t('shell.status.scopeSettings')}
                 </button>
               </div>
             </>

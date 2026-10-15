@@ -7,6 +7,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import { randomUUID } from 'node:crypto'
 import type { ChatEvent, ChatImage, ChatItem, ChatSnapshot, ChatState } from '@shared/chat'
 import { ChatModel } from './protocol'
+import { t } from '@shared/i18n'
 
 type Body<T> = T extends unknown ? Omit<T, 'agentId'> : never
 /** Sự kiện chưa có agentId (AgentService điền khi gửi sang renderer). */
@@ -121,7 +122,7 @@ export abstract class ChatSessionBase {
   /** Nạp lịch sử, đặt phase đầu, gửi `reset` sang renderer. */
   protected begin(history: ChatItem[], sessionId: string | undefined, phase: ChatState['phase'], newSession: boolean): void {
     this.model.load(history)
-    if (newSession && history.length) this.model.addNotice('info', 'Phiên mới')
+    if (newSession && history.length) this.model.addNotice('info', t('chat.newSession'))
     this.model.patchState({ phase, ...(sessionId ? { sessionId } : {}) })
     this.opts.emit({ type: 'reset', items: this.model.items.slice(), state: this.model.state })
     this.lastPhase = phase
@@ -252,7 +253,7 @@ export class ChatSession extends ChatSessionBase {
   }
 
   send(text: string, opts: ChatSendOptions = {}): void {
-    if (!this.alive) throw new Error('Phiên chat chưa chạy')
+    if (!this.alive) throw new Error(t('chat.notRunning'))
     const content: unknown[] = []
     for (const im of opts.images ?? []) content.push({ type: 'image', source: { type: 'base64', media_type: im.mediaType, data: im.data } })
     content.push({ type: 'text', text })
@@ -275,7 +276,7 @@ export class ChatSession extends ChatSessionBase {
       if (this.asks.has(it.requestId))
         this.write({
           type: 'control_response',
-          response: { subtype: 'success', request_id: it.requestId, response: { behavior: 'deny', message: 'Người dùng đã ngắt lượt này trong stag.ai.', interrupt: true } }
+          response: { subtype: 'success', request_id: it.requestId, response: { behavior: 'deny', message: 'The user interrupted this turn in stag.ai.', interrupt: true } }
         })
       this.asks.delete(it.requestId)
       const next = this.model.resolveAsk(it.requestId, 'cancelled')
@@ -296,7 +297,7 @@ export class ChatSession extends ChatSessionBase {
     const response =
       behavior === 'allow'
         ? { behavior: 'allow', updatedInput: updatedInput ?? ask.input, ...(remember && ask.suggestions.length ? { updatedPermissions: ask.suggestions } : {}) }
-        : { behavior: 'deny', message: 'Người dùng từ chối yêu cầu này trong stag.ai.' }
+        : { behavior: 'deny', message: 'The user denied this request in stag.ai.' }
     this.write({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } })
     const it = this.model.resolveAsk(requestId, behavior === 'allow' ? 'allowed' : 'denied')
     if (it) this.queue(it)

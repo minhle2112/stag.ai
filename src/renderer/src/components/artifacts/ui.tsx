@@ -1,6 +1,7 @@
 // Mảnh giao diện dùng chung của tab Sản phẩm.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { initials } from '@shared/artifacts'
+import { fmtTime, t, type PlainKey } from '@shared/i18n'
 
 /**
  * Màu riêng cho từng agent ở tab Sản phẩm: không trùng màu trạng thái của app (teal = thao tác / nháp, xanh lá = đang
@@ -113,39 +114,45 @@ export function useToast(): [React.ReactNode, (text: string) => void] {
 /** "hôm nay 11:38" / "hôm qua 21:14" / "T7 11/10 18:20". */
 export function when(iso: string, now = new Date()): string {
   const d = new Date(iso)
-  const hm = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+  const hm = fmtTime(d)
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  if (d.getTime() >= start) return `hôm nay ${hm}`
-  if (d.getTime() >= start - 86_400_000) return `hôm qua ${hm}`
-  const wd = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][d.getDay()]
-  return `${wd} ${d.getDate()}/${d.getMonth() + 1} ${hm}`
+  if (d.getTime() >= start) return t('artifacts.when.today', { time: hm })
+  if (d.getTime() >= start - 86_400_000) return t('artifacts.when.yesterday', { time: hm })
+  return `${dayLabel(d)} ${hm}`
+}
+
+/** "T7 11/10" / "Sat 10/11". */
+function dayLabel(d: Date): string {
+  const wd = t('artifacts.when.weekdays').split(' ')[d.getDay()]
+  return t('artifacts.when.date', { wd, d: String(d.getDate()), m: String(d.getMonth() + 1) })
 }
 
 /** Giờ ngắn cho dòng việc: hôm nay "15:05", trước đó "hôm qua" / "T7 11/10". */
 export function shortWhen(iso: string, now = new Date()): string {
   const d = new Date(iso)
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  if (d.getTime() >= start) return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-  if (d.getTime() >= start - 86_400_000) return 'hôm qua'
-  return `${['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`
+  if (d.getTime() >= start) return fmtTime(d)
+  if (d.getTime() >= start - 86_400_000) return t('artifacts.when.yesterdayShort')
+  return dayLabel(d)
 }
 
 /** Loại sản phẩm (nhãn trên thẻ). */
 export function typeLabel(kind: string): string {
-  return (
-    {
-      markdown: 'Tài liệu',
-      text: 'Văn bản',
-      image: 'Ảnh',
-      video: 'Video',
-      audio: 'Âm thanh',
-      pdf: 'PDF',
-      docx: 'Word',
-      sheet: 'Bảng',
-      pptx: 'Trình chiếu',
-      html: 'Trang HTML',
-      zip: 'Gói nén',
-      font: 'Phông chữ'
-    } as Record<string, string>
-  )[kind] ?? 'Tệp'
+  const key = TYPE_LABELS[kind]
+  return t(key ?? 'artifacts.type.other')
+}
+
+const TYPE_LABELS: Record<string, PlainKey | undefined> = {
+  markdown: 'artifacts.type.markdown',
+  text: 'artifacts.type.text',
+  image: 'artifacts.type.image',
+  video: 'artifacts.type.video',
+  audio: 'artifacts.type.audio',
+  pdf: 'artifacts.type.pdf',
+  docx: 'artifacts.type.docx',
+  sheet: 'artifacts.type.sheet',
+  pptx: 'artifacts.type.pptx',
+  html: 'artifacts.type.html',
+  zip: 'artifacts.type.zip',
+  font: 'artifacts.type.font'
 }

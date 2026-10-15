@@ -1,11 +1,11 @@
-// Worker của plugin "Nhật ký việc" (xem package.json → stagPlugin). Note viết bằng tiếng Anh như vault của agent.
+// Worker of the "Task log" plugin (see package.json → stagPlugin). Notes are written in English, like the agents' vault.
 import { definePlugin, runWorker } from './stag-plugin-sdk.mjs'
 
 const pad = (n) => String(n).padStart(2, '0')
-/** Ngày theo giờ máy, dạng YYYY-MM-DD. */
+/** Local date as YYYY-MM-DD. */
 export const dayOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 
-/** Nội dung note của một ngày; null khi không có việc nào xong hôm đó. */
+/** Note content for one day; null when no task was finished that day. */
 export function renderLog(day, tasks, includeOpen) {
   const done = tasks.filter((t) => t.status === 'done' && t.doneAt && dayOf(new Date(t.doneAt)) === day)
   if (!done.length) return null
@@ -17,7 +17,7 @@ export function renderLog(day, tasks, includeOpen) {
   }
   const out = ['---', 'type: task-log', `date: ${day}`, '---', `# Task log ${day}`, '', `## Done (${done.length})`, ...done.map(line)]
   if (open.length) out.push('', `## Still open (${open.length})`, ...open.map(line))
-  out.push('', '_Written by the stag.ai plugin "Nhật ký việc"; rewritten on each run._', '')
+  out.push('', '_Written by the stag.ai plugin "Task log"; rewritten on each run._', '')
   return out.join('\n')
 }
 
@@ -40,12 +40,12 @@ const plugin = definePlugin({
     })
 
     ctx.actions.register('writeToday', async (_params, run) => {
-      if (!run.workspaceId) return { message: 'Chưa chọn workspace.' }
+      if (!run.workspaceId) return { message: 'No workspace selected.' }
       const path = await write({ id: run.workspaceId, name: run.workspaceName ?? '' }, dayOf(new Date()))
-      return { message: path ? `Đã ghi ${path} trong vault.` : 'Hôm nay chưa có việc nào xong, chưa ghi gì.' }
+      return { message: path ? `Wrote ${path} in the vault.` : 'No tasks finished today yet; nothing written.' }
     })
   }
 })
 
-// Chỉ chạy worker khi là tiến trình plugin (test import renderLog / dayOf trực tiếp).
+// Only start the worker inside a plugin process (tests import renderLog / dayOf directly).
 if (process.env.STAG_PLUGIN_ID) runWorker(plugin)

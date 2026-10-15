@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { blockDiff, blockKind, locateQuote, plainBlock, wordDiff, type DocBlock } from '@shared/artifacts'
 import { renderNote } from '../vault/markdown'
 import { escapeHtml } from './code'
+import { useT } from '../../i18n'
 import { Mi } from './ui'
 
 export interface RenderedBlock {
@@ -125,6 +126,7 @@ export function DocView({
   /** Bôi chọn trong lúc so sánh. */
   onDiffSelect: () => void
 }): React.JSX.Element {
+  const t = useT()
   const host = useRef<HTMLDivElement>(null)
   const [float, setFloat] = useState<{ x: number; y: number; compact: boolean; a: { block: string; off: number; quote: string } } | null>(null)
 
@@ -272,7 +274,7 @@ export function DocView({
             dangerouslySetInnerHTML={{ __html: r.html }}
           />
         ))}
-        {!body.length && <p className="text-dim">Tài liệu trống.</p>}
+        {!body.length && <p className="text-dim">{t('artifacts.doc.empty')}</p>}
       </div>
       {float && (
         <button
@@ -281,14 +283,14 @@ export function DocView({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => start(float.a)}
           style={{ left: float.x, top: float.y }}
-          title="Góp ý cho đoạn đã chọn (phím C)"
+          title={t('artifacts.doc.commentTitle')}
           className={`fixed z-40 inline-flex items-center border border-accent bg-accent font-semibold text-accent-on shadow-float ${float.compact ? 'h-7 w-7 justify-center rounded-full text-[16px] leading-none' : 'gap-1.5 rounded-[7px] px-2.5 py-1 text-[12px]'}`}
         >
           {float.compact ? (
             '＋'
           ) : (
             <>
-              <Mi name="cmt" /> Góp ý <span className="rounded border border-b-2 border-black/40 px-1 font-mono text-[10.5px]">C</span>
+              <Mi name="cmt" /> {t('artifacts.doc.comment')} <span className="rounded border border-b-2 border-black/40 px-1 font-mono text-[10.5px]">C</span>
             </>
           )}
         </button>

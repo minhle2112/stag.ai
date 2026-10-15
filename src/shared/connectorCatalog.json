@@ -433,7 +433,7 @@
   {
    "slug": "filesystem",
    "name": "Filesystem",
-   "description": "Đọc / ghi file trong các thư mục bạn cho phép. Chạy trên máy bằng npx.",
+   "description": "Read and write files in the folders you allow. Runs locally with npx.",
    "categories": [
     "developer"
    ],
@@ -444,7 +444,7 @@
      "key": "local",
      "kind": "stdio",
      "label": "",
-     "guide": "Thêm thư mục được phép ở ô Tham số trên trang của connector sau khi kết nối (mặc định: thư mục dự án của phiên).",
+     "guide": "After connecting, add allowed folders in the Arguments box on the connector's page (default: the session's project folder).",
      "warnings": [],
      "fields": [],
      "command": "npx",
@@ -1614,7 +1614,7 @@
   {
    "slug": "playwright",
    "name": "Playwright",
-   "description": "Agent điều khiển một trình duyệt riêng: mở trang, bấm, đọc, chụp màn hình. Chạy trên máy bằng npx, không cần tài khoản.",
+   "description": "The agent drives its own browser: open pages, click, read, take screenshots. Runs locally with npx, no account needed.",
    "categories": [
     "developer"
    ],

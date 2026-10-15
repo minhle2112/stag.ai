@@ -7,6 +7,7 @@ import { useUi } from '../../store/ui'
 import { useWorkspaces } from '../../store/workspaces'
 import { Button, Modal } from '../Modal'
 import { ProjectMark } from './ProjectMark'
+import { tx, useT } from '../../i18n'
 
 function errMsg(e: unknown): string {
   return String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -20,6 +21,7 @@ export function DeleteProjectDialog(): React.JSX.Element | null {
 }
 
 function Dialog({ wsId, projectId }: { wsId: string; projectId: string }): React.JSX.Element | null {
+  const t = useT()
   const ws = useWorkspaces((s) => s.items.find((w) => w.id === wsId))
   const state = useAgents((s) => s.byWs[wsId])
   const statuses = useBoard((s) => s.byWs[wsId]?.statuses)
@@ -64,14 +66,21 @@ function Dialog({ wsId, projectId }: { wsId: string; projectId: string }): React
     }
   }
 
-  const label = team.length && delDir ? `Xoá project, ${team.length} agent và thư mục` : team.length ? `Xoá project và ${team.length} agent` : delDir ? 'Xoá project và thư mục' : 'Xoá project'
+  const label =
+    team.length && delDir
+      ? t('projects.delete.btnAll', { count: team.length })
+      : team.length
+        ? t('projects.delete.btnAgents', { count: team.length })
+        : delDir
+          ? t('projects.delete.btnFolder')
+          : t('projects.delete.btn')
 
   return (
     <Modal
       title={
         <span className="flex items-center gap-2">
           <ProjectMark project={p} />
-          Xoá project "{p.name}"?
+          {t('projects.delete.title', { name: p.name })}
         </span>
       }
       width="w-[520px]"
@@ -79,10 +88,10 @@ function Dialog({ wsId, projectId }: { wsId: string; projectId: string }): React
       footer={
         <>
           <Button onClick={close} disabled={busy}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button primary variant="danger" onClick={() => void confirm()} disabled={busy}>
-            {busy ? 'Đang xoá…' : label}
+            {busy ? t('projects.delete.deleting') : label}
           </Button>
         </>
       }
@@ -90,7 +99,7 @@ function Dialog({ wsId, projectId }: { wsId: string; projectId: string }): React
       {team.length ? (
         <>
           <div className="text-[12.5px] text-muted">
-            Xoá luôn <b className="text-fg">{team.length} agent</b> của project: dừng phiên và bỏ khỏi app.
+            {tx('projects.delete.agentsIntro', { agents: <b className="text-fg">{t('projects.delete.agentCount', { count: team.length })}</b> })}
           </div>
           <div className="mt-2 rounded-lg border border-line-2 px-2.5 py-0.5">
             {team.map((a) => {
@@ -99,36 +108,38 @@ function Dialog({ wsId, projectId }: { wsId: string; projectId: string }): React
                 <div key={a.id} className="flex h-[30px] items-center gap-2">
                   <span className={`sdot ${st === 'work' ? 'ok' : st === 'wait' ? 'wa' : 'off'}`} />
                   <b className="font-medium">{a.name}</b>
-                  <span className={`ml-auto text-[12px] ${st === 'idle' ? 'text-dim' : 'text-wait-text'}`}>{st === 'work' ? 'đang chạy' : st === 'wait' ? 'đang chờ bạn' : 'rảnh'}</span>
+                  <span className={`ml-auto text-[12px] ${st === 'idle' ? 'text-dim' : 'text-wait-text'}`}>{st === 'work' ? t('projects.delete.running') : st === 'wait' ? t('projects.delete.waiting') : t('projects.delete.idle')}</span>
                 </div>
               )
             })}
           </div>
           {busyAgents.length > 0 && (
             <div className="mt-2.5 rounded-md border border-wait/40 bg-wait/10 px-3 py-2 text-[12.5px] text-wait-text">
-              <b>{busyAgents.length} agent đang làm dở.</b> Việc đang mở của chúng bị bỏ; phần đã sửa trong code vẫn còn trên đĩa.
+              <b>{t('projects.delete.busyTitle', { count: busyAgents.length })}</b> {t('projects.delete.busyNote')}
             </div>
           )}
         </>
       ) : (
-        <div className="text-[12.5px] text-muted">Project chưa có agent.</div>
+        <div className="text-[12.5px] text-muted">{t('projects.delete.noAgents')}</div>
       )}
 
       <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-lg border border-line-2 p-2.5 hover:bg-panel-2">
         <input type="checkbox" checked={delDir} onChange={(e) => setDelDir(e.target.checked)} className="mt-0.5" />
         <div className="min-w-0">
           <b className="font-semibold">
-            Xoá cả thư mục code <code>{p.folder}\</code>
+            {tx('projects.delete.folderCheck', { folder: <code>{p.folder}\</code> })}
           </b>
           <div className="mt-0.5 text-[12px] text-muted">
             {!delDir ? (
-              'Không tick: thư mục code giữ nguyên trên đĩa.'
+              t('projects.delete.keepFolder')
             ) : info && !info.exists ? (
-              'Thư mục không còn trên đĩa.'
+              t('projects.delete.folderGone')
             ) : (
               <>
-                Thư mục{info?.files != null ? ` (${info.files}${info.more ? '+' : ''} file)` : ''} chuyển vào <b className="text-fg">Thùng rác</b> của Windows, lấy lại được từ đó.
-                {info?.dirty ? <span className="text-danger-text"> Có {info.dirty} file đã sửa chưa commit.</span> : null}
+                {info?.files != null
+                  ? tx('projects.delete.toTrashFiles', { count: info.files, more: info.more ? '+' : '', trash: <b className="text-fg">{t('projects.delete.trash')}</b> })
+                  : tx('projects.delete.toTrash', { trash: <b className="text-fg">{t('projects.delete.trash')}</b> })}
+                {info?.dirty ? <span className="text-danger-text"> {t('projects.delete.dirty', { count: info.dirty })}</span> : null}
               </>
             )}
           </div>
@@ -137,7 +148,7 @@ function Dialog({ wsId, projectId }: { wsId: string; projectId: string }): React
       </label>
 
       <div className="mt-3 rounded-md bg-panel-2 px-3 py-2 text-[12px] text-muted">
-        Note <code>{p.note}</code> và note của từng agent trong <code>60 Agents/</code> luôn giữ nguyên. Sản phẩm và nhật ký cũ vẫn xem được, nhãn chuyển sang "Chung".
+        {tx('projects.delete.notesKept', { note: <code>{p.note}</code>, agents: <code>60 Agents/</code>, root: t('common.name.rootProject') })}
       </div>
       {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-danger">{error}</div>}
     </Modal>

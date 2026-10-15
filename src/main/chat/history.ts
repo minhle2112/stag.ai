@@ -4,6 +4,7 @@
 import { promises as fs } from 'node:fs'
 import type { ChatItem } from '@shared/chat'
 import { ChatModel } from './protocol'
+import { t } from '@shared/i18n'
 
 /** Chỉ đọc phần cuối file chừng này (transcript có thể rất lớn). */
 const TAIL_BYTES = 3 * 1024 * 1024
@@ -77,7 +78,7 @@ export function userItem(model: ChatModel, text: string, images = 0): void {
   if (/^<(command-name|command-message|local-command|system-reminder|turn_aborted)/.test(text)) return
   // Claude Code ghi dòng này vào transcript khi người dùng ngắt lượt.
   if (/^\[Request interrupted by user/.test(text)) {
-    model.addNotice('info', 'Đã ngắt lượt')
+    model.addNotice('info', t('chat.interrupted'))
     return
   }
   if (APP_OPENINGS.has(text)) {

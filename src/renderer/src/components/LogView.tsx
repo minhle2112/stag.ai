@@ -6,6 +6,7 @@ import { localDay } from '../status'
 import { useAgents } from '../store/agents'
 import { useSettings } from '../store/settings'
 import { useUi } from '../store/ui'
+import { useLocale, useT } from '../i18n'
 import { useVaultIndex } from '../vaultIndex'
 import { Icon } from './Icon'
 import { AgentAvatar } from './ui/AgentAvatar'
@@ -26,6 +27,8 @@ const utf8 = (s: string): number => new TextEncoder().encode(s).length
  * từng agent (`60 Agents/<tên>.md`), kèm thanh dung lượng note từng agent so với hạn mức (Cài đặt → Vault & bộ nhớ).
  */
 export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Element {
+  const t = useT()
+  const locale = useLocale()
   const { vaultPath } = workspace
   const agentsState = useAgents((s) => s.byWs[workspace.id])
   const loadAgents = useAgents((s) => s.load)
@@ -77,7 +80,7 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
   const shownAgent = agents.find((a) => a.id === pick) ?? agents[0]
   const todayShown = useMemo(() => (today && today.text != null && filtering ? { ...today, text: filterWorkLog(today.text, projF, projects) } : today), [today, filtering, projF, projects])
   const doc = mode === 'today' ? todayShown : shownAgent ? (notes[`60 Agents/${shownAgent.name}.md`] ?? null) : null
-  const html = useMemo(() => (doc?.text != null ? renderNote(doc.text, { current: doc.rel, notes: null }).html : ''), [doc])
+  const html = useMemo(() => (doc?.text != null ? renderNote(doc.text, { current: doc.rel, notes: null }).html : ''), [doc, locale])
 
   return (
     <div className="absolute inset-0 flex flex-col">
@@ -86,13 +89,13 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
           value={mode}
           onChange={setMode}
           options={[
-            { value: 'today', label: 'Hôm nay' },
-            { value: 'agent', label: 'Theo agent' }
+            { value: 'today', label: t('vault.log.today') },
+            { value: 'agent', label: t('vault.log.byAgent') }
           ]}
         />
         {projects.length > 0 && (
-          <div className="ml-2 flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="Lọc theo project">
-            {[{ id: 'all', label: 'Tất cả', p: undefined as Project | null | undefined }, { id: CHUNG, label: 'Chung', p: null }, ...projects.map((p) => ({ id: p.id, label: p.name, p }))].map((o) => (
+          <div className="ml-2 flex min-w-0 items-center gap-1 overflow-x-auto" aria-label={t('vault.log.filterProject')}>
+            {[{ id: 'all', label: t('vault.log.all'), p: undefined as Project | null | undefined }, { id: CHUNG, label: t('common.name.rootProject'), p: null }, ...projects.map((p) => ({ id: p.id, label: p.name, p }))].map((o) => (
               <button
                 key={o.id}
                 type="button"
@@ -109,8 +112,8 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
         <button
           type="button"
           onClick={() => openInVault(workspace.id, doc?.rel ?? logRel)}
-          data-tip={`Mở ${doc?.rel ?? logRel} trong Vault`}
-          aria-label="Mở trong Vault"
+          data-tip={t('vault.log.openInVaultTip', { rel: doc?.rel ?? logRel })}
+          aria-label={t('vault.log.openInVault')}
           className="grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-fg"
         >
           <Icon name="vault" />
@@ -144,10 +147,10 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
               ) : (
                 <div className="py-10 text-center text-dim">
                   {mode === 'today'
-                    ? 'Hôm nay chưa có việc nào xong. Khi agent báo xong việc, app tự ghi một dòng vào đây.'
+                    ? t('vault.log.emptyToday')
                     : agents.length
-                      ? 'Agent này chưa có note bộ nhớ.'
-                      : 'Workspace chưa có agent.'}
+                      ? t('vault.log.agentNoNote')
+                      : t('vault.log.noAgents')}
                 </div>
               )}
             </div>
@@ -156,15 +159,12 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
 
         <aside className="min-h-0 overflow-y-auto border-l border-line bg-bg py-1.5">
           <h4 className="flex min-h-[30px] items-center gap-1.5 px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-dim">
-            BỘ NHỚ AGENT
-            <span
-              className="inline-flex cursor-help"
-              data-tip="Mỗi agent có hạn mức dung lượng note (vạch trên thanh). Việc xong → ghi vào 40 Log/<ngày>.md và mục Work done; vượt hạn mức → mục cũ chuyển sang archive. Chỉnh ở Cài đặt → Vault & bộ nhớ."
-            >
+            {t('vault.log.memory')}
+            <span className="inline-flex cursor-help" data-tip={t('vault.log.memoryTip')}>
               <Icon name="info" size="s" />
             </span>
           </h4>
-          {agents.length === 0 && <div className="px-3 py-2 text-[12px] text-dim">Chưa có agent.</div>}
+          {agents.length === 0 && <div className="px-3 py-2 text-[12px] text-dim">{t('vault.log.noAgentsShort')}</div>}
           {agents.map((a) => {
             const text = notes[`60 Agents/${a.name}.md`]?.text
             const kb = text != null ? utf8(text) / 1024 : 0
@@ -180,7 +180,7 @@ export function LogView({ workspace }: { workspace: Workspace }): React.JSX.Elem
                   setMode('agent')
                 }}
                 className="block w-full px-3 py-1.5 text-left hover:bg-panel-2"
-                data-tip={text == null ? 'Chưa có note' : high ? `Sắp chạm ${budget} KB: mục Work done cũ sẽ được cất sang archive` : undefined}
+                data-tip={text == null ? t('vault.log.noNote') : high ? t('vault.log.nearBudget', { budget: String(budget) }) : undefined}
               >
                 <div className="mb-1.5 flex items-center gap-1.5 text-[12px]">
                   <AgentAvatar agent={a} size={16} />

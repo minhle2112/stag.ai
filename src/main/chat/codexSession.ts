@@ -4,6 +4,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { ChatItem } from '@shared/chat'
+import { t } from '@shared/i18n'
 import { codexHookTrustArgs } from '../codex'
 import { codexAnswer, CodexChatModel, type CodexAsk } from './codexProtocol'
 import { ChatSessionBase, type ChatSendOptions, type ChatSessionOptions } from './session'
@@ -74,7 +75,7 @@ export function codexHookTrust(o: { command: string; args: string[]; cwd: string
         resolve(list!)
       }
     }
-    const timer = setTimeout(() => end(new Error('codex app-server không trả lời hooks/list')), TRUST_MS)
+    const timer = setTimeout(() => end(new Error(t('chat.codex.trustTimeout'))), TRUST_MS)
     const send = (o2: unknown): void => {
       proc.stdin.write(JSON.stringify(o2) + '\n')
     }
@@ -82,7 +83,9 @@ export function codexHookTrust(o: { command: string; args: string[]; cwd: string
     proc.stderr.setEncoding('utf8')
     proc.stderr.on('data', (d: string) => (stderr = (stderr + d).slice(-2000)))
     proc.on('error', (e) => end(e))
-    proc.on('exit', (code) => end(new Error(`codex app-server thoát (${code}) trước khi trả lời hooks/list${stderr.trim() ? `: ${stderr.trim().slice(-300)}` : ''}`)))
+    proc.on('exit', (code) =>
+      end(new Error(`${t('chat.codex.trustExit', { code: String(code) })}${stderr.trim() ? `: ${stderr.trim().slice(-300)}` : ''}`))
+    )
     proc.stdout.setEncoding('utf8')
     proc.stdout.on('data', (d: string) => {
       buf += d
@@ -97,11 +100,11 @@ export function codexHookTrust(o: { command: string; args: string[]; cwd: string
           continue
         }
         if (m.id === 1) {
-          if (m.error) return end(new Error(`initialize lỗi: ${JSON.stringify(m.error)}`))
+          if (m.error) return end(new Error(t('chat.codex.rpcError', { method: 'initialize', error: JSON.stringify(m.error) })))
           send({ jsonrpc: '2.0', method: 'initialized' })
           send({ jsonrpc: '2.0', id: 2, method: 'hooks/list', params: { cwds: [o.cwd] } })
         } else if (m.id === 2) {
-          if (m.error || !isObj(m.result)) return end(new Error(`hooks/list lỗi: ${JSON.stringify(m.error)}`))
+          if (m.error || !isObj(m.result)) return end(new Error(t('chat.codex.rpcError', { method: 'hooks/list', error: JSON.stringify(m.error) })))
           const out: Array<{ key: string; hash: string }> = []
           for (const entry of Array.isArray(m.result.data) ? m.result.data : []) {
             if (!isObj(entry)) continue
@@ -146,14 +149,14 @@ export class CodexChatSession extends ChatSessionBase {
     this.model.askPrefix = `${randomUUID().slice(0, 8)}-`
     void this.boot().catch((e: Error) => {
       this.stderr = `${this.stderr}\n${e.message}`.trim()
-      this.queue(this.model.addNotice('error', `Không mở được phiên Codex: ${e.message}`))
+      this.queue(this.model.addNotice('error', t('chat.codex.startFailed', { message: e.message })))
       if (this.proc && !this.exited) this.kill()
       else this.finish(null)
     })
   }
 
   send(text: string, opts: ChatSendOptions = {}): void {
-    if (this.exited) throw new Error('Phiên chat chưa chạy')
+    if (this.exited) throw new Error(t('chat.notRunning'))
     this.outbox.push(userInput(text, opts.images))
     this.lastSentAt = Date.now()
     this.queue(this.model.addUser(opts.display ?? text, opts.origin ?? 'user', { from: opts.from, images: opts.images?.length }))
@@ -207,7 +210,7 @@ export class CodexChatSession extends ChatSessionBase {
     }
     // Người dùng dừng / xoá agent trong lúc chạy thử hook: không mở app-server nữa.
     if (this.killed || this.exited) return
-    if (!trust.length) this.queue(this.model.addNotice('warn', 'Codex chưa tin cậy hook của stag.ai: việc đang làm, khoá phạm vi và sản phẩm của phiên này có thể không cập nhật.'))
+    if (!trust.length) this.queue(this.model.addNotice('warn', t('chat.codex.untrusted')))
     this.spawnProcess([...o.args, ...codexHookTrustArgs(trust), 'app-server'])
     await this.request('initialize', { clientInfo: CLIENT_INFO, capabilities: CAPABILITIES })
     this.notify('initialized')
@@ -217,14 +220,14 @@ export class CodexChatSession extends ChatSessionBase {
       try {
         res = await this.request('thread/resume', { threadId: o.resumeId, ...params, excludeTurns: true })
       } catch (e) {
-        this.queue(this.model.addNotice('warn', `Không tiếp tục được phiên Codex ${o.resumeId} (${(e as Error).message}): mở phiên mới.`))
+        this.queue(this.model.addNotice('warn', t('chat.codex.resumeFailed', { id: o.resumeId, message: (e as Error).message })))
       }
     }
     res ??= await this.request('thread/start', params)
     const r = isObj(res) ? res : {}
     const thread = isObj(r.thread) ? r.thread : {}
     const threadId = str(thread.id)
-    if (!threadId) throw new Error('app-server không trả về thread id')
+    if (!threadId) throw new Error(t('chat.codex.noThread'))
     this.model.threadId = threadId
     this.model.patchState({ sessionId: threadId, ...(str(r.model) ? { model: str(r.model) } : {}) })
     if (this.model.state.phase === 'starting') this.model.setPhase('idle')
@@ -257,7 +260,7 @@ export class CodexChatSession extends ChatSessionBase {
           this.outbox.unshift(input)
           return
         }
-        this.queue(this.model.addNotice('error', `Codex không nhận lượt: ${e.message}`))
+        this.queue(this.model.addNotice('error', t('chat.codex.turnRejected', { message: e.message })))
         if (!this.outbox.length && this.model.state.phase === 'busy') this.model.setPhase('idle')
         this.stateDirty = true
         this.flushSoon()
@@ -273,12 +276,12 @@ export class CodexChatSession extends ChatSessionBase {
   }
 
   private request(method: string, params: unknown): Promise<unknown> {
-    if (!this.proc || this.exited) return Promise.reject(new Error('app-server đã dừng'))
+    if (!this.proc || this.exited) return Promise.reject(new Error(t('chat.codex.stopped')))
     const id = ++this.rpcSeq
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waits.delete(id)
-        reject(new Error(`${method}: quá thời gian chờ`))
+        reject(new Error(t('chat.codex.timeout', { method })))
       }, REQUEST_MS)
       this.waits.set(id, { resolve, reject, timer })
       this.write({ jsonrpc: '2.0', id, method, params })
@@ -323,7 +326,7 @@ export class CodexChatSession extends ChatSessionBase {
   protected override finish(code: number | null): void {
     for (const w of this.waits.values()) {
       clearTimeout(w.timer)
-      w.reject(new Error('app-server đã dừng'))
+      w.reject(new Error(t('chat.codex.stopped')))
     }
     this.waits.clear()
     super.finish(code)

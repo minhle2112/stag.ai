@@ -7,6 +7,7 @@ import { shell } from 'electron'
 import { agentNameProblem, sameAgentName } from '@shared/agentName'
 import { autoFolder, folderClash, joinRoot, normFolder, PROJECT_COLORS, projectNameProblem, projectNoteRel, projectPair } from '@shared/projects'
 import type { Agent, CreateProjectRequest, CreateProjectResult, Project, ProjectDeleteInfo, ProjectFolderChoice, Workspace, WorkspaceFolder } from '@shared/types'
+import { t } from '@shared/i18n'
 import type { AgentService } from './agents'
 import { exists, isDir, today, writeIfMissing } from './fsutil'
 import type { SettingsStore } from './settings'
@@ -36,7 +37,7 @@ export class ProjectService {
 
   private ws(id: string): Workspace {
     const w = this.workspaces.get(id)
-    if (!w) throw new Error('Workspace không tồn tại')
+    if (!w) throw new Error('Workspace not found')
     return w
   }
 
@@ -79,15 +80,16 @@ export class ProjectService {
 
   /**
    * Kiểm tra yêu cầu tạo project (tên, đội, thư mục) và chọn thư mục code, chưa ghi gì: dùng cho create và cho thẻ
-   * hỏi người dùng của tool project_create. Lỗi (tiếng Việt) thì ném ra.
+   * hỏi người dùng của tool project_create. Lỗi thì ném ra, bằng tiếng Anh (agent đọc; hộp tạo project của giao diện đã
+   * tự kiểm các lỗi này bằng ngôn ngữ đang chọn trước khi gọi).
    */
   async plan(req: CreateProjectRequest): Promise<{ name: string; folder: string; created: boolean; note: string }> {
     const ws = this.ws(req.workspaceId)
     const projects = ws.projects ?? []
     const name = req.name.trim()
     const same = projects.find((p) => p.name.toLowerCase() === name.toLowerCase())
-    if (same) throw new Error(`Đã có project tên "${same.name}"`)
-    const nameProblem = projectNameProblem(name, projects)
+    if (same) throw new Error(`A project named "${same.name}" already exists`)
+    const nameProblem = projectNameProblem(name, projects, undefined, true)
     if (nameProblem) throw new Error(nameProblem)
 
     // Đội: tên hợp lệ, không trùng agent nào trong workspace, không trùng nhau.
@@ -96,8 +98,8 @@ export class ProjectService {
     for (const m of req.team) {
       const n = m.name.trim()
       const problem = agentNameProblem(n)
-      if (problem) throw new Error(`${n || '(trống)'}: ${problem}`)
-      if (existing.some((a) => sameAgentName(a.name, n)) || seen.some((x) => sameAgentName(x, n))) throw new Error(`Đã có agent tên "${n}" trong workspace`)
+      if (problem) throw new Error(`${n || '(empty)'}: ${problem}`)
+      if (existing.some((a) => sameAgentName(a.name, n)) || seen.some((x) => sameAgentName(x, n))) throw new Error(`An agent named "${n}" already exists in this workspace`)
       seen.push(n)
     }
 
@@ -108,8 +110,8 @@ export class ProjectService {
       const typed = req.folder.name.trim()
       if (typed) {
         const f = normFolder(typed)
-        if (!f) throw new Error('Tên thư mục không hợp lệ (đường dẫn tương đối trong workspace, không có .. hay ký tự cấm).')
-        if (await exists(joinRoot(ws.path, f))) throw new Error(`Đã có thư mục ${f}. Đặt tên khác, hoặc chọn "Dùng thư mục có sẵn".`)
+        if (!f) throw new Error('Invalid folder name (use a path relative to the workspace, without .. or forbidden characters).')
+        if (await exists(joinRoot(ws.path, f))) throw new Error(`Folder ${f} already exists. Pick another name, or use the existing folder.`)
         folder = f
       } else {
         const names = new Set((await fs.readdir(ws.path).catch(() => [] as string[])).map((n) => n.toLowerCase()))
@@ -117,16 +119,16 @@ export class ProjectService {
       }
     } else {
       const f = normFolder(req.folder.path)
-      if (!f) throw new Error('Thư mục không hợp lệ.')
-      if (!(await isDir(joinRoot(ws.path, f)))) throw new Error(`Không thấy thư mục ${f} trong workspace.`)
+      if (!f) throw new Error('Invalid folder.')
+      if (!(await isDir(joinRoot(ws.path, f)))) throw new Error(`Folder ${f} not found in the workspace.`)
       folder = f
     }
-    const clash = folderClash(projects, folder)
+    const clash = folderClash(projects, folder, undefined, true)
     if (clash) throw new Error(clash)
     const vault = relative(ws.path, ws.vaultPath).replace(/\\/g, '/').toLowerCase()
     const f = folder.toLowerCase()
     if (vault && !vault.startsWith('..') && (vault === f || vault.startsWith(`${f}/`) || f.startsWith(`${vault}/`)))
-      throw new Error('Thư mục code không được trùng hay chứa vault.')
+      throw new Error('The code folder cannot be the vault or contain it.')
     return { name, folder, created, note: uniqueNote(name, projects) }
   }
 
@@ -193,9 +195,9 @@ export class ProjectService {
   async update(workspaceId: string, projectId: string, patch: { name?: string; goal?: string }): Promise<Workspace> {
     const ws = this.ws(workspaceId)
     const projects = ws.projects ?? []
-    if (!projects.some((p) => p.id === projectId)) throw new Error('Project không còn')
+    if (!projects.some((p) => p.id === projectId)) throw new Error('Project not found')
     if (patch.name !== undefined) {
-      const problem = projectNameProblem(patch.name, projects, projectId)
+      const problem = projectNameProblem(patch.name, projects, projectId, true)
       if (problem) throw new Error(problem)
     }
     return this.workspaces.update(ws.id, (w) => ({
@@ -210,7 +212,7 @@ export class ProjectService {
   async deleteInfo(workspaceId: string, projectId: string): Promise<ProjectDeleteInfo> {
     const ws = this.ws(workspaceId)
     const p = ws.projects?.find((x) => x.id === projectId)
-    if (!p) throw new Error('Project không còn')
+    if (!p) throw new Error(t('projects.err.notFound'))
     const dir = joinRoot(ws.path, p.folder)
     if (!(await isDir(dir))) return { files: 0, dirty: null, exists: false }
     let files = 0
@@ -245,7 +247,7 @@ export class ProjectService {
   async remove(workspaceId: string, projectId: string, deleteFolder: boolean): Promise<Workspace> {
     const ws = this.ws(workspaceId)
     const p = ws.projects?.find((x) => x.id === projectId)
-    if (!p) throw new Error('Project không còn')
+    if (!p) throw new Error(t('projects.err.notFound'))
     // Thư mục trước: không chuyển được vào Thùng rác (file đang mở…) thì chưa xoá gì.
     if (deleteFolder) {
       const dir = joinRoot(ws.path, p.folder)
@@ -253,7 +255,7 @@ export class ProjectService {
         try {
           await shell.trashItem(dir)
         } catch (e) {
-          throw new Error(`Không chuyển được thư mục ${dir} vào Thùng rác: ${(e as Error).message}. Chưa xoá gì cả (đóng chương trình đang mở file trong đó rồi thử lại).`)
+          throw new Error(t('projects.delete.trashFailed', { dir, message: (e as Error).message }))
         }
       }
     }

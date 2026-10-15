@@ -3,6 +3,7 @@ import type { ChatItem } from '@shared/chat'
 import { Icon } from '../Icon'
 import { ChatRow, type RowCtx } from './ChatItems'
 import { buildRows, nearBottom, showWorking } from './chatLogic'
+import { useT } from '../../i18n'
 
 /**
  * Danh sách hội thoại cuộn được. Tự cuộn theo nội dung mới nếu người dùng đang ở đáy (±40px); cuộn lên thì dừng
@@ -28,6 +29,7 @@ export function ChatList({
   /** Bấm vào chỗ trống (không chọn chữ, không bấm nút) → đưa con trỏ về ô soạn tin. */
   onBlankClick?: () => void
 }): React.JSX.Element {
+  const t = useT()
   const scroller = useRef<HTMLDivElement>(null)
   const inner = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
@@ -85,7 +87,7 @@ export function ChatList({
           {showWorking(items, phase) && (
             <div className="inline-flex items-center gap-1.5 text-[12px] text-dim">
               <span className="sdot in" />
-              Đang làm…
+              {t('chat.working')}
             </div>
           )}
         </div>
@@ -101,7 +103,7 @@ export function ChatList({
           className="absolute right-4 bottom-3 inline-flex h-7 items-center gap-1.5 rounded-full border border-line-2 bg-panel-2 px-3 text-[12px] text-fg shadow-tip hover:border-line-3 hover:bg-panel-3"
         >
           <Icon name="send" size="s" className="rotate-180" />
-          Mới nhất
+          {t('chat.latest')}
         </button>
       )}
     </div>

@@ -4,7 +4,7 @@ A Windows desktop app for running a team of AI coding agents side by side. Each 
 
 Agents are the CLI tools you already have installed and signed in to: Claude Code, Codex, or a plain terminal. stag.ai does not call any model API itself and does not need an API key to run agents.
 
-> The app's interface is in Vietnamese for now.
+> The interface is available in English and Vietnamese. Switch it any time in Settings → Appearance → Language. A new install starts in Vietnamese on a Vietnamese Windows and in English otherwise.
 
 ## Features
 

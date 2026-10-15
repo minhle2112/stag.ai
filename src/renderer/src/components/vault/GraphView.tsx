@@ -4,6 +4,7 @@ import ForceGraph from 'force-graph'
 import type { VaultIndex } from '@shared/types'
 import { AgentAvatar } from '../ui/AgentAvatar'
 import { Seg } from '../ui/Seg'
+import { t as tr, useT } from '../../i18n'
 import { IconButton } from '../shell/IconButton'
 import {
   buildGraph,
@@ -150,6 +151,7 @@ const LABEL_ZOOM = 1.1
 
 /** Graph view của vault: node = note (+ node ma), cạnh = link; vẽ bằng force-graph (canvas 2D). */
 export function GraphView({ index, current, onOpen, activity }: GraphViewProps): React.JSX.Element {
+  const t = useT()
   const [store] = useState(() => savedFor(index.vaultPath))
   const [settings, setSettingsState] = useState<Settings>(store.settings)
   const setSettings = (patch: Partial<Settings>): void => {
@@ -248,7 +250,7 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
       .nodeId('id')
       .nodeRelSize(1)
       .nodeVal((n) => n.r * n.r) // vùng bấm/hover = hình tròn bán kính r
-      .nodeLabel((n) => (n.ghost ? `${esc(n.name)} — <i>Chưa có note</i>` : esc(n.id)))
+      .nodeLabel((n) => (n.ghost ? `${esc(n.name)} — <i>${esc(tr('vault.ghostTitle'))}</i>` : esc(n.id)))
       .showPointerCursor((o) => !!o && !(o as SimNode).ghost)
       .linkColor((l) => (hover.current.id ? (touches(l, hover.current.id) ? withAlpha(t.accent, 0.85) : withAlpha(t.link, 0.25)) : t.link))
       .linkWidth((l) => (hover.current.id && touches(l, hover.current.id) ? 1.6 : 1))
@@ -373,7 +375,7 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
           label(n, shortName(n.name), a, false)
         }
         // Node đang hover và note đang mở: luôn có nhãn.
-        for (const n of special) label(n, n.ghost ? `${shortName(n.name)} (chưa có)` : shortName(n.name), 1, true)
+        for (const n of special) label(n, n.ghost ? tr('vault.graph.ghostLabel', { name: shortName(n.name) }) : shortName(n.name), 1, true)
         ctx.globalAlpha = 1
       })
       .onNodeHover((n) => {
@@ -519,7 +521,7 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
     <div className="@container flex h-full min-h-0 w-full flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 overflow-hidden border-b border-line px-3 whitespace-nowrap">
         <span className="hidden shrink-0 text-[12px] text-dim @min-[460px]:inline">
-          {display.nodes.length} note · {display.links.length} liên kết
+          {t('vault.noteCount', { count: display.nodes.length })} · {t('vault.graph.links', { count: display.links.length })}
         </span>
         <Seg
           value={local ? 'local' : 'global'}
@@ -528,8 +530,8 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
             setSettings({ mode: m })
           }}
           options={[
-            { value: 'global', label: 'Toàn vault', tip: 'Cả vault' },
-            { value: 'local', label: 'Cục bộ', tip: canLocal ? 'Chỉ phần quanh note đang mở' : 'Mở một note để xem graph cục bộ' }
+            { value: 'global', label: t('vault.graph.global'), tip: t('vault.graph.globalTip') },
+            { value: 'local', label: t('vault.graph.local'), tip: canLocal ? t('vault.graph.localTip') : t('vault.graph.localOff') }
           ]}
         />
         {local && (
@@ -537,40 +539,40 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
             value={String(settings.depth) as '1' | '2'}
             onChange={(d) => setSettings({ depth: d === '2' ? 2 : 1 })}
             options={[
-              { value: '1', label: '1 bước', tip: 'Chỉ note link trực tiếp' },
-              { value: '2', label: '2 bước', tip: 'Cả note cách 2 link' }
+              { value: '1', label: t('vault.graph.depth1'), tip: t('vault.graph.depth1Tip') },
+              { value: '2', label: t('vault.graph.depth2'), tip: t('vault.graph.depth2Tip') }
             ]}
           />
         )}
         <button
           type="button"
           aria-pressed={settings.showGhosts}
-          data-tip="Hiện link tới note chưa có (node mờ)"
+          data-tip={t('vault.graph.ghostsTip')}
           className={`inline-flex ${chip(settings.showGhosts)}`}
           onClick={() => setSettings({ showGhosts: !settings.showGhosts })}
         >
-          Chưa có note
+          {t('vault.graph.ghosts')}
           {ghostCount > 0 && <span className="font-mono text-[11px] text-dim">{ghostCount}</span>}
         </button>
         <button
           type="button"
           aria-pressed={settings.hideOrphans}
-          data-tip="Ẩn note không có link nào"
+          data-tip={t('vault.graph.orphansTip')}
           className={`hidden @min-[520px]:inline-flex ${chip(settings.hideOrphans)}`}
           onClick={() => setSettings({ hideOrphans: !settings.hideOrphans })}
         >
-          Ẩn mồ côi
+          {t('vault.graph.orphans')}
         </button>
         <IconButton
           icon="focus"
-          tip="Vừa khung"
+          tip={t('vault.graph.fit')}
           onClick={() => {
             fitPending.current = false
             if (fgRef.current) fitView(fgRef.current, 400)
           }}
         />
         <div className="min-w-0 flex-1" />
-        <div className="hidden shrink-0 items-center gap-3 text-[11px] text-muted @min-[760px]:flex" data-tip="Vòng liền = agent ghi · vòng đứt = agent đọc">
+        <div className="hidden shrink-0 items-center gap-3 text-[11px] text-muted @min-[760px]:flex" data-tip={t('vault.graph.legendTip')}>
           {liveAgents.map((name) => (
             <span key={name} className="flex items-center gap-1.5">
               <AgentAvatar name={name} size={14} />
@@ -579,7 +581,7 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
           ))}
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-line-2" />
-            chưa có note
+            {t('vault.graph.legendGhost')}
           </span>
         </div>
       </div>
@@ -589,24 +591,24 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
 
         {display.nodes.length === 0 && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-muted">
-            {graph.nodes.length === 0 ? 'Vault chưa có note.' : 'Không có note nào khớp bộ lọc.'}
+            {graph.nodes.length === 0 ? t('vault.graph.empty') : t('vault.graph.noMatch')}
           </div>
         )}
 
         {stats.length > 0 && (
           <div className="pointer-events-auto absolute top-2 right-2 max-h-[60%] min-w-36 overflow-y-auto rounded-lg border border-line-2 bg-panel/90 py-1">
             <div className="flex items-center gap-2 px-2.5 pt-0.5 pb-1">
-              <span className="text-[11px] font-semibold tracking-[0.07em] text-dim">LOẠI NOTE</span>
+              <span className="text-[11px] font-semibold tracking-[0.07em] text-dim">{t('vault.graph.types')}</span>
               <button
                 type="button"
                 aria-pressed={settings.colorByType}
-                data-tip="Tô màu node theo loại note"
+                data-tip={t('vault.graph.colorTip')}
                 onClick={() => setSettings({ colorByType: !settings.colorByType })}
                 className={`ml-auto h-[18px] rounded border px-1.5 text-[11px] ${
                   settings.colorByType ? 'border-line-3 bg-panel-3 text-fg' : 'border-line-2 text-muted hover:text-fg'
                 }`}
               >
-                Tô màu
+                {t('vault.graph.color')}
               </button>
             </div>
             {stats.map(({ key, count }) => {
@@ -615,14 +617,14 @@ export function GraphView({ index, current, onOpen, activity }: GraphViewProps):
                 <button
                   key={key}
                   onClick={() => toggleType(key)}
-                  data-tip={off ? 'Bấm để hiện loại này' : 'Bấm để ẩn loại này'}
+                  data-tip={off ? t('vault.graph.showType') : t('vault.graph.hideType')}
                   className={`flex w-full items-center gap-2 px-2.5 py-0.5 text-left text-[12px] hover:bg-panel-2 ${off ? 'text-dim line-through opacity-60' : 'text-fg'}`}
                 >
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
                     style={{ background: settings.colorByType ? typeColor(key || null) : palRef.current.node }}
                   />
-                  <span className="min-w-0 flex-1 truncate">{key || 'không loại'}</span>
+                  <span className="min-w-0 flex-1 truncate">{key || t('vault.graph.noType')}</span>
                   <span className="font-mono text-[11px] text-dim">{count}</span>
                 </button>
               )

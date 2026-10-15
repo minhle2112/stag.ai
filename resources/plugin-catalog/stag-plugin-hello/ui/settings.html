@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Hello — Số liệu</title>
+    <title>Hello — Stats</title>
     <link rel="stylesheet" href="/__stag/ui.css" />
     <link rel="stylesheet" href="./hello.css" />
     <style>
@@ -13,16 +13,16 @@
   </head>
   <body>
     <main>
-      <p class="muted" style="margin: 0">Trang cài đặt riêng của Hello (slot settingsPage). Số việc xong của mọi agent, đếm từ sự kiện <code>task.done</code>.</p>
+      <p class="muted" style="margin: 0">Hello's own settings page (settingsPage slot). Tasks finished by every agent, counted from <code>task.done</code> events.</p>
       <table>
         <thead>
-          <tr><th>Agent</th><th>Workspace</th><th>Việc xong</th></tr>
+          <tr><th>Agent</th><th>Workspace</th><th>Done</th></tr>
         </thead>
         <tbody id="rows"></tbody>
       </table>
       <div class="row">
-        <button id="reset">Đặt lại số đếm</button>
-        <button id="summary">Tổng kết ngay</button>
+        <button id="reset">Reset counts</button>
+        <button id="summary">Summarize now</button>
         <span class="muted" id="msg"></span>
       </div>
     </main>
@@ -39,13 +39,13 @@
             return tr
           })
         )
-        if (!stats.agents.length) rows.innerHTML = '<tr><td colspan="3" class="muted">Chưa có agent.</td></tr>'
+        if (!stats.agents.length) rows.innerHTML = '<tr><td colspan="3" class="muted">No agents yet.</td></tr>'
       }
       document.getElementById('reset').onclick = async () => {
         msg.textContent = (await host.action('reset')).message
         await load()
       }
-      // "Tổng kết ngay" chạy cùng đoạn mã với việc theo lịch, qua một action.
+      // "Summarize now" runs the same code as the scheduled job, through an action.
       document.getElementById('summary').onclick = async () => {
         msg.textContent = (await host.action('summaryNow')).message
       }

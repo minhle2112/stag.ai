@@ -68,6 +68,7 @@ export type SettingsSection =
   | 'agentApi'
   | 'vault'
   | 'browser'
+  | 'computer'
   | 'voice'
   | 'data'
   | 'about'
@@ -128,6 +129,10 @@ interface UiState {
   toggleBrowser: () => void
   /** Mở / đóng pane trình duyệt ở nhóm màn hình đang xem. */
   setBrowserOpen: (open: boolean) => void
+  /** Pane bên phải đang hiện gì: trình duyệt hay ô Máy tính (computer use). Cùng một khung dock. */
+  dock: 'browser' | 'computer'
+  /** Nút Máy tính trên thanh tiêu đề: mở dock ở ô Máy tính, hoặc đóng nếu đang hiện ô đó. */
+  toggleComputer: () => void
   modalOpened: () => void
   modalClosed: () => void
 }
@@ -165,15 +170,25 @@ export const useUi = create<UiState>((set, get) => ({
     set({ panes: next })
   },
   toggleBrowser: () => {
-    const { tab, settings, panes } = get()
-    get().setBrowserOpen(!panes.browser[viewClassOf(tab, settings !== null)])
+    const { tab, settings, panes, dock } = get()
+    const open = panes.browser[viewClassOf(tab, settings !== null)]
+    get().setBrowserOpen(!open || dock !== 'browser')
   },
   setBrowserOpen: (open) => {
     const { tab, settings, panes } = get()
     const k = viewClassOf(tab, settings !== null)
     const next = { ...panes, browser: { ...panes.browser, [k]: open } }
     writePanes(next)
-    set({ panes: next })
+    set(open ? { panes: next, dock: 'browser' } : { panes: next })
+  },
+  dock: 'browser',
+  toggleComputer: () => {
+    const { tab, settings, panes, dock } = get()
+    const k = viewClassOf(tab, settings !== null)
+    const open = !(panes.browser[k] && dock === 'computer')
+    const next = { ...panes, browser: { ...panes.browser, [k]: open } }
+    writePanes(next)
+    set(open ? { panes: next, dock: 'computer' } : { panes: next })
   },
   modalOpened: () => set((s) => ({ modals: s.modals + 1 })),
   modalClosed: () => set((s) => ({ modals: Math.max(0, s.modals - 1) }))

@@ -1,25 +1,25 @@
-// SDK worker cho plugin stag.ai (alpha). Không phụ thuộc gói nào: mỗi plugin giữ một bản của file này cạnh worker
-// (Cài đặt → Plugin → "Tạo plugin" tự chép vào). Bản gốc: resources/plugin-sdk/stag-plugin-sdk.mjs; bản trong plugin
-// kèm app và trong skill stag-plugin-author phải giống hệt (test kiểm). Tên hàm theo SDK plugin của Paperclip:
+// Worker SDK for stag.ai plugins (alpha). No dependencies: every plugin keeps its own copy of this file next to its worker
+// (Settings → Plugins → "New plugin" copies it in). Original: resources/plugin-sdk/stag-plugin-sdk.mjs; the copies in the
+// bundled plugins and in the stag-plugin-author skill must be identical (a test checks). Function names follow Paperclip's plugin SDK:
 //
 //   import { definePlugin, runWorker } from './stag-plugin-sdk.mjs'
 //   const plugin = definePlugin({
 //     async setup(ctx) {
 //       ctx.tools.register('word_count', async (params, run) => ({ content: '42' }))
-//       ctx.actions.register('hello', async (params, run) => ({ message: 'Xin chào' }))
+//       ctx.actions.register('hello', async (params, run) => ({ message: 'Hello' }))
 //       ctx.events.on('task.done', async (event) => ctx.logger.info(event.data.title))
-//       ctx.data.register('stats', async (params, run) => ({ done: 3 }))        // trang plugin: host.getData('stats')
-//       ctx.jobs.register('summary', async (job) => { /* chạy theo lịch trong manifest.jobs */ })
+//       ctx.data.register('stats', async (params, run) => ({ done: 3 }))        // plugin page: host.getData('stats')
+//       ctx.jobs.register('summary', async (job) => { /* runs on the schedule in manifest.jobs */ })
 //       ctx.webhooks.register('ping', async (req) => ({ status: 200, body: { ok: true } }))
-//       ctx.streams.emit('feed', { text: 'hi' })                               // đẩy thẳng tới trang plugin đang mở
+//       ctx.streams.emit('feed', { text: 'hi' })                               // pushed straight to open plugin pages
 //     },
 //     async onValidateConfig(config) { return { ok: true } },
 //     async onHealth() { return { status: 'ok' } }
 //   })
 //   runWorker(plugin)
 //
-// Giao thức: JSON-RPC 2.0 qua kênh tin nhắn của tiến trình (Electron utilityProcess: process.parentPort;
-// Node fork: process.send). Xem docs/plugins.md.
+// Protocol: JSON-RPC 2.0 over the process message channel (Electron utilityProcess: process.parentPort;
+// Node fork: process.send). See docs/plugins.md.
 
 const HOST_TIMEOUT_MS = 30_000
 
@@ -47,7 +47,7 @@ export function runWorker(def) {
       const id = `w${nextId++}`
       const timer = setTimeout(() => {
         pending.delete(id)
-        reject(new Error(`stag.ai không trả lời ${method}`))
+        reject(new Error(`stag.ai did not answer ${method}`))
       }, HOST_TIMEOUT_MS)
       pending.set(id, { resolve, reject, timer })
       send({ jsonrpc: '2.0', id, method, params })
@@ -77,18 +77,31 @@ export function runWorker(def) {
     },
     agents: {
       list: () => call('agents.list'),
-      send: (agentId, text) => call('agent.sessions.send', { agentId, text })
+      send: (agentId, text) => call('agent.sessions.send', { agentId, text }),
+      // agent.sessions.send capability: ask an agent to do something. Typed and sent when it is idle; an agent without a
+      // running session gets a new session that starts with it. → { status: 'sent' | 'queued' | 'opened' }
+      ask: (agentId, text) => call('agent.ask', { agentId, text })
     },
     board: { list: (workspaceId) => call('board.list', { workspaceId }) },
     vault: {
       read: (workspaceId, path) => call('vault.read', { workspaceId, path }),
       write: (workspaceId, path, content) => call('vault.write', { workspaceId, path, content })
     },
-    // Quyền files.read: một thư mục của dự án (không đệ quy; bỏ .git, node_modules, .sessions, .stag, vault) →
-    // [{ name, path, type: 'file' | 'dir', size }]; đọc file chữ UTF-8 ≤ 1 MB → { text }. path tương đối so với dự án.
+    // files.read capability: one folder of the project (not recursive; skips .git, node_modules, .sessions, .stag, vault) →
+    // [{ name, path, type: 'file' | 'dir', size }]; reading a UTF-8 text file ≤ 1 MB → { text }. path is relative to the project.
     files: {
       list: (workspaceId, path = '') => call('files.list', { workspaceId, path }),
       read: (workspaceId, path) => call('files.read', { workspaceId, path })
+    },
+    // artifacts.publish capability: publish a project file (path relative to the workspace, or absolute inside it) to the
+    // Artifacts tab on behalf of an agent, under its open / latest task. → { id }
+    artifacts: {
+      publish: (workspaceId, agentId, { file, title, description = '' }) => call('artifacts.publish', { workspaceId, agentId, file, title, description })
+    },
+    // browser.cookies capability (risky): the Browser pane's cookies for one domain and its subdomains, as a Netscape
+    // cookies.txt → { text, count }. Keep them in memory or a temp file you delete right after use.
+    browser: {
+      cookies: (workspaceId, domain) => call('browser.cookies', { workspaceId, domain })
     },
     notify: (title, body) => call('notify', { title, body })
   }
@@ -119,36 +132,36 @@ export function runWorker(def) {
     },
     async executeTool(p) {
       const fn = tools.get(p.name)
-      if (!fn) throw new Error(`Tool "${p.name}" chưa được đăng ký trong setup()`)
+      if (!fn) throw new Error(`Tool "${p.name}" is not registered in setup()`)
       const r = await fn(p.params ?? {}, p.context)
       return typeof r === 'string' ? { content: r } : r
     },
     async performAction(p) {
       const fn = actions.get(p.key)
-      if (!fn) throw new Error(`Action "${p.key}" chưa được đăng ký trong setup()`)
+      if (!fn) throw new Error(`Action "${p.key}" is not registered in setup()`)
       return (await fn(p.params ?? {}, p.context)) ?? {}
     },
     async getData(p) {
       const fn = data.get(p.key)
-      if (!fn) throw new Error(`Data "${p.key}" chưa được đăng ký trong setup()`)
+      if (!fn) throw new Error(`Data "${p.key}" is not registered in setup()`)
       return fn(p.params ?? {}, p.context)
     },
     async runJob(p) {
       const fn = jobs.get(p.job.key)
-      if (!fn) throw new Error(`Job "${p.job.key}" chưa được đăng ký trong setup()`)
+      if (!fn) throw new Error(`Job "${p.job.key}" is not registered in setup()`)
       await fn(p.job)
       return { ok: true }
     },
     async handleWebhook(p) {
       const fn = webhooks.get(p.endpointKey) ?? def.onWebhook
-      if (!fn) throw new Error(`Webhook "${p.endpointKey}" chưa được đăng ký trong setup()`)
+      if (!fn) throw new Error(`Webhook "${p.endpointKey}" is not registered in setup()`)
       return (await fn(p)) ?? null
     }
   }
 
   const onMessage = async (m) => {
     if (!m || m.jsonrpc !== '2.0') return
-    // Trả lời cho lời gọi worker → host.
+    // Reply to a worker → host call.
     if (m.id !== undefined && !m.method) {
       const p = pending.get(m.id)
       if (!p) return
@@ -160,11 +173,11 @@ export function runWorker(def) {
     }
     const fn = handlers[m.method]
     if (m.id === undefined) {
-      // Thông báo (vd. onEvent): không trả lời; xử lý lần lượt theo thứ tự đến (hai sự kiện không chạy chồng nhau).
+      // Notification (e.g. onEvent): no reply; handled one at a time in arrival order (two events never overlap).
       if (fn) events = events.then(() => fn(m.params ?? {})).catch((e) => log('error')(`${m.method}: ${e?.message ?? e}`))
       return
     }
-    if (!fn) return send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `Không có method ${m.method}` } })
+    if (!fn) return send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `No method ${m.method}` } })
     try {
       send({ jsonrpc: '2.0', id: m.id, result: (await fn(m.params ?? {})) ?? null })
     } catch (e) {

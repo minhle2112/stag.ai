@@ -160,7 +160,7 @@ describe('lệnh shell', () => {
   it('lệnh ghi nhắc tới đường dẫn bị khoá → hỏi; lệnh đọc hoặc chỗ khác → không', async () => {
     const r = await guard.preToolUse(ws, B, 'claude', sh('Set-Content -Path src\\auth\\login.ts -Value x'))
     expect(r?.hookSpecificOutput.permissionDecision).toBe('ask')
-    expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('Lệnh này có thể sửa src/auth/')
+    expect(r?.hookSpecificOutput.permissionDecisionReason).toContain('This command may modify src/auth/')
     expect(await guard.preToolUse(ws, B, 'claude', sh('Get-Content src/auth/login.ts'))).toBeUndefined()
     expect(await guard.preToolUse(ws, B, 'claude', sh('rm src/authz/x.ts'))).toBeUndefined()
     expect(await guard.preToolUse(ws, B, 'claude', sh(`rm ${join(root, 'src', 'auth', 'x.ts')}`))).toBeDefined()

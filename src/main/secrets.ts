@@ -1,6 +1,7 @@
 import { SECRET_NAME_RE } from '@shared/connectors'
 import type { SecretsList } from '@shared/types'
 import { isObject, JsonFile } from './jsonFile'
+import { t } from '@shared/i18n'
 
 /** Mã hoá / giải mã (Electron safeStorage: DPAPI của Windows, gắn với tài khoản Windows đang đăng nhập). */
 export interface Cipher {
@@ -73,13 +74,13 @@ export class SecretStore {
 
   /** Lưu nhiều bí mật một lần ghi file. */
   async setMany(list: Array<{ name: string; value: string }>): Promise<{ list: SecretsList }> {
-    if (!this.cipher.available()) throw new Error('Windows chưa cho mã hoá dữ liệu (safeStorage) nên app không lưu bí mật được.')
+    if (!this.cipher.available()) throw new Error(t('secrets.error.noCipher'))
     const next = { ...this.items }
     const now = new Date().toISOString()
     for (const { name, value } of list) {
-      if (!SECRET_NAME_RE.test(name)) throw new Error(`Tên bí mật "${name}" không hợp lệ: chỉ chữ, số và "_", không bắt đầu bằng số.`)
-      if (!value) throw new Error(`Bí mật ${name} đang trống.`)
-      if (value.length > MAX_VALUE) throw new Error(`Bí mật ${name} dài quá ${MAX_VALUE} ký tự.`)
+      if (!SECRET_NAME_RE.test(name)) throw new Error(t('secrets.error.badName', { name }))
+      if (!value) throw new Error(t('secrets.error.empty', { name }))
+      if (value.length > MAX_VALUE) throw new Error(t('secrets.error.tooLong', { name, max: MAX_VALUE }))
       next[name] = { data: this.cipher.encrypt(value).toString('base64'), updatedAt: now }
     }
     await this.commit(next)

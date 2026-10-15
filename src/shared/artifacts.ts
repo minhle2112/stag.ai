@@ -3,6 +3,8 @@
 // File này: kiểu dữ liệu + logic thuần (tách khối tài liệu, giữ id khối giữa các bản, so sánh, neo góp ý, hộp
 // "Cần bạn xem", gom việc theo ngày) — dùng chung cho main và renderer, test bằng vitest.
 
+import { t } from './i18n'
+
 /** Trạng thái một mạch góp ý.
  * - draft: người dùng viết, chưa gửi.
  * - queued: đã bấm gửi, chờ gõ vào phiên agent (agent đang làm / phiên đóng).
@@ -471,7 +473,11 @@ export function inboxOf(arts: readonly ArtifactRecord[]): InboxItem[] {
     const fixed = a.comments.filter((c) => c.state === 'fixed')
     if (!nv && !asks.length && !fixed.length) continue
     const lastAgent = asks[0] && [...asks[0].thread].reverse().find((m) => m.by === 'agent')
-    const sub = lastAgent ? `${a.agentName}: ${lastAgent.text}` : nv ? latestVersion(a).note || `Bản mới v${latestVersion(a).v}` : `Kiểm tra ở v${fixed[0].fixedIn ?? latestVersion(a).v}`
+    const sub = lastAgent
+      ? `${a.agentName}: ${lastAgent.text}`
+      : nv
+        ? latestVersion(a).note || t('artifacts.inbox.newVersion', { v: latestVersion(a).v })
+        : t('artifacts.inbox.checkIn', { v: fixed[0].fixedIn ?? latestVersion(a).v })
     const focus = asks[0]?.id ?? (!nv && fixed[0] ? fixed[0].id : null)
     const times = [a.updatedAt, ...asks.map((c) => c.updatedAt), ...fixed.map((c) => c.updatedAt)]
     out.push({ artifactId: a.id, newVersions: nv, asks: asks.length, fixed: fixed.length, focus, sub, updatedAt: times.sort().at(-1)! })
@@ -496,15 +502,15 @@ export function dayBucket(task: { status: string; doneAt?: string; createdAt: st
 
 /** Lý do nộp không thành, nói với người dùng (lỗi gốc viết cho agent bằng tiếng Anh, xem main/artifactStore.ts). */
 export function failureReason(error: string): string {
-  if (/call task_start/i.test(error)) return 'agent chưa mở việc nào (task_start)'
-  if (/does not exist/i.test(error)) return 'file không có trong dự án'
-  if (/outside the project/i.test(error)) return 'file nằm ngoài thư mục dự án'
-  if (/cannot be published/i.test(error)) return 'file nằm trong thư mục không nộp được (.stag, .git, .sessions, node_modules)'
-  if (/too large/i.test(error)) return 'file quá lớn (tối đa 150 MB)'
-  if (/is not a file/i.test(error)) return 'đường dẫn không phải là file'
-  if (/title is empty/i.test(error)) return 'thiếu tiêu đề'
-  if (/file is empty/i.test(error)) return 'thiếu đường dẫn file'
-  return 'lỗi khác (rê chuột để xem chi tiết)'
+  if (/call task_start/i.test(error)) return t('artifacts.fail.noTask')
+  if (/does not exist/i.test(error)) return t('artifacts.fail.missing')
+  if (/outside the project/i.test(error)) return t('artifacts.fail.outside')
+  if (/cannot be published/i.test(error)) return t('artifacts.fail.blocked')
+  if (/too large/i.test(error)) return t('artifacts.fail.tooLarge')
+  if (/is not a file/i.test(error)) return t('artifacts.fail.notFile')
+  if (/title is empty/i.test(error)) return t('artifacts.fail.noTitle')
+  if (/file is empty/i.test(error)) return t('artifacts.fail.noPath')
+  return t('artifacts.fail.other')
 }
 
 /** Nhãn chữ tắt của agent (2 ký tự): "Dev Thực Chiến" → "DT", "Tester" → "TE". */

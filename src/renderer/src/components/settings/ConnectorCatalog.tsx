@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CATALOG, catalogDescription, findCatalog, methodLabel } from '@shared/catalog'
+import { CATALOG, catalogDescription, findCatalog, methodGuide, methodLabel } from '@shared/catalog'
+import type { PlainKey } from '@shared/i18n'
 import { agentKind, type CatalogEntry, type CatalogMethod, type ConnectAccess, type ConnectResult, type Connector, type ToolApproval } from '@shared/types'
 import { useAgents } from '../../store/agents'
 import { useApprovals } from '../../store/approvals'
@@ -8,6 +9,7 @@ import { useWorkspaces } from '../../store/workspaces'
 import { Button, Modal } from '../Modal'
 import { errText } from './AdaptersSection'
 import { Callout, Empty, INPUT, INPUT_MONO, SmallButton, Tile, Tiles } from './controls'
+import { tx, useT } from '../../i18n'
 
 /**
  * Settings → Connector, phần theo trang Connectors của Paperclip: Danh mục (tìm, Connect, "Kết nối công cụ riêng"),
@@ -43,15 +45,20 @@ export function ConnectorLogo({ slug, name, size = 36 }: { slug?: string; name: 
 export function BrowseView({ q, onOpen }: { q: string; onOpen: (id: string) => void }): React.JSX.Element {
   const items = useSettings((s) => s.value.app.connectors.items)
   const [connecting, setConnecting] = useState<CatalogEntry | null>(null)
+  const t = useT()
   const list = useMemo(() => {
     const k = q.trim().toLowerCase()
-    return k ? CATALOG.filter((e) => `${e.name} ${e.slug} ${e.description} ${e.categories.join(' ')}`.toLowerCase().includes(k)) : CATALOG
-  }, [q])
+    return k
+      ? CATALOG.filter((e) => `${e.name} ${e.slug} ${e.description} ${catalogDescription(e)} ${e.categories.join(' ')}`.toLowerCase().includes(k))
+      : CATALOG
+    // catalogDescription đổi theo ngôn ngữ: tính lại khi `t` (ngôn ngữ) đổi.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, t])
 
   return (
     <>
       {list.length === 0 ? (
-        <Empty title={`Không thấy connector nào khớp "${q}".`} />
+        <Empty title={t('connectors.browse.noMatch', { q })} />
       ) : (
         <Tiles>
           {list.map((e) => {
@@ -69,14 +76,15 @@ export function BrowseView({ q, onOpen }: { q: string; onOpen: (id: string) => v
                       <button
                         type="button"
                         onClick={() => onOpen(mine[0].id)}
-                        data-tip="Mở connector đã kết nối"
+                        data-tip={t('connectors.browse.openConnected')}
                         className="h-[22px] rounded-full border border-work/40 px-2 text-[11px] whitespace-nowrap text-work hover:bg-work/10"
                       >
-                        Đã kết nối{mine.length > 1 ? ` ×${mine.length}` : ''}
+                        {t('connectors.tab.connected')}
+                        {mine.length > 1 ? ` ×${mine.length}` : ''}
                       </button>
                     )}
-                    <SmallButton size="xs" tip={`Kết nối ${e.name}`} onClick={() => setConnecting(e)}>
-                      Kết nối
+                    <SmallButton size="xs" tip={t('connectors.browse.connectTo', { name: e.name })} onClick={() => setConnecting(e)}>
+                      {t('connectors.browse.connect')}
                     </SmallButton>
                   </>
                 }
@@ -119,6 +127,7 @@ function ConnectDialog({ entry, onClose, onOpen }: { entry: CatalogEntry; onClos
   const [clientSecret, setClientSecret] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState<ConnectResult | null>(null)
+  const t = useT()
   const method = entry.methods.find((m) => m.key === methodKey)
 
   useEffect(() => {
@@ -161,52 +170,52 @@ function ConnectDialog({ entry, onClose, onOpen }: { entry: CatalogEntry; onClos
   const footer =
     step === 'access' ? (
       <>
-        <Button onClick={onClose}>Huỷ</Button>
+        <Button onClick={onClose}>{t('common.cancel')}</Button>
         <Button primary disabled={!accessOk} onClick={() => setStep('method')}>
-          Tiếp tục
+          {t('connectors.dialog.continue')}
         </Button>
       </>
     ) : step === 'method' ? (
       <>
-        <Button onClick={() => setStep('access')}>Quay lại</Button>
+        <Button onClick={() => setStep('access')}>{t('common.back')}</Button>
         <Button primary disabled={!methodOk} onClick={connect}>
-          Kết nối
+          {t('connectors.browse.connect')}
         </Button>
       </>
     ) : step === 'working' ? (
-      <Button onClick={() => void window.stag.connectors.cancelConnect()}>Huỷ đăng nhập</Button>
+      <Button onClick={() => void window.stag.connectors.cancelConnect()}>{t('connectors.dialog.cancelSignIn')}</Button>
     ) : (
       <>
-        <Button onClick={onClose}>Xong</Button>
+        <Button onClick={onClose}>{t('common.done')}</Button>
         <Button primary onClick={() => onOpen(result!.id)}>
-          Mở trang connector
+          {t('connectors.dialog.openPage')}
         </Button>
       </>
     )
 
   return (
-    <Modal title={`Kết nối ${entry.name}`} width="w-[600px]" onClose={step === 'working' ? undefined : onClose} footer={footer}>
+    <Modal title={t('connectors.browse.connectTo', { name: entry.name })} width="w-[600px]" onClose={step === 'working' ? undefined : onClose} footer={footer}>
       <div className="mb-4 flex items-center gap-3">
         <ConnectorLogo slug={entry.slug} name={entry.name} size={40} />
         <div className="min-w-0 flex-1">
           <div className="text-[12px] text-muted">{catalogDescription(entry)}</div>
           {entry.docsUrl && (
             <a href={entry.docsUrl} target="_blank" rel="noreferrer" className="text-[12px] text-accent hover:underline">
-              Tài liệu của {entry.name} ↗
+              {t('connectors.dialog.docsOf', { name: entry.name })}
             </a>
           )}
         </div>
-        {(step === 'access' || step === 'method') && <span className="text-[12px] text-dim">Bước {step === 'access' ? 1 : 2} / 2</span>}
+        {(step === 'access' || step === 'method') && <span className="text-[12px] text-dim">{t('connectors.dialog.step', { n: step === 'access' ? 1 : 2 })}</span>}
       </div>
 
       {step === 'access' && (
         <fieldset>
-          <legend className="mb-2 text-[13px] font-medium">Agent nào được dùng connector này?</legend>
-          <Radio checked={mode === 'all'} onChange={() => setMode('all')} label="Mọi agent" desc="Bật ở mặc định của app; tắt riêng từng workspace / agent sau được." />
+          <legend className="mb-2 text-[13px] font-medium">{t('connectors.dialog.who')}</legend>
+          <Radio checked={mode === 'all'} onChange={() => setMode('all')} label={t('connectors.dialog.all')} desc={t('connectors.dialog.allDesc')} />
           <Radio
             checked={mode === 'workspace'}
             onChange={() => setMode('workspace')}
-            label="Chỉ agent trong một workspace"
+            label={t('connectors.dialog.workspace')}
             desc={
               mode === 'workspace' && (
                 <select aria-label="Workspace" value={wsId} onChange={(e) => setWsId(e.target.value)} className={`${INPUT} mt-1.5`}>
@@ -222,14 +231,14 @@ function ConnectDialog({ entry, onClose, onOpen }: { entry: CatalogEntry; onClos
           <Radio
             checked={mode === 'agents'}
             onChange={() => setMode('agents')}
-            label="Chỉ agent tôi chọn"
+            label={t('connectors.dialog.agents')}
             desc={
               mode === 'agents' && (
                 <div className="mt-1.5 max-h-48 overflow-y-auto rounded-md border border-line-2 bg-bg p-2">
                   {workspaces.map((w) => (
                     <div key={w.id} className="mb-1">
                       <div className="text-[11px] tracking-[0.07em] text-dim uppercase">{w.name}</div>
-                      {agentsOf(w.id).length === 0 && <div className="text-[12px] text-dim">(chưa có agent)</div>}
+                      {agentsOf(w.id).length === 0 && <div className="text-[12px] text-dim">{t('connectors.dialog.noAgents')}</div>}
                       {agentsOf(w.id).map((a) => (
                         <label key={a.id} className="flex items-center gap-2 py-0.5 text-[13px]">
                           <input
@@ -252,7 +261,7 @@ function ConnectDialog({ entry, onClose, onOpen }: { entry: CatalogEntry; onClos
 
       {step === 'method' && (
         <>
-          <div className="mb-2 text-[13px] font-medium">Kết nối bằng cách nào?</div>
+          <div className="mb-2 text-[13px] font-medium">{t('connectors.dialog.how')}</div>
           <div className="mb-4 flex flex-col gap-2">
             {entry.methods.map((m) => (
               <Radio
@@ -260,7 +269,7 @@ function ConnectDialog({ entry, onClose, onOpen }: { entry: CatalogEntry; onClos
                 checked={methodKey === m.key}
                 onChange={() => setMethodKey(m.key)}
                 label={methodLabel(entry, m)}
-                desc={m.capability?.description || KIND_HINT[m.kind]}
+                desc={m.capability?.description || t(KIND_HINT[m.kind])}
               />
             ))}
           </div>
@@ -273,11 +282,11 @@ function ConnectDialog({ entry, onClose, onOpen }: { entry: CatalogEntry; onClos
         <div className="py-6 text-center text-[13px]">
           {method?.kind === 'oauth' || method?.kind === 'oauth-app' ? (
             <>
-              <div className="font-medium">Đang chờ bạn đăng nhập {entry.name} trong trình duyệt…</div>
-              <div className="mt-1 text-[12px] text-dim">Trình duyệt mặc định đã mở trang đăng nhập. Xong thì quay lại đây (tối đa 5 phút).</div>
+              <div className="font-medium">{t('connectors.dialog.waiting', { name: entry.name })}</div>
+              <div className="mt-1 text-[12px] text-dim">{t('connectors.dialog.waitingDesc')}</div>
             </>
           ) : (
-            <div className="font-medium">Đang kết nối và thử lấy danh sách tool…</div>
+            <div className="font-medium">{t('connectors.dialog.connecting')}</div>
           )}
         </div>
       )}
@@ -286,12 +295,14 @@ function ConnectDialog({ entry, onClose, onOpen }: { entry: CatalogEntry; onClos
         <div className="text-[13px]">
           {result.test.ok ? (
             <Callout tone="ok">
-              Đã kết nối {entry.name}: {result.test.tools.length} tool{result.test.server ? ` (${result.test.server})` : ''}. Agent nhận connector ở phiên mở sau.
+              {result.test.server
+                ? t('connectors.dialog.doneServer', { name: entry.name, tools: t('connectors.toolCount', { count: result.test.tools.length }), server: result.test.server })
+                : t('connectors.dialog.done', { name: entry.name, tools: t('connectors.toolCount', { count: result.test.tools.length }) })}
             </Callout>
           ) : (
             <Callout tone="danger">
-              Đã lưu connector nhưng thử kết nối chưa được: {result.test.error}
-              <div className="mt-1 text-[12px] text-muted">Mở trang connector để sửa và thử lại.</div>
+              {t('connectors.dialog.savedFailed', { error: result.test.error ?? '' })}
+              <div className="mt-1 text-[12px] text-muted">{t('connectors.dialog.savedFailedHint')}</div>
             </Callout>
           )}
         </div>
@@ -300,13 +311,13 @@ function ConnectDialog({ entry, onClose, onOpen }: { entry: CatalogEntry; onClos
   )
 }
 
-const KIND_HINT: Record<CatalogMethod['kind'], string> = {
-  oauth: 'Mở trình duyệt để đăng nhập; app tự đăng ký và tự làm mới phiên đăng nhập.',
-  'oauth-app': 'Dùng OAuth app bạn tạo ở trang quản trị của dịch vụ (client ID / secret, khai báo địa chỉ chuyển hướng của app); một số dịch vụ cho app tự đăng ký.',
-  key: 'Dán API key / token; cất ở Kho bí mật (mã hoá).',
-  none: 'Không cần đăng nhập.',
-  url: 'Dán URL máy chủ bạn đã tạo ở trang của dịch vụ (token nằm trong URL, cất ở Kho bí mật).',
-  stdio: 'Chạy máy chủ ngay trên máy bằng npx.'
+const KIND_HINT: Record<CatalogMethod['kind'], PlainKey> = {
+  oauth: 'connectors.kind.oauth',
+  'oauth-app': 'connectors.kind.oauthApp',
+  key: 'connectors.kind.key',
+  none: 'connectors.kind.none',
+  url: 'connectors.kind.url',
+  stdio: 'connectors.kind.stdio'
 }
 
 function MethodForm(p: {
@@ -323,10 +334,12 @@ function MethodForm(p: {
 }): React.JSX.Element {
   const { m } = p
   const [copied, setCopied] = useState(false)
+  const t = useT()
   const field = `${INPUT_MONO} mt-1 w-full`
+  const guide = methodGuide(p.entry, m)
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-line-2 bg-bg p-3">
-      {m.guide && <p className="text-[12px] leading-relaxed text-dim">{m.guide}</p>}
+      {guide && <p className="text-[12px] leading-relaxed text-dim">{guide}</p>}
       {m.fields.map((f) => (
         <label key={f.key} className="block text-[13px]">
           {f.label}
@@ -339,21 +352,22 @@ function MethodForm(p: {
           {m.keyLabel ?? 'API key'}
           <input type="password" value={p.value} onChange={(e) => p.setValue(e.target.value)} placeholder={m.keyPlaceholder} className={field} />
           <span className="mt-1 block text-[12px] text-dim">
-            Gửi trong header {m.header?.name ?? 'Authorization'}
-            {m.header?.prefix ? ` dạng "${m.header.prefix}…"` : ''}. Cất ở Kho bí mật, không hiện lại.
+            {m.header?.prefix
+              ? t('connectors.form.headerPrefix', { header: m.header?.name ?? 'Authorization', prefix: m.header.prefix })
+              : t('connectors.form.header', { header: m.header?.name ?? 'Authorization' })}
           </span>
         </label>
       )}
       {m.kind === 'url' && (
         <label className="block text-[13px]">
-          URL máy chủ
+          {t('connectors.form.serverUrl')}
           <input type="password" value={p.value} onChange={(e) => p.setValue(e.target.value)} placeholder="https://…" className={field} />
         </label>
       )}
       {m.kind === 'oauth-app' && (
         <>
           <div className="text-[12px]">
-            Địa chỉ chuyển hướng (khai báo trong OAuth app):
+            {t('connectors.form.redirect')}
             <div className="mt-1 flex items-center gap-2">
               <code className="rounded border border-line-2 bg-panel px-2 py-1 font-mono text-[11px]">http://127.0.0.1:47621/oauth/callback</code>
               <button
@@ -364,28 +378,28 @@ function MethodForm(p: {
                   setCopied(true)
                 }}
               >
-                {copied ? 'Đã chép' : 'Chép'}
+                {copied ? t('common.copied') : t('common.copy')}
               </button>
               {m.register && (
                 <a href={m.register} target="_blank" rel="noreferrer" className="text-[12px] text-accent hover:underline">
-                  Tạo OAuth app ↗
+                  {t('connectors.form.createApp')}
                 </a>
               )}
             </div>
           </div>
           <label className="block text-[13px]">
-            Client ID <span className="text-dim">(bỏ trống: app thử tự đăng ký nếu dịch vụ cho phép)</span>
+            Client ID <span className="text-dim">{t('connectors.form.clientIdHint')}</span>
             <input value={p.clientId} onChange={(e) => p.setClientId(e.target.value)} spellCheck={false} className={field} />
           </label>
           <label className="block text-[13px]">
-            Client secret (nếu có)
+            {t('connectors.form.clientSecret')}
             <input type="password" value={p.clientSecret} onChange={(e) => p.setClientSecret(e.target.value)} className={field} />
           </label>
         </>
       )}
       {m.serverUrl && m.kind !== 'url' && m.kind !== 'stdio' && (
         <div className="text-[12px] text-dim">
-          Máy chủ: <code className="font-mono">{m.serverUrl}</code>
+          {tx('connectors.form.server', { url: <code className="font-mono">{m.serverUrl}</code> })}
         </div>
       )}
       {m.warnings.map((w) => (
@@ -395,7 +409,7 @@ function MethodForm(p: {
       ))}
       {m.docs && (
         <a href={m.docs} target="_blank" rel="noreferrer" className="text-[12px] text-accent hover:underline">
-          Hướng dẫn ↗
+          {t('connectors.form.guide')}
         </a>
       )}
     </div>
@@ -420,19 +434,17 @@ export function ReviewView({ connectorLabel }: { connectorLabel: (id: string) =>
   const items = useApprovals((s) => s.items)
   const workspaces = useWorkspaces((s) => s.items)
   const [now, setNow] = useState(Date.now())
+  const t = useT()
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
   }, [])
 
   return (
     <>
-      <p className="mb-4 text-[12px] leading-relaxed text-dim">
-        Thao tác agent muốn chạy cần bạn đồng ý trước: cho phép một lần, luôn cho phép (tool đó chuyển sang "Tự cho phép"), hoặc từ chối. Áp dụng cho tool
-        connector ở mức "Hỏi trước" trong phiên Claude Code; quá {9} phút không ai duyệt thì agent hỏi trong terminal. Codex tự hỏi trong terminal của nó.
-      </p>
+      <p className="mb-4 text-[12px] leading-relaxed text-dim">{t('connectors.review.desc', { minutes: 9 })}</p>
       {items.length === 0 ? (
-        <Empty title="Không có gì đang chờ bạn duyệt." />
+        <Empty title={t('connectors.review.empty')} />
       ) : (
         <div className="flex flex-col gap-2">
           {items.map((a) => (
@@ -446,6 +458,7 @@ export function ReviewView({ connectorLabel }: { connectorLabel: (id: string) =>
 
 function ApprovalCard({ a, c, wsName, now }: { a: ToolApproval; c?: Connector; wsName: string; now: number }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
+  const t = useT()
   const left = Math.max(0, Math.round((Date.parse(a.expiresAt) - now) / 1000))
   const answer = (d: 'allow' | 'always' | 'deny'): void => {
     setBusy(true)
@@ -458,13 +471,20 @@ function ApprovalCard({ a, c, wsName, now }: { a: ToolApproval; c?: Connector; w
         <ConnectorLogo slug={c?.catalog?.slug} name={name} size={30} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px]">
-            <b className="font-semibold">{a.agentName}</b>
-            {wsName && <span className="text-muted"> · {wsName}</span>} muốn dùng <b className="font-semibold">{name}</b>
+            {tx('connectors.review.wants', {
+              agent: (
+                <>
+                  <b className="font-semibold">{a.agentName}</b>
+                  {wsName && <span className="text-muted"> · {wsName}</span>}
+                </>
+              ),
+              name: <b className="font-semibold">{name}</b>
+            })}
           </div>
           <div className="mt-0.5 font-mono text-[11px] text-dim">{a.tool}</div>
         </div>
         <span className="font-mono text-[11px] tabular-nums text-dim">
-          còn {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}
+          {t('connectors.review.left', { time: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` })}
         </span>
       </div>
       {a.input && a.input !== '{}' && (
@@ -472,13 +492,13 @@ function ApprovalCard({ a, c, wsName, now }: { a: ToolApproval; c?: Connector; w
       )}
       <div className="mt-3 flex justify-end gap-2">
         <SmallButton variant="danger" disabled={busy} onClick={() => answer('deny')}>
-          Từ chối
+          {t('common.deny')}
         </SmallButton>
         <SmallButton disabled={busy} onClick={() => answer('always')}>
-          Luôn cho phép
+          {t('connectors.review.always')}
         </SmallButton>
         <SmallButton variant="primary" disabled={busy} onClick={() => answer('allow')}>
-          Cho phép
+          {t('common.allow')}
         </SmallButton>
       </div>
     </div>

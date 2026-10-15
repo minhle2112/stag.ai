@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Icon, type IconName } from '../Icon'
+import { t } from '../../i18n'
 
 /**
  * Ô điều khiển dùng chung cho trang Settings (bản "Xưởng", design/v2/1-xuong.html). Mọi thay đổi lưu ngay (không có nút Lưu).
@@ -73,7 +74,7 @@ export function Group({
 }
 
 /** Chấm teal 6px: "dòng này đang ghi đè ở cấp đang chọn". Có `onReset` thì bấm vào để bỏ ghi đè (theo cấp trên). */
-export function OverrideDot({ onReset, tip = 'Ghi đè ở cấp này' }: { onReset?: () => void; tip?: string }): React.JSX.Element {
+export function OverrideDot({ onReset, tip = t('settings.controls.overrideHere') }: { onReset?: () => void; tip?: string }): React.JSX.Element {
   const dot = <span className="h-1.5 w-1.5 rounded-full bg-accent" />
   if (!onReset) return <span data-tip={tip} className="inline-grid h-3.5 w-3.5 shrink-0 place-items-center">{dot}</span>
   return (
@@ -121,7 +122,7 @@ export function Row({
           {override?.on && (
             <OverrideDot
               onReset={override.onReset}
-              tip={`Ghi đè ở cấp này · bấm để theo cấp trên${override.parent ? ` (${override.parent})` : ''}`}
+              tip={override.parent ? t('settings.controls.overrideResetParent', { parent: override.parent }) : t('settings.controls.overrideReset')}
             />
           )}
           <label htmlFor={htmlFor} className="min-w-0 text-[13px] font-medium">
@@ -229,7 +230,7 @@ export function OverrideSwitch({
       {own !== undefined && (
         <OverrideDot
           onReset={() => onChange(undefined)}
-          tip={`Ghi đè ở cấp này · bấm để theo cấp trên (${parentLabel ?? (inherited ? 'bật' : 'tắt')})`}
+          tip={t('settings.controls.overrideResetParent', { parent: parentLabel ?? t(inherited ? 'common.on' : 'common.off').toLowerCase() })}
         />
       )}
       <Switch label={label} checked={own ?? inherited} disabled={disabled} onChange={(v) => onChange(v)} />
@@ -311,7 +312,7 @@ export function Stepper({
   const btn = 'grid h-full w-[26px] place-items-center text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent'
   return (
     <div className={`inline-flex h-7 shrink-0 items-center rounded-md border border-line-2 bg-bg focus-within:border-accent/40 ${disabled ? 'opacity-50' : ''}`}>
-      <button type="button" className={`${btn} rounded-l-[5px]`} disabled={disabled || value <= min} onClick={() => commit(value - step)} aria-label={`Giảm ${label}`} data-tip="Giảm">
+      <button type="button" className={`${btn} rounded-l-[5px]`} disabled={disabled || value <= min} onClick={() => commit(value - step)} aria-label={t('settings.controls.decreaseLabel', { label })} data-tip={t('settings.controls.decrease')}>
         −
       </button>
       <input
@@ -325,7 +326,7 @@ export function Stepper({
         className="w-[52px] bg-transparent text-center font-mono text-[12px] tabular-nums outline-none"
       />
       {suffix && <span className="pr-1 text-[12px] text-dim">{suffix}</span>}
-      <button type="button" className={`${btn} rounded-r-[5px]`} disabled={disabled || value >= max} onClick={() => commit(value + step)} aria-label={`Tăng ${label}`} data-tip="Tăng">
+      <button type="button" className={`${btn} rounded-r-[5px]`} disabled={disabled || value >= max} onClick={() => commit(value + step)} aria-label={t('settings.controls.increaseLabel', { label })} data-tip={t('settings.controls.increase')}>
         +
       </button>
     </div>

@@ -8,6 +8,7 @@ import { claudeConfigDir } from './context'
 import { spawnSpec } from './externalAdapters'
 import { exists, readText } from './fsutil'
 import type { SettingsStore } from './settings'
+import { t } from '@shared/i18n'
 
 /**
  * Adapter = cách app chạy một CLI AI (Claude Code, Codex): tìm file chạy, kiểm tra phiên bản / đăng nhập,
@@ -20,12 +21,8 @@ export const ADAPTER_LABEL: Record<CliAdapterId, string> = { claude: 'Claude Cod
 /** Mức suy nghĩ `--effort` của Claude Code (theo `claude --help`, 2.1.295). */
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 /** Tên tắt model của Claude Code: luôn trỏ tới bản mới nhất của dòng đó. Gõ tên đầy đủ cũng được. */
-const CLAUDE_MODELS: AdapterModel[] = [
-  { id: 'opus', label: 'Opus (mới nhất)', efforts: CLAUDE_EFFORTS },
-  { id: 'sonnet', label: 'Sonnet (mới nhất)', efforts: CLAUDE_EFFORTS },
-  { id: 'haiku', label: 'Haiku (mới nhất)', efforts: CLAUDE_EFFORTS },
-  { id: 'fable', label: 'Fable (mới nhất)', efforts: CLAUDE_EFFORTS }
-]
+const claudeModels = (): AdapterModel[] =>
+  ['Opus', 'Sonnet', 'Haiku', 'Fable'].map((name) => ({ id: name.toLowerCase(), label: t('adapters.model.latest', { name }), efforts: CLAUDE_EFFORTS }))
 
 /**
  * Tìm file chạy thật của Claude Code. Gọi thẳng claude.exe thay vì claude.cmd để tham số
@@ -42,7 +39,7 @@ export async function resolveClaude(env: NodeJS.ProcessEnv = process.env): Promi
     const target = shim && /"%dp0%\\?([^"]+?\.exe)"/i.exec(shim)
     if (target && (await exists(join(dir, target[1])))) return join(dir, target[1])
   }
-  throw new Error('Không tìm thấy Claude Code (claude) trong PATH. Cài bằng: npm install -g @anthropic-ai/claude-code')
+  throw new Error(t('adapters.error.claudeMissing'))
 }
 
 /** Biến cấu hình Claude Code của người dùng — luôn giữ. */
@@ -131,12 +128,12 @@ export function codexModels(cacheJson: string): AdapterModel[] {
 export function claudeLogin(stdout: string): AdapterStatus['login'] {
   try {
     const s = JSON.parse(stdout) as { loggedIn?: unknown; authMethod?: unknown; subscriptionType?: unknown; email?: unknown }
-    if (s.loggedIn === false) return { state: 'out', detail: 'Chưa đăng nhập' }
-    if (s.loggedIn !== true) return { state: 'unknown', detail: 'Không đọc được trạng thái đăng nhập' }
-    const parts = [s.authMethod, s.subscriptionType && `gói ${s.subscriptionType}`, s.email].filter((p): p is string => typeof p === 'string' && !!p)
-    return { state: 'in', detail: parts.join(' · ') || 'Đã đăng nhập' }
+    if (s.loggedIn === false) return { state: 'out', detail: t('adapters.login.out') }
+    if (s.loggedIn !== true) return { state: 'unknown', detail: t('adapters.login.unknown') }
+    const parts = [s.authMethod, s.subscriptionType && t('adapters.login.plan', { plan: String(s.subscriptionType) }), s.email].filter((p): p is string => typeof p === 'string' && !!p)
+    return { state: 'in', detail: parts.join(' · ') || t('adapters.login.in') }
   } catch {
-    return { state: 'unknown', detail: 'Không đọc được trạng thái đăng nhập' }
+    return { state: 'unknown', detail: t('adapters.login.unknown') }
   }
 }
 
@@ -144,9 +141,9 @@ export function claudeLogin(stdout: string): AdapterStatus['login'] {
 export function codexLogin(output: string): AdapterStatus['login'] {
   const using = /Logged in using (.+)/i.exec(output)
   if (using) return { state: 'in', detail: using[1].trim() }
-  if (/logged in/i.test(output) && !/not logged in/i.test(output)) return { state: 'in', detail: 'Đã đăng nhập' }
-  if (/not logged in/i.test(output)) return { state: 'out', detail: 'Chưa đăng nhập' }
-  return { state: 'unknown', detail: output.trim().split(/\r?\n/)[0] || 'Không đọc được trạng thái đăng nhập' }
+  if (/logged in/i.test(output) && !/not logged in/i.test(output)) return { state: 'in', detail: t('adapters.login.in') }
+  if (/not logged in/i.test(output)) return { state: 'out', detail: t('adapters.login.out') }
+  return { state: 'unknown', detail: output.trim().split(/\r?\n/)[0] || t('adapters.login.unknown') }
 }
 
 interface RunResult {
@@ -179,7 +176,7 @@ export class AdapterService {
     const custom = this.settings.get().app.adapters[id].path
     if (custom) {
       const st = await fs.stat(custom).catch(() => null)
-      if (!st?.isFile()) throw new Error(`Không thấy file chạy ${ADAPTER_LABEL[id]} ở "${custom}". Sửa trong Cài đặt → Adapter → ${ADAPTER_LABEL[id]}.`)
+      if (!st?.isFile()) throw new Error(t('adapters.error.customPath', { name: ADAPTER_LABEL[id], path: custom }))
       return { path: custom, source: 'custom' }
     }
     return { path: id === 'codex' ? await resolveCodex() : await resolveClaude(), source: 'auto' }
@@ -212,7 +209,7 @@ export class AdapterService {
       version: null,
       login: { state: 'unknown', detail: '' },
       configModel: null,
-      models: id === 'claude' ? CLAUDE_MODELS : [],
+      models: id === 'claude' ? claudeModels() : [],
       error: null,
       checkedAt: new Date().toISOString()
     }
@@ -230,7 +227,7 @@ export class AdapterService {
     const env = { ...independentSessionEnv(process.env), ...this.env(id) }
     const version = await runCli(status.path, ['--version'], env)
     if (!version.ok) {
-      status.error = `Chạy "${status.path} --version" lỗi: ${version.err.trim().split(/\r?\n/)[0] || 'không rõ'}`
+      status.error = t('adapters.error.runFailed', { command: `"${status.path} --version"`, error: version.err.trim().split(/\r?\n/)[0] || t('common.unknown') })
       return status
     }
     status.version = version.out.trim().split(/\r?\n/)[0] || null

@@ -2,7 +2,7 @@
 
 /** Bỏ dấu + chữ thường; giống `fold` ở main/vaultIndex.ts (renderer không import được main). */
 export function fold(s: string): string {
-  return s.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase()
+  return s.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase() // i18n-ignore: bỏ dấu tiếng Việt khi tìm
 }
 
 export interface Piece {

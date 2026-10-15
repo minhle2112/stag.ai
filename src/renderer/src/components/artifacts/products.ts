@@ -1,6 +1,7 @@
 // Cột trái tab "Sản phẩm": gom sản phẩm theo việc của agent, nhóm theo ngày, lọc project / agent, tìm kiếm.
 import { dayBucket, needsYou, unseenVersions, type ArtifactRecord, type ArtifactsSnapshot, type DayBucket, type PublishFailure } from '@shared/artifacts'
 import type { Task } from '@shared/types'
+import { t, type PlainKey } from '@shared/i18n'
 import { fold } from '../vault/highlight'
 
 export interface TaskEntry {
@@ -21,12 +22,13 @@ export interface TaskEntry {
   failures: PublishFailure[]
 }
 
-export const BUCKETS: Array<{ id: DayBucket; label: string }> = [
-  { id: 'run', label: 'ĐANG LÀM' },
-  { id: 'today', label: 'HÔM NAY' },
-  { id: 'yday', label: 'HÔM QUA' },
-  { id: 'week', label: 'TUẦN NÀY' },
-  { id: 'older', label: 'CŨ HƠN' }
+/** Nhãn là khoá i18n (vẽ bằng t() + chữ hoa). */
+export const BUCKETS: Array<{ id: DayBucket; label: PlainKey }> = [
+  { id: 'run', label: 'common.name.working' },
+  { id: 'today', label: 'common.today' },
+  { id: 'yday', label: 'common.yesterday' },
+  { id: 'week', label: 'common.thisWeek' },
+  { id: 'older', label: 'common.older' }
 ]
 
 /** Mỗi lần "Tải thêm" ở nhóm Cũ hơn. */
@@ -62,7 +64,7 @@ export function buildEntries(tasks: readonly Task[], snap: ArtifactsSnapshot | u
     const a = newest(list)[0]
     out.push({
       id: k,
-      title: a.taskTitle || 'Không gắn việc',
+      title: a.taskTitle || t('artifacts.noTask'),
       agentId: a.agentId,
       agentName: a.agentName,
       status: 'done',
@@ -89,7 +91,7 @@ export function emptyCount(entries: readonly TaskEntry[], agentId: string | null
 
 export interface Group {
   id: DayBucket
-  label: string
+  label: PlainKey
   entries: TaskEntry[]
   /** Nhóm Cũ hơn: số việc còn chưa tải. */
   more: number

@@ -6,6 +6,7 @@ import { ipcRenderer } from 'electron'
 import { agentColor, PAGE_IPC, type AnchorUpdate, type CaptureResult, type InspectGroup, type InspectSource, type InspectTarget, type PageCmd, type PagePin, type PageState, type PinPlace, type SaveInput } from '@shared/inspect'
 import { classKey, parseSrc, tagKey, type StaticTag } from '@shared/inspectSource'
 import { initials } from '@shared/artifacts'
+import { setLocale, t as tr, type PlainKey } from '@shared/i18n'
 import { credHost, startCredentials } from './credentials'
 
 if (window.top === window) {
@@ -138,6 +139,7 @@ function pageUrl(): string {
 
 function apply(s: PageState): void {
   state = s
+  if (s.locale) setLocale(s.locale)
   // Main bỏ bảng "ghim nào còn trên trang" mỗi lần đẩy trạng thái: gửi lại dù không đổi.
   lastPlaces = ''
   for (const id of [...found.keys()]) if (!s.pins.some((p) => p.id === id)) found.delete(id)
@@ -318,7 +320,7 @@ function sourceOf(el: Element): InspectSource {
       const widget = n.getAttribute('data-widget_type')?.replace(/\.default$/, '') ?? elType
       return {
         chip: 'el',
-        label: `Elementor ${widget} #${elId}${page ? ` · trang #${page}` : ''}`,
+        label: `Elementor ${widget} #${elId}${page ? ` · page #${page}` : ''}`,
         hint: `Elementor element id ${elId} (${widget})${page ? ` in post ${page} meta _elementor_data` : ''}: edit the JSON with WP-CLI (wp post meta get/update), then wp elementor flush-css.`,
         ...(n !== el ? { inherited: true } : {})
       }
@@ -338,8 +340,8 @@ function sourceOf(el: Element): InspectSource {
   if (fromFile) return fromFile
   // mu-plugin WordPress: template chính của trang (front-page.php…) cho phần không có nguồn riêng.
   const tpl = document.querySelector('meta[name="stag-template"]')?.getAttribute('content')
-  if (tpl) return { ...parseSrc(tpl, true), label: `${tpl} (template của trang)` }
-  return { chip: 'none', label: 'Không rõ nguồn' }
+  if (tpl) return { ...parseSrc(tpl, true), label: `${tpl} (page template)` }
+  return { chip: 'none', label: 'Unknown source' }
 }
 
 /** File HTML tĩnh của trang (main tìm trong dự án) + thẻ mở của nó, theo khoá thẻ#id.lớp → các dòng theo thứ tự. */
@@ -516,7 +518,7 @@ function placeBox(b: HTMLElement, r: { x: number; y: number; w: number; h: numbe
   b.style.height = r.h + 'px'
 }
 
-const PIN_TIP: Record<string, string> = { queued: 'đang chờ agent', working: 'agent đang trả lời', new: 'có trả lời mới', read: 'đã xem' }
+const PIN_TIP: Record<string, PlainKey> = { queued: 'inspect.pin.queued', working: 'inspect.pin.working', new: 'inspect.pin.new', read: 'inspect.pin.read' }
 
 function renderPins(): void {
   const places: Record<number, PinPlace> = {}
@@ -564,7 +566,12 @@ function renderPins(): void {
     n.className = `pin ${cls}${peekId === p.id ? ' hl' : ''}`
     n.textContent = String(p.id)
     const who = state.agents.find((a) => a.id === p.agentId)?.name
-    n.title = draft ? `#${p.id} · chờ gửi${who ? ` cho ${who}` : ''}: ${p.title.slice(0, 60)}` : `#${p.id} · ${PIN_TIP[p.state] ?? ''}`
+    const tip = PIN_TIP[p.state]
+    n.title = draft
+      ? who
+        ? tr('inspect.pin.draftFor', { id: String(p.id), who, title: p.title.slice(0, 60) })
+        : tr('inspect.pin.draft', { id: String(p.id), title: p.title.slice(0, 60) })
+      : `#${p.id} · ${tip ? tr(tip) : ''}`
     n.style.left = pos.x + 'px'
     n.style.top = pos.y + 'px'
   }
@@ -683,8 +690,8 @@ function openCmp(el: Element, pt: { x: number; y: number }): void {
   const text = draft?.title ?? ''
   const box = div('cmp')
   box.setAttribute('role', 'dialog')
-  box.setAttribute('aria-label', 'Bình luận')
-  box.innerHTML = `<textarea rows="2" placeholder="Nhập bình luận…"></textarea><div class="row"><div class="whow"></div><button class="send" type="button" title="Thêm vào danh sách chờ gửi (Enter)">Thêm</button></div>`
+  box.setAttribute('aria-label', tr('common.name.comments'))
+  box.innerHTML = `<textarea rows="2" placeholder="${esc(tr('inspect.box.placeholder'))}"></textarea><div class="row"><div class="whow"></div><button class="send" type="button" title="${esc(tr('inspect.box.addTip'))}">${esc(tr('common.add'))}</button></div>`
   const ta = box.querySelector('textarea')!
   const who = box.querySelector<HTMLDivElement>('.whow')!
   const add = box.querySelector<HTMLButtonElement>('.send')!
@@ -782,8 +789,8 @@ function paintWho(c: Composer): void {
   const a = state.agents.find((x) => x.id === c.agentId)
   const had = !!root.activeElement && c.who.contains(root.activeElement)
   const chev = '<svg class="ic" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>'
-  c.who.innerHTML = `<button class="who" type="button" aria-haspopup="listbox" aria-expanded="${c.menu}" title="Gửi cho agent nào">${
-    a ? `${avatar(a.name)}<span class="nm">${esc(a.name)}</span>` : '<span class="nm">Chưa có agent</span>'
+  c.who.innerHTML = `<button class="who" type="button" aria-haspopup="listbox" aria-expanded="${c.menu}" title="${esc(tr('inspect.box.whoTip'))}">${
+    a ? `${avatar(a.name)}<span class="nm">${esc(a.name)}</span>` : `<span class="nm">${esc(tr('inspect.box.noAgent'))}</span>`
   }${chev}</button>${
     c.menu
       ? `<div class="menu ${c.box.getBoundingClientRect().top < 180 ? 'down' : 'up'}" role="listbox">${
@@ -792,11 +799,11 @@ function paintWho(c: Composer): void {
                 .map(
                   (x, i) =>
                     `<button type="button" role="option" aria-selected="${x.id === c.agentId}" data-ag="${esc(x.id)}" class="${i === c.focus ? 'f' : ''}">${avatar(x.name)}<span class="nm">${esc(x.name)}</span>${
-                      !x.running ? '<span class="d">chưa mở</span>' : x.busy || x.load ? '<span class="d">đang bận</span>' : ''
+                      !x.running ? `<span class="d">${esc(tr('inspect.box.notOpen'))}</span>` : x.busy || x.load ? `<span class="d">${esc(tr('inspect.box.busy'))}</span>` : ''
                     }</button>`
                 )
                 .join('')
-            : '<div class="none">Workspace chưa có agent nào</div>'
+            : `<div class="none">${esc(tr('inspect.box.noAgents'))}</div>`
         }</div>`
       : ''
   }`
@@ -912,7 +919,7 @@ async function save(input: SaveInput): Promise<number | null> {
   try {
     return (await ipcRenderer.invoke(PAGE_IPC.save, input)) as number
   } catch (e) {
-    toast(`Không thêm được bình luận: ${errText(e)}`)
+    toast(tr('inspect.box.addFailed', { message: errText(e) }))
     return null
   }
 }

@@ -4,6 +4,7 @@
  * (`GET https://api.anthropic.com/api/oauth/usage`, không có tài liệu công khai — dạng trả về xem `parseUsage`).
  * Token không bao giờ rời main: renderer chỉ nhận `ClaudeUsageState`.
  */
+import { t, type PlainKey } from './i18n'
 
 /** Một giới hạn: % đã dùng + giờ reset (ms). */
 export interface UsageWindow {
@@ -157,33 +158,33 @@ export function msBeforeReset(w: UsageWindow, windowMs: number, now: number): nu
 /** Thời lượng ngắn: "2 giờ 13 phút", "47 phút", "dưới 1 phút", "3 ngày 4 giờ". */
 export function formatDuration(ms: number): string {
   const min = Math.floor(ms / 60_000)
-  if (min < 1) return 'dưới 1 phút'
+  if (min < 1) return t('usage.dur.underMinute')
   const d = Math.floor(min / 1440)
   const h = Math.floor((min % 1440) / 60)
   const m = min % 60
-  if (d) return h ? `${d} ngày ${h} giờ` : `${d} ngày`
-  if (h) return m ? `${h} giờ ${m} phút` : `${h} giờ`
-  return `${m} phút`
+  if (d) return h ? t('usage.dur.daysHours', { days: d, hours: h }) : t('usage.dur.days', { count: d })
+  if (h) return m ? t('usage.dur.hoursMinutes', { hours: h, minutes: m }) : t('usage.dur.hours', { count: h })
+  return t('usage.dur.minutes', { count: m })
 }
 
-const WEEKDAYS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
+const WEEKDAYS: readonly PlainKey[] = ['usage.weekday.0', 'usage.weekday.1', 'usage.weekday.2', 'usage.weekday.3', 'usage.weekday.4', 'usage.weekday.5', 'usage.weekday.6']
 const pad = (n: number): string => String(n).padStart(2, '0')
 
 /** Giờ reset: dưới 24 giờ → "sau 2 giờ 13 phút"; xa hơn → "T5 09:00" (giờ máy). Không có → ''. */
 export function formatReset(resetsAt: number | null, now: number): string {
   if (resetsAt === null) return ''
   const left = resetsAt - now
-  if (left <= 0) return 'đang reset'
-  if (left < 24 * 3600_000) return `sau ${formatDuration(left)}`
+  if (left <= 0) return t('usage.reset.now')
+  if (left < 24 * 3600_000) return t('usage.reset.in', { duration: formatDuration(left) })
   const d = new Date(resetsAt)
-  return `${WEEKDAYS[d.getDay()]} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `${t(WEEKDAYS[d.getDay()])} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /** "Cập nhật N phút trước". */
 export function formatAgo(at: number | null, now: number): string {
-  if (at === null) return 'Chưa cập nhật'
+  if (at === null) return t('usage.ago.never')
   const min = Math.floor((now - at) / 60_000)
-  return min < 1 ? 'Cập nhật vừa xong' : `Cập nhật ${formatDuration(now - at)} trước`
+  return min < 1 ? t('usage.ago.justNow') : t('usage.ago.at', { duration: formatDuration(now - at) })
 }
 
 const hit = (w: UsageWindow | null): boolean => !!w && (w.percent >= 100 || w.locked)
@@ -197,23 +198,20 @@ export interface UsageWarning {
 export function usageWarning(u: ClaudeUsage, now: number): UsageWarning | null {
   const after = (w: UsageWindow): string => {
     const r = formatReset(w.resetsAt, now)
-    return r ? ` (reset ${r})` : ''
+    return r ? t('usage.reset.suffix', { when: r }) : ''
   }
-  if (u.session && hit(u.session))
-    return { tone: 'danger', text: `Đã chạm giới hạn phiên 5 giờ${after(u.session)}. Agent Claude sẽ báo lỗi giới hạn tới khi reset; agent Codex vẫn chạy được.` }
-  if (u.week && hit(u.week))
-    return { tone: 'danger', text: `Đã chạm giới hạn tuần${after(u.week)}. Agent Claude sẽ báo lỗi giới hạn tới khi reset; agent Codex vẫn chạy được.` }
+  if (u.session && hit(u.session)) return { tone: 'danger', text: t('usage.warn.sessionHit', { reset: after(u.session) }) }
+  if (u.week && hit(u.week)) return { tone: 'danger', text: t('usage.warn.weekHit', { reset: after(u.week) }) }
   const m = u.models.find(hit)
-  if (m) return { tone: 'danger', text: `Đã chạm giới hạn tuần của ${m.label}${after(m)}. Các model khác vẫn dùng được.` }
+  if (m) return { tone: 'danger', text: t('usage.warn.modelHit', { model: m.label, reset: after(m) }) }
   for (const [w, ms, name] of [
-    [u.session, SESSION_MS, 'phiên 5 giờ'],
-    [u.week, WEEK_MS, 'tuần']
+    [u.session, SESSION_MS, 'usage.window.session'],
+    [u.week, WEEK_MS, 'usage.window.week']
   ] as const) {
     if (!w || w.percent < 70) continue
     const early = msBeforeReset(w, ms, now)
-    if (early !== null && early >= 60_000)
-      return { tone: 'amber', text: `Đang dùng nhanh hơn nhịp — với tốc độ này sẽ chạm giới hạn ${name} trước giờ reset khoảng ${formatDuration(early)}.` }
+    if (early !== null && early >= 60_000) return { tone: 'amber', text: t('usage.warn.ahead', { name: t(name), duration: formatDuration(early) }) }
   }
-  if (u.session && u.session.percent >= 90) return { tone: 'amber', text: 'Sắp hết giới hạn phiên 5 giờ.' }
+  if (u.session && u.session.percent >= 90) return { tone: 'amber', text: t('usage.warn.sessionNear') }
   return null
 }

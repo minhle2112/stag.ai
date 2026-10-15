@@ -14,12 +14,15 @@ import { InspectPanel, pagePins } from './inspect/InspectPanel'
 import { SourceSetupDialog } from './inspect/SourceSetupDialog'
 import { hostMatches, hostOf } from '@shared/credentials'
 import { useCredentials } from '../store/credentials'
+import { t as tt, tx, useT } from '../i18n'
+import { ComputerPane } from './computer/ComputerPane'
 
 /**
  * Pane browser của một workspace. Trang thật là WebContentsView do main vẽ đè lên vùng `viewport`;
  * pane chỉ báo vị trí vùng đó và vẽ thanh tab / địa chỉ.
  */
 export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.Element {
+  const t = useT()
   const wsId = workspace.id
   const state = useBrowser((s) => s.byWs[wsId])
   const load = useBrowser((s) => s.load)
@@ -122,13 +125,13 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
           {state?.tabs.map((t) => (
             <TabButton key={t.id} tab={t} active={t.id === state.activeTabId} onSelect={() => b.activate(wsId, t.id)} onClose={() => b.closeTab(wsId, t.id)} />
           ))}
-          <IconButton icon="plus" tip="Tab mới · Ctrl+T" onClick={() => b.newTab(wsId)} />
+          <IconButton icon="plus" tip={t('browser.tab.newTip')} onClick={() => b.newTab(wsId)} />
         </div>
         <span ref={menuBtn} className="inline-flex">
-          <IconButton icon="more" tip="Thêm" on={menu} onClick={() => setMenu((m) => !m)} />
+          <IconButton icon="more" tip={t('browser.pane.more')} on={menu} onClick={() => setMenu((m) => !m)} />
         </span>
-        <IconButton icon={expanded ? 'unfocus' : 'focus'} tip={expanded ? 'Thu nhỏ pane' : 'Phóng to pane'} onClick={() => setExpanded(!expanded)} />
-        <IconButton icon="x" tip="Đóng · Ctrl+Shift+B" onClick={toggleBrowser} />
+        <IconButton icon={expanded ? 'unfocus' : 'focus'} tip={expanded ? t('browser.pane.collapse') : t('browser.pane.expand')} onClick={() => setExpanded(!expanded)} />
+        <IconButton icon="x" tip={t('browser.pane.close')} onClick={toggleBrowser} />
       </div>
       {menu && (
         <Popover anchor={menuBtn.current} onClose={() => setMenu(false)}>
@@ -145,7 +148,7 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
         <div className="flex h-[30px] shrink-0 items-center gap-1.5 border-b border-line bg-accent/10 px-3 text-[12px]">
           <span className="h-1.5 w-1.5 rounded-full bg-work" />
           <b className="font-semibold">{driver}</b>
-          <span className="text-muted">đang điều khiển tab này</span>
+          <span className="text-muted">{t('browser.pane.driving')}</span>
         </div>
       )}
 
@@ -153,7 +156,7 @@ export function BrowserPane({ workspace }: { workspace: Workspace }): React.JSX.
         <div ref={viewport} className={`relative min-h-0 min-w-0 flex-1 bg-bg ${side && !narrow ? 'rounded-bl-[11px]' : 'rounded-b-[11px]'}`}>
           {blank && !resizing && <NewTabPanel wsId={wsId} tab={active} />}
           {active && resizing && (
-            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-dim">Thả chuột để giữ độ rộng này</div>
+            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-dim">{t('browser.pane.releaseToKeep')}</div>
           )}
           {covered && <InspectPanel wsId={wsId} tab={active} overlay onClose={() => setSide(wsId, false)} />}
         </div>
@@ -169,6 +172,7 @@ function InspectTools({ tab, pins, side, onSoi, onSide }: { tab: BrowserTab; pin
   const open = pins.filter((p) => isOpen(p.state)).length
   const fresh = pins.filter((p) => needsYou(p.state)).length
   const drafts = pins.filter((p) => p.state === 'draft').length
+  const t = useT()
   const on = !!tab.inspect
   const n = fresh || (side ? 0 : drafts || open)
   return (
@@ -177,8 +181,8 @@ function InspectTools({ tab, pins, side, onSoi, onSide }: { tab: BrowserTab; pin
         type="button"
         onClick={onSoi}
         aria-pressed={on}
-        aria-label="Soi"
-        data-tip={`${on ? 'Tắt' : 'Bật'} Soi (Ctrl+Shift+C)`}
+        aria-label={t('common.name.inspect')}
+        data-tip={on ? t('browser.inspect.off') : t('browser.inspect.on')}
         className={`ml-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md border ${on ? 'border-accent bg-accent text-accent-on' : 'border-line-2 text-muted hover:text-fg'}`}
       >
         <Icon name="soi" />
@@ -187,8 +191,12 @@ function InspectTools({ tab, pins, side, onSoi, onSide }: { tab: BrowserTab; pin
         type="button"
         onClick={onSide}
         aria-pressed={side}
-        aria-label="Bình luận"
-        data-tip={`${side ? 'Ẩn bình luận' : 'Bình luận'}${[fresh && `${fresh} trả lời mới`, drafts && `${drafts} chờ gửi`, open && `${open} đang mở`]
+        aria-label={t('common.name.comments')}
+        data-tip={`${side ? t('browser.comments.hide') : t('common.name.comments')}${[
+          fresh && t('browser.comments.fresh', { count: fresh }),
+          drafts && t('browser.comments.drafts', { count: drafts }),
+          open && t('browser.comments.open', { count: open })
+        ]
           .filter(Boolean)
           .map((x) => ` · ${x}`)
           .join('')}`}
@@ -227,12 +235,14 @@ function ratioAt(row: DOMRect, x: number): number {
  * Terminal bên trái tự fit lại nhờ ResizeObserver của từng ô.
  */
 export function BrowserDock({ workspace }: { workspace: Workspace }): React.JSX.Element {
+  const t = useT()
   const width = useBrowser((s) => s.width)
   const setWidth = useBrowser((s) => s.setWidth)
   const resetWidth = useBrowser((s) => s.resetWidth)
   const setResizing = useBrowser((s) => s.setResizing)
   const expanded = useBrowser((s) => s.expanded)
   const setExpanded = useBrowser((s) => s.setExpanded)
+  const dock = useUi((s) => s.dock)
   const [dragging, setDragging] = useState(false)
   const aside = useRef<HTMLElement>(null)
   const normalWidth = `clamp(${PANE_MIN}px, ${(width * 100).toFixed(3)}%, calc(100% - ${MAIN_MIN}px))`
@@ -318,7 +328,7 @@ export function BrowserDock({ workspace }: { workspace: Workspace }): React.JSX.
         <div
           role="separator"
           aria-orientation="vertical"
-          title="Kéo để đổi độ rộng · nhấp đúp để về mặc định"
+          title={t('browser.pane.resizeTip')}
           onPointerDown={startDrag}
           onDoubleClick={resetWidth}
           className="group absolute inset-y-0 -left-[5px] z-20 w-[8px] cursor-col-resize"
@@ -328,7 +338,7 @@ export function BrowserDock({ workspace }: { workspace: Workspace }): React.JSX.
       )}
       {/* Khung nổi bo góc như pane browser của Claude desktop; view trang được bo góc dưới ở main. */}
       <div className="h-full overflow-hidden rounded-xl border border-line-2 bg-panel shadow-card">
-        <BrowserPane key={workspace.id} workspace={workspace} />
+        {dock === 'computer' ? <ComputerPane workspace={workspace} /> : <BrowserPane key={workspace.id} workspace={workspace} />}
       </div>
       {dragging && <div className="fixed inset-0 z-[60] cursor-col-resize" />}
     </aside>
@@ -340,19 +350,20 @@ function tabLabel(t: BrowserTab): string {
   if (t.title) return t.title
   try {
     const u = new URL(t.url)
-    return u.protocol === 'about:' ? 'Tab mới' : u.host
+    return u.protocol === 'about:' ? tt('browser.tab.new') : u.host
   } catch {
-    return 'Tab mới'
+    return tt('browser.tab.new')
   }
 }
 
 function TabButton({ tab, active, onSelect, onClose }: { tab: BrowserTab; active: boolean; onSelect: () => void; onClose: () => void }): React.JSX.Element {
+  const t = useT()
   const agent = tab.owner.kind === 'agent' ? tab.owner.agentName : null
   return (
     <div
       onClick={onSelect}
       onAuxClick={(e) => e.button === 1 && onClose()}
-      data-tip={`${tab.title || tabLabel(tab)}\n${tab.url}${agent ? `\n${agent} đang điều khiển` : ''}`}
+      data-tip={`${tab.title || tabLabel(tab)}\n${tab.url}${agent ? `\n${t('browser.tab.drivenBy', { name: agent })}` : ''}`}
       className={`group flex h-7 max-w-[180px] min-w-[72px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md pr-1 pl-2 text-[13px] whitespace-nowrap ${
         active ? 'bg-panel-3 text-fg' : 'text-muted hover:bg-panel-2 hover:text-fg'
       }`}
@@ -366,7 +377,7 @@ function TabButton({ tab, active, onSelect, onClose }: { tab: BrowserTab; active
           onClose()
         }}
         className={`grid h-5 w-5 shrink-0 place-items-center rounded text-dim hover:bg-line hover:text-fg ${active ? 'opacity-60 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-        data-tip="Đóng tab"
+        data-tip={t('browser.tab.close')}
       >
         <Icon name="x" size="s" />
       </button>
@@ -375,6 +386,7 @@ function TabButton({ tab, active, onSelect, onClose }: { tab: BrowserTab; active
 }
 
 function AddressBar({ wsId, tab, children }: { wsId: string; tab: BrowserTab | undefined; children?: React.ReactNode }): React.JSX.Element {
+  const t = useT()
   const [text, setText] = useState('')
   const [editing, setEditing] = useState(false)
   const b = window.stag.browser
@@ -407,9 +419,9 @@ function AddressBar({ wsId, tab, children }: { wsId: string; tab: BrowserTab | u
   )
   return (
     <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-line px-2">
-      {navBtn('al', 'Lùi', !tab?.canGoBack, () => tab && b.back(wsId, tab.id))}
-      {navBtn('ar', 'Tới', !tab?.canGoForward, () => tab && b.forward(wsId, tab.id))}
-      {navBtn('ref', 'Tải lại', !tab || isBlankTab(tab), () => tab && b.reload(wsId, tab.id))}
+      {navBtn('al', t('browser.nav.back'), !tab?.canGoBack, () => tab && b.back(wsId, tab.id))}
+      {navBtn('ar', t('browser.nav.forward'), !tab?.canGoForward, () => tab && b.forward(wsId, tab.id))}
+      {navBtn('ref', t('browser.nav.reload'), !tab || isBlankTab(tab), () => tab && b.reload(wsId, tab.id))}
       <input
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -425,7 +437,7 @@ function AddressBar({ wsId, tab, children }: { wsId: string; tab: BrowserTab | u
             ;(e.target as HTMLInputElement).blur()
           }
         }}
-        placeholder="Nhập URL"
+        placeholder={t('browser.nav.urlPlaceholder')}
         spellCheck={false}
         className="mx-1 h-7 min-w-0 flex-1 rounded-md border border-line-2 bg-bg0 px-2.5 text-[12.5px] text-fg outline-none select-text placeholder:text-dim focus:border-accent/60"
       />
@@ -436,7 +448,7 @@ function AddressBar({ wsId, tab, children }: { wsId: string; tab: BrowserTab | u
         disabled={!tab || isBlankTab(tab)}
         onClick={() => tab && b.toggleDevTools(wsId, tab.id)}
         aria-pressed={!!tab?.devtools}
-        data-tip={tab?.devtools ? 'Đóng DevTools của tab này' : 'DevTools của tab · F12'}
+        data-tip={tab?.devtools ? t('browser.devtools.closeTip') : t('browser.devtools.openTip')}
         className={`grid h-7 w-7 shrink-0 place-items-center rounded-md hover:bg-panel-3 hover:text-fg disabled:opacity-30 ${tab?.devtools ? 'bg-panel-3 text-accent' : 'text-muted'}`}
       >
         <Icon name="code" />
@@ -450,12 +462,13 @@ function AddressBar({ wsId, tab, children }: { wsId: string; tab: BrowserTab | u
  * tab, không có thì mở Cài đặt → Mật khẩu lọc theo tên miền.
  */
 function KeyButton({ tab }: { tab: BrowserTab }): React.JSX.Element | null {
+  const t = useT()
   const items = useCredentials((s) => s.items)
   const open = useUi((s) => s.openSettings)
   const host = hostOf(tab.url)
   if (!host) return null
   const n = items.filter((i) => hostMatches(host, i.domains)).length
-  const tip = n ? `${n} mật khẩu cho ${host} trong kho (agent dùng qua credential_fill)` : `Chưa có mật khẩu cho ${host}`
+  const tip = n ? t('browser.key.count', { count: n, host }) : t('browser.key.none', { host })
   return (
     <button
       type="button"
@@ -472,6 +485,7 @@ function KeyButton({ tab }: { tab: BrowserTab }): React.JSX.Element | null {
 
 /** Menu ⋮ của pane: việc ít dùng (mở ngoài, DevTools, dev server, xoá dữ liệu trang). Ẩn view trang khi mở (view nằm đè HTML). */
 function BrowserMenu({ wsId, tab, onClose, onSource }: { wsId: string; tab: BrowserTab | undefined; onClose: () => void; onSource: () => void }): React.JSX.Element {
+  const t = useT()
   const b = window.stag.browser
   useEffect(() => {
     const ui = useUi.getState()
@@ -485,45 +499,43 @@ function BrowserMenu({ wsId, tab, onClose, onSource }: { wsId: string; tab: Brow
   }
   return (
     <div className="min-w-[220px] rounded-lg border border-line-2 bg-panel-2 p-1 text-[13px] shadow-xl">
-      <MenuItem label="Tab mới" hint="Ctrl+T" onClick={run(() => void b.newTab(wsId))} />
-      <MenuItem label="Dev server của dự án…" onClick={run(() => void b.newTab(wsId))} />
-      {web && <MenuItem label="Mở bằng trình duyệt ngoài" onClick={run(() => window.open(tab.url))} />}
-      {tab && !isBlankTab(tab) && <MenuItem label={tab.devtools ? 'Đóng DevTools' : 'Mở DevTools'} hint="F12" onClick={run(() => void b.toggleDevTools(wsId, tab.id))} />}
-      <MenuItem label="Tìm nguồn cho chế độ Soi…" onClick={run(onSource)} />
-      {tab && <MenuItem label="Đóng tab" onClick={run(() => void b.closeTab(wsId, tab.id))} />}
+      <MenuItem label={t('browser.tab.new')} hint="Ctrl+T" onClick={run(() => void b.newTab(wsId))} />
+      <MenuItem label={t('browser.menu.devServer')} onClick={run(() => void b.newTab(wsId))} />
+      {web && <MenuItem label={t('browser.menu.external')} onClick={run(() => window.open(tab.url))} />}
+      {tab && !isBlankTab(tab) && <MenuItem label={tab.devtools ? t('browser.devtools.close') : t('browser.devtools.open')} hint="F12" onClick={run(() => void b.toggleDevTools(wsId, tab.id))} />}
+      <MenuItem label={t('browser.menu.inspectSource')} onClick={run(onSource)} />
+      {tab && <MenuItem label={t('browser.tab.close')} onClick={run(() => void b.closeTab(wsId, tab.id))} />}
       <div className="my-1 h-px bg-line" />
-      <MenuItem label="Xoá cookie và dữ liệu trang" danger onClick={run(() => void b.clearData(wsId))} />
+      <MenuItem label={t('browser.menu.clearData')} danger onClick={run(() => void b.clearData(wsId))} />
     </div>
   )
 }
 
 /** Agent xin mở trang ngoài localhost: hỏi người dùng (hộp thoại đầu hàng đợi). */
 export function BrowserAskDialog(): React.JSX.Element | null {
+  const t = useT()
   const ask = useBrowser((s) => s.asks[0])
   const answer = useBrowser((s) => s.answer)
   const allowAlways = useBrowser((s) => s.allowAlways)
   if (!ask) return null
   return (
     <Modal
-      title="Agent muốn mở trang ngoài"
+      title={t('browser.ask.title')}
       footer={
         <>
-          <Button onClick={() => answer(ask.id, false)}>Từ chối</Button>
+          <Button onClick={() => answer(ask.id, false)}>{t('common.deny')}</Button>
           {/* Lưu Cài đặt hỏng thì vẫn cho phép lần này (allowAlways luôn trả lời). */}
-          <Button onClick={() => void allowAlways(ask).catch(() => {})}>Luôn cho trang này</Button>
+          <Button onClick={() => void allowAlways(ask).catch(() => {})}>{t('browser.ask.always')}</Button>
           <Button primary onClick={() => answer(ask.id, true)}>
-            Cho phép
+            {t('common.allow')}
           </Button>
         </>
       }
     >
-      <p>
-        Agent <b>{ask.agentName}</b> muốn mở:
-      </p>
+      <p>{tx('browser.ask.wants', { name: <b>{ask.agentName}</b> })}</p>
       <p className="mt-2 break-all rounded-md bg-panel-2 px-3 py-2 font-mono text-[12px]">{ask.url}</p>
       <p className="mt-3 text-[12px] text-muted">
-        Cho phép thì agent dùng được mọi trang thuộc <span className="font-mono">{ask.origin}</span> tới khi tắt app. "Luôn cho trang này" lưu origin vào
-        Cài đặt → Trình duyệt (mọi agent, cả sau khi mở lại app). Agent đang chờ bạn trả lời (tự từ chối sau 2 phút).
+        {tx('browser.ask.note', { origin: <span className="font-mono">{ask.origin}</span> })}
       </p>
     </Modal>
   )

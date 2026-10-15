@@ -63,7 +63,7 @@ describe('tên và thư mục project', () => {
   it('thư mục tự đặt: slug, trùng thì -2, -3', () => {
     const taken = new Set(['admin-portal', 'admin-portal-2'])
     expect(autoFolder('Admin Portal', (f) => taken.has(f))).toBe('admin-portal-3')
-    expect(autoFolder('', () => false)).toBe('project-moi')
+    expect(autoFolder('', () => false)).toBe('new-project')
   })
 
   it('note vault, ghép đường dẫn kiểu Windows', () => {

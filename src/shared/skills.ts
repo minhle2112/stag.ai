@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import type { Settings, SkillsSettings } from './types'
 
 /**
@@ -65,7 +66,7 @@ export interface ParsedSkill {
 /** Đọc SKILL.md; `dirName` = tên thư mục (phải trùng `name`). */
 export function parseSkillMd(md: string, dirName?: string): ParsedSkill {
   const { front, body } = splitSkillMd(md)
-  if (front === null) return { name: '', description: '', body, error: 'SKILL.md phải mở đầu bằng frontmatter (--- name / description ---).' }
+  if (front === null) return { name: '', description: '', body, error: t('skills.md.noFrontmatter') }
   const f = frontmatterFields(front)
   const name = (f.name ?? '').trim()
   const description = (f.description ?? '').trim()
@@ -74,11 +75,11 @@ export function parseSkillMd(md: string, dirName?: string): ParsedSkill {
 
 /** Lỗi của tên / mô tả (tiếng Việt) hoặc null. */
 export function skillProblem(name: string, description: string, dirName?: string): string | null {
-  if (!name) return 'Thiếu "name" trong frontmatter.'
-  if (!SKILL_NAME_RE.test(name)) return `Tên "${name}" chỉ gồm a-z, 0-9 và "-", tối đa 64 ký tự, bắt đầu bằng chữ / số.`
-  if (dirName !== undefined && dirName !== name) return `Tên "${name}" phải trùng tên thư mục "${dirName}".`
-  if (!description) return 'Thiếu "description": agent dựa vào mô tả để biết khi nào dùng skill.'
-  if (description.length > SKILL_DESC_MAX) return `Mô tả dài quá ${SKILL_DESC_MAX} ký tự.`
+  if (!name) return t('skills.md.noName')
+  if (!SKILL_NAME_RE.test(name)) return t('skills.md.badName', { name })
+  if (dirName !== undefined && dirName !== name) return t('skills.md.nameDir', { name, dir: dirName })
+  if (!description) return t('skills.md.noDesc')
+  if (description.length > SKILL_DESC_MAX) return t('skills.md.descLong', { max: String(SKILL_DESC_MAX) })
   return null
 }
 

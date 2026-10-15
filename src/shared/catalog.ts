@@ -1,5 +1,6 @@
 import data from './connectorCatalog.json'
 import type { CatalogEntry, CatalogMethod } from './types'
+import { t, type PlainKey } from './i18n'
 
 /** Danh mục connector (tạo bằng scripts/import-connector-catalog.mjs từ định nghĩa app của Paperclip, MIT). */
 export const CATALOG: CatalogEntry[] = (data as { entries: CatalogEntry[] }).entries
@@ -10,61 +11,74 @@ export function findCatalog(slug: string, method?: string): { entry: CatalogEntr
   return entry && m ? { entry, method: m } : null
 }
 
-/** Điền `{field}` trong URL mẫu; thiếu / sai mẫu → lỗi tiếng Việt. */
+/** Điền `{field}` trong URL mẫu; thiếu / sai mẫu → lỗi theo ngôn ngữ giao diện. */
 export function fillServerUrl(m: CatalogMethod, fields: Record<string, string>): string {
   if (!m.serverUrlTemplate) return m.serverUrl ?? ''
   for (const f of m.fields) {
     const v = (fields[f.key] ?? '').trim()
-    if (!v) throw new Error(`Cần điền "${f.label}".`)
-    if (f.pattern && !new RegExp(f.pattern).test(v)) throw new Error(`"${f.label}" không đúng dạng (vd. ${f.placeholder}).`)
+    if (!v) throw new Error(t('connectors.catalog.fieldRequired', { label: f.label }))
+    if (f.pattern && !new RegExp(f.pattern).test(v)) throw new Error(t('connectors.catalog.fieldPattern', { label: f.label, example: f.placeholder }))
   }
   return m.serverUrlTemplate.replace(/\{(\w+)\}/g, (_, k: string) => encodeURIComponent((fields[k] ?? '').trim()))
 }
 
-/** Mô tả tiếng Việt cho các dịch vụ không dùng câu mẫu "Connect X's provider-hosted MCP server.". */
-const VI: Record<string, string> = {
-  context7: 'Tra tài liệu mới nhất của thư viện / framework.',
-  github: 'Repo, issue, pull request: đọc code, bình luận, mở PR.',
-  gmail: 'Tìm và đọc thư Gmail, tạo thư nháp (không gửi được thư).',
-  'google-calendar': 'Đọc lịch và quản lý sự kiện Google Calendar.',
-  'google-chat': 'Tìm, đọc hội thoại Google Chat và gửi tin.',
-  'google-docs': 'Đọc và sửa tài liệu Google Docs.',
-  'google-drive': 'Tìm, đọc, tạo và chép file trong Google Drive.',
-  'google-people': 'Tìm danh bạ và hồ sơ trong tổ chức (Google People).',
-  'google-sheets': 'Đọc và sửa bảng tính Google Sheets.',
-  'google-slides': 'Đọc và sửa bản trình chiếu Google Slides.',
-  'google-workspace-search': 'Tìm trong Gmail, Drive, Calendar và Chat bằng một tool chỉ đọc.',
-  linear: 'Tạo, sửa và đọc issue Linear.',
-  notion: 'Đọc và sửa trang trong workspace Notion.',
-  posthog: 'Phân tích sử dụng sản phẩm, lỗi, feature flag và thử nghiệm trên PostHog.',
-  sentry: 'Điều tra lỗi, bản phát hành và sự cố production.',
-  shopify: 'Tìm sản phẩm, chính sách của cửa hàng và quản lý giỏ hàng.',
-  slack: 'Cho agent dùng tool Slack: đọc, tìm và gửi tin.',
-  vercel: 'Xem project, deployment và log khi chạy.',
-  zapier: 'Nối tới hàng nghìn app qua tài khoản Zapier của bạn.'
+/** Mô tả riêng (khoá từ điển) cho các dịch vụ không dùng câu mẫu "Connect X's provider-hosted MCP server.". */
+const DESC: Record<string, PlainKey> = {
+  context7: 'connectors.catalog.desc.context7',
+  filesystem: 'connectors.catalog.desc.filesystem',
+  github: 'connectors.catalog.desc.github',
+  gmail: 'connectors.catalog.desc.gmail',
+  'google-calendar': 'connectors.catalog.desc.google-calendar',
+  'google-chat': 'connectors.catalog.desc.google-chat',
+  'google-docs': 'connectors.catalog.desc.google-docs',
+  'google-drive': 'connectors.catalog.desc.google-drive',
+  'google-people': 'connectors.catalog.desc.google-people',
+  'google-sheets': 'connectors.catalog.desc.google-sheets',
+  'google-slides': 'connectors.catalog.desc.google-slides',
+  'google-workspace-search': 'connectors.catalog.desc.google-workspace-search',
+  linear: 'connectors.catalog.desc.linear',
+  notion: 'connectors.catalog.desc.notion',
+  playwright: 'connectors.catalog.desc.playwright',
+  posthog: 'connectors.catalog.desc.posthog',
+  sentry: 'connectors.catalog.desc.sentry',
+  shopify: 'connectors.catalog.desc.shopify',
+  slack: 'connectors.catalog.desc.slack',
+  vercel: 'connectors.catalog.desc.vercel',
+  zapier: 'connectors.catalog.desc.zapier'
 }
 
-/** Mô tả tiếng Việt của một dịch vụ trong danh mục. */
+/** Hướng dẫn riêng (khoá từ điển) của một cách kết nối, theo `<slug>:<method>`. */
+const GUIDE: Record<string, PlainKey> = {
+  'filesystem:local': 'connectors.catalog.guide.filesystem'
+}
+
+/** Mô tả của một dịch vụ trong danh mục, theo ngôn ngữ giao diện. */
 export function catalogDescription(e: CatalogEntry): string {
-  if (VI[e.slug]) return VI[e.slug]
-  return /provider-hosted MCP server\.?$/.test(e.description) ? `Máy chủ MCP chính thức của ${e.name}.` : e.description
+  if (DESC[e.slug]) return t(DESC[e.slug])
+  return /provider-hosted MCP server\.?$/.test(e.description) ? t('connectors.catalog.official', { name: e.name }) : e.description
+}
+
+/** Hướng dẫn của một cách kết nối (rỗng = không có). */
+export function methodGuide(e: CatalogEntry, m: CatalogMethod): string {
+  const k = GUIDE[`${e.slug}:${m.key}`]
+  return k ? t(k) : m.guide
 }
 
 /** Nhãn cách kết nối. */
 export function methodLabel(e: CatalogEntry, m: CatalogMethod): string {
   const base =
     m.kind === 'oauth'
-      ? `Đăng nhập ${e.name} trong trình duyệt`
+      ? t('connectors.method.oauth', { name: e.name })
       : m.kind === 'oauth-app'
-        ? 'Đăng nhập bằng OAuth app của bạn'
+        ? t('connectors.method.oauthApp')
         : m.kind === 'key'
           ? m.label && !/^Use an? API key$/i.test(m.label)
             ? m.label
-            : 'Dùng API key'
+            : t('connectors.method.key')
           : m.kind === 'url'
-            ? 'Dán URL máy chủ đã tạo'
+            ? t('connectors.method.url')
             : m.kind === 'stdio'
-              ? 'Chạy trên máy (npx)'
-              : m.label || 'Không cần đăng nhập'
+              ? t('connectors.method.stdio')
+              : m.label || t('connectors.method.none')
   return m.capability ? `${base} — ${m.capability.label}` : base
 }

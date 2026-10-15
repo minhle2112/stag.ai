@@ -46,6 +46,7 @@ import {
   type Tone
 } from './controls'
 import { LevelBar, LevelToggle, setAtLevel, useLevel, type Level, type LevelKey } from './levels'
+import { fmtDateTime, fmtNumber, fmtTime, t, tx, useT } from '../../i18n'
 
 /**
  * Settings → Connector: máy chủ MCP cho phiên agent. Hai loại:
@@ -92,6 +93,7 @@ export function ConnectorsSection(): React.JSX.Element {
   const [level, setLevel] = useState<LevelKey>(() => agentLevel(focus?.agentId))
   const [adding, setAdding] = useState(false)
   const [q, setQ] = useState('')
+  const t = useT()
 
   useEffect(() => {
     if (focus?.review) setTab('review')
@@ -116,8 +118,8 @@ export function ConnectorsSection(): React.JSX.Element {
   return (
     <>
       <SectionTitle
-        title="Connector (MCP)"
-        desc="Máy chủ MCP cho agent thêm tool. App đưa chúng vào phiên Claude Code, Codex và adapter ngoài đọc được file MCP. Token / API key cất ở Kho bí mật, truyền qua biến môi trường, không nằm trên dòng lệnh."
+        title={t('connectors.section.title')}
+        desc={t('connectors.section.desc')}
         right={<LevelBar level={level} setLevel={setLevel} field="connectors" />}
       />
       {!inDetail && (
@@ -129,29 +131,29 @@ export function ConnectorsSection(): React.JSX.Element {
               if (id === 'connected') setView({ type: 'list' })
             }}
             options={[
-              { value: 'connected', label: `Đã kết nối${items.length ? ` · ${items.length}` : ''}`, tip: 'Connector của stag.ai và máy chủ có sẵn trong CLI' },
-              { value: 'browse', label: `Danh mục · ${CATALOG.length}`, tip: 'Kết nối dịch vụ từ danh mục' },
+              { value: 'connected', label: `${t('connectors.tab.connected')}${items.length ? ` · ${items.length}` : ''}`, tip: t('connectors.tab.connectedTip') },
+              { value: 'browse', label: `${t('connectors.tab.browse')} · ${CATALOG.length}`, tip: t('connectors.tab.browseTip') },
               {
                 value: 'review',
                 label: (
                   <>
-                    Duyệt
+                    {t('connectors.tab.review')}
                     {pending > 0 && <span className="rounded-full bg-wait px-1.5 text-[11px] font-semibold text-wait-on">{pending}</span>}
                   </>
                 ),
-                tip: 'Lần gọi tool đang chờ bạn duyệt'
+                tip: t('connectors.tab.reviewTip')
               }
             ]}
           />
-          {tab === 'browse' ? <SearchBox className="min-w-[160px] flex-1" value={q} onChange={setQ} placeholder="Tìm connector" label="Tìm connector" /> : <div className="flex-1" />}
+          {tab === 'browse' ? <SearchBox className="min-w-[160px] flex-1" value={q} onChange={setQ} placeholder={t('connectors.search')} label={t('connectors.search')} /> : <div className="flex-1" />}
           {tab === 'connected' && (
             <SmallButton variant="primary" icon="plus" onClick={() => setTab('browse')}>
-              Kết nối thêm
+              {t('connectors.connectMore')}
             </SmallButton>
           )}
           {tab === 'browse' && (
-            <SmallButton icon="plus" onClick={() => setAdding(true)} tip="Thêm máy chủ MCP tự cấu hình hoặc dán JSON">
-              Công cụ riêng
+            <SmallButton icon="plus" onClick={() => setAdding(true)} tip={t('connectors.customTip')}>
+              {t('connectors.custom')}
             </SmallButton>
           )}
         </div>
@@ -215,13 +217,14 @@ function ConnectorList({ level, open }: { level: LevelKey; open: (id: string) =>
   const items = useSettings((s) => s.value.app.connectors.items)
   const secrets = useSecrets((s) => s.items)
   const lv = useLevel(level)
+  const t = useT()
   const missing = (c: Connector): string[] => connectorSecrets(c).filter((n) => !secrets.some((x) => x.name === n))
 
   return (
     <>
-      <Group title="Connector của stag.ai" flush>
+      <Group title={t('connectors.list.own')} flush>
         {items.length === 0 ? (
-          <Empty title="Chưa kết nối gì">Chọn một dịch vụ ở Danh mục, hoặc chép một máy chủ có sẵn bên dưới.</Empty>
+          <Empty title={t('connectors.list.emptyTitle')}>{t('connectors.list.empty')}</Empty>
         ) : (
           <Tiles>
             {items.map((c) => {
@@ -229,9 +232,9 @@ function ConnectorList({ level, open }: { level: LevelKey; open: (id: string) =>
               const tone: Tone = miss.length ? 'bad' : c.testedAt ? 'ok' : 'muted'
               const line = [
                 c.id,
-                ...(c.oauth ? ['đăng nhập OAuth'] : []),
+                ...(c.oauth ? [t('connectors.list.oauth')] : []),
                 c.transport === 'http' ? c.url : [c.command, ...c.args].join(' '),
-                c.testedAt ? `${c.tools.length} tool` : 'chưa thử'
+                c.testedAt ? t('connectors.toolCount', { count: c.tools.length }) : t('connectors.list.untested')
               ].join(' · ')
               return (
                 <Tile
@@ -242,7 +245,7 @@ function ConnectorList({ level, open }: { level: LevelKey; open: (id: string) =>
                   badge={<Badge>{c.transport === 'http' ? 'HTTP' : 'stdio'}</Badge>}
                   sub={<span className="font-mono text-[11px]">{line}</span>}
                   tip={line}
-                  alert={miss.length ? `thiếu bí mật ${miss.join(', ')}` : undefined}
+                  alert={miss.length ? t('connectors.list.missingSecrets', { names: miss.join(', ') }) : undefined}
                   onOpen={() => open(c.id)}
                   control={<ConnToggle k={c.id} level={lv} label={c.label || c.id} />}
                 />
@@ -265,6 +268,7 @@ function InheritedGroup({ runtime, level }: { runtime: CliAdapterId; level: Leve
   const [scan, setScan] = useState<InheritedScan | undefined>(scanCache[runtime])
   const [busy, setBusy] = useState(false)
   const [copyMsg, setCopyMsg] = useState('')
+  const t = useT()
   const wsId = level.wsId ?? activeWs ?? undefined
   const ws = workspaces.find((w) => w.id === wsId)
 
@@ -294,7 +298,7 @@ function InheritedGroup({ runtime, level }: { runtime: CliAdapterId; level: Leve
   const rows: InheritedServer[] = [...(scan?.servers ?? [])]
   for (const k of keys)
     if (k.startsWith(`${runtime}:`) && !rows.some((r) => r.key === k))
-      rows.push({ key: k, runtime, name: k.slice(runtime.length + 1), source: guessSource(runtime, k.slice(runtime.length + 1)), target: '', status: scan ? 'không thấy khi quét' : 'chưa quét', copyable: false })
+      rows.push({ key: k, runtime, name: k.slice(runtime.length + 1), source: guessSource(runtime, k.slice(runtime.length + 1)), target: '', status: scan ? t('connectors.inherited.notFound') : t('connectors.inherited.notScanned'), copyable: false })
 
   const copy = (s: InheritedServer): void => {
     setCopyMsg('')
@@ -310,36 +314,38 @@ function InheritedGroup({ runtime, level }: { runtime: CliAdapterId; level: Leve
 
   const help =
     runtime === 'claude'
-      ? `Máy chủ ${RUNTIME.claude} tự nạp: connector claude.ai, plugin, claude mcp add, .mcp.json của dự án${ws ? ` (theo thư mục của workspace ${ws.name})` : ''}. Quét chạy claude mcp list (có kiểm tra kết nối, không tốn quota). Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.`
-      : 'Máy chủ trong ~/.codex/config.toml (và .codex/config.toml của dự án). Tắt ở đây chỉ áp dụng cho phiên agent của stag.ai.'
+      ? ws
+        ? t('connectors.inherited.claudeHelpWs', { runtime: RUNTIME.claude, workspace: ws.name })
+        : t('connectors.inherited.claudeHelp', { runtime: RUNTIME.claude })
+      : t('connectors.inherited.codexHelp')
 
   return (
     <Group
       title={
         <span className="inline-flex items-center gap-1.5">
-          Có sẵn trong {RUNTIME[runtime]}
+          {t('connectors.inherited.title', { runtime: RUNTIME[runtime] })}
           <InfoTip text={help} />
         </span>
       }
       action={
         <SmallButton onClick={doScan} disabled={busy}>
-          {busy ? 'Đang quét…' : scan ? 'Quét lại' : 'Quét'}
+          {busy ? t('connectors.inherited.scanning') : scan ? t('connectors.inherited.rescan') : t('connectors.inherited.scan')}
         </SmallButton>
       }
     >
       {scan?.cwd && (
         <div className="mb-2 truncate text-[11px] text-dim" data-tip={scan.cwd}>
-          Quét lúc {new Date(scan.scannedAt).toLocaleTimeString()} ở {scan.cwd}
+          {t('connectors.inherited.scannedAt', { time: fmtTime(scan.scannedAt, true), folder: scan.cwd })}
         </div>
       )}
       {scan?.error && <ErrorBar error={scan.error} />}
       {copyMsg && <Callout className="mb-2">{copyMsg}</Callout>}
       {rows.length === 0 ? (
-        <div className="border-b border-line py-3 text-[12px] text-dim">{busy ? 'Đang quét…' : scan ? 'Không có máy chủ nào.' : 'Bấm Quét để xem.'}</div>
+        <div className="border-b border-line py-3 text-[12px] text-dim">{busy ? t('connectors.inherited.scanning') : scan ? t('connectors.inherited.none') : t('connectors.inherited.pressScan')}</div>
       ) : (
         <Tiles min={260}>
           {rows.map((s) => {
-            const tone: Tone = /connected|bật/i.test(s.status) ? 'ok' : /fail|error|lỗi|không thấy/i.test(s.status) ? 'bad' : /auth|pending|approval/i.test(s.status) ? 'warn' : 'muted'
+            const tone: Tone = /connected|enabled in|bật/i.test(s.status) ? 'ok' : /fail|error|not found|lỗi|không thấy/i.test(s.status) ? 'bad' : /auth|pending|approval/i.test(s.status) ? 'warn' : 'muted' // i18n-ignore: matches status text in either UI language
             const line = [s.target, s.status].filter(Boolean).join(' · ')
             return (
               <Tile
@@ -356,10 +362,10 @@ function InheritedGroup({ runtime, level }: { runtime: CliAdapterId; level: Leve
                       <SmallButton
                         variant="ghost"
                         size="xs"
-                        tip="Chép thành connector của stag.ai (dùng được cả với Codex / adapter ngoài)"
+                        tip={t('connectors.inherited.copyTip')}
                         onClick={() => copy(s)}
                       >
-                        Chép
+                        {t('common.copy')}
                       </SmallButton>
                     )}
                     <ConnToggle k={s.key} level={level} label={s.name} />
@@ -388,9 +394,10 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
   const [test, setTest] = useState<ConnectorTestResult | 'loading' | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [reauth, setReauth] = useState<'busy' | null>(null)
+  const t = useT()
 
   if (!c) {
-    return <DetailHead onBack={onBack} backLabel="Tất cả connector" title={id} sub={loaded ? 'Connector này đã bị gỡ.' : 'Đang tải…'} />
+    return <DetailHead onBack={onBack} backLabel={t('connectors.detail.back')} title={id} sub={loaded ? t('connectors.detail.removed') : t('common.loading')} />
   }
   const save = (patch: Partial<Connector>): void => {
     const next = { ...c, ...patch }
@@ -419,27 +426,27 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
       .finally(() => setReauth(null))
   }
 
-  const toolNames = [...new Set([...c.tools.map((t) => t.name), ...Object.keys(c.toolPolicy)])]
+  const toolNames = [...new Set([...c.tools.map((x) => x.name), ...Object.keys(c.toolPolicy)])]
 
   return (
     <>
       <DetailHead
         onBack={onBack}
-        backLabel="Tất cả connector"
+        backLabel={t('connectors.detail.back')}
         logo={<ConnectorLogo slug={c.catalog?.slug} name={c.label || c.id} size={30} />}
         title={c.label || c.id}
         badge={<Badge>{c.transport === 'http' ? 'HTTP' : 'stdio'}</Badge>}
         control={<ConnToggle k={c.id} level={lv} label={c.label || c.id} />}
-        sub={`Công tắc bên phải áp dụng cho ${lv.name} (đổi cấp ở đầu trang). Sửa cấu hình áp dụng cho mọi nơi; phiên đang chạy giữ nguyên.`}
+        sub={t('connectors.detail.levelHint', { level: lv.name })}
       />
       <ErrorBar error={error} />
       {(cat || c.oauth || c.urlSecret) && (
-        <Group title="Dịch vụ">
+        <Group title={t('connectors.detail.service')}>
           {cat && (
             <Row label={cat.entry.name} sub={methodLabel(cat.entry, cat.method)}>
               {cat.entry.docsUrl && (
                 <a href={cat.entry.docsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] text-accent hover:underline">
-                  Tài liệu
+                  {t('connectors.detail.docs')}
                   <Icon name="ext" size="s" />
                 </a>
               )}
@@ -447,56 +454,56 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
           )}
           {c.oauth && (
             <Row
-              label="Đăng nhập OAuth"
-              desc="Token cất ở Kho bí mật, app tự làm mới trước mỗi phiên. Bị thu hồi / hết hạn hẳn thì đăng nhập lại. Phiên rất dài có thể gặp token hết hạn giữa chừng: mở phiên mới."
-              sub={reauth ? 'Đang chờ bạn đăng nhập trong trình duyệt…' : undefined}
+              label={t('connectors.detail.oauth')}
+              desc={t('connectors.detail.oauthDesc')}
+              sub={reauth ? t('connectors.detail.waitingBrowser') : undefined}
             >
               {reauth ? (
-                <SmallButton onClick={() => void window.stag.connectors.cancelConnect()}>Huỷ</SmallButton>
+                <SmallButton onClick={() => void window.stag.connectors.cancelConnect()}>{t('common.cancel')}</SmallButton>
               ) : (
-                <SmallButton onClick={doReauth}>Đăng nhập lại</SmallButton>
+                <SmallButton onClick={doReauth}>{t('connectors.detail.reauth')}</SmallButton>
               )}
             </Row>
           )}
-          {c.urlSecret && <Row label="URL có token" desc={`URL đầy đủ cất ở bí mật ${c.urlSecret}; cài đặt chỉ giữ ${c.url}. Đổi URL: thay giá trị bí mật ở Kho bí mật.`} />}
+          {c.urlSecret && <Row label={t('connectors.detail.urlSecret')} desc={t('connectors.detail.urlSecretDesc', { secret: c.urlSecret, url: c.url })} />}
         </Group>
       )}
-      <Group title="Máy chủ">
-        <Row label="Tên hiển thị" htmlFor="conn-label">
+      <Group title={t('connectors.detail.server')}>
+        <Row label={t('connectors.detail.label')} htmlFor="conn-label">
           <TextField id="conn-label" value={c.label} placeholder={c.id} onCommit={(label) => save({ label })} />
         </Row>
-        <Row label="Tên trong phiên" desc={`Agent thấy tool dạng mcp__${c.id}__<tool>. Chỉ a-z, 0-9, "_" và "-".`} htmlFor="conn-id">
+        <Row label={t('connectors.detail.id')} desc={t('connectors.detail.idDesc', { pattern: `mcp__${c.id}__<tool>` })} htmlFor="conn-id">
           <TextField id="conn-id" mono value={c.id} onCommit={(v) => v && v !== c.id && save({ id: v })} />
         </Row>
-        <Row label="Kiểu kết nối" desc="stdio = app chạy một chương trình trên máy; HTTP = máy chủ ở xa (Streamable HTTP).">
+        <Row label={t('connectors.detail.transport')} desc={t('connectors.detail.transportDesc')}>
           <Select
-            label="Kiểu kết nối"
+            label={t('connectors.detail.transport')}
             value={c.transport}
             onChange={(transport) => save({ transport })}
             options={[
-              { value: 'stdio', label: 'stdio (chương trình)' },
+              { value: 'stdio', label: t('connectors.detail.stdio') },
               { value: 'http', label: 'HTTP' }
             ]}
           />
         </Row>
         {c.transport === 'stdio' ? (
           <>
-            <Row label="Chương trình" desc="Vd. npx, uvx, node, hoặc đường dẫn file .exe. Trên Windows npx / npm tự được chạy qua cmd /c." htmlFor="conn-cmd">
+            <Row label={t('connectors.detail.command')} desc={t('connectors.detail.commandDesc')} htmlFor="conn-cmd">
               <TextField id="conn-cmd" mono value={c.command} placeholder="npx" onCommit={(command) => save({ command })} />
             </Row>
-            <Row label="Tham số" desc='Cách nhau bằng dấu cách; "…" giữ khoảng trắng.' htmlFor="conn-args">
+            <Row label={t('connectors.detail.args')} desc={t('connectors.detail.argsDesc')} htmlFor="conn-args">
               <TextField id="conn-args" mono wide value={joinArgs(c.args)} placeholder="-y @playwright/mcp@latest" onCommit={(v) => save({ args: splitArgs(v) })} />
             </Row>
           </>
         ) : (
           <>
             {!c.urlSecret && (
-              <Row label="Địa chỉ" htmlFor="conn-url">
+              <Row label={t('connectors.detail.url')} htmlFor="conn-url">
                 <TextField id="conn-url" mono wide value={c.url} placeholder="https://example.com/mcp" onCommit={(url) => save({ url })} />
               </Row>
             )}
             {!c.oauth && (
-              <Row label="Bearer token" desc="Gửi thành header Authorization: Bearer <bí mật>.">
+              <Row label="Bearer token" desc={t('connectors.detail.bearerDesc')}>
                 <SecretPicker value={c.bearerSecret} onChange={(bearerSecret) => save({ bearerSecret })} allowNone suggest={`${c.id}_TOKEN`} />
               </Row>
             )}
@@ -506,64 +513,68 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
 
       <ValueRows
         key={`${c.id}-${c.transport}`}
-        title={c.transport === 'stdio' ? 'Biến môi trường' : 'Header thêm'}
-        keyLabel={c.transport === 'stdio' ? 'TÊN_BIẾN' : 'X-Header'}
+        title={c.transport === 'stdio' ? t('connectors.values.env') : t('connectors.values.headers')}
+        keyLabel={c.transport === 'stdio' ? t('connectors.values.envPlaceholder') : 'X-Header'}
         keyRe={c.transport === 'stdio' ? ENV_KEY_RE : /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/}
         values={c.transport === 'stdio' ? c.env : c.headers}
         suggest={(k) => `${c.id}_${k}`.toUpperCase().replace(/[^A-Z0-9_]+/g, '_')}
         onSave={(v) => save(c.transport === 'stdio' ? { env: v } : { headers: v })}
       />
 
-      <Group title="Thử kết nối">
+      <Group title={t('connectors.test.title')}>
         <Row
-          label="Nối thử và lấy danh sách tool"
-          desc="Chạy máy chủ với cấu hình này (cả bí mật), hỏi danh sách tool rồi đóng. Không gọi tool nào."
+          label={t('connectors.test.label')}
+          desc={t('connectors.test.desc')}
           sub={
             test === 'loading'
-              ? 'Đang nối… (lần đầu chạy npx có thể phải tải gói)'
+              ? t('connectors.test.connecting')
               : test
                 ? test.ok
-                  ? `Được: ${test.server || 'máy chủ'} · ${test.tools.length} tool · ${(test.ms / 1000).toFixed(1)} s`
+                  ? t('connectors.test.ok', {
+                      server: test.server || t('connectors.test.server'),
+                      tools: t('connectors.toolCount', { count: test.tools.length }),
+                      seconds: fmtNumber(test.ms / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+                    })
                   : undefined
                 : c.testedAt
-                  ? `Lần thử gần nhất ${new Date(c.testedAt).toLocaleString()}: ${c.tools.length} tool.`
+                  ? t('connectors.test.last', { time: fmtDateTime(c.testedAt), tools: t('connectors.toolCount', { count: c.tools.length }) })
                   : undefined
           }
         >
           <SmallButton onClick={doTest} disabled={test === 'loading'}>
-            {test === 'loading' ? 'Đang thử…' : 'Thử kết nối'}
+            {test === 'loading' ? t('connectors.test.testing') : t('connectors.test.title')}
           </SmallButton>
         </Row>
         {test && test !== 'loading' && !test.ok && <div className="border-b border-line py-2.5 text-[12px] whitespace-pre-wrap text-danger">{test.error}</div>}
       </Group>
 
-      <Group title="Tool">
+      <Group title={t('connectors.tools.title')}>
         <Row
-          label="Mặc định"
-          desc="Tool chưa chọn riêng: hỏi bạn trước khi agent dùng, hay tự cho phép. (Agent chạy ở mức quyền bỏ qua mọi câu hỏi thì không hỏi.)"
+          label={t('connectors.tools.default')}
+          desc={t('connectors.tools.defaultDesc')}
         >
           <Select
-            label="Mức mặc định của tool"
+            label={t('connectors.tools.defaultLabel')}
             value={c.approval}
             onChange={(approval) => save({ approval })}
             options={[
-              { value: 'ask', label: 'Hỏi trước' },
-              { value: 'allow', label: 'Tự cho phép' }
+              { value: 'ask', label: t('connectors.policy.ask') },
+              { value: 'allow', label: t('connectors.policy.allow') }
             ]}
           />
         </Row>
         {toolNames.length === 0 ? (
-          <div className="border-b border-line py-3 text-[12px] text-dim">Bấm "Thử kết nối" để thấy tool và chọn mức cho từng tool.</div>
+          <div className="border-b border-line py-3 text-[12px] text-dim">{t('connectors.tools.empty')}</div>
         ) : (
           toolNames.map((name) => {
-            const t = c.tools.find((x) => x.name === name)
+            const tool = c.tools.find((x) => x.name === name)
             const own = c.toolPolicy[name]
             const blocked = toolPolicy(c, name) === 'block'
             return (
-              <Row key={name} label={<span className="font-mono text-[12px]">{name}</span>} desc={t?.description || (t ? undefined : 'không thấy ở lần thử gần nhất')}>
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${blocked ? 'bg-danger' : 'bg-transparent'}`} data-tip={blocked ? 'Đang chặn' : undefined} />
+              <Row key={name} label={<span className="font-mono text-[12px]">{name}</span>} desc={tool?.description || (tool ? undefined : t('connectors.tools.notSeen'))}>
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${blocked ? 'bg-danger' : 'bg-transparent'}`} data-tip={blocked ? t('connectors.tools.blocked') : undefined} />
                 <Select<ToolPolicy | 'default'>
-                  label={`Mức của tool ${name}`}
+                  label={t('connectors.tools.levelOf', { name })}
                   value={own ?? 'default'}
                   onChange={(v) => {
                     const toolPolicyNext = { ...c.toolPolicy }
@@ -572,10 +583,10 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
                     save({ toolPolicy: toolPolicyNext })
                   }}
                   options={[
-                    { value: 'default', label: `Theo mặc định (${c.approval === 'allow' ? 'tự cho phép' : 'hỏi trước'})` },
-                    { value: 'allow', label: 'Tự cho phép' },
-                    { value: 'ask', label: 'Hỏi trước' },
-                    { value: 'block', label: 'Chặn' }
+                    { value: 'default', label: c.approval === 'allow' ? t('connectors.policy.defaultAllow') : t('connectors.policy.defaultAsk') },
+                    { value: 'allow', label: t('connectors.policy.allow') },
+                    { value: 'ask', label: t('connectors.policy.ask') },
+                    { value: 'block', label: t('connectors.policy.block') }
                   ]}
                 />
               </Row>
@@ -584,11 +595,11 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
         )}
       </Group>
 
-      <Group title="Gỡ">
+      <Group title={t('connectors.remove.group')}>
         <Row
-          label="Gỡ connector"
-          desc="Bỏ khỏi mọi phiên agent mở sau, cùng các bật / tắt riêng của nó."
-          sub={confirmRemove ? 'Bấm lần nữa để gỡ. Bí mật của nó vẫn giữ trong Kho bí mật.' : undefined}
+          label={t('connectors.remove.label')}
+          desc={t('connectors.remove.desc')}
+          sub={confirmRemove ? t('connectors.remove.confirm') : undefined}
         >
           <SmallButton
             variant={confirmRemove ? 'dangerSolid' : 'danger'}
@@ -597,7 +608,7 @@ function ConnectorDetail({ id, level, onBack, onRenamed }: { id: string; level: 
               run(window.stag.connectors.remove(c.id).then(onBack))
             }}
           >
-            {confirmRemove ? 'Gỡ thật' : 'Gỡ connector'}
+            {confirmRemove ? t('connectors.remove.really') : t('connectors.remove.label')}
           </SmallButton>
         </Row>
       </Group>
@@ -657,19 +668,20 @@ function SecretPicker({
 }): React.JSX.Element {
   const { items, available } = useSecrets()
   const [creating, setCreating] = useState(false)
+  const t = useT()
   const missing = value && !items.some((x) => x.name === value)
   if (creating) return <NewSecret suggest={suggest} onDone={(n) => (setCreating(false), n && onChange(n))} />
   return (
     <Select
-      label="Bí mật"
+      label={t('connectors.secretPicker.label')}
       value={value}
       onChange={(v) => (v === '+new' ? setCreating(true) : onChange(v))}
       options={[
-        ...(allowNone ? [{ value: '', label: '— Không —' }] : []),
-        ...(missing ? [{ value, label: `${value} (chưa lưu!)` }] : []),
+        ...(allowNone ? [{ value: '', label: t('connectors.secretPicker.none') }] : []),
+        ...(missing ? [{ value, label: t('connectors.secretPicker.missing', { name: value }) }] : []),
         // Bí mật đăng nhập OAuth (khối JSON có refresh token) không dùng làm bí mật thường: chỉ connector OAuth của nó dùng.
         ...items.filter((x) => !x.name.startsWith(OAUTH_SECRET_PREFIX) || x.name === value).map((x) => ({ value: x.name, label: x.name })),
-        { value: '+new', label: '+ Bí mật mới…', disabled: !available }
+        { value: '+new', label: t('connectors.secretPicker.new'), disabled: !available }
       ]}
     />
   )
@@ -679,6 +691,7 @@ function NewSecret({ suggest, onDone }: { suggest: string; onDone: (name: string
   const [name, setName] = useState(suggest)
   const [value, setValue] = useState('')
   const [error, setError] = useState('')
+  const t = useT()
   const ok = SECRET_NAME_RE.test(name) && value !== ''
   const submit = (): void => {
     if (!ok) return
@@ -690,13 +703,13 @@ function NewSecret({ suggest, onDone }: { suggest: string; onDone: (name: string
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex gap-1.5">
-        <input aria-label="Tên bí mật mới" value={name} onChange={(e) => setName(e.target.value)} className={`${INPUT_MONO} w-40`} spellCheck={false} />
+        <input aria-label={t('connectors.secretPicker.newName')} value={name} onChange={(e) => setName(e.target.value)} className={`${INPUT_MONO} w-40`} spellCheck={false} />
         <input
-          aria-label="Giá trị bí mật mới"
+          aria-label={t('connectors.secretPicker.newValue')}
           type="password"
           autoFocus
           value={value}
-          placeholder="giá trị"
+          placeholder={t('connectors.secretPicker.valuePlaceholder')}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit()
@@ -705,9 +718,9 @@ function NewSecret({ suggest, onDone }: { suggest: string; onDone: (name: string
           className={`${INPUT_MONO} w-40`}
         />
         <SmallButton onClick={submit} disabled={!ok}>
-          Lưu
+          {t('common.save')}
         </SmallButton>
-        <SmallButton onClick={() => onDone(null)}>Huỷ</SmallButton>
+        <SmallButton onClick={() => onDone(null)}>{t('common.cancel')}</SmallButton>
       </div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
@@ -740,6 +753,7 @@ function ValueRows({
     Object.entries(v).map(([key, x]) => ('secret' in x ? { key, kind: 'secret', value: x.secret } : { key, kind: 'value', value: x.value }))
   const [rows, setRows] = useState<ValueRow[]>(() => toRows(values))
   const [problem, setProblem] = useState('')
+  const t = useT()
   const valuesJson = JSON.stringify(values)
   useEffect(() => setRows(toRows(values)), [valuesJson]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -748,9 +762,9 @@ function ValueRows({
     const out: Record<string, ConnectorValue> = {}
     for (const r of filled) {
       const k = r.key.trim()
-      if (!keyRe.test(k)) return setProblem(`Tên "${k || '(trống)'}" không hợp lệ`)
-      if (k in out) return setProblem(`Tên ${k} bị trùng`)
-      if (r.kind === 'secret' && !r.value) return setProblem(`${k}: chọn bí mật`)
+      if (!keyRe.test(k)) return setProblem(k ? t('connectors.values.badName', { name: k }) : t('connectors.values.emptyName'))
+      if (k in out) return setProblem(t('connectors.values.duplicate', { name: k }))
+      if (r.kind === 'secret' && !r.value) return setProblem(t('connectors.values.pickSecret', { name: k }))
       out[k] = r.kind === 'secret' ? { secret: r.value } : { value: r.value }
     }
     setProblem('')
@@ -767,7 +781,7 @@ function ValueRows({
       {rows.map((r, i) => (
         <div key={i} className="flex items-center gap-2 border-b border-line py-2">
           <input
-            aria-label={`Tên ${i + 1}`}
+            aria-label={t('connectors.values.nameN', { n: i + 1 })}
             value={r.key}
             placeholder={keyLabel}
             spellCheck={false}
@@ -776,12 +790,12 @@ function ValueRows({
             className={`${INPUT_MONO} w-48`}
           />
           <Select
-            label={`Loại giá trị ${i + 1}`}
+            label={t('connectors.values.kindN', { n: i + 1 })}
             value={r.kind}
             onChange={(kind) => update(i, { kind, value: '' }, kind === 'value')}
             options={[
-              { value: 'value', label: 'Chữ' },
-              { value: 'secret', label: 'Bí mật' }
+              { value: 'value', label: t('connectors.values.text') },
+              { value: 'secret', label: t('connectors.values.secret') }
             ]}
           />
           <div className="flex min-w-0 flex-1 justify-end">
@@ -789,7 +803,7 @@ function ValueRows({
               <SecretPicker value={r.value} suggest={suggest(r.key || 'KEY')} onChange={(v) => update(i, { value: v }, true)} />
             ) : (
               <input
-                aria-label={`Giá trị ${i + 1}`}
+                aria-label={t('connectors.values.valueN', { n: i + 1 })}
                 value={r.value}
                 spellCheck={false}
                 onChange={(e) => update(i, { value: e.target.value })}
@@ -800,8 +814,8 @@ function ValueRows({
           </div>
           <button
             type="button"
-            aria-label={`Xoá dòng ${i + 1}`}
-            data-tip="Xoá dòng"
+            aria-label={t('connectors.values.removeN', { n: i + 1 })}
+            data-tip={t('connectors.values.remove')}
             onClick={() => {
               const next = rows.filter((_, j) => j !== i)
               setRows(next)
@@ -815,12 +829,12 @@ function ValueRows({
       ))}
       <div className="flex items-center gap-3 py-2">
         <SmallButton icon="plus" onClick={() => setRows([...rows, { key: '', kind: 'value', value: '' }])}>
-          Thêm dòng
+          {t('connectors.values.addRow')}
         </SmallButton>
         {problem ? (
           <span className="text-[12px] text-danger">{problem}</span>
         ) : (
-          <span className="text-[12px] text-dim">Token / key: chọn "Bí mật" — giá trị cất ở Kho bí mật, không nằm trong cài đặt.</span>
+          <span className="text-[12px] text-dim">{t('connectors.values.hint')}</span>
         )}
       </div>
     </Group>
@@ -831,8 +845,8 @@ function ValueRows({
 
 function importSummary(r: ConnectorImport): string {
   const parts: string[] = []
-  if (r.connectors.length) parts.push(`Đã thêm ${r.connectors.map((c) => c.id).join(', ')}.`)
-  if (r.secrets.length) parts.push(`Tách ${r.secrets.length} giá trị thành bí mật: ${r.secrets.join(', ')}.`)
+  if (r.connectors.length) parts.push(t('connectors.summary.added', { ids: r.connectors.map((c) => c.id).join(', ') }))
+  if (r.secrets.length) parts.push(t('connectors.summary.secrets', { count: r.secrets.length, names: r.secrets.join(', ') }))
   if (r.errors.length) parts.push(r.errors.join(' · '))
   return parts.join(' ')
 }
@@ -848,6 +862,7 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<ConnectorImport | null>(null)
+  const t = useT()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -877,7 +892,7 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
         const r = await window.stag.connectors.importJson(json)
         for (const c of r.connectors) await enableOnlyAt(lv, c)
         if (!r.connectors.length) {
-          setError(r.errors.join('\n') || 'Không thêm được connector nào')
+          setError(r.errors.join('\n') || t('connectors.add.nothing'))
           setBusy(false)
           return
         }
@@ -910,21 +925,21 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
 
   return (
     <Modal
-      title="Kết nối công cụ riêng"
+      title={t('connectors.add.title')}
       width="w-[560px]"
       onClose={busy ? undefined : onClose}
       footer={
         result ? (
           <Button primary onClick={() => onCreated(result.connectors.length === 1 ? result.connectors[0].id : null)}>
-            Xong
+            {t('common.done')}
           </Button>
         ) : (
           <>
             <Button onClick={onClose} disabled={busy}>
-              Huỷ
+              {t('common.cancel')}
             </Button>
             <Button primary onClick={create} disabled={busy || !ready}>
-              {busy ? 'Đang thêm…' : 'Thêm'}
+              {busy ? t('connectors.add.adding') : t('common.add')}
             </Button>
           </>
         )
@@ -940,48 +955,47 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
           }}
         >
           <p className="mb-3 text-[12px] leading-relaxed text-dim">
-            {lv.lvl === 'app' ? 'Connector mới bật cho mọi agent.' : `Connector mới chỉ bật cho ${lv.name} (mặc định của app: tắt).`} Sau khi thêm, bấm "Thử kết nối" ở
-            trang của nó.
+            {lv.lvl === 'app' ? t('connectors.add.introApp') : t('connectors.add.introLevel', { level: lv.name })} {t('connectors.add.introTest')}
           </p>
           <Seg
             className="mb-4 self-start"
             value={tab}
             onChange={setTab}
             options={[
-              { value: 'custom', label: 'Tự cấu hình' },
-              { value: 'json', label: 'Dán JSON' }
+              { value: 'custom', label: t('connectors.add.custom') },
+              { value: 'json', label: t('connectors.add.json') }
             ]}
           />
           {tab === 'custom' && (
             <>
               <label className="mb-1 block text-[12px] font-medium" htmlFor="conn-new-name">
-                Tên
+                {t('connectors.add.name')}
               </label>
               <input id="conn-new-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Linear" className={`${INPUT} w-full`} />
-              {name && <p className={hint}>Tên trong phiên: {freeId(slugify(name))}</p>}
+              {name && <p className={hint}>{t('connectors.add.idPreview', { id: freeId(slugify(name)) })}</p>}
               <div className="mt-3 mb-1.5 flex gap-4">
-                {(['stdio', 'http'] as const).map((t) => (
-                  <label key={t} className="flex items-center gap-1.5 text-[13px]">
-                    <input type="radio" className="accent-accent" checked={transport === t} onChange={() => setTransport(t)} />
-                    {t === 'stdio' ? 'Chương trình (stdio)' : 'Máy chủ HTTP'}
+                {(['stdio', 'http'] as const).map((tp) => (
+                  <label key={tp} className="flex items-center gap-1.5 text-[13px]">
+                    <input type="radio" className="accent-accent" checked={transport === tp} onChange={() => setTransport(tp)} />
+                    {tp === 'stdio' ? t('connectors.add.stdio') : t('connectors.add.http')}
                   </label>
                 ))}
               </div>
               <input
-                aria-label={transport === 'stdio' ? 'Lệnh chạy máy chủ' : 'Địa chỉ máy chủ'}
+                aria-label={transport === 'stdio' ? t('connectors.add.commandLabel') : t('connectors.add.urlLabel')}
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
                 placeholder={transport === 'stdio' ? 'npx -y @modelcontextprotocol/server-memory' : 'https://mcp.example.com/mcp'}
                 spellCheck={false}
                 className={field}
               />
-              <p className={hint}>Biến môi trường, header, bí mật: thêm ở trang của connector sau khi tạo.</p>
+              <p className={hint}>{t('connectors.add.later')}</p>
             </>
           )}
           {tab === 'json' && (
             <>
               <textarea
-                aria-label="JSON cấu hình MCP"
+                aria-label={t('connectors.add.jsonLabel')}
                 autoFocus
                 value={json}
                 onChange={(e) => setJson(e.target.value)}
@@ -990,10 +1004,7 @@ function AddConnectorDialog({ level, onClose, onCreated }: { level: LevelKey; on
                 placeholder={'{\n  "mcpServers": {\n    "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] }\n  }\n}'}
                 className={`${TEXTAREA} w-full`}
               />
-              <p className={hint}>
-                Dạng của Claude Code / Cursor / VS Code (<code>mcpServers</code> hoặc <code>servers</code>). Giá trị có tên giống token (KEY, TOKEN, SECRET…) và
-                header Authorization được tách thành bí mật, không lưu vào cài đặt.
-              </p>
+              <p className={hint}>{tx('connectors.add.jsonHint', { mcpServers: <code>mcpServers</code>, servers: <code>servers</code> })}</p>
             </>
           )}
           {error && <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-[12px] whitespace-pre-wrap text-danger">{error}</div>}

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { t } from '@shared/i18n'
 
 export async function exists(p: string): Promise<boolean> {
   try {
@@ -62,7 +63,7 @@ export function isInside(root: string, p: string): boolean {
   return x === r || x.startsWith(r.endsWith(sep) ? r : r + sep)
 }
 
-const outside = (): Error => Object.assign(new Error('Đường dẫn phải nằm trong thư mục dự án'), { code: 'OUTSIDE' })
+const outside = (): Error => Object.assign(new Error(t('app.error.outsideProject')), { code: 'OUTSIDE' })
 
 /**
  * Đường dẫn thật (đã giải symlink / junction) của `rel` trong thư mục `root`. Chặn đường dẫn tuyệt đối, `..`, và

@@ -19,8 +19,8 @@ export function parseSrc(raw: string, inherited = false): InspectSource {
     const order = parts.find((p) => /^block \d+$/.test(p))
     return {
       chip: 'wp',
-      label: `Block ${block ?? ''} · bài #${post[1]}${order ? ` · ${order}` : ''}`.replace('Block  ·', 'Block ·'),
-      effect: `Nội dung bài #${post[1]} trong cơ sở dữ liệu · có bản sửa (revision), hoàn tác được`,
+      label: `Block ${block ?? ''} · post #${post[1]}${order ? ` · ${order}` : ''}`.replace('Block  ·', 'Block ·'),
+      effect: `Content of post #${post[1]} in the database · revisions are kept, can be undone`,
       hint: `WordPress post ${post[1]}, ${block ?? 'block'}${order ? ` (${order} in render order)` : ''}: edit post_content with WP-CLI on the local copy (wp post get ${post[1]} --field=post_content / wp post update), a revision is kept.`,
       ...inh
     }
@@ -30,7 +30,7 @@ export function parseSrc(raw: string, inherited = false): InspectSource {
     return {
       chip: 'wp',
       label: `Template part "${part[1]}"`,
-      effect: 'Template part của block theme · đổi ở mọi trang dùng phần này',
+      effect: 'Block theme template part · changes every page that uses this part',
       hint: `Block-theme template part "${part[1]}": if it was edited in the Site Editor it lives in the DB (wp_template_part post, slug ${part[1]}), otherwise in the theme's parts/${part[1]}.html (edit the child theme).`,
       ...inh
     }
@@ -38,7 +38,7 @@ export function parseSrc(raw: string, inherited = false): InspectSource {
     return {
       chip: 'wp',
       label: `Template · ${parts.slice(1).join(' · ')}`,
-      effect: 'Template của block theme · đổi ở mọi trang dùng template này',
+      effect: 'Block theme template · changes every page that uses this template',
       hint: 'Block-theme template (wp_template post if edited in the Site Editor, else the theme templates/*.html); edit the child theme.',
       ...inh
     }
@@ -56,12 +56,12 @@ export function parseSrc(raw: string, inherited = false): InspectSource {
     ...(chip === 'theme'
       ? parent
         ? {
-            effect: 'Theme cha · sửa thẳng sẽ mất khi cập nhật theme → agent chép sang child theme trước',
+            effect: 'Parent theme · direct edits are lost on theme update → the agent copies it to the child theme first',
             hint: `Parent theme file wp-content/${file}: never edit it in place — copy it into the child theme (create one if missing) and edit the copy.`
           }
-        : { effect: 'Theme · áp dụng cho mọi trang dùng phần này', hint: `Theme file wp-content/${file}${line ? ` around line ${line}` : ''}.` }
+        : { effect: 'Theme · applies to every page that uses this part', hint: `Theme file wp-content/${file}${line ? ` around line ${line}` : ''}.` }
       : chip === 'plugin'
-        ? { effect: 'Template của plugin · áp dụng cho mọi trang dùng phần này', hint: `Plugin file wp-content/${file}: a plugin update overwrites edits — prefer a theme override / hook if the plugin supports it.` }
+        ? { effect: 'Plugin template · applies to every page that uses this part', hint: `Plugin file wp-content/${file}: a plugin update overwrites edits — prefer a theme override / hook if the plugin supports it.` }
         : {}),
     ...inh
   }

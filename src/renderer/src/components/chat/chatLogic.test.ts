@@ -336,3 +336,15 @@ describe('appendText / nearBottom', () => {
     expect(nearBottom({ scrollHeight: 1000, scrollTop: 500, clientHeight: 400 })).toBe(false)
   })
 })
+
+describe('atQuery (bảng @ cửa sổ)', () => {
+  it('opens on @ at line start or after a space, not inside emails', async () => {
+    const { atQuery } = await import('./chatLogic')
+    expect(atQuery('@', 1)).toEqual({ start: 0, query: '' })
+    expect(atQuery('xem @Cap', 8)).toEqual({ start: 4, query: 'Cap' })
+    expect(atQuery('dòng 1\n@no', 10)).toEqual({ start: 7, query: 'no' })
+    expect(atQuery('a@b.com', 7)).toBeNull()
+    expect(atQuery('@cap cut', 8)).toBeNull()
+    expect(atQuery('xem @Cap rồi', 8)).toEqual({ start: 4, query: 'Cap' })
+  })
+})

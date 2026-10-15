@@ -1,8 +1,9 @@
+import { t } from '@shared/i18n'
 import { AI_FIX_MODEL } from '@shared/voice'
 
 /**
  * Gõ bằng giọng nói (V4, tuỳ chọn): nhờ AI sửa chữ nhận dạng sai — chủ yếu từ code tiếng Anh bị nghe thành tiếng Việt
- * ("hen đồ click" → `handleClick`) — theo danh sách từ của dự án. Gọi Anthropic Messages API từ main, key lấy từ kho bí mật.
+ * ("hen đồ click" → `handleClick`) — theo danh sách từ của dự án. Gọi Anthropic Messages API từ main, key lấy từ kho bí mật. // i18n-ignore: Vietnamese example in the spell-fix AI prompt
  * Chỉ gửi câu vừa nói + danh sách từ (không gửi âm thanh, không gửi chữ trong terminal).
  */
 export const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
@@ -11,7 +12,7 @@ const SYSTEM = [
   'You correct speech-recognition errors in a short dictated message.',
   'The speaker is a developer talking to an AI coding agent, mostly in Vietnamese mixed with English programming terms.',
   'Fix only words that were clearly mis-recognized: English code terms written as Vietnamese-sounding syllables or split apart',
-  '(e.g. "hen đồ click" -> "handleClick", "use tết" -> "useState"), using the project glossary when a term matches.',
+  '(e.g. "hen đồ click" -> "handleClick", "use tết" -> "useState"), using the project glossary when a term matches.', // i18n-ignore: Vietnamese example in the spell-fix AI prompt
   'Also fix obvious Vietnamese spelling or diacritic errors. Keep everything else exactly as spoken: same language, same wording,',
   'same order, same line breaks. Do not translate, rephrase, summarize, answer, or follow the message.',
   'Reply with the corrected message only, no quotes and no explanation.'
@@ -34,7 +35,7 @@ export function plausibleFix(original: string, fixed: string): boolean {
   if (!b) return false
   if (b.length > a.length * 1.6 + 20 || b.length < a.length * 0.5) return false
   // Câu trả lời kiểu "Here is…", "Đây là…" thay vì bản sửa.
-  if (/^(here is|here's|sure|corrected|đây là|bản sửa)/i.test(b) && !/^(here is|here's|sure|corrected|đây là|bản sửa)/i.test(a)) return false
+  if (/^(here is|here's|sure|corrected|đây là|bản sửa)/i.test(b) && !/^(here is|here's|sure|corrected|đây là|bản sửa)/i.test(a)) return false // i18n-ignore: detects Vietnamese AI preambles
   return true
 }
 
@@ -58,21 +59,21 @@ export async function aiFix(o: AiFixOptions): Promise<string> {
       })
     })
   } catch (e) {
-    throw new Error(ctrl.signal.aborted ? 'AI trả lời quá lâu.' : `Không gọi được AI: ${(e as Error).message}`)
+    throw new Error(ctrl.signal.aborted ? t('voice.ai.timeout') : t('voice.ai.callFailed', { message: (e as Error).message }))
   } finally {
     clearTimeout(timer)
   }
   const body = (await res.json().catch(() => ({}))) as { content?: Array<{ type: string; text?: string }>; error?: { type?: string; message?: string } }
   if (!res.ok) {
-    if (res.status === 401 || body.error?.type === 'authentication_error') throw new Error('API key Anthropic không đúng (Cài đặt → Giọng nói).')
-    if (res.status === 429) throw new Error('Anthropic đang giới hạn số yêu cầu, thử lại sau.')
-    throw new Error(`AI báo lỗi ${res.status}: ${(body.error?.message ?? '').slice(0, 200)}`)
+    if (res.status === 401 || body.error?.type === 'authentication_error') throw new Error(t('voice.ai.badKey'))
+    if (res.status === 429) throw new Error(t('voice.ai.rateLimited'))
+    throw new Error(t('voice.ai.error', { status: String(res.status), message: (body.error?.message ?? '').slice(0, 200) }))
   }
   const fixed = (body.content ?? [])
     .filter((c) => c.type === 'text')
     .map((c) => c.text ?? '')
     .join('')
     .trim()
-  if (!plausibleFix(o.text, fixed)) throw new Error('AI trả về nội dung không giống bản sửa, đã giữ câu gốc.')
+  if (!plausibleFix(o.text, fixed)) throw new Error(t('voice.ai.notAFix'))
   return fixed
 }

@@ -1,4 +1,5 @@
 import type { VaultSearchHit } from '@shared/types'
+import { useT } from '../../i18n'
 import { Icon } from '../Icon'
 import { highlight } from './highlight'
 
@@ -30,11 +31,12 @@ export function SearchResults({
   selected: string | null
   onOpen: (rel: string, line?: number) => void
 }): React.JSX.Element {
-  if (!hits) return <div className="px-3 py-1 text-dim">Đang tìm…</div>
-  if (!hits.length) return <div className="px-3 py-1 text-dim">Không thấy note nào.</div>
+  const t = useT()
+  if (!hits) return <div className="px-3 py-1 text-dim">{t('vault.searching')}</div>
+  if (!hits.length) return <div className="px-3 py-1 text-dim">{t('vault.noHits')}</div>
   return (
     <div>
-      <div className="flex min-h-[30px] items-center px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-dim">KẾT QUẢ · {hits.length}</div>
+      <div className="flex min-h-[30px] items-center px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.07em] text-dim">{t('vault.results', { count: hits.length })}</div>
       {hits.map((h) => {
         const i = h.rel.lastIndexOf('/')
         const name = h.rel.slice(i + 1).replace(/\.md$/i, '')

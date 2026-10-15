@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useUi } from '../store/ui'
 import { Icon, type IconName } from './Icon'
+import { useT } from '../i18n'
 
 interface Props {
   title: ReactNode
@@ -20,6 +21,7 @@ const openModals: object[] = []
 
 /** Hộp thoại giữa màn hình (bản thiết kế "Xưởng"): đầu 44px có nút đóng, thân cuộn được, chân nền sâu hơn. */
 export function Modal({ title, children, footer, onClose, width = 'w-[560px]', icon, tone }: Props): React.JSX.Element {
+  const t = useT()
   useEffect(() => {
     const ui = useUi.getState()
     ui.modalOpened()
@@ -67,8 +69,8 @@ export function Modal({ title, children, footer, onClose, width = 'w-[560px]', i
             <button
               type="button"
               onClick={onClose}
-              data-tip="Đóng · Esc"
-              aria-label="Đóng"
+              data-tip={t('agents.modal.closeTip')}
+              aria-label={t('common.close')}
               className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted hover:bg-panel-3 hover:text-fg"
             >
               <Icon name="x" />

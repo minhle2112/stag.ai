@@ -18,6 +18,7 @@ const TIMEOUT_MS = 60_000
 const pending = new Map()
 const contextFns = new Set()
 const themeFns = new Set()
+const localeFns = new Set()
 const streamFns = new Map()
 let nextId = 1
 let context = null
@@ -42,12 +43,17 @@ window.addEventListener('message', (e) => {
   if (m.event === 'context') {
     context = m.context
     document.documentElement.dataset.theme = context?.theme ?? 'dark'
+    document.documentElement.lang = context?.locale ?? 'vi'
     markReady(context)
     for (const fn of contextFns) fn(context)
   } else if (m.event === 'theme') {
     if (context) context = { ...context, theme: m.theme }
     document.documentElement.dataset.theme = m.theme
     for (const fn of themeFns) fn(m.theme)
+  } else if (m.event === 'locale') {
+    if (context) context = { ...context, locale: m.locale }
+    document.documentElement.lang = m.locale
+    for (const fn of localeFns) fn(m.locale)
   } else if (m.event === 'stream') {
     for (const fn of streamFns.get(m.channel) ?? []) fn(m.data)
   }
@@ -58,7 +64,7 @@ function call(method, params = {}) {
     const id = nextId++
     const timer = setTimeout(() => {
       pending.delete(id)
-      reject(new Error(`stag.ai không trả lời ${method}`))
+      reject(new Error(`stag.ai did not respond to ${method}`))
     }, TIMEOUT_MS)
     pending.set(id, { resolve, reject, timer })
     post({ id, method, params })
@@ -83,6 +89,11 @@ export const host = {
     themeFns.add(fn)
     return () => themeFns.delete(fn)
   },
+  /** App đổi ngôn ngữ giao diện ('vi' | 'en'); ngôn ngữ hiện tại ở host.context.locale. Trả về hàm huỷ. */
+  onLocale(fn) {
+    localeFns.add(fn)
+    return () => localeFns.delete(fn)
+  },
   call,
   getData: (key, params = {}) => call('data.get', { key, params }),
   action: (key, params = {}) => call('action.perform', { key, params }),
@@ -94,7 +105,9 @@ export const host = {
   },
   agents: {
     list: () => call('agents.list'),
-    send: (agentId, text) => call('agent.sessions.send', { agentId, text })
+    send: (agentId, text) => call('agent.sessions.send', { agentId, text }),
+    /** Nhờ agent làm việc: gõ + gửi khi agent rảnh, chưa chạy thì mở phiên mới (quyền agent.sessions.send). */
+    ask: (agentId, text) => call('agent.ask', { agentId, text })
   },
   board: { list: (workspaceId) => call('board.list', { workspaceId: wsId(workspaceId) }) },
   vault: {
@@ -111,6 +124,15 @@ export const host = {
   toast: (text) => call('ui.toast', { text: String(text) }),
   /** Mở địa chỉ http(s) trong trình duyệt của app ('browser') hoặc trình duyệt mặc định ('external'). */
   openUrl: (url, target = 'browser') => call('ui.openUrl', { url, target }),
+  /** Hộp chọn file của hệ điều hành → đường dẫn đầy đủ hoặc null. filters: [{ name, extensions: ['mp4', …] }]. */
+  pickFile: (title, filters) => call('ui.pickFile', { title, filters }),
+  /** Mở thư mục chứa file (path tương đối so với dự án của workspace) trong Explorer. */
+  reveal: (path, workspaceId) => call('ui.reveal', { workspaceId: wsId(workspaceId), path }),
+  /** Mở Cài đặt → Plugin → trang của plugin này. */
+  openSettings: () => call('ui.openSettings'),
+  /** Địa chỉ cho <img> / <video> tới một file trong dự án (quyền files.read; video tua được). */
+  fileUrl: (path, workspaceId) =>
+    `/__stag/file/${encodeURIComponent(wsId(workspaceId) ?? '')}/${String(path).split(/[\\/]+/).map(encodeURIComponent).join('/')}`,
   /** Nhận dữ liệu worker đẩy qua ctx.streams.emit(channel, data). Trả về hàm huỷ. */
   on(channel, fn) {
     const set = streamFns.get(channel) ?? new Set()

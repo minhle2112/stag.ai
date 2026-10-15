@@ -3,7 +3,9 @@ import type { InstalledPlugin, PluginCatalogEntry, PluginInstallRequest, PluginJ
 import type { VoiceAiInfo, VoiceCloudInfo, VoiceResult, VoiceStatus } from '@shared/voice'
 import type { DevServerList } from '@shared/launch'
 import type { ClaudeUsageState } from '@shared/claudeUsage'
+import { CU_IPC, type ComputerAttach, type ComputerCommand, type ComputerState, type ComputerWindow } from '@shared/computer'
 import type { ThemeState } from '@shared/theme'
+import type { Locale } from '@shared/i18n/types'
 import type { ArtifactComment, ArtifactsSnapshot, CommentAnchor, DocBlock } from '@shared/artifacts'
 import type { InspectAction, InspectActionResult, InspectSnapshot, SourceKind, SourceSetup } from '@shared/inspect'
 import type { CredentialInput, CredentialLogEntry, CredentialNotice, CredentialPatch, CredentialsState, CredentialView, ImportKind, ImportPreview, TotpPreview } from '@shared/credentials'
@@ -553,7 +555,8 @@ const api = {
     }
   },
   /** Chọn một file .exe; null = huỷ. */
-  pickFile: (title: string, defaultPath?: string): Promise<string | null> => ipcRenderer.invoke(IPC.pickFile, title, defaultPath),
+  pickFile: (title: string, defaultPath?: string, filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.pickFile, title, defaultPath, filters),
   /** Người dùng bấm thông báo của một agent. */
   onRevealAgent(cb: (workspaceId: string, agentId: string) => void): () => void {
     const fn = (_e: IpcRendererEvent, workspaceId: string, agentId: string): void => cb(workspaceId, agentId)
@@ -572,6 +575,21 @@ const api = {
       return () => ipcRenderer.removeListener(IPC.claudeUsageChanged, fn)
     }
   },
+  /** Computer use: ô Máy tính, bảng @ cửa sổ, thanh tiêu đề. */
+  computer: {
+    state: (): Promise<ComputerState> => ipcRenderer.invoke(CU_IPC.getState),
+    onState(cb: (s: ComputerState) => void): () => void {
+      const fn = (_e: IpcRendererEvent, s: ComputerState): void => cb(s)
+      ipcRenderer.on(CU_IPC.state, fn)
+      return () => ipcRenderer.removeListener(CU_IPC.state, fn)
+    },
+    windows: (): Promise<ComputerWindow[]> => ipcRenderer.invoke(CU_IPC.windows),
+    command: (cmd: ComputerCommand): Promise<void> => ipcRenderer.invoke(CU_IPC.command, cmd),
+    revoke: (sessionId: string, key?: string): Promise<void> => ipcRenderer.invoke(CU_IPC.revoke, sessionId, key),
+    /** Chọn cửa sổ trong bảng @: cấp app cho phiên đang chạy của agent, trả dòng ngữ cảnh + ảnh cửa sổ. */
+    attachWindow: (agentId: string, windowId: string, image = true): Promise<ComputerAttach> => ipcRenderer.invoke(CU_IPC.attachWindow, agentId, windowId, image),
+    tierFor: (exe: string): Promise<{ tier: ComputerWindow['tier']; reason: ComputerWindow['reason'] } | null> => ipcRenderer.invoke(CU_IPC.tierFor, exe)
+  },
   /** Màu app: Sáng / Tối / Theo Windows (Cài đặt → Giao diện). */
   theme: {
     /** Đồng bộ: script đầu trang đặt data-theme trước khi React vẽ (không chớp sai màu). */
@@ -589,6 +607,17 @@ const api = {
       const fn = (_e: IpcRendererEvent, s: ThemeState): void => cb(s)
       ipcRenderer.on(IPC.themeChanged, fn)
       return () => ipcRenderer.removeListener(IPC.themeChanged, fn)
+    }
+  },
+  /** Ngôn ngữ giao diện (Cài đặt → Giao diện). */
+  locale: {
+    /** Đồng bộ: đặt ngôn ngữ trước khi React vẽ lần đầu (không chớp tiếng Việt rồi mới sang tiếng Anh). */
+    initial: (): Locale | null => {
+      try {
+        return ipcRenderer.sendSync(IPC.localeGetSync) as Locale
+      } catch {
+        return null
+      }
     }
   }
 }

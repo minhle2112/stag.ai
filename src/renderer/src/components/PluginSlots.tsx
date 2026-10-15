@@ -1,3 +1,4 @@
+import { useT } from '../i18n'
 import { usePlugins, usePluginToast, runSlot, slotsOf } from '../store/plugins'
 import { useSettings } from '../store/settings'
 import { useActiveWorkspace } from '../store/workspaces'
@@ -50,6 +51,7 @@ export function ToolbarPluginButtons(): React.JSX.Element {
 /** Lời nhắn của plugin ở góc dưới bên trái (kết quả bấm nút). */
 export function PluginToast(): React.JSX.Element | null {
   const { text, bad, hide } = usePluginToast()
+  const t = useT()
   if (!text) return null
   return (
     <div
@@ -58,7 +60,7 @@ export function PluginToast(): React.JSX.Element | null {
     >
       <div className="flex items-start gap-3">
         <span className="min-w-0 flex-1 whitespace-pre-wrap">{text}</span>
-        <button onClick={hide} className="shrink-0 text-muted hover:text-fg" aria-label="Đóng">
+        <button onClick={hide} className="shrink-0 text-muted hover:text-fg" aria-label={t('common.close')}>
           ×
         </button>
       </div>

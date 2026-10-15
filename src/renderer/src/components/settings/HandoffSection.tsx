@@ -9,11 +9,13 @@ import { useWorkspaces } from '../../store/workspaces'
 import { AgentAvatar } from '../ui/AgentAvatar'
 import { ErrorBar, Group, InfoTip, Note, Row, SectionTitle, Stepper, Switch, useSaveError } from './controls'
 import { LevelBar } from './levels'
+import { useT } from '../../i18n'
 
 /** Cấp đang sửa: 'app' hoặc `ws:<id>` hoặc `agent:<wsId>:<agentId>`. */
 type LevelKey = string
 
 export function HandoffSection(): React.JSX.Element {
+  const t = useT()
   const settings = useSettings((s) => s.value)
   const save = useSettings((s) => s.save)
   const saveOverrides = useSettings((s) => s.saveOverrides)
@@ -69,25 +71,29 @@ export function HandoffSection(): React.JSX.Element {
   return (
     <>
       <SectionTitle
-        title="Agent & bàn giao"
-        desc="Khi context của một phiên agent đạt ngưỡng và agent đang chờ bạn (hết lượt, bạn không gõ phím vài giây), app nhờ agent ghi vault và viết bản bàn giao, rồi đóng phiên và mở phiên mới đọc tiếp từ bản bàn giao đó. Việc đang làm của agent vẫn giữ nguyên."
+        title={t('handoff.title')}
+        desc={t('handoff.desc')}
         right={<LevelBar level={level} setLevel={setLevel} has={(o) => !!o?.handoff} />}
       />
       <ErrorBar error={error} />
 
-      <Group title="Bàn giao khi context gần đầy">
-        <Row label="Tự động bàn giao" override={override('autoHandoff', (v) => (v ? 'bật' : 'tắt'))}>
-          <Switch label="Tự động bàn giao" checked={effective.autoHandoff} onChange={(v) => setField('autoHandoff', v)} />
+      <Group title={t('handoff.group')}>
+        <Row label={t('handoff.auto')} override={override('autoHandoff', (v) => (v ? t('common.on').toLowerCase() : t('common.off').toLowerCase()))}>
+          <Switch label={t('handoff.auto')} checked={effective.autoHandoff} onChange={(v) => setField('autoHandoff', v)} />
         </Row>
         <Row
-          label="Ngưỡng"
-          desc={`= ${formatTokens((200_000 * pct) / 100)} token với cửa sổ 200k, ${formatTokens((1_000_000 * pct) / 100)} token với cửa sổ 1M. Claude Code tự compact ở khoảng 97% (cửa sổ 1M) nên tối đa là ${HANDOFF_MAX}%.`}
+          label={t('handoff.threshold')}
+          desc={t('handoff.thresholdDesc', {
+            t200: formatTokens((200_000 * pct) / 100),
+            t1m: formatTokens((1_000_000 * pct) / 100),
+            max: HANDOFF_MAX
+          })}
           disabled={percentOff}
           override={override('handoffPercent', (v) => `${v}%`)}
         >
           <input
             type="range"
-            aria-label="Ngưỡng bàn giao (thanh trượt)"
+            aria-label={t('handoff.sliderLabel')}
             min={HANDOFF_MIN}
             max={HANDOFF_MAX}
             step={5}
@@ -101,7 +107,7 @@ export function HandoffSection(): React.JSX.Element {
             className="w-40 accent-accent"
           />
           <Stepper
-            label="Ngưỡng bàn giao"
+            label={t('handoff.thresholdLabel')}
             value={pct}
             min={HANDOFF_MIN}
             max={HANDOFF_MAX}
@@ -115,21 +121,19 @@ export function HandoffSection(): React.JSX.Element {
 
       <CtxStrip threshold={pct} agents={strip} muted={percentOff} />
 
-      <Note>
-        Bàn giao tay bất cứ lúc nào: menu ⋯ của agent ở thanh bên → "Bàn giao sang phiên mới". App đọc % context qua statusLine của Claude Code; statusLine
-        riêng của bạn (nếu có) vẫn chạy và hiện như cũ trong phiên agent.
-      </Note>
+      <Note>{t('handoff.note')}</Note>
     </>
   )
 }
 
 /** Dải 0–100%: mỗi ô vuông là một agent ở đúng % context của nó, vạch đỏ = ngưỡng bàn giao (vùng sau vạch tô đỏ nhạt). */
 function CtxStrip({ threshold, agents, muted }: { threshold: number; agents: Array<{ id: string; name: string; pct: number }>; muted?: boolean }): React.JSX.Element {
+  const t = useT()
   return (
     <div className={`relative mt-3 mb-1 h-[50px] rounded-md border border-line bg-panel ${muted ? 'opacity-50' : ''}`}>
       <span className="absolute top-[9px] left-3 flex items-center gap-1.5 text-[12px] text-muted">
-        Ctx hiện tại
-        <InfoTip text="Mỗi ô vuông là một agent · vạch đỏ = ngưỡng bàn giao" />
+        {t('handoff.strip')}
+        <InfoTip text={t('handoff.stripTip')} />
       </span>
       <div className="absolute top-[17px] right-[22px] left-[120px] h-[3px] rounded-sm bg-panel-3">
         <div className="absolute inset-y-0 right-0 rounded-r-sm bg-danger/40" style={{ left: `${threshold}%` }} />
@@ -138,13 +142,13 @@ function CtxStrip({ threshold, agents, muted }: { threshold: number; agents: Arr
             {v}%
           </span>
         ))}
-        <span className="absolute -top-2 -ml-px h-[19px] w-0.5 rounded-sm bg-danger" style={{ left: `${threshold}%` }} data-tip={`Ngưỡng ${threshold}%`} />
+        <span className="absolute -top-2 -ml-px h-[19px] w-0.5 rounded-sm bg-danger" style={{ left: `${threshold}%` }} data-tip={t('handoff.thresholdTip', { pct: threshold })} />
         {agents.map((a) => (
           <span
             key={a.id}
             className="absolute -top-[7px] inline-flex -translate-x-1/2 rounded-[5px] shadow-[0_0_0_2px_var(--color-panel)]"
             style={{ left: `${a.pct}%` }}
-            data-tip={`${a.name} · ctx ${Math.floor(a.pct)}%${a.pct >= threshold ? ' · sắp bàn giao' : ''}`}
+            data-tip={`${a.name} · ctx ${Math.floor(a.pct)}%${a.pct >= threshold ? t('handoff.soon') : ''}`}
           >
             <AgentAvatar name={a.name} size={16} />
           </span>

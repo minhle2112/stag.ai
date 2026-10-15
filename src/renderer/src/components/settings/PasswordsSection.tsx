@@ -10,7 +10,9 @@ import {
   type ImportPreview,
   type TotpPreview
 } from '@shared/credentials'
+import type { PlainKey } from '@shared/i18n'
 import { agentKind, type Agent } from '@shared/types'
+import { fmtDate, fmtTime, t, tx, useT } from '../../i18n'
 import { useCredentials } from '../../store/credentials'
 import { useUi } from '../../store/ui'
 import { useWorkspaces } from '../../store/workspaces'
@@ -94,37 +96,37 @@ function TotpLive({ id }: { id: string }): React.JSX.Element {
   )
 }
 
-const POLICY_HINT: Record<CredentialPolicy, string> = {
-  ask: 'Mỗi lần agent muốn đăng nhập, app hiện thẻ hỏi bạn.',
-  first: 'Lần đầu mỗi agent dùng mục này, app hỏi bạn. Bạn chọn “Luôn cho agent này” thì những lần sau không hỏi. Agent bạn chọn ở trên coi như đã cho.',
-  auto: 'Agent đã chọn điền ngay không hỏi. Agent khác vẫn xin được, và app hỏi bạn. Vẫn chỉ trên đúng tên miền, mỗi lần dùng đều ghi vào nhật ký.',
-  off: 'Mục này chỉ để bạn tự xem / chép. Agent không thấy nó trong credential_list.'
+const POLICY_HINT: Record<CredentialPolicy, PlainKey> = {
+  ask: 'passwords.policyHint.ask',
+  first: 'passwords.policyHint.first',
+  auto: 'passwords.policyHint.auto',
+  off: 'passwords.policyHint.off'
 }
 
-const ACTION_TEXT: Record<CredentialLogEntry['action'], string> = {
-  login: 'điền đăng nhập',
-  username: 'điền tên đăng nhập',
-  password: 'điền mật khẩu',
-  totp: 'điền mã 2FA',
-  blocked: 'muốn điền trên trang sai tên miền',
-  denied: 'xin điền, bị từ chối',
-  needs_user: 'gặp 2FA kho không điền được',
-  saved: 'lưu mục',
-  updated: 'cập nhật mục',
-  imported: 'nhập',
-  totp_saved: 'lưu khoá 2FA'
+const ACTION_TEXT: Record<CredentialLogEntry['action'], PlainKey> = {
+  login: 'passwords.action.login',
+  username: 'passwords.action.username',
+  password: 'passwords.action.password',
+  totp: 'passwords.action.totp',
+  blocked: 'passwords.action.blocked',
+  denied: 'passwords.action.denied',
+  needs_user: 'passwords.action.needsUser',
+  saved: 'passwords.action.saved',
+  updated: 'passwords.action.updated',
+  imported: 'passwords.action.imported',
+  totp_saved: 'passwords.action.totpSaved'
 }
 
 function when(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   const now = new Date()
-  const hm = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-  if (d.toDateString() === now.toDateString()) return `Hôm nay ${hm}`
+  const hm = fmtTime(d)
+  if (d.toDateString() === now.toDateString()) return t('passwords.when.today', { time: hm })
   const y = new Date(now)
   y.setDate(now.getDate() - 1)
-  if (d.toDateString() === y.toDateString()) return `Hôm qua ${hm}`
-  return `${d.getDate()}/${d.getMonth() + 1} ${hm}`
+  if (d.toDateString() === y.toDateString()) return t('passwords.when.yesterday', { time: hm })
+  return `${fmtDate(d, { day: 'numeric', month: 'numeric' })} ${hm}`
 }
 
 /**
@@ -141,6 +143,7 @@ export function PasswordsSection(): React.JSX.Element {
   const [menu, setMenu] = useState(false)
   const [error, setError] = useState('')
   const agents = useAllAgents()
+  const t = useT()
 
   // Mở từ toast "Xem nhật ký" / nút chìa khoá của ô Browser.
   useEffect(() => {
@@ -166,34 +169,34 @@ export function PasswordsSection(): React.JSX.Element {
   return (
     <>
       <SectionTitle
-        title="Mật khẩu"
-        desc="Kho mật khẩu cho agent. Agent nhờ app đăng nhập, app tự điền vào trang trong ô Browser, chỉ trên đúng tên miền của mục. Agent không bao giờ thấy mật khẩu hay mã 2FA. Mã hoá bằng Windows, không ghi vào vault hay cài đặt."
+        title={t('common.name.passwords')}
+        desc={t('passwords.section.desc')}
         right={
           <>
             <LevelBar appOnly />
             <div className="relative">
               <SmallButton icon="import" onClick={() => setMenu((m) => !m)}>
-                Nhập
+                {t('passwords.section.import')}
               </SmallButton>
               {menu && <ImportMenu onPick={doImport} onClose={() => setMenu(false)} />}
             </div>
             <SmallButton variant="primary" icon="plus" disabled={!available} onClick={() => setDialog({})}>
-              Thêm
+              {t('common.add')}
             </SmallButton>
           </>
         }
       />
-      {!available && <ErrorBar error="Windows chưa cho mã hoá dữ liệu (safeStorage) nên app không lưu mật khẩu được." />}
+      {!available && <ErrorBar error={t('passwords.store.noCipher')} />}
       <ErrorBar error={error} />
 
       {loaded && !items.length ? (
-        <Empty title="Chưa có mật khẩu nào">
-          Bấm <b>Thêm</b>, nhập từ Bitwarden / Chrome, hoặc tự đăng nhập một trang trong ô Browser: app hỏi bạn có lưu không. Agent gọi tool <code>credential_fill</code> để app điền giúp.
+        <Empty title={t('passwords.section.emptyTitle')}>
+          {tx('passwords.section.emptyBody', { add: <b>{t('common.add')}</b>, tool: <code>credential_fill</code> })}
         </Empty>
       ) : (
         <div className="grid grid-cols-[280px_minmax(0,1fr)] gap-4">
           <div className="min-w-0">
-            <SearchBox value={q} onChange={setQ} placeholder="Tìm tên, tên miền, tài khoản…" />
+            <SearchBox value={q} onChange={setQ} placeholder={t('passwords.section.search')} />
             <div className="mt-2 space-y-0.5">
               {shown.map((i) => (
                 <button
@@ -212,11 +215,11 @@ export function PasswordsSection(): React.JSX.Element {
                   </span>
                   <span className="flex shrink-0 flex-col items-end gap-0.5">
                     {i.hasTotp && <Chip tone="ok">2FA</Chip>}
-                    {i.policy === 'off' ? <Chip tone="no">chỉ bạn</Chip> : <Chip>{i.agents.length} agent</Chip>}
+                    {i.policy === 'off' ? <Chip tone="no">{t('passwords.section.onlyYou')}</Chip> : <Chip>{t('passwords.section.agentCount', { count: i.agents.length })}</Chip>}
                   </span>
                 </button>
               ))}
-              {!shown.length && <div className="py-6 text-center text-[12px] text-dim">Không có mục nào khớp.</div>}
+              {!shown.length && <div className="py-6 text-center text-[12px] text-dim">{t('passwords.section.noMatch')}</div>}
             </div>
           </div>
           <div className="min-w-0">{current && <Detail key={current.id} item={current} agents={agents} onEdit={(only2fa) => setDialog({ item: current, only2fa })} />}</div>
@@ -225,12 +228,12 @@ export function PasswordsSection(): React.JSX.Element {
 
       {never.length > 0 && (
         <div className="mt-6">
-          <div className="mb-1.5 text-[11px] font-semibold tracking-wider text-dim uppercase">Không bao giờ hỏi lưu</div>
+          <div className="mb-1.5 text-[11px] font-semibold tracking-wider text-dim uppercase">{t('passwords.section.never')}</div>
           <div className="flex flex-wrap gap-1.5">
             {never.map((h) => (
               <span key={h} className="inline-flex h-6 items-center gap-1 rounded-md border border-line-2 pr-1 pl-2 font-mono text-[11.5px]">
                 {h}
-                <button type="button" title="Bỏ khỏi danh sách" className="rounded p-0.5 text-dim hover:bg-panel-3 hover:text-fg" onClick={() => void window.stag.credentials.neverRemove(h)}>
+                <button type="button" title={t('passwords.section.neverRemove')} className="rounded p-0.5 text-dim hover:bg-panel-3 hover:text-fg" onClick={() => void window.stag.credentials.neverRemove(h)}>
                   <Icon name="x" size={12} />
                 </button>
               </span>
@@ -265,6 +268,7 @@ function ImportMenu({ onPick, onClose }: { onPick: (k: ImportKind) => void; onCl
     window.addEventListener('mousedown', down)
     return () => window.removeEventListener('mousedown', down)
   }, [onClose])
+  const t = useT()
   const item = (k: ImportKind, title: string, sub: string): React.JSX.Element => (
     <button type="button" onClick={() => onPick(k)} className="flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-panel-3">
       <Icon name="import" className="mt-0.5 text-dim" />
@@ -276,11 +280,11 @@ function ImportMenu({ onPick, onClose }: { onPick: (k: ImportKind) => void; onCl
   )
   return (
     <div ref={ref} className="absolute top-8 right-0 z-20 w-[310px] rounded-lg border border-line-2 bg-panel-2 p-1 shadow-float">
-      {item('bitwarden-json', 'Bitwarden (.json)', 'File export không mã hoá, có cả khoá 2FA')}
+      {item('bitwarden-json', 'Bitwarden (.json)', t('passwords.importMenu.bitwardenJson'))}
       {item('bitwarden-csv', 'Bitwarden (.csv)', 'login_uri, login_username, login_password, login_totp')}
-      {item('chrome-csv', 'Chrome / Edge (.csv)', 'Mật khẩu đã lưu trong trình duyệt (không có 2FA)')}
+      {item('chrome-csv', 'Chrome / Edge (.csv)', t('passwords.importMenu.chromeCsv'))}
       <div className="mx-2 my-1 border-t border-line" />
-      <div className="px-2.5 py-1.5 text-[11.5px] text-dim">Xem trước, bỏ chọn từng mục rồi mới nhập. Nhập xong nhớ xoá file export.</div>
+      <div className="px-2.5 py-1.5 text-[11.5px] text-dim">{t('passwords.importMenu.note')}</div>
     </div>
   )
 }
@@ -311,6 +315,7 @@ function Detail({ item, agents, onEdit }: { item: CredentialView; agents: Record
   const [confirmDel, setConfirmDel] = useState(false)
   const [error, setError] = useState('')
   const off = item.policy === 'off'
+  const t = useT()
 
   useEffect(() => {
     let live = true
@@ -347,30 +352,30 @@ function Detail({ item, agents, onEdit }: { item: CredentialView; agents: Record
         <Fav name={item.name} size={34} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[15px] font-semibold">{item.name}</div>
-          <div className="text-[12px] text-dim">Lần dùng cuối: {item.lastUsed ? `${when(item.lastUsed.at)} · ${item.lastUsed.agentName}` : 'Chưa dùng'}</div>
+          <div className="text-[12px] text-dim">{t('passwords.detail.lastUsed', { when: item.lastUsed ? `${when(item.lastUsed.at)} · ${item.lastUsed.agentName}` : t('passwords.detail.never') })}</div>
         </div>
         <SmallButton icon="pen" onClick={() => onEdit(false)}>
-          Sửa
+          {t('common.edit')}
         </SmallButton>
         {confirmDel ? (
           <>
             <SmallButton variant="dangerSolid" onClick={() => void window.stag.credentials.remove(item.id)}>
-              Xoá hẳn
+              {t('passwords.detail.deleteForGood')}
             </SmallButton>
             <SmallButton variant="ghost" onClick={() => setConfirmDel(false)}>
-              Thôi
+              {t('common.cancel')}
             </SmallButton>
           </>
         ) : (
           <SmallButton variant="ghost" onClick={() => setConfirmDel(true)}>
-            Xoá
+            {t('common.delete')}
           </SmallButton>
         )}
       </div>
       <ErrorBar error={error} />
 
-      <div className="mt-2 mb-1 text-[11px] font-semibold tracking-wider text-dim uppercase">Đăng nhập</div>
-      <Field label="Tên miền">
+      <div className="mt-2 mb-1 text-[11px] font-semibold tracking-wider text-dim uppercase">{t('passwords.detail.login')}</div>
+      <Field label={t('passwords.field.domain')}>
         {item.domains.map((d) => (
           <span key={d} className="inline-flex h-6 items-center gap-1 rounded-md border border-line-2 px-1.5 font-mono text-[11.5px]">
             <Icon name="globe" size={12} className="text-dim" />
@@ -378,16 +383,16 @@ function Detail({ item, agents, onEdit }: { item: CredentialView; agents: Record
           </span>
         ))}
       </Field>
-      <Field label="Tên đăng nhập" acts={item.username ? <IconBtn icon="copy" tip={copied === 'username' ? 'Đã chép' : 'Chép'} onClick={() => copy('username')} /> : undefined}>
-        <span className="truncate">{item.username || <span className="text-dim">(không có)</span>}</span>
+      <Field label={t('passwords.field.username')} acts={item.username ? <IconBtn icon="copy" tip={copied === 'username' ? t('common.copied') : t('common.copy')} onClick={() => copy('username')} /> : undefined}>
+        <span className="truncate">{item.username || <span className="text-dim">{t('passwords.detail.none')}</span>}</span>
       </Field>
       <Field
-        label="Mật khẩu"
+        label={t('passwords.field.password')}
         acts={
           item.hasPassword ? (
             <>
-              <IconBtn icon={pw !== null ? 'eyeoff' : 'eye'} tip={pw !== null ? 'Ẩn' : 'Hiện (tự ẩn sau 20 giây)'} onClick={() => (pw !== null ? setPw(null) : void window.stag.credentials.reveal(item.id).then((v) => setPw(v ?? '')))} />
-              <IconBtn icon="copy" tip={copied === 'password' ? 'Đã chép' : 'Chép (tự xoá khỏi clipboard sau 30 giây)'} onClick={() => copy('password')} />
+              <IconBtn icon={pw !== null ? 'eyeoff' : 'eye'} tip={pw !== null ? t('passwords.detail.hide') : t('passwords.detail.reveal')} onClick={() => (pw !== null ? setPw(null) : void window.stag.credentials.reveal(item.id).then((v) => setPw(v ?? '')))} />
+              <IconBtn icon="copy" tip={copied === 'password' ? t('common.copied') : t('passwords.detail.copyPassword')} onClick={() => copy('password')} />
             </>
           ) : undefined
         }
@@ -395,37 +400,37 @@ function Detail({ item, agents, onEdit }: { item: CredentialView; agents: Record
         {item.hasPassword ? (
           <>
             <span className="font-mono text-[12.5px]">{pw ?? '••••••••••••••••'}</span>
-            {pw !== null && <Chip tone="warn">tự ẩn sau 20 giây</Chip>}
+            {pw !== null && <Chip tone="warn">{t('passwords.detail.autoHide')}</Chip>}
           </>
         ) : (
-          <span className="text-dim">Chưa có</span>
+          <span className="text-dim">{t('passwords.detail.notSet')}</span>
         )}
       </Field>
-      <Field label="Mã 2FA" acts={item.hasTotp ? <IconBtn icon="copy" tip={copied === 'totp' ? 'Đã chép' : 'Chép'} onClick={() => copy('totp')} /> : undefined}>
+      <Field label={t('passwords.field.totp')} acts={item.hasTotp ? <IconBtn icon="copy" tip={copied === 'totp' ? t('common.copied') : t('common.copy')} onClick={() => copy('totp')} /> : undefined}>
         {item.hasTotp ? (
           <TotpLive id={item.id} />
         ) : (
           <>
-            <span className="text-dim">Chưa có</span>
+            <span className="text-dim">{t('passwords.detail.notSet')}</span>
             <SmallButton icon="qr" onClick={() => onEdit(true)}>
-              Thêm 2FA
+              {t('passwords.detail.add2fa')}
             </SmallButton>
           </>
         )}
       </Field>
 
       <div className="mt-5 mb-1 flex items-center gap-2 text-[11px] font-semibold tracking-wider text-dim uppercase">
-        <span className="flex-1">Agent được dùng</span>
+        <span className="flex-1">{t('passwords.detail.agents')}</span>
         <select
           aria-label="Workspace"
           className={`${INPUT} h-6 w-auto text-[12px] font-normal tracking-normal normal-case`}
           value={item.workspaces === null ? '*' : (item.workspaces[0] ?? '*')}
           onChange={(e) => patch({ workspaces: e.target.value === '*' ? null : [e.target.value] })}
         >
-          <option value="*">Mọi workspace</option>
+          <option value="*">{t('passwords.detail.allWorkspaces')}</option>
           {workspaces.map((w) => (
             <option key={w.id} value={w.id}>
-              Workspace: {w.name}
+              {t('passwords.detail.workspace', { name: w.name })}
             </option>
           ))}
         </select>
@@ -450,10 +455,10 @@ function Detail({ item, agents, onEdit }: { item: CredentialView; agents: Record
             )
           })
         ) : (
-          <span className="text-[12px] text-dim">Chưa có agent nào.</span>
+          <span className="text-[12px] text-dim">{t('passwords.detail.noAgents')}</span>
         )}
       </Field>
-      <Field label="Khi agent dùng">
+      <Field label={t('passwords.detail.whenUsed')}>
         <div className="inline-flex flex-wrap rounded-md border border-line-2 p-0.5">
           {POLICIES.map((p) => (
             <button
@@ -462,46 +467,43 @@ function Detail({ item, agents, onEdit }: { item: CredentialView; agents: Record
               onClick={() => patch({ policy: p })}
               className={`rounded px-2 py-0.5 text-[12px] ${item.policy === p ? (p === 'off' ? 'bg-danger/15 text-danger' : 'bg-panel-3 font-medium text-fg') : 'text-muted hover:text-fg'}`}
             >
-              {POLICY_LABEL[p]}
+              {t(POLICY_LABEL[p])}
             </button>
           ))}
         </div>
       </Field>
-      <p className="mt-1.5 text-[12px] leading-relaxed text-dim">{POLICY_HINT[item.policy]}</p>
+      <p className="mt-1.5 text-[12px] leading-relaxed text-dim">{t(POLICY_HINT[item.policy])}</p>
 
       <div className="mt-5 mb-1 flex items-center text-[11px] font-semibold tracking-wider text-dim uppercase">
-        <span className="flex-1">Nhật ký dùng</span>
-        <span className="font-normal tracking-normal normal-case">90 ngày · không ghi mật khẩu</span>
+        <span className="flex-1">{t('passwords.detail.log')}</span>
+        <span className="font-normal tracking-normal normal-case">{t('passwords.detail.logNote')}</span>
       </div>
       <div className="rounded-md border border-line">
         {log === null ? (
           <div className="px-3 py-2 text-[12px] text-dim">…</div>
         ) : !log.length ? (
-          <div className="px-3 py-2 text-[12px] text-dim">Chưa có lần dùng nào.</div>
+          <div className="px-3 py-2 text-[12px] text-dim">{t('passwords.detail.logEmpty')}</div>
         ) : (
           log.slice(0, 30).map((e, i) => (
             <div key={i} className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-[12px] last:border-b-0">
               <span className="w-[92px] shrink-0 text-dim">{when(e.at)}</span>
               {e.agentId ? <ProductAvatar name={e.agentName} small /> : <span className="w-[15px]" />}
               <span className="min-w-0 flex-1 truncate">
-                <b className="font-medium">{e.agentName}</b>{' '}
-                {e.action === 'blocked' && e.detail === 'insecure_page' ? 'muốn điền trên trang http:// (không mã hoá)' : (ACTION_TEXT[e.action] ?? e.action)}
-                {e.host && (
-                  <>
-                    {' '}
-                    trên <span className={e.action === 'blocked' ? 'font-medium text-danger' : ''}>{e.host}</span>
-                  </>
-                )}
-                {e.how === 'once' ? ' · bạn cho phép' : e.how === 'always' ? ' · bạn cho phép, luôn cho' : ''}
+                {tx(e.host ? 'passwords.log.lineOn' : 'passwords.log.line', {
+                  who: <b className="font-medium">{e.agentId ? e.agentName : t('passwords.log.you')}</b>,
+                  action: e.action === 'blocked' && e.detail === 'insecure_page' ? t('passwords.action.insecure') : ACTION_TEXT[e.action] ? t(ACTION_TEXT[e.action]) : e.action,
+                  host: <span className={e.action === 'blocked' ? 'font-medium text-danger' : ''}>{e.host}</span>
+                })}
+                {e.how === 'once' ? t('passwords.log.allowedOnce') : e.how === 'always' ? t('passwords.log.allowedAlways') : ''}
               </span>
               {e.action === 'blocked' ? (
-                <Chip tone="no">đã chặn</Chip>
+                <Chip tone="no">{t('passwords.log.chipBlocked')}</Chip>
               ) : e.action === 'denied' ? (
-                <Chip tone="no">từ chối</Chip>
+                <Chip tone="no">{t('passwords.log.chipDenied')}</Chip>
               ) : e.action === 'needs_user' ? (
-                <Chip tone="warn">cần bạn</Chip>
+                <Chip tone="warn">{t('passwords.log.chipNeedsUser')}</Chip>
               ) : e.agentId ? (
-                <Chip tone="ok">đã điền</Chip>
+                <Chip tone="ok">{t('passwords.log.chipFilled')}</Chip>
               ) : null}
             </div>
           ))
@@ -553,6 +555,7 @@ function ItemDialog({
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const team = activeWs ? (agents[activeWs] ?? []) : []
+  const t = useT()
 
   // Khoá dán vào: kiểm và hiện mã hiện tại để so với app trên điện thoại.
   useEffect(() => {
@@ -570,7 +573,7 @@ function ItemDialog({
 
   const fromScan = (p: TotpPreview | null): void => {
     if (!p) return
-    if (!p.ok) return setError(p.error ?? 'Không đọc được mã QR.')
+    if (!p.ok) return setError(p.error ?? t('passwords.item.qrUnreadable'))
     setError('')
     setKey(p.value ?? '')
     setTab('key')
@@ -606,17 +609,17 @@ function ItemDialog({
 
   return (
     <Modal
-      title={only2fa ? 'Thêm 2FA' : item ? 'Sửa mật khẩu' : 'Thêm mật khẩu'}
+      title={only2fa ? t('passwords.detail.add2fa') : item ? t('passwords.item.editTitle') : t('passwords.item.addTitle')}
       icon="key"
       width="w-[600px]"
       onClose={onClose}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button primary disabled={!canSave} onClick={save}>
-            Lưu
+            {t('common.save')}
           </Button>
         </>
       }
@@ -626,38 +629,38 @@ function ItemDialog({
         {!only2fa && (
           <>
             <label className="block">
-              <span className="mb-1 block text-[12px] text-muted">Tên</span>
+              <span className="mb-1 block text-[12px] text-muted">{t('passwords.item.name')}</span>
               <input className={`${INPUT} w-full`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Shop ABC · admin" autoFocus />
             </label>
             <label className="block">
-              <span className="mb-1 block text-[12px] text-muted">Tên miền</span>
+              <span className="mb-1 block text-[12px] text-muted">{t('passwords.field.domain')}</span>
               <input className={`${INPUT_MONO} w-full`} value={domains} onChange={(e) => setDomains(e.target.value)} placeholder="admin.shop-abc.vn" spellCheck={false} />
               <span className="mt-1 block text-[11.5px] text-dim">
-                App chỉ điền trên đúng tên miền này. Thêm <code>*.shop-abc.vn</code> nếu muốn cả tên miền con. Nhiều tên miền: cách nhau bằng dấu phẩy.
+                {tx('passwords.item.domainHint', { wild: <code>*.shop-abc.vn</code> })}
               </span>
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
-                <span className="mb-1 block text-[12px] text-muted">Tên đăng nhập</span>
+                <span className="mb-1 block text-[12px] text-muted">{t('passwords.field.username')}</span>
                 <input className={`${INPUT} w-full`} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin@shop-abc.vn" spellCheck={false} autoComplete="off" />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[12px] text-muted">Mật khẩu</span>
+                <span className="mb-1 block text-[12px] text-muted">{t('passwords.field.password')}</span>
                 <span className="flex items-center gap-1">
                   <input
                     className={`${INPUT_MONO} min-w-0 flex-1`}
                     type={showPw ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder={item?.hasPassword ? '(giữ nguyên)' : ''}
+                    placeholder={item?.hasPassword ? t('passwords.item.keep') : ''}
                     autoComplete="new-password"
                   />
-                  <button type="button" data-tip={showPw ? 'Ẩn' : 'Hiện'} onClick={() => setShowPw((v) => !v)} className="grid h-7 w-7 place-items-center rounded-md text-dim hover:bg-panel-3 hover:text-fg">
+                  <button type="button" data-tip={showPw ? t('passwords.detail.hide') : t('passwords.item.show')} onClick={() => setShowPw((v) => !v)} className="grid h-7 w-7 place-items-center rounded-md text-dim hover:bg-panel-3 hover:text-fg">
                     <Icon name={showPw ? 'eyeoff' : 'eye'} size="s" />
                   </button>
                   <button
                     type="button"
-                    data-tip="Tạo mật khẩu mạnh"
+                    data-tip={t('passwords.item.generate')}
                     onClick={() => {
                       setPassword(strongPassword())
                       setShowPw(true)
@@ -673,12 +676,12 @@ function ItemDialog({
         )}
 
         <div>
-          <span className="mb-1 block text-[12px] text-muted">{only2fa ? `Khoá 2FA cho “${item?.name ?? ''}”` : 'Mã 2FA (không bắt buộc)'}</span>
+          <span className="mb-1 block text-[12px] text-muted">{only2fa ? t('passwords.item.keyFor', { name: item?.name ?? '' }) : t('passwords.item.totpOptional')}</span>
           <div className="rounded-lg border border-line-2 bg-panel p-2.5">
             <div className="mb-2 inline-flex rounded-md border border-line-2 p-0.5">
-              {(['key', 'qr'] as const).map((t) => (
-                <button key={t} type="button" onClick={() => setTab(t)} className={`rounded px-2.5 py-0.5 text-[12px] ${tab === t ? 'bg-panel-3 font-medium' : 'text-muted hover:text-fg'}`}>
-                  {t === 'key' ? 'Dán khoá' : 'Quét QR'}
+              {(['key', 'qr'] as const).map((k) => (
+                <button key={k} type="button" onClick={() => setTab(k)} className={`rounded px-2.5 py-0.5 text-[12px] ${tab === k ? 'bg-panel-3 font-medium' : 'text-muted hover:text-fg'}`}>
+                  {k === 'key' ? t('passwords.item.tabKey') : t('passwords.item.tabQr')}
                 </button>
               ))}
             </div>
@@ -688,25 +691,25 @@ function ItemDialog({
                   className={`${INPUT_MONO} w-full`}
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
-                  placeholder={item?.hasTotp ? '(đã có khoá 2FA — dán khoá mới để thay)' : 'JBSW Y3DP EHPK 3PXP… hoặc otpauth://totp/…'}
+                  placeholder={item?.hasTotp ? t('passwords.item.keyReplace') : t('passwords.item.keyPlaceholder')}
                   spellCheck={false}
                   autoComplete="off"
                 />
                 <span className="mt-1 block text-[11.5px] text-dim">
-                  Khoá bí mật trang web hiện khi bật 2FA (“không quét được mã?”), hoặc dán cả link <code>otpauth://totp/…</code>. Dán ảnh QR (Ctrl+V) cũng được.
+                  {tx('passwords.item.keyHint', { link: <code>otpauth://totp/…</code> })}
                 </span>
               </>
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" onClick={() => void window.stag.credentials.scanScreen().then(fromScan)} className="rounded-md border border-dashed border-line-2 px-3 py-3 text-center text-[12px] text-muted hover:border-accent/50 hover:text-fg">
                   <Icon name="monitor" size={20} className="mx-auto mb-1" />
-                  <b className="block font-medium text-fg">Quét trên màn hình</b>
-                  Mở trang hiện mã QR (ô Browser cũng được) rồi bấm. App tìm mã QR trên màn hình.
+                  <b className="block font-medium text-fg">{t('passwords.item.scanScreen')}</b>
+                  {t('passwords.item.scanScreenDesc')}
                 </button>
                 <button type="button" onClick={() => void window.stag.credentials.scanImage().then(fromScan)} className="rounded-md border border-dashed border-line-2 px-3 py-3 text-center text-[12px] text-muted hover:border-accent/50 hover:text-fg">
                   <Icon name="img" size={20} className="mx-auto mb-1" />
-                  <b className="block font-medium text-fg">Chọn ảnh QR</b>
-                  hoặc dán ảnh bằng Ctrl+V
+                  <b className="block font-medium text-fg">{t('passwords.item.pickImage')}</b>
+                  {t('passwords.item.pickImageDesc')}
                 </button>
               </div>
             )}
@@ -717,16 +720,16 @@ function ItemDialog({
                     <span className="font-mono text-[17px] font-semibold tracking-wider">{totp.code}</span>
                     <Ring left={totp.left ?? 30} period={30} />
                     <span className="min-w-0 flex-1 text-[12px] text-muted">
-                      App 2FA trên điện thoại của bạn có hiện đúng mã này không?{totp.issuer ? ` (${totp.issuer}${totp.account ? ` · ${totp.account}` : ''})` : ''}
+                      {t('passwords.item.verifyAsk')}{totp.issuer ? ` (${totp.issuer}${totp.account ? ` · ${totp.account}` : ''})` : ''}
                     </span>
                     {verified ? (
                       <Chip tone="ok">
                         <Icon name="check" size={11} />
-                        Đã kiểm
+                        {t('passwords.item.verified')}
                       </Chip>
                     ) : (
                       <SmallButton icon="check" onClick={() => setVerified(true)}>
-                        Khớp
+                        {t('passwords.item.match')}
                       </SmallButton>
                     )}
                   </>
@@ -738,7 +741,7 @@ function ItemDialog({
             {item?.hasTotp && !only2fa && !hasKey && (
               <label className="mt-2 flex items-center gap-2 text-[12px] text-muted">
                 <input type="checkbox" checked={removeTotp} onChange={(e) => setRemoveTotp(e.target.checked)} />
-                Bỏ khoá 2FA đã lưu
+                {t('passwords.item.removeTotp')}
               </label>
             )}
           </div>
@@ -746,7 +749,7 @@ function ItemDialog({
 
         {!only2fa && (
           <div>
-            <span className="mb-1 block text-[12px] text-muted">Agent được dùng {team.length ? '(workspace đang mở)' : ''}</span>
+            <span className="mb-1 block text-[12px] text-muted">{team.length ? t('passwords.item.agentsOpenWs') : t('passwords.detail.agents')}</span>
             <div className="flex flex-wrap gap-1.5">
               {team.map((a) => {
                 const on = picked.includes(a.id)
@@ -763,14 +766,14 @@ function ItemDialog({
                   </button>
                 )
               })}
-              {!team.length && <span className="text-[12px] text-dim">Chưa có agent nào trong workspace đang mở.</span>}
+              {!team.length && <span className="text-[12px] text-dim">{t('passwords.item.noAgentsWs')}</span>}
             </div>
             <span className="mt-1 block text-[11.5px] text-dim">
-              {item ? 'Đổi chế độ hỏi ở trang chi tiết.' : 'Mục mới: “Hỏi mỗi lần”. Agent chưa được chọn vẫn có thể xin, và app sẽ hỏi bạn.'}
+              {item ? t('passwords.item.policyEdit') : t('passwords.item.policyNew')}
             </span>
           </div>
         )}
-        {hasKey && totp?.ok && !verified && <Callout tone="wait">Bấm “Khớp” sau khi so mã với app trên điện thoại rồi mới lưu được.</Callout>}
+        {hasKey && totp?.ok && !verified && <Callout tone="wait">{t('passwords.item.verifyFirst')}</Callout>}
       </div>
     </Modal>
   )
@@ -781,6 +784,7 @@ function ImportDialog({ preview, onClose }: { preview: ImportPreview; onClose: (
   const [result, setResult] = useState<{ added: number; updated: number; errors: string[] } | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const t = useT()
   const folder = preview.file.replace(/[\\/][^\\/]*$/, '')
   const toggle = (i: number): void =>
     setPick((s) => {
@@ -799,22 +803,22 @@ function ImportDialog({ preview, onClose }: { preview: ImportPreview; onClose: (
   }
   return (
     <Modal
-      title="Nhập mật khẩu"
+      title={t('passwords.importDlg.title')}
       icon="import"
       width="w-[640px]"
       onClose={onClose}
       footer={
         result ? (
           <Button primary onClick={onClose}>
-            Xong
+            {t('common.done')}
           </Button>
         ) : (
           <>
             <Button variant="ghost" onClick={onClose}>
-              Huỷ
+              {t('common.cancel')}
             </Button>
             <Button primary disabled={busy || !pick.size} onClick={run}>
-              Nhập {pick.size} mục
+              {t('passwords.importDlg.run', { count: pick.size })}
             </Button>
           </>
         )
@@ -824,7 +828,7 @@ function ImportDialog({ preview, onClose }: { preview: ImportPreview; onClose: (
       {result ? (
         <div className="space-y-3">
           <Callout tone="ok" icon="check">
-            Đã thêm {result.added} mục{result.updated ? `, cập nhật ${result.updated} mục đã có` : ''}. Mục nhập vào ở chế độ “Hỏi mỗi lần”, chưa agent nào được chọn.
+            {result.updated ? t('passwords.importDlg.doneUpdated', { count: result.added, updated: result.updated }) : t('passwords.importDlg.done', { count: result.added })}
           </Callout>
           {result.errors.length > 0 && (
             <Callout tone="danger">
@@ -834,26 +838,24 @@ function ImportDialog({ preview, onClose }: { preview: ImportPreview; onClose: (
             </Callout>
           )}
           <Callout tone="wait" icon="shield">
-            <div className="font-medium">Xoá file export ngay</div>
-            <div className="mt-0.5 break-all">
-              <code>{preview.file}</code> chứa mật khẩu chưa mã hoá.
-            </div>
+            <div className="font-medium">{t('passwords.importDlg.deleteFile')}</div>
+            <div className="mt-0.5 break-all">{tx('passwords.importDlg.plainFile', { file: <code>{preview.file}</code> })}</div>
             <div className="mt-1.5">
-              <SmallButton onClick={() => void window.stag.openFolder(folder)}>Mở thư mục</SmallButton>
+              <SmallButton onClick={() => void window.stag.openFolder(folder)}>{t('passwords.importDlg.openFolder')}</SmallButton>
             </div>
           </Callout>
         </div>
       ) : (
         <>
           <p className="mb-2 text-[12px] text-muted">
-            <span className="break-all font-mono">{preview.file}</span> · {preview.rows.length} mục đăng nhập. Bỏ chọn mục không muốn nhập.
+            {tx('passwords.importDlg.summary', { file: <span className="break-all font-mono">{preview.file}</span>, count: preview.rows.length })}
           </p>
           {preview.errors.length > 0 && (
             <Callout tone="wait" className="mb-2">
               {preview.errors.slice(0, 6).map((e) => (
                 <div key={e}>{e}</div>
               ))}
-              {preview.errors.length > 6 && <div>… và {preview.errors.length - 6} dòng khác</div>}
+              {preview.errors.length > 6 && <div>{t('passwords.importDlg.moreErrors', { count: preview.errors.length - 6 })}</div>}
             </Callout>
           )}
           <div className="max-h-[50vh] overflow-y-auto rounded-md border border-line">
@@ -869,7 +871,7 @@ function ImportDialog({ preview, onClose }: { preview: ImportPreview; onClose: (
                   </span>
                 </span>
                 {r.hasTotp && <Chip tone="ok">2FA</Chip>}
-                {r.duplicate && <Chip tone="warn">đã có → cập nhật</Chip>}
+                {r.duplicate && <Chip tone="warn">{t('passwords.importDlg.duplicate')}</Chip>}
               </label>
             ))}
           </div>

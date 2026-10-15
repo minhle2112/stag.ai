@@ -22,7 +22,7 @@ describe('manifest plugin', () => {
     ])
     expect(h.manifest.ui.slots.at(-1)?.dataKey).toBe('statusBar')
     expect(h.manifest.entrypoints).toEqual({ worker: './worker.mjs', ui: './ui' })
-    expect(h.manifest.jobs).toEqual([{ key: 'summary', displayName: 'Tổng kết', description: expect.any(String), schedule: '0 * * * *' }])
+    expect(h.manifest.jobs).toEqual([{ key: 'summary', displayName: 'Summary', description: expect.any(String), schedule: '0 * * * *' }])
     expect(h.manifest.webhooks.map((w) => w.endpointKey)).toEqual(['ping'])
     const c = parsePluginManifest(
       pkg({ capabilities: ['ui.action.register'], ui: { slots: [{ type: 'globalToolbarButton', id: 'go', open: { url: 'https://x.dev/{workspace.name}', target: 'external' } }] } })
@@ -123,7 +123,7 @@ describe('manifest plugin', () => {
 describe('cấu hình, URL slot, tên tool', () => {
   const { manifest } = parsePluginManifest(hello)
   it('điền mặc định, ép kiểu, báo lỗi', () => {
-    expect(normalizePluginConfig(manifest.instanceConfigSchema, {})).toEqual({ config: { greeting: 'Xin chào', maxWords: 500, docsUrl: 'https://example.com' }, errors: {} })
+    expect(normalizePluginConfig(manifest.instanceConfigSchema, {})).toEqual({ config: { greeting: 'Hello', maxWords: 500, docsUrl: 'https://example.com' }, errors: {} })
     expect(normalizePluginConfig(manifest.instanceConfigSchema, { maxWords: '20', greeting: 'Hi' }).config).toEqual({ greeting: 'Hi', maxWords: 20, docsUrl: 'https://example.com' })
     expect(normalizePluginConfig(manifest.instanceConfigSchema, { maxWords: '2.5' }).errors).toEqual({ maxWords: 'Cần số nguyên.' })
     expect(normalizePluginConfig(manifest.instanceConfigSchema, { maxWords: 0 }).errors).toEqual({ maxWords: 'Nhỏ nhất 1.' })

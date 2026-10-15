@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { appendText, CLOUD_TERMS_MAX, joinChunks, nextCut, splitSendCommand, trimSilence, VOICE_GLOBAL_HOTKEYS, type VoiceStatus } from '@shared/voice'
 import { contextTerms, GENERAL_TERMS, pickHotwords, postProcess } from '@shared/voiceVocab'
+import { t as tr } from '../i18n'
 import { MicCapture } from '../voice/capture'
 import { pasteIntoTerminal, terminalText } from '../terminals'
 import { useAgents } from './agents'
@@ -102,7 +103,7 @@ window.stag.voice.onCloudText((id, live, livePartial, error) => {
   // Đám mây lỗi giữa lúc nói: có model trên máy thì bật nó ngay (nạp trong lúc người dùng còn nói), không thì báo luôn.
   if (useVoice.getState().status.model !== 'ready') return fail(error, /API key/.test(error))
   void window.stag.voice.prewarm()
-  useVoice.setState({ live: '', livePartial: `(${error} Thả phím xong sẽ nhận dạng bằng máy trên máy.)` })
+  useVoice.setState({ live: '', livePartial: tr('voice.run.cloudFallbackLive', { error }) })
 })
 
 function errText(e: unknown): string {
@@ -179,7 +180,7 @@ export async function beginVoice(target: VoiceTarget): Promise<void> {
   useVoice.setState({ target, phase: 'opening', text: keepText, ...CLEAR })
   const vs = useSettings.getState().value.app.voice
   const useCloud = vs.engine === 'soniox'
-  if (!useCloud && v.status.model !== 'ready') return fail('Chưa tải model nhận dạng giọng nói.', true)
+  if (!useCloud && v.status.model !== 'ready') return fail(tr('voice.run.noModel'), true)
   if (!useCloud) void window.stag.voice.prewarm()
   const vocab = vocabFor(target).catch(() => ({ hot: [], cloud: [], terms: [] }))
   let cloud: Cloud | null = null
@@ -194,7 +195,7 @@ export async function beginVoice(target: VoiceTarget): Promise<void> {
   try {
     await mic.open(vs.micId)
   } catch (e) {
-    if (session === s) fail(`Không mở được micro: ${errText(e)}. Kiểm tra Windows Settings → Privacy → Microphone.`)
+    if (session === s) fail(tr('voice.run.micFailed', { message: errText(e) }))
     return
   }
   if (session !== s) return
@@ -226,7 +227,7 @@ async function finishCloud(s: Session, c: Cloud, all: Float32Array): Promise<str
     const why = errText(e)
     window.stag.voice.cloudCancel(c.id)
     if (useVoice.getState().status.model !== 'ready') throw Object.assign(new Error(why), { setup: /API key/.test(why) })
-    useVoice.setState({ notice: `Soniox lỗi: ${why} Đã nhận dạng bằng máy trên máy.` })
+    useVoice.setState({ notice: tr('voice.run.cloudFallback', { error: why }) })
     s.start = 0
     s.parts = []
     flush(s, all, true)
@@ -262,7 +263,7 @@ export async function endVoice(): Promise<void> {
   } catch (e) {
     if (session === s) {
       session = null
-      fail(`Nhận dạng lỗi: ${errText(e)}`, !!(e as { setup?: boolean }).setup)
+      fail(tr('voice.run.failed', { message: errText(e) }), !!(e as { setup?: boolean }).setup)
     }
     return
   }
@@ -277,7 +278,7 @@ export async function endVoice(): Promise<void> {
   if (!text.trim() && !send) {
     // Nói thêm mà không ra chữ: giữ khung xem trước như cũ.
     if (prev) return useVoice.setState({ phase: 'preview' })
-    return fail(s.heard ? 'Không nhận ra câu nào. Thử nói rõ hơn hoặc gần micro hơn.' : 'Không nghe thấy gì. Kiểm tra micro trong Cài đặt → Giọng nói.')
+    return fail(s.heard ? tr('voice.run.nothingRecognized') : tr('voice.run.nothingHeard'))
   }
   const merged = appendText(prev, text)
   const glossary = (await s.vocab).cloud
@@ -305,7 +306,7 @@ async function fixPreview(target: VoiceTarget, text: string, glossary: string[])
     fixed = await window.stag.voice.aiFix(text, glossary)
   } catch (e) {
     const v = useVoice.getState()
-    if (v.target === target) useVoice.setState({ aiBusy: false, notice: `Không sửa được bằng AI: ${errText(e)}` })
+    if (v.target === target) useVoice.setState({ aiBusy: false, notice: tr('voice.run.aiFailed', { message: errText(e) }) })
     return
   }
   const v = useVoice.getState()
@@ -344,12 +345,12 @@ export function insertVoice(text = useVoice.getState().text, send = false): void
       () => {
         if (useVoice.getState().target === target) useVoice.setState({ phase: 'idle', target: null, text: '', ...CLEAR })
       },
-      (e) => useVoice.setState({ phase: 'error', error: `Không gõ được vào ứng dụng đang mở: ${errText(e)}` })
+      (e) => useVoice.setState({ phase: 'error', error: tr('voice.run.typeFailed', { message: errText(e) }) })
     )
     return
   }
   if (!pasteIntoTerminal(target.agentId, t, send)) {
-    useVoice.setState({ phase: 'error', error: 'Ô này không có phiên đang chạy nên chưa chèn được. Mở phiên rồi thử lại.', text: t })
+    useVoice.setState({ phase: 'error', error: tr('voice.run.noSession'), text: t })
     return
   }
   useVoice.setState({ phase: 'idle', target: null, text: '', ...CLEAR })

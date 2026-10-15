@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { IPC, type AppInfo, type PtySpawnOptions } from '@shared/ipc'
+import { t } from '@shared/i18n'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { copyFile, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
@@ -69,7 +70,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.wsPick, async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)!
     const r = await dialog.showOpenDialog(win, {
-      title: 'Chọn thư mục dự án',
+      title: t('app.dialog.pickProject'),
       defaultPath: settings.general().projectsDir || undefined,
       properties: ['openDirectory', 'createDirectory']
     })
@@ -79,7 +80,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   // Hộp tạo workspace → "Chọn thư mục vault khác…": thư mục bất kỳ, kể cả ngoài dự án.
   ipcMain.handle(IPC.vaultPick, async (e, projectPath: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)!
-    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục vault', defaultPath: projectPath, properties: ['openDirectory', 'createDirectory'] })
+    const r = await dialog.showOpenDialog(win, { title: t('app.dialog.pickVault'), defaultPath: projectPath, properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : inspectVaultDir(r.filePaths[0], projectPath)
   })
   ipcMain.handle(IPC.wsCreate, (_e, req: CreateWorkspaceRequest) => workspaces.create(req, cliEnv('claude')))
@@ -129,7 +130,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
 
   const ws = (id: string): Workspace => {
     const w = workspaces.get(id)
-    if (!w) throw new Error('Workspace không tồn tại')
+    if (!w) throw new Error(t('app.error.noSuchWorkspace'))
     return w
   }
   ipcMain.handle(IPC.boardSnapshot, (_e, workspaceId: string) => board.snapshot(ws(workspaceId)))
@@ -195,7 +196,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   // "Lưu bản chụp ra file…" (file gốc đã bị xoá): chép bản chụp ra chỗ người dùng chọn.
   ipcMain.handle(IPC.productSaveAs, async (e, workspaceId: string, snapshot: string) => {
     const w = ws(workspaceId)
-    if (!/^\.stag\/artifacts\/a\d+\/[^/]+$/.test(String(snapshot))) throw new Error('Không phải bản chụp sản phẩm')
+    if (!/^\.stag\/artifacts\/a\d+\/[^/]+$/.test(String(snapshot))) throw new Error(t('app.error.notSnapshot'))
     const src = await artifactPath(w, snapshot)
     const win = BrowserWindow.fromWebContents(e.sender)
     const opts = { defaultPath: join(w.path, basename(snapshot)) }
@@ -206,8 +207,8 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   })
   ipcMain.handle(IPC.vaultUnwatch, (e, vaultPath: string) => vaultWatchers.unwatch(vaultPath, e.sender))
   ipcMain.handle(IPC.settingsOverride, (_e, level: OverrideLevel, id: string, patch: SettingsOverridesPatch) => {
-    if (level !== 'workspace' && level !== 'agent') throw new Error('Cấp cài đặt không hợp lệ')
-    if (!patch || typeof patch !== 'object') throw new Error('Ghi đè không hợp lệ')
+    if (level !== 'workspace' && level !== 'agent') throw new Error(t('app.error.badLevel'))
+    if (!patch || typeof patch !== 'object') throw new Error(t('app.error.badOverride'))
     return settings.setOverrides(level, id, patch)
   })
   ipcMain.handle(IPC.shellsList, () => detectShells())
@@ -229,14 +230,14 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   })
   ipcMain.handle(IPC.notifyTest, () => notifier.test())
   ipcMain.handle(IPC.adapterCheck, (_e, id: string) => {
-    if (id !== 'claude' && id !== 'codex') throw new Error('Adapter không hợp lệ')
+    if (id !== 'claude' && id !== 'codex') throw new Error(t('app.error.badAdapter'))
     return adapters.check(id)
   })
   ipcMain.handle(IPC.adapterExtList, () => external.list())
   ipcMain.handle(IPC.adapterExtInstall, (_e, req: AdapterInstallRequest) => {
-    if (req?.type !== 'npm' && req?.type !== 'local') throw new Error('Cách cài không hợp lệ')
-    if (req.type === 'npm' && typeof req.name !== 'string') throw new Error('Thiếu tên gói')
-    if (req.type === 'local' && typeof req.path !== 'string') throw new Error('Thiếu đường dẫn')
+    if (req?.type !== 'npm' && req?.type !== 'local') throw new Error(t('app.error.badInstallMethod'))
+    if (req.type === 'npm' && typeof req.name !== 'string') throw new Error(t('app.error.noPackageName'))
+    if (req.type === 'local' && typeof req.path !== 'string') throw new Error(t('app.error.noPath'))
     return external.install(req)
   })
   ipcMain.handle(IPC.adapterExtRemove, (_e, id: string) => external.remove(String(id)))
@@ -254,27 +255,27 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
       if (fresh.length) await secrets.setMany(fresh)
       await settings.addConnectors(parsed.connectors)
     }
-    const errors = [...parsed.errors, ...kept.map((n) => `Bí mật ${n} đã có: giữ giá trị cũ (đổi ở Secrets nếu cần)`)]
+    const errors = [...parsed.errors, ...kept.map((n) => t('app.error.secretKept', { name: n }))]
     return { connectors: parsed.connectors, secrets: fresh.map((x) => x.name), errors }
   }
   const takenIds = (): string[] => settings.get().app.connectors.items.map((c) => c.id)
   ipcMain.handle(IPC.connectorSave, (_e, c: Connector, prevId?: string) => {
-    if (!c || typeof c !== 'object') throw new Error('Connector không hợp lệ')
+    if (!c || typeof c !== 'object') throw new Error(t('app.error.badConnector'))
     return settings.saveConnector(c, typeof prevId === 'string' ? prevId : undefined)
   })
   ipcMain.handle(IPC.connectorRemove, (_e, id: string) => settings.removeConnector(String(id)))
   ipcMain.handle(IPC.connectorImport, (_e, text: string) => saveImport(parseMcpJson(String(text ?? ''), takenIds())))
   ipcMain.handle(IPC.connectorCopy, async (_e, runtime: CliAdapterId, name: string, workspaceId?: string) => {
-    if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
+    if (runtime !== 'claude' && runtime !== 'codex') throw new Error(t('app.error.badCli'))
     const exe = runtime === 'codex' ? (await adapters.exe('codex')).path : ''
     const config = await inheritedConfig(runtime, String(name), exe, cwdOf(workspaceId), cliEnv(runtime))
-    if (!config) throw new Error(`Không đọc được cấu hình của "${name}" (máy chủ claude.ai / plugin không chép được).`)
+    if (!config) throw new Error(t('app.error.copyConfig', { name: String(name) }))
     return saveImport(importInherited(String(name), config, takenIds()))
   })
   /** Thử kết nối (làm mới token OAuth trước) rồi lưu danh sách tool. */
   const runTest = async (id: string, workspaceId?: string): Promise<ConnectorTestResult> => {
     const c = settings.get().app.connectors.items.find((x) => x.id === id)
-    if (!c) throw new Error('Connector không tồn tại')
+    if (!c) throw new Error(t('app.error.noConnector'))
     let fresh: Map<string, string>
     try {
       fresh = await oauth.fresh(c.oauth ? [{ name: c.bearerSecret, label: c.label || c.id }] : [])
@@ -289,24 +290,24 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   }
   ipcMain.handle(IPC.connectorTest, (_e, id: string, workspaceId?: string) => runTest(String(id), workspaceId))
   ipcMain.handle(IPC.connectorConnect, async (_e, req: ConnectRequest, workspaceId?: string): Promise<ConnectResult> => {
-    if (!req || typeof req.slug !== 'string' || typeof req.method !== 'string' || !req.access) throw new Error('Yêu cầu kết nối không hợp lệ')
+    if (!req || typeof req.slug !== 'string' || typeof req.method !== 'string' || !req.access) throw new Error(t('app.error.badConnect'))
     const id = await connectFromCatalog(req, { settings, secrets, oauth })
     return { id, test: await runTest(id, workspaceId) }
   })
   ipcMain.handle(IPC.connectorConnectCancel, () => oauth.cancel())
   ipcMain.handle(IPC.connectorReauth, async (_e, id: string, workspaceId?: string) => {
     const c = settings.get().app.connectors.items.find((x) => x.id === id)
-    if (!c?.oauth) throw new Error('Connector này không đăng nhập bằng OAuth')
+    if (!c?.oauth) throw new Error(t('app.error.notOauth'))
     await oauth.relogin(c.bearerSecret)
     return runTest(c.id, workspaceId)
   })
   ipcMain.handle(IPC.approvalsList, () => approvals.list())
   ipcMain.handle(IPC.approvalsAnswer, (_e, id: string, decision: ApprovalDecision) => {
-    if (decision !== 'allow' && decision !== 'always' && decision !== 'deny') throw new Error('Quyết định không hợp lệ')
+    if (decision !== 'allow' && decision !== 'always' && decision !== 'deny') throw new Error(t('app.error.badDecision'))
     approvals.answer(String(id), decision)
   })
   ipcMain.handle(IPC.connectorScan, async (_e, runtime: CliAdapterId, workspaceId?: string) => {
-    if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
+    if (runtime !== 'claude' && runtime !== 'codex') throw new Error(t('app.error.badCli'))
     const cwd = cwdOf(workspaceId)
     let exe: string
     try {
@@ -318,13 +319,13 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   })
   ipcMain.handle(IPC.secretsList, () => secrets.list())
   ipcMain.handle(IPC.secretsSet, (_e, name: string, value: string) => {
-    if (typeof name !== 'string' || typeof value !== 'string') throw new Error('Bí mật không hợp lệ')
-    if (name.trim().toUpperCase().startsWith(OAUTH_SECRET_PREFIX)) throw new Error(`Tên bắt đầu bằng ${OAUTH_SECRET_PREFIX} dành cho đăng nhập OAuth của app, chọn tên khác.`)
+    if (typeof name !== 'string' || typeof value !== 'string') throw new Error(t('app.error.badSecret'))
+    if (name.trim().toUpperCase().startsWith(OAUTH_SECRET_PREFIX)) throw new Error(t('app.error.oauthPrefix', { prefix: OAUTH_SECRET_PREFIX }))
     return secrets.set(name.trim(), value)
   })
   ipcMain.handle(IPC.secretsRemove, (_e, name: string) => {
     const users = settings.get().app.connectors.items.filter((c) => connectorSecrets(c).includes(name)).map((c) => c.id)
-    if (users.length) throw new Error(`Bí mật ${name} đang được dùng bởi: ${users.join(', ')}. Bỏ khỏi connector đó trước.`)
+    if (users.length) throw new Error(t('app.error.secretInUse', { name: String(name), users: users.join(', ') }))
     return secrets.remove(String(name))
   })
   // ---- Skill ----
@@ -332,7 +333,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   const imported = async (r: { added: string[]; skipped: Array<{ name: string; reason: string }> }): Promise<SkillImportResult> => ({ ...r, list: await skillsList() })
   /** Chỉ đọc file tên SKILL.md (skill có sẵn của CLI, đường dẫn lấy từ lần quét). */
   const skillMdPath = (p: unknown): string => {
-    if (typeof p !== 'string' || !/^skill\.md$/i.test(basename(p))) throw new Error('Đường dẫn skill không hợp lệ')
+    if (typeof p !== 'string' || !/^skill\.md$/i.test(basename(p))) throw new Error(t('app.error.badSkillPath'))
     return p
   }
   ipcMain.handle(IPC.skillsList, () => skillsList())
@@ -356,7 +357,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   ipcMain.handle(IPC.skillsImport, async (e, kind: 'folder' | 'zip') => {
     const win = BrowserWindow.fromWebContents(e.sender)!
     const r = await dialog.showOpenDialog(win, {
-      title: kind === 'zip' ? 'Chọn file .zip chứa skill' : 'Chọn thư mục skill (có SKILL.md) hoặc thư mục chứa nhiều skill',
+      title: kind === 'zip' ? t('app.dialog.pickSkillZip') : t('app.dialog.pickSkillDir'),
       properties: kind === 'zip' ? ['openFile'] : ['openDirectory'],
       filters: kind === 'zip' ? [{ name: 'Zip', extensions: ['zip', 'skill'] }] : undefined
     })
@@ -365,11 +366,11 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   })
   ipcMain.handle(IPC.skillsInstall, async (_e, slug: string) => imported(await skills.installCatalog(String(slug))))
   ipcMain.handle(IPC.skillsCopy, async (_e, runtime: CliAdapterId, path: string) => {
-    if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
+    if (runtime !== 'claude' && runtime !== 'codex') throw new Error(t('app.error.badCli'))
     return imported(await skills.importDir(dirname(skillMdPath(path)), { kind: runtime, from: path }))
   })
   ipcMain.handle(IPC.skillsScan, (_e, runtime: CliAdapterId, workspaceId?: string) => {
-    if (runtime !== 'claude' && runtime !== 'codex') throw new Error('CLI không hợp lệ')
+    if (runtime !== 'claude' && runtime !== 'codex') throw new Error(t('app.error.badCli'))
     return scanSkills(runtime, cwdOf(workspaceId), async () => (await adapters.exe('codex')).path, cliEnv(runtime))
   })
   ipcMain.handle(IPC.skillsReveal, async (_e, target: string) => {
@@ -379,7 +380,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   })
   // ---- Plugin ----
   const pluginId = (id: unknown): string => {
-    if (typeof id !== 'string' || !id) throw new Error('id plugin không hợp lệ')
+    if (typeof id !== 'string' || !id) throw new Error(t('app.error.badPluginId'))
     return id
   }
   ipcMain.handle(IPC.pluginsList, () => plugins.list())
@@ -387,7 +388,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
     if (req?.type === 'npm' && typeof req.name === 'string') return plugins.install({ type: 'npm', name: req.name, version: typeof req.version === 'string' ? req.version : undefined })
     if (req?.type === 'local' && typeof req.path === 'string') return plugins.install({ type: 'local', path: req.path })
     if (req?.type === 'catalog' && typeof req.slug === 'string') return plugins.install({ type: 'catalog', slug: req.slug })
-    throw new Error('Yêu cầu cài không hợp lệ')
+    throw new Error(t('app.error.badInstall'))
   })
   ipcMain.handle(IPC.pluginsApprove, (_e, id: string) => plugins.approve(pluginId(id)))
   ipcMain.handle(IPC.pluginsRemove, async (_e, id: string) => {
@@ -411,18 +412,29 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
   )
   ipcMain.handle(IPC.pluginsCatalog, () => plugins.catalog())
   ipcMain.handle(IPC.pluginsScaffold, (_e, req: PluginScaffoldRequest) => {
-    if (!req || typeof req.parentDir !== 'string' || typeof req.name !== 'string' || typeof req.id !== 'string') throw new Error('Yêu cầu tạo plugin không hợp lệ')
+    if (!req || typeof req.parentDir !== 'string' || typeof req.name !== 'string' || typeof req.id !== 'string') throw new Error(t('app.error.badScaffold'))
     return plugins.scaffold({ parentDir: req.parentDir, name: req.name, id: req.id, template: req.template === 'page' ? 'page' : 'basic' })
   })
   ipcMain.handle(IPC.pluginsRunJob, (_e, id: string, key: string) => plugins.runJob(pluginId(id), String(key), 'manual'))
   ipcMain.handle(IPC.pluginsRotateWebhook, (_e, id: string) => plugins.rotateWebhookToken(pluginId(id)))
-  ipcMain.handle(IPC.pickFile, async (e, title: string, defaultPath?: string) => {
+  ipcMain.handle(IPC.pickFile, async (e, title: string, defaultPath?: string, filters?: unknown) => {
     const win = BrowserWindow.fromWebContents(e.sender)!
+    // filters: [{ name, extensions }] (vd. trang plugin chọn video / phụ đề); vắng = chọn chương trình (.exe) như trước.
+    const given = (Array.isArray(filters) ? filters : [])
+      .map((f) => ({
+        name: String((f as { name?: unknown })?.name ?? '').slice(0, 80),
+        extensions: (Array.isArray((f as { extensions?: unknown })?.extensions) ? ((f as { extensions: unknown[] }).extensions) : [])
+          .map((x) => String(x).replace(/^\./, '').toLowerCase())
+          .filter((x) => /^[a-z0-9]{1,10}$|^\*$/.test(x))
+          .slice(0, 30)
+      }))
+      .filter((f) => f.name && f.extensions.length)
+      .slice(0, 5)
     const r = await dialog.showOpenDialog(win, {
-      title,
+      title: String(title ?? '').slice(0, 200),
       defaultPath: defaultPath || undefined,
       properties: ['openFile'],
-      filters: [{ name: 'Chương trình', extensions: ['exe'] }]
+      filters: given.length ? given : [{ name: t('app.dialog.programs'), extensions: ['exe'] }]
     })
     return r.canceled ? null : r.filePaths[0]
   })
@@ -432,7 +444,7 @@ export function registerIpc(ptys: PtyManager, workspaces: WorkspaceStore, agents
 /** Gõ bằng giọng nói (V1): model + nhận dạng. Âm thanh chỉ đi renderer → main → tiến trình nhận dạng, không ghi ra đĩa. */
 export function registerVoiceIpc(voice: VoiceService, vocab: VocabCache, workspaces: WorkspaceStore, cloud: VoiceCloud, usage: CloudUsage): void {
   const sessionId = (v: unknown): string => {
-    if (typeof v !== 'string' || !/^[\w-]{1,64}$/.test(v)) throw new Error('Mã lượt nói không hợp lệ.')
+    if (typeof v !== 'string' || !/^[\w-]{1,64}$/.test(v)) throw new Error(t('app.error.badVoiceId'))
     return v
   }
   ipcMain.handle(IPC.voiceCloudInfo, (): VoiceCloudInfo => ({ hasKey: cloud.hasKey(), monthSeconds: Math.round(usage.month()) }))
@@ -470,9 +482,9 @@ export function registerVoiceIpc(voice: VoiceService, vocab: VocabCache, workspa
   ipcMain.handle(IPC.voicePrewarm, () => voice.prewarm())
   ipcMain.handle(IPC.voiceUnload, () => voice.unload())
   ipcMain.handle(IPC.voiceTranscribe, (_e, samples: unknown, hotwords: unknown) => {
-    if (!(samples instanceof Float32Array) || samples.length === 0) throw new Error('Không có âm thanh.')
+    if (!(samples instanceof Float32Array) || samples.length === 0) throw new Error(t('app.error.noAudio'))
     // Renderer đã cắt đoạn ≤ 12 s; chặn đoạn quá dài (model chỉ chứa ~20 s).
-    if (samples.length > 30 * 16000) throw new Error('Đoạn âm thanh quá dài.')
+    if (samples.length > 30 * 16000) throw new Error(t('app.error.audioTooLong'))
     const words = Array.isArray(hotwords) ? hotwords.filter((x): x is string => typeof x === 'string') : []
     return voice.transcribe(samples, words)
   })
@@ -493,17 +505,17 @@ export function registerVoiceSystemIpc(d: {
 }): void {
   const key = (): string => {
     const k = d.secrets.get(AI_FIX_SECRET)
-    if (!k) throw new Error('Chưa có API key Anthropic (Cài đặt → Giọng nói → Sửa bằng AI).')
+    if (!k) throw new Error(t('app.error.noAiKey'))
     return k
   }
   const strings = (v: unknown, max: number): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length <= 80).slice(0, max) : [])
   ipcMain.handle(IPC.voiceAiInfo, (): VoiceAiInfo => ({ hasKey: !!d.secrets.get(AI_FIX_SECRET) }))
   ipcMain.handle(IPC.voiceAiFix, (_e, text: unknown, terms: unknown) => {
-    if (typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error('Không có chữ để sửa.')
+    if (typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error(t('app.error.noTextToFix'))
     return aiFix({ key: key(), text, terms: strings(terms, 300), url: d.aiUrl })
   })
   ipcMain.handle(IPC.voiceAiTest, async () => {
-    await aiFix({ key: key(), text: 'xin chào', terms: [], url: d.aiUrl })
+    await aiFix({ key: key(), text: 'xin chào', terms: [], url: d.aiUrl }) // i18n-ignore: Vietnamese sample text for the Vietnamese spell-fix test call
   })
   ipcMain.handle(IPC.voiceGlobalInfo, () => ({ error: d.global.error }))
   ipcMain.on(IPC.voiceOverlay, (_e, s: unknown) => {
@@ -523,7 +535,7 @@ export function registerVoiceSystemIpc(d: {
     })
   })
   ipcMain.handle(IPC.voiceType, (_e, text: unknown, send: unknown) => {
-    if (typeof text !== 'string' || text.length > 20000) throw new Error('Chữ không hợp lệ.')
+    if (typeof text !== 'string' || text.length > 20000) throw new Error(t('app.error.badText'))
     return typeText(d.keys, text, send === true)
   })
 }

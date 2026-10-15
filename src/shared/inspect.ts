@@ -4,6 +4,8 @@
 // File này: kiểu dữ liệu + logic thuần (chuyển trạng thái, hàng chờ mỗi agent, gói tin gửi agent) — dùng chung cho main,
 // preload của trang và renderer; test bằng vitest.
 
+import { t as tr, type Locale } from './i18n'
+
 /** Trạng thái một bình luận (ghim).
  * - draft: chờ gửi — bấm "Thêm" (hoặc đóng hộp khi còn chữ): ghim nét đứt, nằm ở mục "Chờ gửi" của ngăn Bình luận,
  *   chưa vào hàng của agent nào; nút "Gửi" của nhóm agent gửi cả đợt trong một tin (sendDrafts).
@@ -181,6 +183,8 @@ export interface PageState {
   pins: PagePin[]
   agents: InspectAgent[]
   lastAgentId: string | null
+  /** Ngôn ngữ giao diện: lớp Soi trong trang hiện chữ theo đó. */
+  locale?: Locale
 }
 
 export type PinPlace = 'ok' | 'hidden' | 'orphan'
@@ -489,5 +493,5 @@ export function packetMessage(pins: InspectPin[]): string {
 
 /** Dòng hiển thị trong ô chat khi gõ gói tin. */
 export function packetDisplay(ids: number[]): string {
-  return ids.length === 1 ? `Bình luận #${ids[0]} từ chế độ Soi` : `${ids.length} bình luận từ chế độ Soi (${ids.map((i) => `#${i}`).join(', ')})`
+  return ids.length === 1 ? tr('inspect.packet.one', { id: String(ids[0]) }) : tr('inspect.packet.many', { count: ids.length, ids: ids.map((i) => `#${i}`).join(', ') })
 }

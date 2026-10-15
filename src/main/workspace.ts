@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { app, BrowserWindow } from 'electron'
+import { t } from '@shared/i18n'
 import { IPC } from '@shared/ipc'
 import type { CreateWorkspaceRequest, CreateWorkspaceResult, Workspace, WorkspaceInspection } from '@shared/types'
 import { claudeConfigDir } from './context'
@@ -50,7 +51,7 @@ export class WorkspaceStore {
   /** Đổi một workspace (project, gợi ý monorepo…) rồi lưu; trả về bản mới. */
   async update(id: string, fn: (w: Workspace) => Workspace): Promise<Workspace> {
     const cur = this.items.find((w) => w.id === id)
-    if (!cur) throw new Error('Workspace không tồn tại')
+    if (!cur) throw new Error('Workspace not found')
     const next = fn(cur)
     this.items = this.items.map((w) => (w.id === id ? next : w))
     await this.save()
@@ -88,7 +89,7 @@ export class WorkspaceStore {
   async create(input: CreateWorkspaceRequest, claudeEnv: NodeJS.ProcessEnv = process.env): Promise<CreateWorkspaceResult> {
     // Bấm tạo hai lần liền (hoặc hai lần gọi song song): lần sau đợi lần trước xong rồi mới xét trùng.
     const key = resolve(input.path).toLowerCase()
-    if (this.creating.has(key)) throw new Error('Đang tạo workspace cho thư mục này')
+    if (this.creating.has(key)) throw new Error(t('workspace.err.creating'))
     this.creating.add(key)
     try {
       return await this.createNow(input, claudeEnv)
@@ -102,9 +103,9 @@ export class WorkspaceStore {
   private async createNow(input: CreateWorkspaceRequest, claudeEnv: NodeJS.ProcessEnv): Promise<CreateWorkspaceResult> {
     const req = { ...input, path: resolve(input.path) }
     if (req.vault.mode === 'existing') req.vault = { ...req.vault, path: resolve(req.vault.path) }
-    if (!(await isDir(req.path))) throw new Error(`Không tìm thấy thư mục: ${req.path}`)
-    if (req.vault.mode === 'existing' && !(await isDir(req.vault.path))) throw new Error(`Không tìm thấy thư mục vault: ${req.vault.path}`)
-    if (this.items.some((w) => samePath(w.path, req.path))) throw new Error('Thư mục này đã là một workspace trong app')
+    if (!(await isDir(req.path))) throw new Error(t('workspace.err.noFolder', { path: req.path }))
+    if (req.vault.mode === 'existing' && !(await isDir(req.vault.path))) throw new Error(t('workspace.err.noVault', { path: req.vault.path }))
+    if (this.items.some((w) => samePath(w.path, req.path))) throw new Error(t('workspace.err.already'))
 
     const name = safeName(req.name) || defaultProjectName(req.path)
     const report: string[] = []
@@ -119,28 +120,28 @@ export class WorkspaceStore {
     }
 
     // Kiểm tra trước khi ghi gì: lỗi giữa chừng (vd. không có git) không được để lại vault dở dang chặn lần thử lại.
-    if (req.vault.mode === 'new' && (await exists(vaultPath))) throw new Error(`Đã có thư mục "${vars.VAULT_DIR}". Hãy chọn "dùng vault có sẵn".`)
+    if (req.vault.mode === 'new' && (await exists(vaultPath))) throw new Error(t('workspace.err.vaultExists', { dir: vars.VAULT_DIR }))
     // Thư mục con của một repo git: đã có git (không `git init` lồng repo trong repo), .gitignore ghi ngay trong thư mục này.
     let isGit = await insideGit(req.path)
     if (!isGit && req.gitInit) {
       await run('git', ['init', '-b', 'main'], { cwd: req.path })
       isGit = true
-      report.push('Khởi tạo git (nhánh main)')
+      report.push(t('workspace.report.gitInit'))
     }
 
     // 1. Vault
     if (req.vault.mode === 'new') {
       const created = await copyVaultTemplate(vaultPath, vars)
-      report.push(`Tạo vault mới "${vars.VAULT_DIR}" (${created.filter((c) => c.endsWith('.md')).length} note)`)
+      report.push(t('workspace.report.newVault', { dir: vars.VAULT_DIR, count: created.filter((c) => c.endsWith('.md')).length }))
     } else if (req.vault.augment) {
       const created = await copyVaultTemplate(vaultPath, vars, true)
       report.push(
         created.length
-          ? `Bổ sung vào vault có sẵn (không ghi đè): ${created.join(', ')}`
-          : 'Vault có sẵn đã đủ cấu trúc, không thêm gì'
+          ? t('workspace.report.augmented', { files: created.join(', ') })
+          : t('workspace.report.vaultComplete')
       )
     } else {
-      report.push(`Dùng vault có sẵn "${vars.VAULT_DIR}", giữ nguyên`)
+      report.push(t('workspace.report.vaultKept', { dir: vars.VAULT_DIR }))
     }
 
     // 2. Git
@@ -160,13 +161,13 @@ export class WorkspaceStore {
 
   private async ensureGitignore(projectDir: string, vaultPath: string): Promise<string> {
     const rel = relative(projectDir, vaultPath).replace(/\\/g, '/')
-    if (!rel) return '.gitignore: vault chính là thư mục dự án, không thêm được vào .gitignore'
+    if (!rel) return t('workspace.report.gitignoreVaultIsProject')
     if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) {
       const added = await ensureIgnored(projectDir, ['.sessions/'], 'stag.ai agent sessions (personal data, keep out of git)')
-      return `.gitignore: vault nằm ngoài thư mục dự án, không cần loại trừ${added.length ? `; thêm ${added.join(', ')}` : ''}`
+      return added.length ? t('workspace.report.gitignoreOutsideAdded', { items: added.join(', ') }) : t('workspace.report.gitignoreOutside')
     }
     const added = await ensureIgnored(projectDir, [`${gitignoreEscape(rel)}/`, '.sessions/'], 'stag.ai vault + agent sessions (personal data, keep out of git)')
-    return added.length ? `.gitignore: thêm ${added.join(', ')}` : '.gitignore: đã loại trừ vault và .sessions/, giữ nguyên'
+    return added.length ? t('workspace.report.gitignoreAdded', { items: added.join(', ') }) : t('workspace.report.gitignoreKept')
   }
 
   private async ensureClaudeMd(projectDir: string, vars: TemplateVars, structured: boolean): Promise<string> {
@@ -178,21 +179,21 @@ export class WorkspaceStore {
     const plain = structured ? '' : await readTemplate('CLAUDE.memory-plain.md', vars)
     const section = structured ? full.slice(cut) : plain
     const head = at < 0 ? (structured ? '' : `${full.trimEnd()}\n\n`) : full.slice(0, cut)
-    if (await writeIfMissing(file, `${head}${section}`)) return 'Tạo CLAUDE.md có quy tắc recall vault'
+    if (await writeIfMissing(file, `${head}${section}`)) return t('workspace.report.claudeMdCreated')
     const current = (await readText(file)) ?? ''
-    if (mentionsPath(current, vars.VAULT_PATH) || /^##\s+Memory\b/m.test(current)) return 'CLAUDE.md đã có mục Memory, giữ nguyên'
+    if (mentionsPath(current, vars.VAULT_PATH) || /^##\s+Memory\b/m.test(current)) return t('workspace.report.claudeMdKept')
     await fs.appendFile(file, `${current.endsWith('\n') ? '' : '\n'}\n${section}`, 'utf8')
-    return 'CLAUDE.md có sẵn: thêm mục Memory vào cuối file'
+    return t('workspace.report.claudeMdAppended')
   }
 
   private async ensureAutoMemory(vars: TemplateVars, structured: boolean): Promise<string> {
     const file = join(vars.AUTO_MEMORY_PATH, 'MEMORY.md')
     const line = await readTemplate(structured ? 'MEMORY.md' : 'MEMORY.plain.md', vars)
-    if (await writeIfMissing(file, line)) return 'Tạo cache auto memory trỏ về vault'
+    if (await writeIfMissing(file, line)) return t('workspace.report.memoryCreated')
     const current = (await readText(file)) ?? ''
-    if (mentionsPath(current, vars.VAULT_PATH)) return 'Cache auto memory đã trỏ về vault, giữ nguyên'
+    if (mentionsPath(current, vars.VAULT_PATH)) return t('workspace.report.memoryKept')
     await fs.appendFile(file, `${current.endsWith('\n') ? '' : '\n'}${line}`, 'utf8')
-    return 'Cache auto memory có sẵn: thêm dòng trỏ về vault'
+    return t('workspace.report.memoryAppended')
   }
 }
 

@@ -1,5 +1,6 @@
 import { normalizeSkills, normalizeSkillToggles } from './skills'
 import { PLUGIN_ID_RE } from './plugins'
+import { t } from './i18n'
 import {
   DEFAULT_ADAPTERS,
   DEFAULT_AGENT_API,
@@ -55,6 +56,8 @@ import {
   VOICE_UNLOAD_MAX
 } from './types'
 import { normalizeConnectors, normalizeToggles } from './connectors'
+import { LOCALES } from './i18n/types'
+import { COMPUTER_STOP_HOTKEY_IDS, COMPUTER_TIERS, DEFAULT_COMPUTER, type ComputerSettings, type ComputerTier } from './computer'
 
 /** Chuẩn hoá cài đặt đọc từ file / nhận từ giao diện, dùng chung cho main và renderer. */
 
@@ -175,6 +178,24 @@ export function normalizeBrowser(raw: unknown): BrowserSettings {
     keepCookies: bool(r.keepCookies, DEFAULT_BROWSER.keepCookies)
   }
 }
+export function normalizeComputer(raw: unknown): ComputerSettings {
+  const r = obj(raw)
+  const d = DEFAULT_COMPUTER
+  const tiers: Record<string, ComputerTier> = {}
+  for (const [k, v] of Object.entries(obj(r.tiers)).slice(0, 300)) {
+    const key = k.trim().toLowerCase()
+    if (/^[^\\/:*?"<>|]{1,120}\.exe$/.test(key) && COMPUTER_TIERS.includes(v as ComputerTier)) tiers[key] = v as ComputerTier
+  }
+  return {
+    agentTools: bool(r.agentTools, d.agentTools),
+    stopHotkey: oneOf(r.stopHotkey, COMPUTER_STOP_HOTKEY_IDS, d.stopHotkey),
+    minimizeApp: bool(r.minimizeApp, d.minimizeApp),
+    pauseOnUser: bool(r.pauseOnUser, d.pauseOnUser),
+    screenshotAfter: bool(r.screenshotAfter, d.screenshotAfter),
+    tiers
+  }
+}
+
 export function normalizeVoice(raw: unknown): VoiceSettings {
   const r = obj(raw)
   const d = DEFAULT_VOICE
@@ -251,7 +272,8 @@ export function normalizeGeneral(raw: unknown): GeneralSettings {
     claudeUsage: bool(r.claudeUsage, d.claudeUsage),
     theme: oneOf(r.theme, THEME_PREFS, d.theme),
     terminalFollowTheme: bool(r.terminalFollowTheme, d.terminalFollowTheme),
-    claudeThemeSync: bool(r.claudeThemeSync, d.claudeThemeSync)
+    claudeThemeSync: bool(r.claudeThemeSync, d.claudeThemeSync),
+    language: oneOf(r.language, LOCALES, d.language)
   }
 }
 
@@ -324,6 +346,8 @@ export function normalizeOverrides(raw: unknown): SettingsOverrides | null {
   if (agentApi) out.agentApi = agentApi
   const br = obj(obj(raw).browser)
   if (typeof br.agentTools === 'boolean') out.browser = { agentTools: br.agentTools }
+  const cu = obj(obj(raw).computer)
+  if (typeof cu.agentTools === 'boolean') out.computer = { agentTools: cu.agentTools }
   const memory = partialMemory(obj(raw).memory)
   if (memory) out.memory = memory
   return Object.keys(out).length ? out : null
@@ -368,7 +392,8 @@ export function normalizeSettings(raw: unknown): Settings {
         agentApi: normalizeAgentApi({}),
         browser: normalizeBrowser({}),
         voice: normalizeVoice({}),
-        memory: normalizeMemory({})
+        memory: normalizeMemory({}),
+        computer: normalizeComputer({})
       },
       workspaces: {},
       agents: {}
@@ -388,7 +413,8 @@ export function normalizeSettings(raw: unknown): Settings {
       agentApi: normalizeAgentApi(app.agentApi),
       browser: normalizeBrowser(app.browser),
       voice: normalizeVoice(app.voice),
-      memory: normalizeMemory(app.memory)
+      memory: normalizeMemory(app.memory),
+      computer: normalizeComputer(app.computer)
     },
     workspaces: normalizeMap(r.workspaces),
     agents: normalizeMap(r.agents)
@@ -414,7 +440,9 @@ export function patchApp(app: AppSettings, patch: AppSettingsPatch): AppSettings
     agentApi: normalizeAgentApi({ ...app.agentApi, ...patch.agentApi }),
     browser: normalizeBrowser({ ...app.browser, ...patch.browser }),
     voice: normalizeVoice({ ...app.voice, ...patch.voice }),
-    memory: normalizeMemory({ ...app.memory, ...patch.memory })
+    memory: normalizeMemory({ ...app.memory, ...patch.memory }),
+    // `tiers` có mặt trong patch = thay cả bảng.
+    computer: normalizeComputer({ ...app.computer, ...patch.computer })
   }
 }
 
@@ -483,6 +511,14 @@ export function browserToolsOn(s: Settings, workspaceId: string | null | undefin
   return w ?? s.app.browser.agentTools
 }
 
+/** Agent có được dùng computer use không (điều khiển chuột / bàn phím): agent → workspace → app. Mặc định tắt. */
+export function computerToolsOn(s: Settings, workspaceId: string | null | undefined, agentId: string | null | undefined): boolean {
+  const a = agentId ? s.agents[agentId]?.computer?.agentTools : undefined
+  if (a !== undefined) return a
+  const w = workspaceId ? s.workspaces[workspaceId]?.computer?.agentTools : undefined
+  return w ?? s.app.computer.agentTools
+}
+
 /** Model / mức suy nghĩ thực tế của một CLI cho một agent: app → workspace → agent. */
 export function resolveModel(s: Settings, id: CliAdapterId, workspaceId: string | null | undefined, agentId: string | null | undefined): ModelSettings {
   const { model, effort } = s.app.adapters[id]
@@ -537,8 +573,8 @@ export function parseEnv(input: string): { vars: Record<string, string>; errors:
     if (!line || line.startsWith('#')) return
     const eq = line.indexOf('=')
     const key = eq > 0 ? line.slice(0, eq).trim() : ''
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) errors.push(`Dòng ${i + 1}: cần dạng TÊN=giá trị`)
-    else if (RESERVED_ENV.test(key)) errors.push(`Dòng ${i + 1}: ${key} do app tự đặt, không đổi được`)
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) errors.push(t('app.error.envLine', { line: String(i + 1) }))
+    else if (RESERVED_ENV.test(key)) errors.push(t('app.error.envReserved', { line: String(i + 1), key }))
     else vars[key] = line.slice(eq + 1).trim()
   })
   return { vars, errors }

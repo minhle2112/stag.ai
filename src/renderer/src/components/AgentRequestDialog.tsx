@@ -8,6 +8,9 @@ import { useWorkspaces } from '../store/workspaces'
 import { permissionModes } from '../permissionModes'
 import { Button, Modal } from './Modal'
 import { ProjectMark } from './projects/ProjectMark'
+import { t, tx, useT } from '../i18n'
+import { ComputerAskBody } from './computer/ComputerAskBody'
+import { useComputer } from '../store/computer'
 
 function Row({ label, children }: { label: string; children: ReactNode }): React.JSX.Element {
   return (
@@ -23,6 +26,7 @@ function Grid({ children }: { children: ReactNode }): React.JSX.Element {
 }
 
 function Permission({ kind, mode }: { kind: AgentKind; mode: string }): React.JSX.Element {
+  useT()
   const perm = permissionModes(kind).find((p) => p.id === mode)
   return (
     <>
@@ -33,66 +37,70 @@ function Permission({ kind, mode }: { kind: AgentKind; mode: string }): React.JS
 }
 
 function CreateBody({ d, fromName, fromPlace }: { d: AgentCreateDraft; fromName: string; fromPlace: string }): React.JSX.Element {
+  const t = useT()
   const cli = d.kind === 'claude' || d.kind === 'codex'
   return (
     <Grid>
-      <Row label="Tên">
+      <Row label={t('agents.req.name')}>
         <b>{d.name}</b>
       </Row>
-      <Row label="Loại">{d.kindLabel}</Row>
+      <Row label={t('agents.req.kind')}>{d.kindLabel}</Row>
       {d.project !== undefined && (
-        <Row label="Project">
+        <Row label={t('common.project')}>
           {d.project ? (
             <span className="inline-flex items-center gap-1.5">
               <ProjectMark project={d.project} size={9} />
               <b>{d.project.name}</b>
             </span>
           ) : (
-            <span>Chung (thư mục gốc workspace)</span>
+            <span>{t('agents.req.rootProject')}</span>
           )}
         </Row>
       )}
-      {cli && <Row label="Model">{d.model ?? <span className="text-muted">mặc định</span>}</Row>}
-      {cli && <Row label="Mức suy nghĩ">{d.effort ?? <span className="text-muted">mặc định</span>}</Row>}
+      {cli && <Row label={t('agents.req.model')}>{d.model ?? <span className="text-muted">{t('agents.req.default')}</span>}</Row>}
+      {cli && <Row label={t('agents.req.effort')}>{d.effort ?? <span className="text-muted">{t('agents.req.default')}</span>}</Row>}
       {cli && (
-        <Row label="Quyền">
+        <Row label={t('agents.req.permission')}>
           <Permission kind={d.kind} mode={d.permissionMode} />
         </Row>
       )}
-      {d.kind !== 'terminal' && <Row label="Vai trò">{d.role || <span className="text-muted">(không có)</span>}</Row>}
+      {d.kind !== 'terminal' && <Row label={t('agents.req.role')}>{d.role || <span className="text-muted">{t('agents.req.none')}</span>}</Row>}
       {d.kind !== 'terminal' && (
-        <Row label="Việc đầu tiên">
+        <Row label={t('agents.req.firstTask')}>
           {d.task ? (
             <div className="max-h-48 overflow-y-auto whitespace-pre-wrap">{d.task}</div>
           ) : (
-            <span className="text-muted">(không có — agent mới chào và hỏi bạn)</span>
+            <span className="text-muted">{t('agents.req.firstTaskNone')}</span>
           )}
         </Row>
       )}
-      <Row label="Mở ngay">
+      <Row label={t('agents.req.openNow')}>
         {!d.open
-          ? 'Không — chỉ thêm vào danh sách agent'
+          ? t('agents.req.openNo')
           : d.project !== undefined && (d.project?.id ?? CHUNG) !== fromPlace
-            ? `Có — thêm ô vào tab ${d.project ? `project ${d.project.name}` : 'Chung'}; phiên chạy khi bạn mở tab đó`
-            : `Có — thêm ô cạnh ô của ${fromName} và chạy phiên`}
+            ? d.project
+              ? t('agents.req.openTabProject', { name: d.project.name })
+              : t('agents.req.openTabRoot')
+            : t('agents.req.openHere', { name: fromName })}
       </Row>
     </Grid>
   )
 }
 
 function ProjectBody({ d, wsPath, fromName }: { d: ProjectCreateDraft; wsPath: string | undefined; fromName: string }): React.JSX.Element {
+  const t = useT()
   const full = wsPath ? joinRoot(wsPath, d.folder) : d.folder
   return (
     <Grid>
-      <Row label="Tên">
+      <Row label={t('agents.req.name')}>
         <b>{d.name}</b>
       </Row>
-      <Row label="Thư mục code">
+      <Row label={t('agents.req.folder')}>
         <code className="break-all">{full}</code>
-        <div className="text-[12px] text-muted">{d.createFolder ? 'Thư mục mới, app sẽ tạo' : 'Thư mục có sẵn, giữ nguyên nội dung'}</div>
+        <div className="text-[12px] text-muted">{d.createFolder ? t('agents.req.folderNew') : t('agents.req.folderExisting')}</div>
       </Row>
-      <Row label="Mục tiêu">{d.goal || <span className="text-muted">(chưa có)</span>}</Row>
-      <Row label="Đội">
+      <Row label={t('agents.req.goal')}>{d.goal || <span className="text-muted">{t('agents.req.notYet')}</span>}</Row>
+      <Row label={t('agents.req.team')}>
         {d.team.length ? (
           <ul className="space-y-0.5">
             {d.team.map((m) => (
@@ -102,19 +110,19 @@ function ProjectBody({ d, wsPath, fromName }: { d: ProjectCreateDraft; wsPath: s
             ))}
           </ul>
         ) : (
-          <span className="text-muted">Không tạo agent nào</span>
+          <span className="text-muted">{t('agents.req.teamNone')}</span>
         )}
-        {d.team.length > 0 && <div className="text-[12px] text-muted">Chỉ thêm vào danh sách, chưa mở ô hay chạy phiên</div>}
+        {d.team.length > 0 && <div className="text-[12px] text-muted">{t('agents.req.teamListOnly')}</div>}
       </Row>
       {d.team.length > 0 && (
-        <Row label="Quyền của đội">
+        <Row label={t('agents.req.teamPermission')}>
           <Permission kind="claude" mode={d.teamPermission} />
           {permissionAbove(d.teamPermission, d.callerPermission) && (
-            <div className="text-[12px] font-semibold text-wait">Cao hơn quyền của {fromName} ({d.callerPermission})</div>
+            <div className="text-[12px] font-semibold text-wait">{t('agents.req.aboveCaller', { name: fromName, mode: d.callerPermission })}</div>
           )}
         </Row>
       )}
-      <Row label="Note vault">
+      <Row label={t('agents.req.note')}>
         <code className="break-all">{d.note}</code>
       </Row>
     </Grid>
@@ -127,126 +135,101 @@ function view(req: AgentRequest, kindOf: (id: string) => AgentKind, wsPath: stri
   switch (req.action) {
     case 'create':
       return {
-        title: 'Agent muốn tạo agent mới',
-        lead: (
-          <>
-            Agent {from} muốn tạo {req.create.kind === 'terminal' ? 'một ô terminal' : 'một agent'} mới
-          </>
-        ),
+        title: t('agents.req.create.title'),
+        lead: tx(req.create.kind === 'terminal' ? 'agents.req.create.leadTerminal' : 'agents.req.create.leadAgent', { from }),
         body: <CreateBody d={req.create} fromName={req.fromName} fromPlace={fromPlace} />,
-        ok: 'Tạo agent'
+        ok: t('agents.req.create.ok')
       }
     case 'project':
       return {
-        title: 'Agent muốn tạo project mới',
-        lead: (
-          <>
-            Agent {from} muốn tạo project <b>{req.project.name}</b>
-          </>
-        ),
+        title: t('agents.req.project.title'),
+        lead: tx('agents.req.project.lead', { from, name: <b>{req.project.name}</b> }),
         body: <ProjectBody d={req.project} wsPath={wsPath} fromName={req.fromName} />,
-        ok: 'Tạo project'
+        ok: t('agents.req.project.ok')
       }
     case 'stop':
       return {
-        title: 'Agent muốn dừng phiên của agent khác',
-        lead: (
-          <>
-            Agent {from} muốn dừng phiên đang chạy của <b>{req.target.name}</b> ({req.target.kindLabel})
-          </>
-        ),
-        body: <p className="mt-3 text-[13px]">Việc đang mở của {req.target.name} (nếu có) vẫn giữ; mở lại phiên sau được.</p>,
-        ok: 'Dừng phiên'
+        title: t('agents.req.stop.title'),
+        lead: tx('agents.req.stop.lead', { from, name: <b>{req.target.name}</b>, kind: req.target.kindLabel }),
+        body: <p className="mt-3 text-[13px]">{t('agents.req.stop.body', { name: req.target.name })}</p>,
+        ok: t('agents.req.stop.ok')
       }
     case 'delete':
       return {
-        title: 'Agent muốn xoá agent khác',
-        lead: (
-          <>
-            Agent {from} muốn xoá agent <b>{req.target.name}</b> ({req.target.kindLabel})
-          </>
-        ),
+        title: t('agents.req.delete.title'),
+        lead: tx('agents.req.delete.lead', { from, name: <b>{req.target.name}</b>, kind: req.target.kindLabel }),
         body: (
           <p className="mt-3 text-[13px]">
-            {req.target.running ? 'Phiên đang chạy sẽ bị dừng, ' : ''}note bộ nhớ của {req.target.name} chuyển vào Thùng rác (khôi phục được), thẻ việc đang dở bị bỏ.
+            {t(req.target.running ? 'agents.req.delete.bodyRunning' : 'agents.req.delete.body', { name: req.target.name })}
           </p>
         ),
-        ok: 'Xoá agent'
+        ok: t('agents.req.delete.ok')
       }
     case 'permission':
       return {
-        title: 'Agent muốn đổi quyền của agent',
-        lead: (
-          <>
-            Agent {from} muốn đổi quyền của <b>{req.target.name}</b> ({req.target.kindLabel})
-          </>
-        ),
+        title: t('agents.req.permission.title'),
+        lead: tx('agents.req.permission.lead', { from, name: <b>{req.target.name}</b>, kind: req.target.kindLabel }),
         body: (
           <Grid>
-            <Row label="Hiện tại">
+            <Row label={t('agents.req.permission.current')}>
               <Permission kind={kindOf(req.target.id)} mode={req.from} />
             </Row>
-            <Row label="Đổi thành">
+            <Row label={t('agents.req.permission.to')}>
               <Permission kind={kindOf(req.target.id)} mode={req.to} />
             </Row>
-            <Row label="Có tác dụng">{req.target.running ? 'Từ phiên sau (phiên đang chạy giữ quyền cũ)' : 'Từ phiên tới'}</Row>
+            <Row label={t('agents.req.permission.effect')}>
+              {req.target.running ? t('agents.req.permission.effectNext') : t('agents.req.permission.effectNew')}
+            </Row>
           </Grid>
         ),
-        ok: 'Đổi quyền'
+        ok: t('agents.req.permission.ok')
       }
     case 'devserver':
       return {
-        title: 'Agent muốn chạy dev server',
-        lead: (
-          <>
-            Agent {from} muốn chạy dev server <b>{req.dev.name}</b> trong một ô terminal
-          </>
-        ),
+        title: t('agents.req.dev.title'),
+        lead: tx('agents.req.dev.lead', { from, name: <b>{req.dev.name}</b> }),
         body: (
           <Grid>
-            <Row label="Lệnh">
+            <Row label={t('agents.req.dev.command')}>
               <code className="whitespace-pre-wrap">{req.dev.command}</code>
             </Row>
-            <Row label="Cổng">{req.dev.port}</Row>
-            <Row label="Nguồn">
+            <Row label={t('agents.req.dev.port')}>{req.dev.port}</Row>
+            <Row label={t('agents.req.dev.source')}>
               {req.dev.source === 'agent'
-                ? 'Agent tự đưa lệnh này (sẽ lưu vào .stag/launch.json)'
+                ? t('agents.req.dev.sourceAgent')
                 : req.dev.source === 'saved'
-                  ? 'Lấy từ .stag/launch.json của dự án'
-                  : 'App đoán từ package.json của dự án'}
+                  ? t('agents.req.dev.sourceSaved')
+                  : t('agents.req.dev.sourceGuess')}
             </Row>
-            <Row label="Lưu ý">Lệnh chạy ngoài chế độ quyền của agent, với quyền của bạn. Đồng ý một lần thì lệnh này chạy lại được tới khi tắt app.</Row>
+            <Row label={t('agents.req.dev.note')}>{t('agents.req.dev.noteText')}</Row>
           </Grid>
         ),
-        ok: 'Chạy lệnh'
+        ok: t('agents.req.dev.ok')
       }
-    case 'drive': {
-      const verb = req.tool === 'send' ? 'gửi tin cho' : req.tool === 'open' ? 'mở phiên và giao việc cho' : 'bàn giao việc cho'
+    case 'drive':
       return {
-        title: 'Agent quyền thấp muốn sai agent quyền cao hơn',
-        lead: (
-          <>
-            Agent {from} muốn {verb} <b>{req.target.name}</b> ({req.target.kindLabel})
-          </>
-        ),
+        title: t('agents.req.drive.title'),
+        lead: tx(req.tool === 'send' ? 'agents.req.drive.leadSend' : req.tool === 'open' ? 'agents.req.drive.leadOpen' : 'agents.req.drive.leadHandoff', {
+          from,
+          name: <b>{req.target.name}</b>,
+          kind: req.target.kindLabel
+        }),
         body: (
           <Grid>
-            <Row label={`Quyền ${req.fromName}`}>
+            <Row label={t('agents.req.drive.permOf', { name: req.fromName })}>
               <Permission kind={kindOf(req.fromAgentId)} mode={req.from} />
             </Row>
-            <Row label={`Quyền ${req.target.name}`}>
+            <Row label={t('agents.req.drive.permOf', { name: req.target.name })}>
               <Permission kind={kindOf(req.target.id)} mode={req.to} />
             </Row>
-            <Row label="Nội dung">
+            <Row label={t('agents.req.content')}>
               <div className="max-h-48 overflow-y-auto whitespace-pre-wrap">{req.text}</div>
             </Row>
           </Grid>
         ),
-        ok: req.tool === 'send' ? 'Gửi' : req.tool === 'open' ? 'Mở và giao việc' : 'Bàn giao'
+        ok: req.tool === 'send' ? t('common.send') : req.tool === 'open' ? t('agents.req.drive.okOpen') : t('agents.req.drive.okHandoff')
       }
-    }
     case 'cross': {
-      const verb = req.tool === 'send' ? 'gửi tin cho' : req.tool === 'open' ? 'mở phiên và giao việc cho' : 'bàn giao việc cho'
       const chip = (name: string, p: { name: string; color: number }): React.JSX.Element => (
         <span className="inline-flex items-center gap-1.5 rounded-md border border-line-2 bg-panel-2 px-1.5 py-0.5">
           <b className="font-semibold">{name}</b>
@@ -256,60 +239,68 @@ function view(req: AgentRequest, kindOf: (id: string) => AgentKind, wsPath: stri
         </span>
       )
       return {
-        title: 'Gửi việc sang project khác?',
-        lead: (
-          <>
-            Agent {from} (project <b>{req.fromProject.name}</b>) muốn {verb} <b>{req.target.name}</b> của project <b>{req.toProject.name}</b>
-          </>
-        ),
+        title: t('agents.req.cross.title'),
+        lead: tx(req.tool === 'send' ? 'agents.req.cross.leadSend' : req.tool === 'open' ? 'agents.req.cross.leadOpen' : 'agents.req.cross.leadHandoff', {
+          from,
+          fromProject: <b>{req.fromProject.name}</b>,
+          name: <b>{req.target.name}</b>,
+          toProject: <b>{req.toProject.name}</b>
+        }),
         body: (
           <>
             <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
               {chip(req.fromName, req.fromProject)}→{chip(req.target.name, req.toProject)}
             </div>
             <Grid>
-              <Row label="Nội dung">
+              <Row label={t('agents.req.content')}>
                 <div className="max-h-48 overflow-y-auto whitespace-pre-wrap">{req.text}</div>
               </Row>
             </Grid>
           </>
         ),
-        ok: 'Cho gửi'
+        ok: t('agents.req.cross.ok')
       }
     }
     case 'credential': {
       const c = req.credential
       return {
-        title: `${req.fromName} muốn đăng nhập`,
-        lead: (
-          <>
-            Agent {from} xin stag.ai điền {c.step === 'totp' ? 'mã 2FA' : 'tên đăng nhập và mật khẩu'} của mục <b>{c.name}</b> vào trang trong ô Browser
-          </>
-        ),
+        title: t('agents.req.cred.title', { name: req.fromName }),
+        lead: tx(c.step === 'totp' ? 'agents.req.cred.leadTotp' : 'agents.req.cred.leadPassword', { from, name: <b>{c.name}</b> }),
         body: (
           <>
             <Grid>
-              <Row label="Mục">
+              <Row label={t('agents.req.cred.item')}>
                 <b>{c.name}</b>
               </Row>
-              <Row label="Trang">
+              <Row label={t('agents.req.cred.page')}>
                 <code>{c.host}</code>
               </Row>
-              <Row label="Tài khoản">
-                {c.username || <span className="text-muted">(không có tên đăng nhập)</span>}
-                {c.hasTotp ? ' · có 2FA' : ''}
+              <Row label={t('agents.req.cred.account')}>
+                {c.username || <span className="text-muted">{t('agents.req.cred.noUsername')}</span>}
+                {c.hasTotp ? t('agents.req.cred.hasTotp') : ''}
               </Row>
             </Grid>
-            <p className="mt-2 text-[12px] text-muted">
-              Tên miền khớp với mục đã lưu ✓ · Agent không thấy mật khẩu hay mã 2FA · “Cho phép 1 lần” có hiệu lực 2 phút cho cả lượt đăng nhập (gồm bước 2FA) · Đổi ở Cài
-              đặt → Mật khẩu
-            </p>
+            <p className="mt-2 text-[12px] text-muted">{t('agents.req.cred.footnote')}</p>
           </>
         ),
-        ok: 'Cho phép 1 lần'
+        ok: t('agents.req.cred.ok')
       }
     }
+    case 'computer':
+      return {
+        title: t('computer.req.title', { name: req.fromName }),
+        lead: tx('computer.req.lead', { from }),
+        body: <ComputerAskBody ask={req.computer} />,
+        ok: t('computer.req.ok')
+      }
   }
+}
+
+/** Dòng cuối thẻ hỏi computer use: ảnh gửi đi đâu, phím dừng. */
+function ComputerFootnote(): React.JSX.Element {
+  const t = useT()
+  const hotkey = useComputer((s) => s.state?.hotkey ?? 'Ctrl+Alt+Q')
+  return <>{t('computer.req.footnote', { hotkey })}</>
 }
 
 /**
@@ -317,6 +308,7 @@ function view(req: AgentRequest, kindOf: (id: string) => AgentKind, wsPath: stri
  * đầu hàng đợi). Agent đang chờ câu trả lời; hết hạn thì main tự từ chối.
  */
 export function AgentRequestDialog(): React.JSX.Element | null {
+  const t = useT()
   const req = useAgentRequests((s) => s.list[0])
   const answer = useAgentRequests((s) => s.answer)
   const ws = useWorkspaces((s) => s.items.find((w) => w.id === req?.workspaceId))
@@ -327,20 +319,22 @@ export function AgentRequestDialog(): React.JSX.Element | null {
   const from = agents?.find((a) => a.id === req.fromAgentId)
   const v = view(req, kindOf, ws?.path, from ? placeOf(ws, from) : CHUNG)
   const minutes = Math.max(1, Math.round((Date.parse(req.until) - Date.now()) / 60_000))
+  const allBlocked = req.action === 'computer' && req.computer.apps.every((a) => a.tier === 'blocked')
   return (
     <Modal
       title={v.title}
-      icon={req.action === 'credential' ? 'key' : 'code'}
+      icon={req.action === 'credential' ? 'key' : req.action === 'computer' ? 'monitor' : 'code'}
       tone="accent"
       width="w-[560px]"
       footer={
         <>
           <Button variant="ghost" onClick={() => answer(req.id, false)}>
-            {req.action === 'cross' ? 'Không' : 'Từ chối'}
+            {req.action === 'cross' ? t('common.no') : t('common.deny')}
           </Button>
-          {req.action === 'cross' && <Button onClick={() => answer(req.id, 'always')}>Luôn cho giữa 2 project này</Button>}
-          {req.action === 'credential' && req.credential.canAlways && <Button onClick={() => answer(req.id, 'always')}>Luôn cho agent này</Button>}
-          <Button primary onClick={() => answer(req.id, true)}>
+          {req.action === 'cross' && <Button onClick={() => answer(req.id, 'always')}>{t('agents.req.cross.always')}</Button>}
+          {req.action === 'credential' && req.credential.canAlways && <Button onClick={() => answer(req.id, 'always')}>{t('agents.req.cred.always')}</Button>}
+          {req.action === 'computer' && !allBlocked && <Button onClick={() => answer(req.id, 'always')}>{t('computer.req.always')}</Button>}
+          <Button primary disabled={allBlocked} onClick={() => answer(req.id, true)}>
             {v.ok}
           </Button>
         </>
@@ -348,17 +342,13 @@ export function AgentRequestDialog(): React.JSX.Element | null {
     >
       <p>
         {v.lead}
-        {wsName ? (
-          <>
-            {' '}
-            trong workspace <b>{wsName}</b>
-          </>
-        ) : null}
+        {wsName ? tx('agents.req.inWorkspace', { name: <b>{wsName}</b> }) : null}
         :
       </p>
       {v.body}
       <p className="mt-3 text-[12px] text-muted">
-        {req.action === 'credential' ? 'Chỉ cho phép nếu bạn đã nhờ ' + req.fromName + ' đăng nhập trang này.' : `Chỉ đồng ý nếu chính bạn đã nhờ ${req.fromName} làm việc này.`} {req.fromName} đang chờ bạn trả lời (tự từ chối sau khoảng {minutes} phút).
+        {req.action === 'computer' ? <ComputerFootnote /> : req.action === 'credential' ? t('agents.req.onlyIfCred', { name: req.fromName }) : t('agents.req.onlyIf', { name: req.fromName })}{' '}
+        {t('agents.req.waiting', { name: req.fromName, count: minutes })}
       </p>
     </Modal>
   )

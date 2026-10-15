@@ -3,6 +3,8 @@ import * as z from 'zod'
 import { BROWSER_TOOLS_OFF } from '@shared/browser'
 import { DEFAULT_SCOPE, type Agent, type MemoryToolsMode, type ScopeLockSettings, type Task, type Workspace } from '@shared/types'
 import { overlapsOf, scopeLocks, unlocked } from '@shared/scope'
+import { t } from '@shared/i18n'
+import { uiName } from '@shared/i18n/uiNames'
 import type { AgentCreateInput, AgentUpdateInput, ProjectCreateInput, ProjectUpdateInput } from '@shared/agentApi'
 import type { Board } from './board'
 import { BROWSER_KEYS, type BrowserService } from './browser'
@@ -168,16 +170,26 @@ type ToolResult = {
 
 /** Lỗi khi gọi tool của nhóm đang tắt trong Cài đặt → Agent API. */
 export const AGENT_API_OFF = {
-  manage: 'Creating, changing, opening, stopping and deleting agents (and creating or changing projects) is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there.',
-  message: 'Messaging other agents is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there.',
-  read: "Reading other agents' status and session logs is turned off for you in stag.ai (Settings → Agent API). Tell the user; they can turn it on there."
-} as const
+  get manage(): string {
+    return `Creating, changing, opening, stopping and deleting agents (and creating or changing projects) is turned off for you in stag.ai (${uiName.settings('agentApi')}). Tell the user; they can turn it on there.`
+  },
+  get message(): string {
+    return `Messaging other agents is turned off for you in stag.ai (${uiName.settings('agentApi')}). Tell the user; they can turn it on there.`
+  },
+  get read(): string {
+    return `Reading other agents' status and session logs is turned off for you in stag.ai (${uiName.settings('agentApi')}). Tell the user; they can turn it on there.`
+  }
+}
 
 /** Lỗi khi gọi tool memory_* đang tắt trong Cài đặt → Vault & bộ nhớ. */
 export const MEMORY_TOOLS_OFF = {
-  off: 'Memory tools are turned off for you in stag.ai (Settings → Vault & memory). Read and edit the vault files directly instead, or tell the user.',
-  read: 'Memory tools are read-only for you in stag.ai (Settings → Vault & memory). Tell the user if you need to write to the vault.'
-} as const
+  get off(): string {
+    return `Memory tools are turned off for you in stag.ai (${uiName.settings('vault')}). Read and edit the vault files directly instead, or tell the user.`
+  },
+  get read(): string {
+    return `Memory tools are read-only for you in stag.ai (${uiName.settings('vault')}). Tell the user if you need to write to the vault.`
+  }
+}
 
 const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
 const fail = (e: unknown): ToolResult => ({ content: [{ type: 'text', text: String((e as Error)?.message ?? e) }], isError: true })
@@ -220,7 +232,7 @@ export function createStagMcp(ctx: McpContext): McpServer {
     {
       title: 'Start task',
       description:
-        'Call as soon as the task the user gave you is clear. Adds it to the stag.ai task list (shown on your cell as "Đang làm") and writes Task/Scope into your session file. Only one open task at a time.',
+        `Call as soon as the task the user gave you is clear. Adds it to the stag.ai task list (shown on your cell as "${t('common.name.working')}") and writes Task/Scope into your session file. Only one open task at a time.`,
       inputSchema: {
         title: z.string().min(1).max(120).describe('Short task title in the conversation language (shown to the user on your cell), e.g. "Fix Google sign-in bug"'),
         scope: z.string().min(1).max(500).describe('Folders/files you will edit, relative to the project folder, comma-separated, e.g. "src/auth/, tests/auth/*.test.ts". stag.ai locks them for you while the task is open.')
@@ -373,10 +385,10 @@ function registerArtifactTools(server: McpServer, api: NonNullable<McpContext['a
     {
       title: 'Publish an artifact',
       description:
-        'Publish a file you made for the user to review (report, doc, mockup, image, video, PDF, spreadsheet…) in the stag.ai "Sản phẩm" (Artifacts) tab, under your open task. Only deliverables: not code edits, temp files or config. Publishing the same file again creates a new version (v2, v3…) with a diff; stag.ai keeps a snapshot of each version. The user can comment on passages; comments arrive in your session as "[stag.ai] Comments from the user…".',
+        `Publish a file you made for the user to review (report, doc, mockup, image, video, PDF, spreadsheet…) in the stag.ai "${t('common.name.artifacts')}" tab, under your open task. Only deliverables: not code edits, temp files or config. Publishing the same file again creates a new version (v2, v3…) with a diff; stag.ai keeps a snapshot of each version. The user can comment on passages; comments arrive in your session as "[stag.ai] Comments from the user…".`,
       inputSchema: {
         file: z.string().min(1).max(500).describe('Path of the file inside the project (relative to the project folder or absolute)'),
-        title: z.string().min(1).max(120).describe('Short title in the conversation language, e.g. "Báo cáo smoke test 0.1.2"'),
+        title: z.string().min(1).max(120).describe('Short title in the conversation language, e.g. "Smoke test report 0.1.2"'),
         description: z.string().max(600).describe('One or two sentences in the conversation language: what it is and what the user should look at'),
         note: z.string().max(600).optional().describe('From the 2nd publish on: what changed in this version, in the conversation language'),
         fixes: z.array(z.string().max(20)).max(50).optional().describe('Ids of the user comments (e.g. "c7") this version fixes')
@@ -395,11 +407,11 @@ function registerArtifactTools(server: McpServer, api: NonNullable<McpContext['a
     {
       title: 'Reply to an artifact comment',
       description:
-        'Answer a user comment on one of your artifacts, or ask the user back (optionally with quick-answer buttons). The user sees it in the stag.ai "Sản phẩm" (Artifacts) tab; their answer comes back to your session. To report a fix, re-publish the file with artifact_publish(..., fixes) instead.',
+        `Answer a user comment on one of your artifacts, or ask the user back (optionally with quick-answer buttons). The user sees it in the stag.ai "${t('common.name.artifacts')}" tab; their answer comes back to your session. To report a fix, re-publish the file with artifact_publish(..., fixes) instead.`,
       inputSchema: {
         id: z.string().min(1).max(20).describe('Comment id, e.g. "c7"'),
         text: z.string().min(1).max(4000).describe('Your answer or question, in the conversation language'),
-        options: z.array(z.string().min(1).max(60)).max(4).optional().describe('Quick-answer buttons for a question, e.g. ["Đồng ý", "Thôi"]')
+        options: z.array(z.string().min(1).max(60)).max(4).optional().describe('Quick-answer buttons for a question, e.g. ["OK", "Not now"]')
       }
     },
     async (input) => {
@@ -419,7 +431,7 @@ function registerInspectTools(server: McpServer, api: NonNullable<McpContext['in
     {
       title: 'Report back on a page comment',
       description:
-        'Reply to a comment the user pinned on a web page element in the stag.ai Browser ("Soi" mode); they arrive in your session as "[stag.ai] … comment(s) from the user on a web page". Your text shows as a reply in the comment thread. A comment is not always a change request: answer questions and word-only requests (translate / explain…) in text without editing code; edit code only when the comment asks to change the page, then inspect_reply(id, text, changes) — stag.ai reloads the page only when changes is set. Unclear: ask your question in text (ask: true). Cannot do it: failed: true. One call per comment; then move on to the next one. When you edit: edit the source, never the live DOM; never edit a production site; WordPress: edit the child theme (copy the parent-theme file into it first) or use WP-CLI on the local copy, then purge caches; do not edit outside your task scope without asking.',
+        `Reply to a comment the user pinned on a web page element in the stag.ai "${uiName.browser()}" pane ("${t('common.name.inspect')}" mode); they arrive in your session as "[stag.ai] … comment(s) from the user on a web page". Your text shows as a reply in the comment thread. A comment is not always a change request: answer questions and word-only requests (translate / explain…) in text without editing code; edit code only when the comment asks to change the page, then inspect_reply(id, text, changes) — stag.ai reloads the page only when changes is set. Unclear: ask your question in text (ask: true). Cannot do it: failed: true. One call per comment; then move on to the next one. When you edit: edit the source, never the live DOM; never edit a production site; WordPress: edit the child theme (copy the parent-theme file into it first) or use WP-CLI on the local copy, then purge caches; do not edit outside your task scope without asking.`,
       inputSchema: {
         id: z.number().int().min(1).describe('Comment number, e.g. 7 for "#7"'),
         text: z.string().min(1).max(4000).describe('In the conversation language: your answer to the comment, what you changed, your question, or why you could not do it'),
@@ -565,7 +577,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
     {
       title: 'Projects in workspace',
       description:
-        'List the projects of this stag.ai workspace: each project has its own code folder, vault note, goal and agent team. Also lists "Chung" (the workspace root, for agents outside any project) and marks where you are. ' +
+        `List the projects of this stag.ai workspace: each project has its own code folder, vault note, goal and agent team. Also lists "Chung" (the workspace root, for agents outside any project; the user sees it as "${t('common.name.rootProject')}") and marks where you are. ` +
         'Use it when the user asks about projects, before project_create / project_update, or to pick the `project` of agent_create.',
       inputSchema: {},
       annotations: { readOnlyHint: true }
@@ -590,11 +602,11 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
       description:
         'Create a new agent (or plain terminal cell) in this stag.ai workspace, only when the user asks you to (e.g. "create an agent named Tester using Codex model X to write tests"). ' +
         'Call adapter_models first if the user names a model, and agent_list to avoid a name that already exists. ' +
-        'stag.ai may show the user a confirm card (Settings → Agent API) and this call then waits for their answer (up to ~5 minutes). The new agent gets its own vault memory note, its cell opens next to yours and its session starts; `task` becomes its first instruction.',
+        `stag.ai may show the user a confirm card (${uiName.settings('agentApi')}) and this call then waits for their answer (up to ~5 minutes). The new agent gets its own vault memory note, its cell opens next to yours and its session starts; \`task\` becomes its first instruction.`,
       inputSchema: {
         name: z.string().min(1).max(100).describe('Agent name (also its memory note file name), e.g. "Tester"'),
         kind: z.string().min(1).describe('"claude" (Claude Code), "codex", "terminal" (plain shell, no AI) or "external:<adapter id>" — see adapter_models'),
-        role: z.string().max(300).optional().describe('Short role / responsibility in the conversation language, e.g. "Viết và chạy test cho backend"'),
+        role: z.string().max(300).optional().describe('Short role / responsibility in the conversation language, e.g. "Write and run the backend tests"'),
         model: z.string().max(100).optional().describe('Model id for claude / codex (from adapter_models). Omit = workspace default'),
         effort: z.string().max(20).optional().describe('Reasoning effort for claude / codex, e.g. low, medium, high, xhigh, max. Omit = default'),
         permission_mode: z.string().optional().describe('default | acceptEdits | auto | plan. Omit = the adapter default from Settings'),
@@ -608,7 +620,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
           .string()
           .max(100)
           .optional()
-          .describe('Project to put the new agent in (name from project_list), or "Chung" for the workspace root. Omit = the same place as you')
+          .describe(`Project to put the new agent in (name from project_list), or "Chung" for the workspace root (the user sees it as "${t('common.name.rootProject')}"). Omit = the same place as you`)
       }
     },
     call('manage', (team, input: AgentCreateInput) => team.create(input))
@@ -622,7 +634,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
       title: 'Change agent',
       description:
         'Change another agent (or yourself) when the user asks: rename, role, model, effort, permission mode. Only the fields you pass change. ' +
-        'A permission mode change may ask the user in stag.ai first (Settings → Agent API). A running session keeps its old model / permission / role until its next session.',
+        `A permission mode change may ask the user in stag.ai first (${uiName.settings('agentApi')}). A running session keeps its old model / permission / role until its next session.`,
       inputSchema: {
         name: nameArg,
         new_name: z.string().min(1).max(100).optional().describe('New name (its memory note is renamed too)'),
@@ -654,7 +666,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
     'agent_stop',
     {
       title: 'Stop agent session',
-      description: "Stop another agent's running session when the user asks (stag.ai may ask the user to confirm, per Settings → Agent API). Its open task stays open.",
+      description: `Stop another agent's running session when the user asks (stag.ai may ask the user to confirm, per ${uiName.settings('agentApi')}). Its open task stays open.`,
       inputSchema: { name: nameArg }
     },
     call('manage', (team, args: { name: string }) => team.stop(args))
@@ -707,7 +719,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
     {
       title: 'Delete agent',
       description:
-        'Delete another agent when the user asks (stag.ai may ask the user to confirm, per Settings → Agent API): its session stops, its memory note goes to the Recycle Bin, its unfinished task card is dropped.',
+        `Delete another agent when the user asks (stag.ai may ask the user to confirm, per ${uiName.settings('agentApi')}): its session stops, its memory note goes to the Recycle Bin, its unfinished task card is dropped.`,
       inputSchema: { name: nameArg }
     },
     call('manage', (team, args: { name: string }) => team.remove(args))
@@ -719,7 +731,7 @@ function registerTeamTools(server: McpServer, ctx: McpContext): { manage: Regist
       title: 'Create project',
       description:
         'Create a project in this stag.ai workspace, only when the user asks you to: its code folder, a vault note "70 Projects/<name>/<name>.md", and optionally a starter team of agents. It gets its own tab in the app. ' +
-        'Call project_list first to avoid an existing name or folder. stag.ai may show the user a confirm card (Settings → Agent API) and this call then waits for their answer (up to ~5 minutes). ' +
+        `Call project_list first to avoid an existing name or folder. stag.ai may show the user a confirm card (${uiName.settings('agentApi')}) and this call then waits for their answer (up to ~5 minutes). ` +
         "The team's cells are not opened: use agent_open(name, task?) afterwards if the user wants them to start.",
       inputSchema: {
         name: z.string().min(1).max(60).describe('Project name (also its vault note folder name), e.g. "web-shop"'),
@@ -912,7 +924,7 @@ function registerBrowserTools(server: McpServer, ctx: McpContext): RegisteredToo
           'Ask stag.ai to fill the login form (username + password) or the 2FA code field on the page open in your Browser tab with the item, then submit it. ' +
           "You never see the values. Only works when your tab's real domain matches the item (otherwise refused: domain_mismatch — the page may be fake). " +
           'The user may get a confirm card and the call waits for their answer. Returns { filled, submitted, url, next? }: when next says the page now asks for the 2FA code / password, call credential_fill again. ' +
-          'Returns status "needs_user" when the page needs 2FA stag.ai cannot do (SMS / email code, approving on a phone, passkey): ask the user to finish it in the Browser pane and do other work while you wait. ' +
+          `Returns status "needs_user" when the page needs 2FA stag.ai cannot do (SMS / email code, approving on a phone, passkey): ask the user to finish it in the "${uiName.browser()}" pane and do other work while you wait. ` +
           'Never ask the user to paste a password or code into the chat.',
         inputSchema: { id: z.string().min(1).max(100).describe('Item id from credential_list') }
       },
@@ -949,7 +961,7 @@ function registerDevServerTools(server: McpServer, dev: DevServerAgentApi): void
       title: 'Start dev server',
       description:
         "Start the project's dev server in a stag.ai terminal cell the user can see (nothing is started if its port is already open), wait until the port opens, and return the URL. " +
-        'The first time a command runs, stag.ai may show the user a confirm card (Settings → Agent API) and this call then waits for their answer. ' +
+        `The first time a command runs, stag.ai may show the user a confirm card (${uiName.settings('agentApi')}) and this call then waits for their answer. ` +
         'Use this instead of running the dev server in your own shell. Without arguments it starts the only known server; pass name to pick one from preview_list. ' +
         'To add a new one, pass name + command + port (saved to .stag/launch.json). Then open the URL with browser_navigate.',
       inputSchema: {

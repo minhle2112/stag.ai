@@ -14,6 +14,7 @@ import {
 } from '@shared/claudeUsage'
 import { useSettings } from '../../store/settings'
 import { useUi } from '../../store/ui'
+import { tx, useT } from '../../i18n'
 
 const LEVEL_COLOR: Record<UsageLevel, string> = {
   ok: 'var(--color-accent)',
@@ -65,6 +66,7 @@ function RingStat({ w, label }: { w: UsageWindow; label: string }): React.JSX.El
 }
 
 function Meter({ name, w, windowMs, now }: { name: string; w: UsageWindow; windowMs: number; now: number }): React.JSX.Element {
+  const t = useT()
   const lv = usageLevel(w.percent)
   const pace = pacePercent(w.resetsAt, windowMs, now)
   const reset = formatReset(w.resetsAt, now)
@@ -82,11 +84,11 @@ function Meter({ name, w, windowMs, now }: { name: string; w: UsageWindow; windo
           <span
             className="absolute -top-0.5 -bottom-0.5 w-0.5 rounded-[1px] bg-muted opacity-70"
             style={{ left: `calc(${pace}% - 1px)` }}
-            data-tip="Nhịp: dùng đều thì giờ này nên ở đây"
+            data-tip={t('usage.item.paceTip')}
           />
         )}
       </div>
-      {reset && <div className="mt-[5px] text-[11px] text-dim">reset {reset}</div>}
+      {reset && <div className="mt-[5px] text-[11px] text-dim">{t('usage.item.reset', { when: reset })}</div>}
     </div>
   )
 }
@@ -96,6 +98,7 @@ const LINK = 'rounded-[5px] px-1.5 py-[3px] text-muted hover:bg-panel-3 hover:te
 
 /** Mục "Claude" ở thanh trạng thái (kiểu B "Hai vòng"): % phiên 5 giờ + % tuần; bấm mở bảng chi tiết. */
 export function ClaudeUsageItem(): React.JSX.Element | null {
+  const t = useT()
   const enabled = useSettings((s) => s.value.app.general.claudeUsage)
   const openSettings = useUi((s) => s.openSettings)
   const [state, setState] = useState<ClaudeUsageState | null>(null)
@@ -142,16 +145,19 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
   const tNow = Math.max(now, state.fetchedAt ?? 0)
   const tip = u
     ? [
-        u.session && `phiên 5 giờ ${u.session.percent}%${u.session.resetsAt ? ` (reset ${formatReset(u.session.resetsAt, tNow)})` : ''}`,
-        u.week && `tuần ${u.week.percent}%`
+        u.session &&
+          (u.session.resetsAt
+            ? t('usage.item.tipSessionReset', { percent: u.session.percent, when: formatReset(u.session.resetsAt, tNow) })
+            : t('usage.item.tipSession', { percent: u.session.percent })),
+        u.week && t('usage.item.tipWeek', { percent: u.week.percent })
       ]
         .filter(Boolean)
         .join(' · ')
     : state.status === 'loading'
-      ? 'Đang lấy usage…'
+      ? t('usage.item.loading')
       : state.status === 'signedOut'
-        ? 'Chưa đăng nhập Claude'
-        : 'Không lấy được usage'
+        ? t('usage.item.signedOut')
+        : t('usage.item.failed')
 
   async function refresh(): Promise<void> {
     setBusy(true)
@@ -176,10 +182,10 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
         <ClaudeGlyph />
         {u && (u.session || u.week) ? (
           <>
-            {u.session && <RingStat w={u.session} label="5g" />}
+            {u.session && <RingStat w={u.session} label={t('usage.item.ringSession')} />}
             {u.week && (
               <span className={u.session ? 'ml-1' : ''}>
-                <RingStat w={u.week} label="tuần" />
+                <RingStat w={u.week} label={t('usage.item.ringWeek')} />
               </span>
             )}
           </>
@@ -201,7 +207,8 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-fg">Claude</div>
                   <div className="truncate text-[11px] text-dim">
-                    {state.account?.email || (state.status === 'signedOut' ? 'Chưa đăng nhập trong Claude Code' : state.status === 'loading' ? 'Đang lấy usage…' : 'Tài khoản Claude Code')}
+                    {state.account?.email ||
+                      (state.status === 'signedOut' ? t('usage.item.notSignedIn') : state.status === 'loading' ? t('usage.item.loading') : t('usage.item.account'))}
                   </div>
                 </div>
                 {state.account?.plan && (
@@ -211,12 +218,13 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
 
               {state.status === 'signedOut' && (
                 <div className="mx-1.5 my-1 rounded-md border border-wait/25 bg-wait/8 px-2.5 py-2 leading-[1.45] text-wait-text">
-                  {state.error ? `${state.error} ` : ''}Mở một ô Claude và gõ <b>/login</b> (hoặc gửi một tin để Claude Code làm mới phiên), rồi bấm Làm mới.
+                  {state.error ? `${state.error} ` : ''}
+                  {tx('usage.item.loginHint', { command: <b>/login</b> })}
                 </div>
               )}
               {state.status === 'error' && (
                 <div className="mx-1.5 my-1 rounded-md border border-danger/25 bg-danger/10 px-2.5 py-2 leading-[1.45] text-danger-text">
-                  Không lấy được usage. {state.error}
+                  {t('usage.item.failedWith', { error: state.error ?? '' })}
                 </div>
               )}
               {warn && (
@@ -231,16 +239,16 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
 
               {u?.session && (
                 <>
-                  <div className={CAP}>PHIÊN HIỆN TẠI</div>
-                  <Meter name="5 giờ" w={u.session} windowMs={SESSION_MS} now={tNow} />
+                  <div className={CAP}>{t('usage.item.currentSession')}</div>
+                  <Meter name={t('usage.item.fiveHours')} w={u.session} windowMs={SESSION_MS} now={tNow} />
                 </>
               )}
               {u && (u.week || u.models.length > 0) && (
                 <>
-                  <div className={CAP}>TUẦN NÀY</div>
-                  {u.week && <Meter name="Mọi model" w={u.week} windowMs={WEEK_MS} now={tNow} />}
+                  <div className={CAP}>{t('usage.item.thisWeek')}</div>
+                  {u.week && <Meter name={t('usage.item.allModels')} w={u.week} windowMs={WEEK_MS} now={tNow} />}
                   {u.models.map((m) => (
-                    <Meter key={m.label} name={`Riêng ${m.label}`} w={m} windowMs={WEEK_MS} now={tNow} />
+                    <Meter key={m.label} name={t('usage.item.onlyModel', { model: m.label })} w={m} windowMs={WEEK_MS} now={tNow} />
                   ))}
                 </>
               )}
@@ -248,11 +256,11 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
               <div className="mx-1 my-1.5 h-px bg-line" />
               <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-1 text-[11px] text-dim">
                 <span className="truncate" data-tip={u && state.error ? state.error : undefined}>
-                  {u ? `${formatAgo(state.fetchedAt, tNow)}${state.error ? ' · lần hỏi sau lỗi' : ''}` : ''}
+                  {u ? `${formatAgo(state.fetchedAt, tNow)}${state.error ? t('usage.item.lastFailed') : ''}` : ''}
                 </span>
                 <span className="flex-1" />
                 <button type="button" className={LINK} disabled={busy} onClick={() => void refresh()}>
-                  {busy ? 'Đang hỏi…' : 'Làm mới'}
+                  {busy ? t('usage.item.asking') : t('usage.item.refresh')}
                 </button>
                 <button
                   type="button"
@@ -262,7 +270,7 @@ export function ClaudeUsageItem(): React.JSX.Element | null {
                     openSettings('general')
                   }}
                 >
-                  Cài đặt…
+                  {t('usage.item.settings')}
                 </button>
               </div>
             </div>
